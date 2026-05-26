@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SignalForge</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="landing-page" id="landing-page">
+        <header class="landing-nav">
+          <div class="logo-row">
+            <div class="brand-mark small">SF</div>
+            <strong>SignalForge</strong>
+          </div>
+          <button class="secondary-action" id="landing-login-button" type="button">Sign in</button>
+        </header>
+
+        <section class="landing-hero">
+          <div class="hero-market-scene" aria-hidden="true">
+            <div class="hero-grid"></div>
+            <svg viewBox="0 0 1200 520" preserveAspectRatio="none">
+              <polyline class="hero-line hero-line-main" points="0,380 90,340 180,365 270,280 360,305 450,210 540,245 630,160 720,190 810,118 900,142 990,92 1080,132 1200,74" />
+              <polyline class="hero-line hero-line-soft" points="0,430 120,405 240,418 360,352 480,370 600,300 720,318 840,250 960,270 1080,220 1200,236" />
+            </svg>
+          </div>
+          <div class="hero-content">
+            <span class="eyebrow">Crypto signal scanner</span>
+            <h1>Find crypto trading setups in seconds</h1>
+            <p>Scan BTC, ETH, and SOL across multiple timeframes with rule-based signals, stop loss, take profit, and risk/reward.</p>
+            <div class="hero-actions">
+              <button id="start-free-button" type="button">Start with 3 free signals</button>
+              <button class="secondary-action" id="view-demo-button" type="button">View demo</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="landing-band">
+          <div class="section-title">
+            <div>
+              <span class="eyebrow">How it works</span>
+              <h3>Scan markets → Unlock signal → Track outcome</h3>
+            </div>
+          </div>
+          <div class="landing-cards three">
+            <article>
+              <span>01</span>
+              <strong>Scan markets</strong>
+              <p>Run a multi-timeframe sweep across BTC, ETH, and SOL using live Coinbase OHLCV candles.</p>
+            </article>
+            <article>
+              <span>02</span>
+              <strong>Unlock signal</strong>
+              <p>Review qualifying setups, then unlock the full entry, stop loss, take profit, and risk/reward.</p>
+            </article>
+            <article>
+              <span>03</span>
+              <strong>Track outcome</strong>
+              <p>Saved signals are monitored for Hit TP, Hit SL, or Expired status in your history.</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="landing-band">
+          <div class="section-title">
+            <div>
+              <span class="eyebrow">Features</span>
+              <h3>Built for fast, disciplined scanning</h3>
+            </div>
+          </div>
+          <div class="landing-cards five">
+            <article><strong>Scan All</strong><p>Check all supported crypto markets and timeframes in one pass.</p></article>
+            <article><strong>Entry/SL/TP</strong><p>Unlocked signals include complete trade levels.</p></article>
+            <article><strong>Risk/reward</strong><p>Every setup includes a clear R/R ratio before you act.</p></article>
+            <article><strong>Outcome tracking</strong><p>Active signals are checked against live market candles.</p></article>
+            <article><strong>Signals history</strong><p>Filter saved signals by pair, timeframe, and direction.</p></article>
+          </div>
+        </section>
+
+        <section class="landing-band">
+          <div class="section-title">
+            <div>
+              <span class="eyebrow">Pricing</span>
+              <h3>Start small, scale when SignalForge earns the workflow</h3>
+            </div>
+          </div>
+          <div class="pricing-grid">
+            <article>
+              <span>Free trial</span>
+              <strong>3 signals</strong>
+              <p>Try the scanner, unlock full setups, and review history.</p>
+            </article>
+            <article class="featured-price">
+              <span>Pro monthly</span>
+              <strong>$29/mo</strong>
+              <p>Unlimited scanning, saved signal history, and outcome tracking.</p>
+            </article>
+            <article>
+              <span>Credit packs</span>
+              <strong>Pay as you go</strong>
+              <p>Top up unlock credits without a recurring subscription.</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="disclaimer-band">
+          <strong>Educational tool only. Not financial advice.</strong>
+        </section>
+
+        <footer class="landing-footer">
+          <span>SignalForge</span>
+          <span>Live Coinbase candles · Rule-based signals · Demo MVP</span>
+        </footer>
+      </section>
+
+      <section class="auth-screen hidden" id="auth-screen">
+        <div class="brand-panel">
+          <div class="brand-mark">SF</div>
+          <h1>SignalForge</h1>
+          <p>AI-ready market scanning for crypto and equities, built around clean signal workflows.</p>
+          <div class="market-ribbon">
+            <span>BTC-USD</span>
+            <strong>+2.4%</strong>
+            <span>NVDA</span>
+            <strong>+1.1%</strong>
+            <span>SOL-USD</span>
+            <strong>+4.1%</strong>
+          </div>
+        </div>
+
+        <form class="auth-card" id="auth-form">
+          <span class="eyebrow">MVP access</span>
+          <h2>Start scanning</h2>
+          <label>
+            Name
+            <input name="name" autocomplete="name" placeholder="Alex Morgan" />
+          </label>
+          <label>
+            Email
+            <input name="email" type="email" autocomplete="email" placeholder="alex@signalforge.app" required />
+          </label>
+          <label>
+            Password
+            <input name="password" type="password" autocomplete="current-password" placeholder="6+ characters" required />
+          </label>
+          <button type="submit">Enter Dashboard</button>
+          <p class="form-note" id="auth-note">Your first 3 generated signals are included in the free trial.</p>
+        </form>
+      </section>
+
+      <section class="dashboard hidden" id="dashboard">
+        <aside class="sidebar">
+          <div class="logo-row">
+            <div class="brand-mark small">SF</div>
+            <strong>SignalForge</strong>
+          </div>
+          <nav>
+            <a class="active" href="#scanner" data-view-link="scanner">Scanner</a>
+            <a href="#signals" data-view-link="signals">Signals</a>
+            <a href="#portfolio" data-view-link="portfolio">Portfolio</a>
+            <a href="#billing" data-view-link="billing">Billing</a>
+          </nav>
+          <div class="trial-card">
+            <span>Free trial</span>
+            <strong id="trial-count">3 signals left</strong>
+            <button id="upgrade-button">Upgrade</button>
+          </div>
+        </aside>
+
+        <div class="workspace">
+          <header class="topbar">
+            <div>
+              <span class="eyebrow">Market scanner</span>
+              <h2>High-probability setup lab</h2>
+            </div>
+            <div class="user-chip">
+              <span id="user-name">Trader</span>
+              <button id="logout-button">Logout</button>
+            </div>
+          </header>
+
+          <section id="scanner-view" data-view="scanner">
+            <section class="scanner-grid">
+              <div class="panel controls-panel">
+                <div class="panel-header">
+                  <div>
+                    <span class="eyebrow">Universe</span>
+                    <h3>Search pairs</h3>
+                  </div>
+                  <span class="live-dot" id="provider-status">Live candles</span>
+                </div>
+                <input class="search-input" id="pair-search" placeholder="Search BTC, NVDA, Solana..." />
+                <div class="pair-list" id="pair-list"></div>
+                <div class="timeframe-row" id="timeframes"></div>
+                <div class="action-row">
+                  <button class="primary-action" id="scan-all-button" type="button">Scan All</button>
+                  <button class="primary-action secondary-action" id="generate-button" type="button">Unlock Current</button>
+                </div>
+                <div class="scan-progress hidden" id="scan-progress">
+                  <div><span id="scan-progress-text">Scanning markets...</span><strong id="scan-progress-count">0/12</strong></div>
+                  <progress id="scan-progress-bar" max="12" value="0"></progress>
+                </div>
+                <p class="status-line" id="status-line">Select a market and timeframe to generate a setup.</p>
+              </div>
+
+              <div class="chart-panel">
+                <div class="chart-header">
+                  <div>
+                    <span id="selected-symbol">BTC-USD</span>
+                    <strong id="selected-price">$68,420.50</strong>
+                  </div>
+                  <span id="selected-change">+2.4%</span>
+                </div>
+                <div class="chart-canvas" aria-label="mock trading chart">
+                  <div class="grid-lines"></div>
+                  <svg id="candle-chart" viewBox="0 0 680 280" role="img"></svg>
+                </div>
+                <div class="metric-strip">
+                  <div><span>Provider</span><strong id="provider-name">Coinbase</strong></div>
+                  <div><span>Candles</span><strong id="candle-count">--</strong></div>
+                  <div><span>Regime</span><strong id="market-regime">Loading</strong></div>
+                </div>
+              </div>
+            </section>
+
+            <section class="signals-section">
+              <div class="section-title">
+                <div>
+                  <span class="eyebrow">Generated setups</span>
+                  <h3>Signal desk</h3>
+                </div>
+                <span id="signal-count">0 setups</span>
+              </div>
+              <div class="signals-grid" id="signals-grid"></div>
+            </section>
+          </section>
+
+          <section class="page-view hidden" id="signals-view" data-view="signals">
+            <div class="section-title">
+              <div>
+                <span class="eyebrow">Saved signals</span>
+                <h3>Signals history</h3>
+              </div>
+              <span id="history-count">0 saved</span>
+            </div>
+            <div class="performance-grid">
+              <div><span>Total signals</span><strong id="stat-total">0</strong></div>
+              <div><span>Win rate</span><strong id="stat-win-rate">0%</strong></div>
+              <div><span>Hit TP</span><strong id="stat-hit-tp">0</strong></div>
+              <div><span>Hit SL</span><strong id="stat-hit-sl">0</strong></div>
+              <div><span>Expired</span><strong id="stat-expired">0</strong></div>
+            </div>
+            <div class="history-filters">
+              <label>
+                Pair
+                <select id="history-pair-filter">
+                  <option value="all">All pairs</option>
+                  <option value="BTC-USD">BTC-USD</option>
+                  <option value="ETH-USD">ETH-USD</option>
+                  <option value="SOL-USD">SOL-USD</option>
+                </select>
+              </label>
+              <label>
+                Timeframe
+                <select id="history-timeframe-filter">
+                  <option value="all">All timeframes</option>
+                  <option value="5m">5m</option>
+                  <option value="15m">15m</option>
+                  <option value="1h">1h</option>
+                  <option value="4h">4h</option>
+                </select>
+              </label>
+              <label>
+                Direction
+                <select id="history-direction-filter">
+                  <option value="all">All directions</option>
+                  <option value="long">Long</option>
+                  <option value="short">Short</option>
+                </select>
+              </label>
+            </div>
+            <div class="status-legend" aria-label="Signal status labels">
+              <span class="status-pill status-active">Active</span>
+              <span class="status-pill status-hit-tp">Hit TP</span>
+              <span class="status-pill status-hit-sl">Hit SL</span>
+              <span class="status-pill status-expired">Expired</span>
+            </div>
+            <div class="signals-table-wrap" id="signals-history"></div>
+          </section>
+
+          <section class="page-view hidden" id="portfolio-view" data-view="portfolio">
+            <article class="panel"><p class="reasoning">Portfolio tools are coming soon.</p></article>
+          </section>
+
+          <section class="page-view hidden" id="billing-view" data-view="billing">
+            <article class="panel"><p class="reasoning">Billing controls are ready for the Stripe integration step.</p></article>
+          </section>
+        </div>
+      </section>
+    </main>
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
