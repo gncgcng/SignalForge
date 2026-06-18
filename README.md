@@ -32,6 +32,8 @@ Default local `DATABASE_URL`:
 postgres://signalforge:signalforge@localhost:5432/signalforge
 ```
 
+All application, migration, seed, authentication, and outcome-tracking database connections use `DATABASE_URL` exclusively. `DB_HOST`, `PGHOST`, and split host/user/password variables are not read by SignalForge.
+
 ## Demo Login
 
 Use any valid email and a password of 6+ characters. For a seeded local account, run `npm run db:seed` and sign in with `demo@signalforge.app` / `signal123`.

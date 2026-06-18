@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { appConfig } from "./config/appConfig.js";
+import { verifyDatabaseConnection } from "./db/client.js";
 import { attachAuth } from "./middleware/authMiddleware.js";
 import { handleAuthRoutes } from "./modules/auth/authController.js";
 import { handleMarketDataRoutes } from "./modules/market-data/marketDataController.js";
@@ -67,6 +68,8 @@ async function serveStatic(pathname, res) {
     res.end(index);
   }
 }
+
+await verifyDatabaseConnection();
 
 server.listen(appConfig.port, () => {
   console.log(`${appConfig.appName} running at http://localhost:${appConfig.port}`);

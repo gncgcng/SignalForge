@@ -54,7 +54,7 @@ export function startSignalOutcomeTracker() {
     try {
       await updateAllActiveSignalOutcomes();
     } catch (error) {
-      console.warn(`Signal outcome tracker skipped a cycle: ${error.message}`);
+      console.warn(`[signal-outcome-tracker] Database cycle skipped: ${error.message}`);
     } finally {
       trackingInProgress = false;
     }

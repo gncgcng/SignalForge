@@ -1,5 +1,4 @@
 import pg from "pg";
-import { appConfig } from "../config/appConfig.js";
 
 const { Pool } = pg;
 
@@ -7,9 +6,14 @@ let pool = null;
 
 export function getPool() {
   if (!pool) {
+    const connectionString = getDatabaseUrl();
+
     pool = new Pool({
-      connectionString: appConfig.database.url,
-      ssl: appConfig.database.ssl ? { rejectUnauthorized: false } : false
+      connectionString
+    });
+
+    pool.on("error", (error) => {
+      console.error(`[database] PostgreSQL pool error: ${formatDatabaseError(error)}`);
     });
   }
 
@@ -17,11 +21,23 @@ export function getPool() {
 }
 
 export async function query(text, params = []) {
-  return getPool().query(text, params);
+  try {
+    return await getPool().query(text, params);
+  } catch (error) {
+    error.message = `[database] ${formatDatabaseError(error)}`;
+    throw error;
+  }
 }
 
 export async function transaction(callback) {
-  const client = await getPool().connect();
+  let client;
+
+  try {
+    client = await getPool().connect();
+  } catch (error) {
+    error.message = `[database] ${formatDatabaseError(error)}`;
+    throw error;
+  }
 
   try {
     await client.query("BEGIN");
@@ -34,4 +50,50 @@ export async function transaction(callback) {
   } finally {
     client.release();
   }
+}
+
+export async function verifyDatabaseConnection() {
+  const databaseUrl = getDatabaseUrl();
+  const parsed = new URL(databaseUrl);
+  await query("SELECT 1");
+  console.log(`[database] Connected to PostgreSQL host ${parsed.hostname}`);
+}
+
+export function validateDatabaseUrl(value = process.env.DATABASE_URL) {
+  const normalizedValue = value?.trim();
+
+  if (!normalizedValue) {
+    throw new Error("[database] DATABASE_URL is required.");
+  }
+
+  let parsed;
+
+  try {
+    parsed = new URL(normalizedValue);
+  } catch {
+    throw new Error("[database] DATABASE_URL is not a valid PostgreSQL connection URL.");
+  }
+
+  if (!["postgres:", "postgresql:"].includes(parsed.protocol)) {
+    throw new Error("[database] DATABASE_URL must use the postgres:// or postgresql:// protocol.");
+  }
+
+  if (!parsed.hostname || parsed.hostname.toLowerCase() === "base") {
+    throw new Error(`[database] DATABASE_URL resolved to invalid hostname "${parsed.hostname || "(empty)"}".`);
+  }
+
+  return {
+    connectionString: normalizedValue,
+    hostname: parsed.hostname
+  };
+}
+
+function getDatabaseUrl() {
+  return validateDatabaseUrl().connectionString;
+}
+
+function formatDatabaseError(error) {
+  const target = error.hostname || error.address || error.host;
+  const targetText = target ? ` Target: ${target}.` : "";
+  return `${error.message}${targetText}`;
 }

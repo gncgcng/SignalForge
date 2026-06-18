@@ -31,10 +31,6 @@ export const appConfig = {
   sessionCookieName: "signalforge_session",
   freeSignalAllowance: 3,
   supportedTimeframes: ["5m", "15m", "1h", "4h"],
-  database: {
-    url: process.env.DATABASE_URL || "postgres://signalforge:signalforge@localhost:5432/signalforge",
-    ssl: process.env.DATABASE_SSL === "true"
-  },
   marketData: {
     provider: "coinbase-exchange",
     baseUrl: process.env.MARKET_DATA_BASE_URL || "https://api.exchange.coinbase.com",
