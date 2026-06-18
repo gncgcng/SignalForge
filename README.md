@@ -34,9 +34,20 @@ postgres://signalforge:signalforge@localhost:5432/signalforge
 
 All application, migration, seed, authentication, and outcome-tracking database connections use `DATABASE_URL` exclusively. `DB_HOST`, `PGHOST`, and split host/user/password variables are not read by SignalForge.
 
+On Railway, configure these as two separate variables:
+
+```text
+DATABASE_URL=${{Postgres.DATABASE_URL}}
+NODE_ENV=production
+```
+
+Do not append `NODE_ENV=production` to the `DATABASE_URL` value.
+
 ## Demo Login
 
 Use any valid email and a password of 6+ characters. For a seeded local account, run `npm run db:seed` and sign in with `demo@signalforge.app` / `signal123`.
+
+Demo access and demo seed data are disabled when `NODE_ENV=production`.
 
 ## Architecture
 
@@ -63,3 +74,22 @@ The live provider uses Coinbase Exchange public candles for crypto pairs:
 - `SOL-USD`
 
 Supported scanner timeframes are `5m`, `15m`, `1h`, and `4h`. Stocks and ETFs remain visible in the UI as coming soon and are disabled for scanning.
+
+## Commodities
+
+The market catalog includes a separate Commodities category:
+
+- `XAU/USD` (Gold)
+- `XAG/USD` (Silver)
+- `WTI`
+- `BRENT`
+
+Commodities are marked Coming Soon by default. To enable the Twelve Data adapter after confirming that the account/plan returns OHLCV, including volume, for the required symbols and intervals:
+
+```text
+COMMODITIES_LIVE_ENABLED=true
+COMMODITIES_PROVIDER=twelve-data
+COMMODITIES_API_KEY=...
+```
+
+No synthetic commodity candles or volume are generated. Unsupported symbols, timeframes, plans, or missing volume return explicit provider errors.

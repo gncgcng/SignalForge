@@ -8,7 +8,9 @@
     "start": "node src/server.js",
     "db:migrate": "node scripts/db-migrate.js",
     "db:seed": "node scripts/db-seed.js",
+    "test:auth-security": "node scripts/auth-security-test.js",
     "test:database-config": "node scripts/database-config-test.js",
+    "test:market-providers": "node scripts/market-provider-test.js",
     "smoke": "node scripts/smoke-test.js",
     "test:signals": "node scripts/signal-rules-test.js"
   },

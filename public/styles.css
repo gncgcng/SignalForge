@@ -439,6 +439,24 @@ nav a:hover {
   overflow: auto;
 }
 
+.market-category {
+  display: grid;
+  gap: 8px;
+}
+
+.market-category + .market-category {
+  margin-top: 10px;
+}
+
+.market-category-title {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 2px;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
 .pair-button {
   display: grid;
   grid-template-columns: 1fr auto;

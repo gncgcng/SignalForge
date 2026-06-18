@@ -26,6 +26,14 @@ const result = generateMarketDataSetup({
   source: "test-fixture",
   candles: makeFlatCandles()
 }, "15m");
+const commodityResult = generateMarketDataSetup({
+  pair: {
+    symbol: "XAU/USD",
+    assetClass: "Commodity"
+  },
+  source: "commodity-test-fixture",
+  candles: makeFlatCandles()
+}, "15m");
 const stats = calculateSignalStats([
   { status: "Hit TP" },
   { status: "Hit TP" },
@@ -36,6 +44,7 @@ const stats = calculateSignalStats([
 
 console.log(JSON.stringify({
   valid: result.valid,
+  commodityEngineEvaluated: commodityResult.analysis.symbol === "XAU/USD",
   message: result.analysis.message,
   longPassed: result.analysis.candidates.find((candidate) => candidate.direction === "long")?.passedCount,
   shortPassed: result.analysis.candidates.find((candidate) => candidate.direction === "short")?.passedCount,
@@ -45,6 +54,8 @@ console.log(JSON.stringify({
 if (
   result.valid ||
   result.signal ||
+  !commodityResult.analysis ||
+  commodityResult.analysis.symbol !== "XAU/USD" ||
   !result.analysis.message.includes("No valid setup") ||
   stats.totalSignals !== 5 ||
   stats.hitTpCount !== 2 ||

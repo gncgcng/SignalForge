@@ -1,4 +1,5 @@
 import { appConfig } from "../../config/appConfig.js";
+import { MarketDataProviderError } from "./marketDataProviderError.js";
 
 const granularityByTimeframe = {
   "5m": 300,
@@ -8,15 +9,6 @@ const granularityByTimeframe = {
 };
 
 const cache = new Map();
-
-export class MarketDataProviderError extends Error {
-  constructor(message, { statusCode, code } = {}) {
-    super(message);
-    this.name = "MarketDataProviderError";
-    this.statusCode = statusCode;
-    this.code = code || "MARKET_DATA_ERROR";
-  }
-}
 
 export async function getCandlesFromCoinbase(symbol, timeframe) {
   const granularity = granularityByTimeframe[timeframe];
@@ -145,3 +137,25 @@ export async function getCandlesFromCoinbase(symbol, timeframe) {
     clearTimeout(timeout);
   }
 }
+
+export const coinbaseMarketDataProvider = {
+  id: "coinbase-exchange",
+  category: "Crypto",
+  isConfigured() {
+    return true;
+  },
+  supports(symbol, timeframe) {
+    return ["BTC-USD", "ETH-USD", "SOL-USD"].includes(symbol) &&
+      Object.hasOwn(granularityByTimeframe, timeframe);
+  },
+  async getCandles(symbol, timeframe) {
+    if (!this.supports(symbol, timeframe)) {
+      throw new MarketDataProviderError(`Coinbase does not support ${symbol} on ${timeframe}.`, {
+        statusCode: 400,
+        code: "PROVIDER_UNSUPPORTED_MARKET"
+      });
+    }
+
+    return getCandlesFromCoinbase(symbol, timeframe);
+  }
+};

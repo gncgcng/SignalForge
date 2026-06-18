@@ -49,13 +49,18 @@ export async function createUser({ id, name, email, password }) {
   return findUserById(id);
 }
 
-export async function createSession({ id, userId }) {
-  await query("INSERT INTO sessions (id, user_id) VALUES ($1, $2)", [id, userId]);
+export async function createSession({ id, userId, expiresAt }) {
+  await query(
+    "INSERT INTO sessions (id, user_id, expires_at) VALUES ($1, $2, $3)",
+    [id, userId, expiresAt]
+  );
 }
 
 export async function findSessionUser(sessionId) {
   const result = await query(`
-    SELECT user_id FROM sessions WHERE id = $1
+    SELECT user_id
+    FROM sessions
+    WHERE id = $1 AND expires_at > now()
   `, [sessionId]);
 
   return result.rows[0] ? findUserById(result.rows[0].user_id) : null;
@@ -63,6 +68,10 @@ export async function findSessionUser(sessionId) {
 
 export async function deleteSession(sessionId) {
   await query("DELETE FROM sessions WHERE id = $1", [sessionId]);
+}
+
+export async function deleteExpiredSessions() {
+  await query("DELETE FROM sessions WHERE expires_at <= now()");
 }
 
 export async function incrementTrialSignalsUsed(userId) {
@@ -116,16 +125,22 @@ export async function saveUnlockedSignal(userId, signal) {
     `, [signal.id]);
   });
 
-  return findSignalById(signal.id);
+  return findSignalById(signal.id, userId);
 }
 
-export async function findSignalById(signalId) {
-  const result = await query(signalSelectSql("WHERE s.id = $1"), [signalId]);
+export async function findSignalById(signalId, userId) {
+  const result = await query(
+    signalSelectSql("WHERE s.id = $1 AND s.user_id = $2"),
+    [signalId, userId]
+  );
   return result.rows[0] ? mapSignal(result.rows[0]) : null;
 }
 
-export async function listSignalsByUser(userId) {
-  const result = await query(signalSelectSql("WHERE s.user_id = $1 ORDER BY s.created_at DESC LIMIT 100"), [userId]);
+export async function listSignalsByUser(userId, executeQuery = query) {
+  const result = await executeQuery(
+    signalSelectSql("WHERE s.user_id = $1 ORDER BY s.created_at DESC LIMIT 100"),
+    [userId]
+  );
   return result.rows.map(mapSignal);
 }
 

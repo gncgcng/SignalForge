@@ -1,10 +1,9 @@
 import { listSignalsByUser, saveUnlockedSignal } from "../../db/repositories.js";
-import { getOhlcv } from "../market-data/marketDataService.js";
+import { getOhlcv, listActivePairs } from "../market-data/marketDataService.js";
 import { canGenerateSignal, getSubscriptionSummary, recordSignalUsage } from "../subscriptions/subscriptionService.js";
 import { generateMarketDataSetup } from "./signalGenerator.js";
 import { calculateSignalStats, updateSignalsForUser } from "./signalOutcomeService.js";
 
-const scanSymbols = ["BTC-USD", "ETH-USD", "SOL-USD"];
 const scanTimeframes = ["5m", "15m", "1h", "4h"];
 
 export async function createSignal(user, { symbol, timeframe }) {
@@ -61,6 +60,7 @@ export async function scanAllMarkets() {
   const scanned = [];
   const setups = [];
   const errors = [];
+  const scanSymbols = listActivePairs().map((pair) => pair.symbol);
 
   for (const symbol of scanSymbols) {
     for (const timeframe of scanTimeframes) {

@@ -1,24 +1,30 @@
-import { getCandlesFromCoinbase } from "./coinbaseMarketDataProvider.js";
+import { getMarketDataProvider, isPairProviderConfigured } from "./marketDataProviderRegistry.js";
+import { MarketDataProviderError } from "./marketDataProviderError.js";
 
-export const tradingPairs = [
-  { symbol: "BTC-USD", name: "Bitcoin", assetClass: "Crypto", venue: "Coinbase", status: "active" },
-  { symbol: "ETH-USD", name: "Ethereum", assetClass: "Crypto", venue: "Coinbase", status: "active" },
-  { symbol: "SOL-USD", name: "Solana", assetClass: "Crypto", venue: "Coinbase", status: "active" },
-  { symbol: "NVDA", name: "NVIDIA Corp", assetClass: "Stock", venue: "NASDAQ", status: "coming-soon" },
-  { symbol: "TSLA", name: "Tesla Inc", assetClass: "Stock", venue: "NASDAQ", status: "coming-soon" },
-  { symbol: "AAPL", name: "Apple Inc", assetClass: "Stock", venue: "NASDAQ", status: "coming-soon" },
-  { symbol: "SPY", name: "S&P 500 ETF", assetClass: "ETF", venue: "NYSE Arca", status: "coming-soon" }
+const marketCatalog = [
+  { symbol: "BTC-USD", name: "Bitcoin", category: "Crypto", assetClass: "Crypto", venue: "Coinbase", provider: "coinbase-exchange" },
+  { symbol: "ETH-USD", name: "Ethereum", category: "Crypto", assetClass: "Crypto", venue: "Coinbase", provider: "coinbase-exchange" },
+  { symbol: "SOL-USD", name: "Solana", category: "Crypto", assetClass: "Crypto", venue: "Coinbase", provider: "coinbase-exchange" },
+  { symbol: "XAU/USD", name: "Gold", category: "Commodities", assetClass: "Commodity", venue: "OTC", provider: "twelve-data" },
+  { symbol: "XAG/USD", name: "Silver", category: "Commodities", assetClass: "Commodity", venue: "OTC", provider: "twelve-data" },
+  { symbol: "WTI", name: "WTI Crude Oil", category: "Commodities", assetClass: "Commodity", venue: "OTC", provider: "twelve-data" },
+  { symbol: "BRENT", name: "Brent Crude Oil", category: "Commodities", assetClass: "Commodity", venue: "OTC", provider: "twelve-data" },
+  { symbol: "NVDA", name: "NVIDIA Corp", category: "Stocks & ETFs", assetClass: "Stock", venue: "NASDAQ", provider: null },
+  { symbol: "TSLA", name: "Tesla Inc", category: "Stocks & ETFs", assetClass: "Stock", venue: "NASDAQ", provider: null },
+  { symbol: "AAPL", name: "Apple Inc", category: "Stocks & ETFs", assetClass: "Stock", venue: "NASDAQ", provider: null },
+  { symbol: "SPY", name: "S&P 500 ETF", category: "Stocks & ETFs", assetClass: "ETF", venue: "NYSE Arca", provider: null }
 ];
 
 export function listPairs(query = "") {
   const normalized = query.trim().toLowerCase();
+  const pairs = marketCatalog.map(withAvailability);
 
   if (!normalized) {
-    return tradingPairs;
+    return pairs;
   }
 
-  return tradingPairs.filter((pair) => {
-    return [pair.symbol, pair.name, pair.assetClass, pair.venue]
+  return pairs.filter((pair) => {
+    return [pair.symbol, pair.name, pair.category, pair.assetClass, pair.venue]
       .join(" ")
       .toLowerCase()
       .includes(normalized);
@@ -26,26 +32,19 @@ export function listPairs(query = "") {
 }
 
 export function getPair(symbol) {
-  return tradingPairs.find((pair) => pair.symbol === symbol);
+  const pair = marketCatalog.find((item) => item.symbol === symbol);
+  return pair ? withAvailability(pair) : null;
+}
+
+export function listActivePairs() {
+  return marketCatalog.map(withAvailability).filter((pair) => pair.status === "active");
 }
 
 export async function getMarketSnapshot(symbol, timeframe = "15m") {
-  const pair = getPair(symbol);
-
-  if (!pair) {
-    throw new Error("Trading pair not found.");
-  }
-
-  if (pair.status !== "active") {
-    throw new Error(`${pair.symbol} market data is coming soon.`);
-  }
-
-  const marketData = await getCandlesFromCoinbase(symbol, timeframe);
+  const marketData = await getOhlcv(symbol, timeframe);
 
   return {
-    ...pair,
-    lastPrice: marketData.latestPrice,
-    change24h: marketData.change24h,
+    ...marketData.pair,
     source: marketData.source,
     receivedAt: marketData.receivedAt
   };
@@ -55,14 +54,31 @@ export async function getOhlcv(symbol, timeframe) {
   const pair = getPair(symbol);
 
   if (!pair) {
-    throw new Error("Trading pair not found.");
+    throw new MarketDataProviderError(`Unknown market symbol ${symbol}.`, {
+      statusCode: 404,
+      code: "MARKET_NOT_FOUND"
+    });
   }
 
   if (pair.status !== "active") {
-    throw new Error(`${pair.symbol} market data is coming soon.`);
+    throw new MarketDataProviderError(
+      pair.category === "Commodities"
+        ? `${pair.symbol} commodity data is Coming Soon because no supported live OHLCV provider is configured.`
+        : `${pair.symbol} market data is Coming Soon.`,
+      { statusCode: 503, code: "MARKET_COMING_SOON" }
+    );
   }
 
-  const marketData = await getCandlesFromCoinbase(symbol, timeframe);
+  const provider = getMarketDataProvider(pair);
+
+  if (!provider.supports(pair.symbol, timeframe)) {
+    throw new MarketDataProviderError(
+      `${provider.id} does not support ${pair.symbol} on ${timeframe}.`,
+      { statusCode: 400, code: "PROVIDER_UNSUPPORTED_MARKET" }
+    );
+  }
+
+  const marketData = await provider.getCandles(pair.symbol, timeframe);
 
   return {
     pair: {
@@ -74,5 +90,14 @@ export async function getOhlcv(symbol, timeframe) {
     source: marketData.source,
     cache: marketData.cache,
     receivedAt: marketData.receivedAt
+  };
+}
+
+function withAvailability(pair) {
+  const active = Boolean(pair.provider) && isPairProviderConfigured(pair);
+
+  return {
+    ...pair,
+    status: active ? "active" : "coming-soon"
   };
 }

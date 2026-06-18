@@ -1,6 +1,7 @@
 const state = {
   user: null,
   subscription: null,
+  marketCatalog: [],
   pairs: [],
   selectedPair: null,
   timeframe: "15m",
@@ -27,6 +28,7 @@ const landingPage = document.querySelector("#landing-page");
 const dashboard = document.querySelector("#dashboard");
 const authForm = document.querySelector("#auth-form");
 const authNote = document.querySelector("#auth-note");
+const viewDemoButton = document.querySelector("#view-demo-button");
 const pairSearch = document.querySelector("#pair-search");
 const pairList = document.querySelector("#pair-list");
 const timeframes = document.querySelector("#timeframes");
@@ -75,16 +77,9 @@ document.querySelector("#landing-login-button").addEventListener("click", () => 
   showAuth();
 });
 
-document.querySelector("#view-demo-button").addEventListener("click", async () => {
+viewDemoButton.addEventListener("click", async () => {
   try {
-    const { user } = await api.request("/api/auth/login", {
-      method: "POST",
-      body: JSON.stringify({
-        name: "Demo Trader",
-        email: `demo-${Date.now()}@signalforge.app`,
-        password: "signal123"
-      })
-    });
+    const { user } = await api.request("/api/auth/demo", { method: "POST" });
     state.user = user;
     await bootDashboard();
   } catch (error) {
@@ -98,7 +93,7 @@ authForm.addEventListener("submit", async (event) => {
   const form = new FormData(authForm);
 
   try {
-    authNote.textContent = "Creating secure demo session...";
+    authNote.textContent = "Authenticating...";
     const { user } = await api.request("/api/auth/login", {
       method: "POST",
       body: JSON.stringify(Object.fromEntries(form))
@@ -111,8 +106,11 @@ authForm.addEventListener("submit", async (event) => {
 });
 
 document.querySelector("#logout-button").addEventListener("click", async () => {
-  await api.request("/api/auth/logout", { method: "POST" });
-  state.user = null;
+  try {
+    await api.request("/api/auth/logout", { method: "POST" });
+  } finally {
+    clearClientAuthState();
+  }
   landingPage.classList.remove("hidden");
   dashboard.classList.add("hidden");
   authScreen.classList.add("hidden");
@@ -146,7 +144,7 @@ pairSearch.addEventListener("input", async () => {
 });
 
 scanAllButton.addEventListener("click", async () => {
-  const symbols = ["BTC-USD", "ETH-USD", "SOL-USD"];
+  const symbols = state.marketCatalog.filter((pair) => pair.status === "active").map((pair) => pair.symbol);
   const frames = ["5m", "15m", "1h", "4h"];
   const jobs = symbols.flatMap((symbol) => frames.map((timeframe) => ({ symbol, timeframe })));
   const setups = [];
@@ -261,7 +259,11 @@ signalsGrid.addEventListener("click", async (event) => {
 });
 
 async function init() {
-  const { user } = await api.request("/api/auth/session");
+  const [{ user }, authConfig] = await Promise.all([
+    api.request("/api/auth/session"),
+    api.request("/api/auth/config")
+  ]);
+  viewDemoButton.classList.toggle("hidden", !authConfig.demoEnabled);
   state.user = user;
 
   if (user) {
@@ -270,6 +272,36 @@ async function init() {
     landingPage.classList.remove("hidden");
     authScreen.classList.add("hidden");
     dashboard.classList.add("hidden");
+  }
+}
+
+function clearClientAuthState() {
+  localStorage.clear();
+  sessionStorage.clear();
+
+  for (const cookie of document.cookie.split(";")) {
+    const name = cookie.split("=")[0].trim();
+
+    if (name) {
+      document.cookie = `${name}=; Path=/; Max-Age=0; SameSite=Lax`;
+      document.cookie = `${name}=; Path=/; Max-Age=0; SameSite=Lax; Secure`;
+    }
+  }
+
+  state.user = null;
+  state.subscription = null;
+  state.signals = [];
+  state.signalStats = {
+    totalSignals: 0,
+    winRate: 0,
+    hitTpCount: 0,
+    hitSlCount: 0,
+    expiredCount: 0
+  };
+
+  if (signalRefreshTimer) {
+    clearInterval(signalRefreshTimer);
+    signalRefreshTimer = null;
   }
 }
 
@@ -294,15 +326,35 @@ function showAuth() {
 async function loadPairs(query = "") {
   const { pairs } = await api.request(`/api/market-data/pairs?q=${encodeURIComponent(query)}`);
   state.pairs = pairs;
+
+  if (!query) {
+    state.marketCatalog = pairs;
+  }
+
   state.selectedPair = state.selectedPair || pairs.find((pair) => pair.status === "active") || pairs[0];
+  renderHistoryPairOptions();
   renderPairs();
   renderSelectedMarket();
+}
+
+function renderHistoryPairOptions() {
+  const currentValue = historyPairFilter.value || "all";
+  historyPairFilter.innerHTML = `
+    <option value="all">All pairs</option>
+    ${state.marketCatalog.map((pair) => `<option value="${pair.symbol}">${pair.symbol}</option>`).join("")}
+  `;
+  historyPairFilter.value = state.marketCatalog.some((pair) => pair.symbol === currentValue) ? currentValue : "all";
 }
 
 async function loadMarketData() {
   if (!state.selectedPair || state.selectedPair.status !== "active") {
     renderChart([]);
-    setMarketStatus("Stocks and ETFs are coming soon.", "idle");
+    setMarketStatus(
+      state.selectedPair?.category === "Commodities"
+        ? `${state.selectedPair.symbol} commodity data is Coming Soon.`
+        : "Stocks and ETFs are Coming Soon.",
+      "idle"
+    );
     return;
   }
 
@@ -411,14 +463,23 @@ function showView(view) {
 }
 
 function renderPairs() {
-  pairList.innerHTML = state.pairs.map((pair) => `
-    <button class="pair-button ${state.selectedPair?.symbol === pair.symbol ? "active" : ""}" data-symbol="${pair.symbol}" data-status="${pair.status}" ${pair.status !== "active" ? "disabled" : ""} aria-busy="${getPairIsLoading(pair)}">
-      <span>
-        <strong>${pair.symbol}</strong><br />
-        <small>${pair.name} · ${pair.assetClass} · ${pair.venue}</small>
-      </span>
-      <strong>${getPairBadge(pair)}</strong>
-    </button>
+  const categories = [...new Set(state.pairs.map((pair) => pair.category))];
+  pairList.innerHTML = categories.map((category) => `
+    <section class="market-category">
+      <div class="market-category-title">
+        <strong>${category}</strong>
+        <span>${state.pairs.filter((pair) => pair.category === category && pair.status === "active").length} live</span>
+      </div>
+      ${state.pairs.filter((pair) => pair.category === category).map((pair) => `
+        <button class="pair-button ${state.selectedPair?.symbol === pair.symbol ? "active" : ""}" data-symbol="${pair.symbol}" data-status="${pair.status}" ${pair.status !== "active" ? "disabled" : ""} aria-busy="${getPairIsLoading(pair)}">
+          <span>
+            <strong>${pair.symbol}</strong><br />
+            <small>${pair.name} · ${pair.assetClass} · ${pair.venue}</small>
+          </span>
+          <strong>${getPairBadge(pair)}</strong>
+        </button>
+      `).join("")}
+    </section>
   `).join("");
 
   pairList.querySelectorAll("button").forEach((button) => {
@@ -685,7 +746,12 @@ function updateScanProgress(done, total, message) {
 
 function renderScanResults(setups, errors) {
   document.querySelector("#signal-count").textContent = `${setups.length} scan results`;
-  const scannedMarkets = "BTC-USD · ETH-USD · SOL-USD";
+  const scannedMarkets = state.pairs
+    .concat(state.marketCatalog)
+    .filter((pair, index, pairs) => pairs.findIndex((item) => item.symbol === pair.symbol) === index)
+    .filter((pair) => pair.status === "active")
+    .map((pair) => pair.symbol)
+    .join(" · ");
 
   if (setups.length === 0) {
     signalsGrid.innerHTML = `

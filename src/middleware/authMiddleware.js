@@ -1,5 +1,6 @@
 import { appConfig } from "../config/appConfig.js";
-import { findSessionUser } from "../db/repositories.js";
+import { deleteSession, findSessionUser } from "../db/repositories.js";
+import { isDemoOrTesterIdentity } from "../modules/auth/authPolicy.js";
 import { parseCookies } from "../shared/http.js";
 
 export async function attachAuth(req) {
@@ -11,5 +12,13 @@ export async function attachAuth(req) {
     return;
   }
 
-  req.user = await findSessionUser(sessionId);
+  const user = await findSessionUser(sessionId);
+
+  if (appConfig.isProduction && user && isDemoOrTesterIdentity(user.email)) {
+    await deleteSession(sessionId);
+    req.user = null;
+    return;
+  }
+
+  req.user = user;
 }

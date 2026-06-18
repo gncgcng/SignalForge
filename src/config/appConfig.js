@@ -11,15 +11,24 @@ if (existsSync(envPath)) {
   for (const line of lines) {
     const trimmed = line.trim();
 
-    if (!trimmed || trimmed.startsWith("#") || !trimmed.includes("=")) {
+    if (!trimmed || trimmed.startsWith("#")) {
       continue;
     }
 
-    const index = trimmed.indexOf("=");
-    const key = trimmed.slice(0, index).trim();
-    const value = trimmed.slice(index + 1).trim();
+    const match = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
 
-    if (!process.env[key]) {
+    if (!match) {
+      throw new Error(`Invalid .env assignment: ${trimmed}`);
+    }
+
+    const [, key, rawValue] = match;
+    const value = rawValue.trim();
+
+    if (value.includes("\n") || value.includes("\r")) {
+      throw new Error(`Multiline .env values are not supported: ${key}`);
+    }
+
+    if (process.env[key] === undefined) {
       process.env[key] = value;
     }
   }
@@ -27,8 +36,13 @@ if (existsSync(envPath)) {
 
 export const appConfig = {
   appName: "SignalForge",
+  nodeEnv: process.env.NODE_ENV || "development",
+  isProduction: process.env.NODE_ENV === "production",
   port: Number(process.env.PORT || 4173),
-  sessionCookieName: "signalforge_session",
+  sessionCookieName: process.env.NODE_ENV === "production" ? "__Host-signalforge_session" : "signalforge_session",
+  legacySessionCookieName: "signalforge_session",
+  sessionMaxAgeSeconds: 60 * 60 * 24 * 7,
+  demoEnabled: process.env.NODE_ENV !== "production" && process.env.ENABLE_DEMO !== "false",
   freeSignalAllowance: 3,
   supportedTimeframes: ["5m", "15m", "1h", "4h"],
   marketData: {
@@ -37,6 +51,12 @@ export const appConfig = {
     candleLimit: 120,
     requestTimeoutMs: 8000,
     cacheTtlMs: 20000
+  },
+  commodities: {
+    enabled: process.env.COMMODITIES_LIVE_ENABLED === "true",
+    provider: process.env.COMMODITIES_PROVIDER || "twelve-data",
+    baseUrl: process.env.COMMODITIES_API_BASE_URL || "https://api.twelvedata.com",
+    apiKey: process.env.COMMODITIES_API_KEY || ""
   },
   signalTracking: {
     enabled: true,

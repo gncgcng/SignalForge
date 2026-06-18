@@ -55,14 +55,24 @@ export async function transaction(callback) {
 export async function verifyDatabaseConnection() {
   const database = validateDatabaseUrl();
   await query("SELECT 1");
-  console.log(`[database] Connected to PostgreSQL host ${database.hostname}`);
+  console.log(`[database] Connected to PostgreSQL host=${database.hostname} database=${database.database}`);
 }
 
 export function validateDatabaseUrl(value = process.env.DATABASE_URL) {
-  const normalizedValue = value?.trim();
+  const rawValue = String(value ?? "");
 
-  if (!normalizedValue) {
+  if (!rawValue.trim()) {
     throw new Error("[database] DATABASE_URL is required.");
+  }
+
+  if (/[\r\n]/.test(rawValue)) {
+    throw new Error("[database] DATABASE_URL must be a single-line value. Configure NODE_ENV separately.");
+  }
+
+  const normalizedValue = rawValue.trim();
+
+  if (/NODE_ENV\s*=/i.test(normalizedValue)) {
+    throw new Error("[database] DATABASE_URL contains NODE_ENV. Configure DATABASE_URL and NODE_ENV as separate Railway variables.");
   }
 
   let parsed;
@@ -77,9 +87,16 @@ export function validateDatabaseUrl(value = process.env.DATABASE_URL) {
     throw new Error("[database] DATABASE_URL must use the postgres:// or postgresql:// protocol.");
   }
 
+  const database = decodeURIComponent(parsed.pathname.replace(/^\/+/, ""));
+
+  if (!database) {
+    throw new Error("[database] DATABASE_URL must include a database name.");
+  }
+
   return {
     connectionString: normalizedValue,
-    hostname: parsed.hostname
+    hostname: parsed.hostname,
+    database
   };
 }
 

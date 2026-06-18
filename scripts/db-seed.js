@@ -9,6 +9,10 @@ const salt = "local-demo-seed";
 const hash = createHash("sha256").update(`${salt}:${password}`).digest("hex");
 const userId = createId("usr");
 
+if (appConfig.isProduction) {
+  throw new Error("Demo seed data is disabled in production.");
+}
+
 await transaction(async (client) => {
   const existing = await client.query("SELECT id FROM users WHERE email = $1", [email]);
 
