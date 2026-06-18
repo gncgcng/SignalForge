@@ -94,5 +94,6 @@ TWELVEDATA_API_KEY=...
 ```
 
 `TWELVEDATA_API_BASE_URL` can optionally override the default `https://api.twelvedata.com` endpoint.
+Commodity responses are cached for five minutes by default. Override this with `TWELVEDATA_CACHE_TTL_MS`.
 
 No synthetic commodity candles or volume are generated. Unsupported symbols, timeframes, plans, or missing volume return explicit provider errors.

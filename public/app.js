@@ -52,6 +52,7 @@ const statHitSl = document.querySelector("#stat-hit-sl");
 const statExpired = document.querySelector("#stat-expired");
 let marketRequestId = 0;
 let signalRefreshTimer = null;
+let marketLoadTimer = null;
 
 const api = {
   async request(path, options = {}) {
@@ -290,6 +291,11 @@ function clearClientAuthState() {
 
   state.user = null;
   state.subscription = null;
+  state.marketCatalog = [];
+  state.pairs = [];
+  state.selectedPair = null;
+  state.marketData = null;
+  state.marketStatus = {};
   state.signals = [];
   state.signalStats = {
     totalSignals: 0,
@@ -302,6 +308,11 @@ function clearClientAuthState() {
   if (signalRefreshTimer) {
     clearInterval(signalRefreshTimer);
     signalRefreshTimer = null;
+  }
+
+  if (marketLoadTimer) {
+    clearTimeout(marketLoadTimer);
+    marketLoadTimer = null;
   }
 }
 
@@ -331,7 +342,10 @@ async function loadPairs(query = "") {
     state.marketCatalog = pairs;
   }
 
-  state.selectedPair = state.selectedPair || pairs.find((pair) => pair.status === "active") || pairs[0];
+  state.selectedPair = state.selectedPair ||
+    pairs.find((pair) => pair.symbol === "BTC-USD" && pair.status === "active") ||
+    pairs.find((pair) => pair.status === "active") ||
+    pairs[0];
   renderHistoryPairOptions();
   renderPairs();
   renderSelectedMarket();
@@ -492,11 +506,11 @@ function renderPairs() {
   `).join("");
 
   pairList.querySelectorAll("button").forEach((button) => {
-    button.addEventListener("click", async () => {
+    button.addEventListener("click", () => {
       state.selectedPair = state.pairs.find((pair) => pair.symbol === button.dataset.symbol);
       renderPairs();
       renderSelectedMarket();
-      await loadMarketData();
+      queueMarketDataLoad();
     });
   });
 }
@@ -549,12 +563,20 @@ function renderTimeframes() {
   `).join("");
 
   timeframes.querySelectorAll("button").forEach((button) => {
-    button.addEventListener("click", async () => {
+    button.addEventListener("click", () => {
       state.timeframe = button.dataset.frame;
       renderTimeframes();
-      await loadMarketData();
+      queueMarketDataLoad();
     });
   });
+}
+
+function queueMarketDataLoad() {
+  clearTimeout(marketLoadTimer);
+  marketLoadTimer = setTimeout(() => {
+    marketLoadTimer = null;
+    loadMarketData();
+  }, 250);
 }
 
 function renderChart(candles) {

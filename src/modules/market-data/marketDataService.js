@@ -97,6 +97,33 @@ export async function getOhlcv(symbol, timeframe) {
   };
 }
 
+export function getCachedOhlcv(symbol, timeframe) {
+  const pair = getPair(symbol);
+
+  if (!pair || pair.status !== "active") {
+    return null;
+  }
+
+  const provider = getMarketDataProvider(pair);
+  const marketData = provider.getCachedCandles?.(pair.symbol, timeframe);
+
+  if (!marketData) {
+    return null;
+  }
+
+  return {
+    pair: {
+      ...pair,
+      lastPrice: marketData.latestPrice,
+      change24h: marketData.change24h
+    },
+    candles: marketData.candles,
+    source: marketData.source,
+    cache: marketData.cache,
+    receivedAt: marketData.receivedAt
+  };
+}
+
 function withAvailability(pair) {
   const availability = getPairProviderAvailability(pair);
 

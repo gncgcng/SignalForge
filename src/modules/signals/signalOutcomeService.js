@@ -1,6 +1,6 @@
 import { appConfig } from "../../config/appConfig.js";
 import { listActiveSignals, listSignalsByUser, updateSignalOutcome } from "../../db/repositories.js";
-import { getOhlcv } from "../market-data/marketDataService.js";
+import { getCachedOhlcv, getOhlcv, getPair } from "../market-data/marketDataService.js";
 
 const terminalStatuses = new Set(["Hit TP", "Hit SL", "Expired"]);
 let trackingTimer = null;
@@ -84,7 +84,14 @@ async function updateSingleSignalOutcome(signal) {
     return;
   }
 
-  const marketData = await getOhlcv(signal.symbol, signal.timeframe);
+  const marketData = shouldFetchSignalOutcomeMarketData(signal)
+    ? await getOhlcv(signal.symbol, signal.timeframe)
+    : getCachedOhlcv(signal.symbol, signal.timeframe);
+
+  if (!marketData) {
+    return;
+  }
+
   const candles = marketData.candles.filter((candle) => candle.time * 1000 >= createdAt.getTime());
 
   for (const candle of candles) {
@@ -95,6 +102,10 @@ async function updateSingleSignalOutcome(signal) {
       return;
     }
   }
+}
+
+export function shouldFetchSignalOutcomeMarketData(signal) {
+  return getPair(signal.symbol)?.category !== "Commodities";
 }
 
 function getCandleOutcome(signal, candle) {

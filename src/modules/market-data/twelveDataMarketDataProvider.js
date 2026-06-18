@@ -17,6 +17,7 @@ const providerIntervals = {
 };
 
 const cache = new Map();
+const inFlightRequests = new Map();
 
 export const twelveDataMarketDataProvider = {
   id: "twelve-data",
@@ -27,6 +28,15 @@ export const twelveDataMarketDataProvider = {
   supports(symbol, timeframe) {
     return Object.hasOwn(providerSymbols, symbol) &&
       Object.hasOwn(providerIntervals, timeframe);
+  },
+  getCachedCandles(symbol, timeframe) {
+    const cached = cache.get(`${symbol}:${timeframe}`);
+
+    if (!cached || Date.now() - cached.cachedAt >= appConfig.twelveData.cacheTtlMs) {
+      return null;
+    }
+
+    return { ...cached.payload, cache: "hit" };
   },
   async getCandles(symbol, timeframe) {
     if (!this.isConfigured()) {
@@ -44,12 +54,31 @@ export const twelveDataMarketDataProvider = {
     }
 
     const cacheKey = `${symbol}:${timeframe}`;
-    const cached = cache.get(cacheKey);
+    const cached = this.getCachedCandles(symbol, timeframe);
 
-    if (cached && Date.now() - cached.cachedAt < appConfig.marketData.cacheTtlMs) {
-      return { ...cached.payload, cache: "hit" };
+    if (cached) {
+      return cached;
     }
 
+    const inFlightRequest = inFlightRequests.get(cacheKey);
+
+    if (inFlightRequest) {
+      const payload = await inFlightRequest;
+      return { ...payload, cache: "shared" };
+    }
+
+    const request = fetchCandles(this.id, symbol, timeframe, cacheKey);
+    inFlightRequests.set(cacheKey, request);
+
+    try {
+      return await request;
+    } finally {
+      inFlightRequests.delete(cacheKey);
+    }
+  }
+};
+
+async function fetchCandles(providerId, symbol, timeframe, cacheKey) {
     const url = new URL("/time_series", appConfig.twelveData.baseUrl);
     url.searchParams.set("symbol", providerSymbols[symbol]);
     url.searchParams.set("interval", providerIntervals[timeframe]);
@@ -112,7 +141,7 @@ export const twelveDataMarketDataProvider = {
         candles,
         latestPrice: latest.close,
         change24h: previous.close === 0 ? 0 : ((latest.close - previous.close) / previous.close) * 100,
-        source: this.id,
+        source: providerId,
         receivedAt: new Date().toISOString()
       };
 
@@ -131,8 +160,7 @@ export const twelveDataMarketDataProvider = {
     } finally {
       clearTimeout(timeout);
     }
-  }
-};
+}
 
 function isValidOhlcvCandle(candle) {
   return Number.isFinite(candle.time) &&

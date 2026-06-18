@@ -54,7 +54,8 @@ export const appConfig = {
   },
   twelveData: {
     baseUrl: process.env.TWELVEDATA_API_BASE_URL || "https://api.twelvedata.com",
-    apiKey: process.env.TWELVEDATA_API_KEY || ""
+    apiKey: process.env.TWELVEDATA_API_KEY || "",
+    cacheTtlMs: Number(process.env.TWELVEDATA_CACHE_TTL_MS || 300000)
   },
   signalTracking: {
     enabled: true,
