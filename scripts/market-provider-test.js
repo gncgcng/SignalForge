@@ -7,40 +7,64 @@ const pairs = listPairs();
 const crypto = pairs.filter((pair) => pair.category === "Crypto");
 const commodities = pairs.filter((pair) => pair.category === "Commodities");
 const stocks = pairs.filter((pair) => pair.category === "Stocks & ETFs");
-let comingSoonError = null;
-let unsupportedTimeframe = false;
+const requiredCommoditySymbols = ["XAU/USD", "XAG/USD", "WTI", "BRENT"];
+const optionalCommoditySymbols = ["NATGAS"];
+const timeframes = ["5m", "15m", "1h", "4h"];
+const comingSoonChecks = [];
+const supportChecks = [];
 
-try {
-  await getOhlcv("XAU/USD", "15m");
-} catch (error) {
-  comingSoonError = {
-    code: error.code,
-    statusCode: error.statusCode,
-    message: error.message
-  };
+for (const symbol of [...requiredCommoditySymbols, ...optionalCommoditySymbols]) {
+  for (const timeframe of timeframes) {
+    supportChecks.push({
+      symbol,
+      timeframe,
+      supported: commoditiesMarketDataProvider.supports(symbol, timeframe)
+    });
+
+    try {
+      await getOhlcv(symbol, timeframe);
+      comingSoonChecks.push({ symbol, timeframe, rejected: false });
+    } catch (error) {
+      comingSoonChecks.push({
+        symbol,
+        timeframe,
+        rejected: true,
+        code: error.code,
+        statusCode: error.statusCode
+      });
+    }
+  }
 }
-
-unsupportedTimeframe = !commoditiesMarketDataProvider.supports("XAU/USD", "1d");
 
 const result = {
   cryptoActive: crypto.every((pair) => pair.status === "active"),
   commoditySymbols: commodities.map((pair) => pair.symbol),
   commoditiesComingSoon: commodities.every((pair) => pair.status === "coming-soon"),
   stocksComingSoon: stocks.every((pair) => pair.status === "coming-soon"),
-  comingSoonError,
-  unsupportedTimeframe
+  requiredCommodityCoverage: requiredCommoditySymbols.every((symbol) => commodities.some((pair) => pair.symbol === symbol)),
+  naturalGasOptionalCoverage: optionalCommoditySymbols.every((symbol) => commodities.some((pair) => pair.symbol === symbol && pair.optional)),
+  allTimeframesSupported: supportChecks.every((check) => check.supported),
+  allUnavailableMarketsRejectCleanly: comingSoonChecks.every((check) => {
+    return check.rejected && check.code === "MARKET_COMING_SOON" && check.statusCode === 503;
+  }),
+  unsupportedSymbol: !commoditiesMarketDataProvider.supports("COPPER", "15m"),
+  unsupportedTimeframe: !commoditiesMarketDataProvider.supports("XAU/USD", "1d"),
+  combinationsTested: supportChecks.length
 };
 
 console.log(JSON.stringify(result, null, 2));
 
 if (
   !result.cryptoActive ||
-  JSON.stringify(result.commoditySymbols) !== JSON.stringify(["XAU/USD", "XAG/USD", "WTI", "BRENT"]) ||
+  !result.requiredCommodityCoverage ||
+  !result.naturalGasOptionalCoverage ||
   !result.commoditiesComingSoon ||
   !result.stocksComingSoon ||
-  result.comingSoonError?.code !== "MARKET_COMING_SOON" ||
-  result.comingSoonError?.statusCode !== 503 ||
-  !result.unsupportedTimeframe
+  !result.allTimeframesSupported ||
+  !result.allUnavailableMarketsRejectCleanly ||
+  !result.unsupportedSymbol ||
+  !result.unsupportedTimeframe ||
+  result.combinationsTested !== 20
 ) {
   process.exitCode = 1;
 }

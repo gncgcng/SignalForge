@@ -9,6 +9,7 @@ const marketCatalog = [
   { symbol: "XAG/USD", name: "Silver", category: "Commodities", assetClass: "Commodity", venue: "OTC", provider: "twelve-data" },
   { symbol: "WTI", name: "WTI Crude Oil", category: "Commodities", assetClass: "Commodity", venue: "OTC", provider: "twelve-data" },
   { symbol: "BRENT", name: "Brent Crude Oil", category: "Commodities", assetClass: "Commodity", venue: "OTC", provider: "twelve-data" },
+  { symbol: "NATGAS", name: "Natural Gas", category: "Commodities", assetClass: "Commodity", venue: "OTC", provider: "twelve-data", optional: true },
   { symbol: "NVDA", name: "NVIDIA Corp", category: "Stocks & ETFs", assetClass: "Stock", venue: "NASDAQ", provider: null },
   { symbol: "TSLA", name: "Tesla Inc", category: "Stocks & ETFs", assetClass: "Stock", venue: "NASDAQ", provider: null },
   { symbol: "AAPL", name: "Apple Inc", category: "Stocks & ETFs", assetClass: "Stock", venue: "NASDAQ", provider: null },

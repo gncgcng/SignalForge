@@ -379,9 +379,10 @@ async function loadMarketData() {
     document.querySelector("#candle-count").textContent = `${marketData.candles.length}`;
     document.querySelector("#market-regime").textContent = inferRegime(marketData.candles);
     document.querySelector("#provider-status").textContent = marketData.cache === "hit" ? "Cached live" : "Live candles";
+    const providerLabel = marketData.source === "coinbase-exchange" ? "Coinbase" : marketData.source.replaceAll("-", " ");
     state.marketStatus[statusKey] = {
       type: "loaded",
-      message: `Loaded ${marketData.candles.length} live ${state.selectedPair.symbol} ${state.timeframe} candles from Coinbase.`
+      message: `Loaded ${marketData.candles.length} live ${state.selectedPair.symbol} ${state.timeframe} candles from ${providerLabel}.`
     };
     renderMarketStatus();
   } catch (error) {
@@ -494,7 +495,7 @@ function renderPairs() {
 
 function getPairBadge(pair) {
   if (pair.status !== "active") {
-    return "Soon";
+    return "Coming Soon";
   }
 
   return Number.isFinite(pair.change24h) ? formatPercent(pair.change24h) : "Live";
@@ -762,7 +763,7 @@ function renderScanResults(setups, errors) {
             <span>${scannedMarkets}</span>
           </div>
         </div>
-        <p class="reasoning">${errors.length ? `${errors.length} market checks had provider errors; successful checks found no valid setups.` : "All crypto markets and timeframes were scanned without using trial credits."}</p>
+        <p class="reasoning">${errors.length ? `${errors.length} market checks had provider errors; successful checks found no valid setups.` : "All active markets and timeframes were scanned without using trial credits."}</p>
       </article>
     `;
     statusLine.textContent = "No high-probability setups right now. Trial credits were not used.";

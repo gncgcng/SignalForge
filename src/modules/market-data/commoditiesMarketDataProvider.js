@@ -5,7 +5,8 @@ const providerSymbols = {
   "XAU/USD": "XAU/USD",
   "XAG/USD": "XAG/USD",
   WTI: "XTI/USD",
-  BRENT: "XBR/USD"
+  BRENT: "XBR/USD",
+  NATGAS: "XNG/USD"
 };
 
 const providerIntervals = {

@@ -85,6 +85,7 @@ The market catalog includes a separate Commodities category:
 - `XAG/USD` (Silver)
 - `WTI`
 - `BRENT`
+- `NATGAS` (optional Natural Gas)
 
 Commodities are marked Coming Soon by default. To enable the Twelve Data adapter after confirming that the account/plan returns OHLCV, including volume, for the required symbols and intervals:
 
