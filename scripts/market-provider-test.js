@@ -1,7 +1,7 @@
-process.env.COMMODITIES_LIVE_ENABLED = "false";
+delete process.env.TWELVEDATA_API_KEY;
 
 const { listPairs, getOhlcv } = await import("../src/modules/market-data/marketDataService.js");
-const { commoditiesMarketDataProvider } = await import("../src/modules/market-data/commoditiesMarketDataProvider.js");
+const { twelveDataMarketDataProvider } = await import("../src/modules/market-data/twelveDataMarketDataProvider.js");
 
 const pairs = listPairs();
 const crypto = pairs.filter((pair) => pair.category === "Crypto");
@@ -18,7 +18,7 @@ for (const symbol of [...requiredCommoditySymbols, ...optionalCommoditySymbols])
     supportChecks.push({
       symbol,
       timeframe,
-      supported: commoditiesMarketDataProvider.supports(symbol, timeframe)
+      supported: twelveDataMarketDataProvider.supports(symbol, timeframe)
     });
 
     try {
@@ -52,8 +52,8 @@ const result = {
       pair.availabilityCode === "PROVIDER_NOT_CONFIGURED" &&
       pair.availabilityMessage === "Data provider not configured";
   }),
-  unsupportedSymbol: !commoditiesMarketDataProvider.supports("COPPER", "15m"),
-  unsupportedTimeframe: !commoditiesMarketDataProvider.supports("XAU/USD", "1d"),
+  unsupportedSymbol: !twelveDataMarketDataProvider.supports("COPPER", "15m"),
+  unsupportedTimeframe: !twelveDataMarketDataProvider.supports("XAU/USD", "1d"),
   combinationsTested: supportChecks.length
 };
 

@@ -52,11 +52,9 @@ export const appConfig = {
     requestTimeoutMs: 8000,
     cacheTtlMs: 20000
   },
-  commodities: {
-    enabled: process.env.COMMODITIES_LIVE_ENABLED === "true",
-    provider: process.env.COMMODITIES_PROVIDER || "twelve-data",
-    baseUrl: process.env.COMMODITIES_API_BASE_URL || "https://api.twelvedata.com",
-    apiKey: process.env.COMMODITIES_API_KEY || ""
+  twelveData: {
+    baseUrl: process.env.TWELVEDATA_API_BASE_URL || "https://api.twelvedata.com",
+    apiKey: process.env.TWELVEDATA_API_KEY || ""
   },
   signalTracking: {
     enabled: true,

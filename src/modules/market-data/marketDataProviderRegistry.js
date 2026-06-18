@@ -1,10 +1,10 @@
 import { coinbaseMarketDataProvider } from "./coinbaseMarketDataProvider.js";
-import { commoditiesMarketDataProvider } from "./commoditiesMarketDataProvider.js";
+import { twelveDataMarketDataProvider } from "./twelveDataMarketDataProvider.js";
 import { MarketDataProviderError } from "./marketDataProviderError.js";
 
 const providers = new Map([
   ["coinbase-exchange", coinbaseMarketDataProvider],
-  ["twelve-data", commoditiesMarketDataProvider]
+  ["twelve-data", twelveDataMarketDataProvider]
 ]);
 
 export function getMarketDataProvider(pair) {

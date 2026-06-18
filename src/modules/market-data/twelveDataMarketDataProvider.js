@@ -18,13 +18,11 @@ const providerIntervals = {
 
 const cache = new Map();
 
-export const commoditiesMarketDataProvider = {
+export const twelveDataMarketDataProvider = {
   id: "twelve-data",
   category: "Commodities",
   isConfigured() {
-    return appConfig.commodities.enabled &&
-      appConfig.commodities.provider === "twelve-data" &&
-      Boolean(appConfig.commodities.apiKey);
+    return Boolean(appConfig.twelveData.apiKey);
   },
   supports(symbol, timeframe) {
     return Object.hasOwn(providerSymbols, symbol) &&
@@ -33,13 +31,13 @@ export const commoditiesMarketDataProvider = {
   async getCandles(symbol, timeframe) {
     if (!this.isConfigured()) {
       throw new MarketDataProviderError(
-        `${symbol} live commodity data is not configured. Set COMMODITIES_LIVE_ENABLED=true and COMMODITIES_API_KEY to enable it.`,
+        `${symbol} live commodity data is not configured. Set TWELVEDATA_API_KEY to enable it.`,
         { statusCode: 503, code: "PROVIDER_NOT_CONFIGURED" }
       );
     }
 
     if (!this.supports(symbol, timeframe)) {
-      throw new MarketDataProviderError(`The commodities provider does not support ${symbol} on ${timeframe}.`, {
+      throw new MarketDataProviderError(`Twelve Data does not support ${symbol} on ${timeframe}.`, {
         statusCode: 400,
         code: "PROVIDER_UNSUPPORTED_MARKET"
       });
@@ -52,12 +50,12 @@ export const commoditiesMarketDataProvider = {
       return { ...cached.payload, cache: "hit" };
     }
 
-    const url = new URL("/time_series", appConfig.commodities.baseUrl);
+    const url = new URL("/time_series", appConfig.twelveData.baseUrl);
     url.searchParams.set("symbol", providerSymbols[symbol]);
     url.searchParams.set("interval", providerIntervals[timeframe]);
     url.searchParams.set("outputsize", String(appConfig.marketData.candleLimit));
     url.searchParams.set("format", "JSON");
-    url.searchParams.set("apikey", appConfig.commodities.apiKey);
+    url.searchParams.set("apikey", appConfig.twelveData.apiKey);
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), appConfig.marketData.requestTimeoutMs);
@@ -69,18 +67,18 @@ export const commoditiesMarketDataProvider = {
       });
 
       if (response.status === 429) {
-        throw providerError("Commodity market data rate limit reached.", 429, "RATE_LIMITED");
+        throw providerError("Twelve Data rate limit reached.", 429, "RATE_LIMITED");
       }
 
       if (!response.ok) {
-        throw providerError(`Commodity provider returned ${response.status}.`, response.status, "PROVIDER_RESPONSE_ERROR");
+        throw providerError(`Twelve Data returned ${response.status}.`, response.status, "PROVIDER_RESPONSE_ERROR");
       }
 
       const body = await response.json();
 
       if (body.status === "error" || !Array.isArray(body.values)) {
         throw providerError(
-          body.message || `Commodity provider does not support ${symbol} on ${timeframe}.`,
+          body.message || `Twelve Data does not support ${symbol} on ${timeframe}.`,
           400,
           "PROVIDER_UNSUPPORTED_MARKET"
         );
@@ -100,7 +98,7 @@ export const commoditiesMarketDataProvider = {
 
       if (candles.length < 60) {
         throw providerError(
-          `${symbol} returned insufficient OHLCV data for signal analysis. Volume data may be unavailable on the configured provider plan.`,
+          `${symbol} returned insufficient OHLCV data for signal analysis. Volume data may be unavailable on the configured Twelve Data plan.`,
           422,
           "INSUFFICIENT_OHLCV"
         );
@@ -126,10 +124,10 @@ export const commoditiesMarketDataProvider = {
       }
 
       if (error.name === "AbortError") {
-        throw providerError("Commodity market data request timed out.", 504, "MARKET_DATA_TIMEOUT");
+        throw providerError("Twelve Data request timed out.", 504, "MARKET_DATA_TIMEOUT");
       }
 
-      throw providerError("Unable to reach the commodity market data provider.", 503, "PROVIDER_UNAVAILABLE");
+      throw providerError("Unable to reach Twelve Data.", 503, "PROVIDER_UNAVAILABLE");
     } finally {
       clearTimeout(timeout);
     }

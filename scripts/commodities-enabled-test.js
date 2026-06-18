@@ -1,6 +1,4 @@
-process.env.COMMODITIES_LIVE_ENABLED = "true";
-process.env.COMMODITIES_PROVIDER = "twelve-data";
-process.env.COMMODITIES_API_KEY = "test-key";
+process.env.TWELVEDATA_API_KEY = "test-key";
 
 const commoditySymbols = ["XAU/USD", "XAG/USD", "WTI", "BRENT", "NATGAS"];
 const timeframes = ["5m", "15m", "1h", "4h"];

@@ -87,12 +87,12 @@ The market catalog includes a separate Commodities category:
 - `BRENT`
 - `NATGAS` (optional Natural Gas)
 
-Commodities are marked Coming Soon by default. To enable the Twelve Data adapter after confirming that the account/plan returns OHLCV, including volume, for the required symbols and intervals:
+Commodities show `Data provider not configured` until a Twelve Data API key is present. Configure the key locally or in Railway:
 
 ```text
-COMMODITIES_LIVE_ENABLED=true
-COMMODITIES_PROVIDER=twelve-data
-COMMODITIES_API_KEY=...
+TWELVEDATA_API_KEY=...
 ```
+
+`TWELVEDATA_API_BASE_URL` can optionally override the default `https://api.twelvedata.com` endpoint.
 
 No synthetic commodity candles or volume are generated. Unsupported symbols, timeframes, plans, or missing volume return explicit provider errors.
