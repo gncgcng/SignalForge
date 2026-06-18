@@ -1,19 +1,28 @@
 import { validateDatabaseUrl } from "../src/db/client.js";
 
-const valid = validateDatabaseUrl("postgresql://user:password@postgres.railway.internal:5432/railway");
-let rejectedBase = false;
+const postgresUrl = validateDatabaseUrl("postgres://user:password@postgres.railway.internal:5432/railway");
+const postgresqlUrl = validateDatabaseUrl("postgresql://user:password@postgres.railway.internal:5432/railway");
+const arbitraryHost = validateDatabaseUrl("postgres://user:password@base:5432/railway");
+let rejectedInvalidProtocol = false;
 
 try {
-  validateDatabaseUrl("postgresql://user:password@base:5432/railway");
+  validateDatabaseUrl("mysql://user:password@database.internal:3306/app");
 } catch (error) {
-  rejectedBase = error.message.includes('invalid hostname "base"');
+  rejectedInvalidProtocol = error.message.includes("postgres:// or postgresql://");
 }
 
 console.log(JSON.stringify({
-  validHostname: valid.hostname,
-  rejectedBase
+  postgresHostname: postgresUrl.hostname,
+  postgresqlHostname: postgresqlUrl.hostname,
+  arbitraryHostname: arbitraryHost.hostname,
+  rejectedInvalidProtocol
 }, null, 2));
 
-if (valid.hostname !== "postgres.railway.internal" || !rejectedBase) {
+if (
+  postgresUrl.hostname !== "postgres.railway.internal" ||
+  postgresqlUrl.hostname !== "postgres.railway.internal" ||
+  arbitraryHost.hostname !== "base" ||
+  !rejectedInvalidProtocol
+) {
   process.exitCode = 1;
 }

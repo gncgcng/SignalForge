@@ -53,10 +53,9 @@ export async function transaction(callback) {
 }
 
 export async function verifyDatabaseConnection() {
-  const databaseUrl = getDatabaseUrl();
-  const parsed = new URL(databaseUrl);
+  const database = validateDatabaseUrl();
   await query("SELECT 1");
-  console.log(`[database] Connected to PostgreSQL host ${parsed.hostname}`);
+  console.log(`[database] Connected to PostgreSQL host ${database.hostname}`);
 }
 
 export function validateDatabaseUrl(value = process.env.DATABASE_URL) {
@@ -78,10 +77,6 @@ export function validateDatabaseUrl(value = process.env.DATABASE_URL) {
     throw new Error("[database] DATABASE_URL must use the postgres:// or postgresql:// protocol.");
   }
 
-  if (!parsed.hostname || parsed.hostname.toLowerCase() === "base") {
-    throw new Error(`[database] DATABASE_URL resolved to invalid hostname "${parsed.hostname || "(empty)"}".`);
-  }
-
   return {
     connectionString: normalizedValue,
     hostname: parsed.hostname
@@ -95,5 +90,12 @@ function getDatabaseUrl() {
 function formatDatabaseError(error) {
   const target = error.hostname || error.address || error.host;
   const targetText = target ? ` Target: ${target}.` : "";
-  return `${error.message}${targetText}`;
+  return `${maskDatabaseCredentials(error.message)}${targetText}`;
+}
+
+function maskDatabaseCredentials(message = "") {
+  return String(message).replace(
+    /(postgres(?:ql)?:\/\/)([^:\s/@]+)(?::[^@\s/]*)?@/gi,
+    "$1***:***@"
+  );
 }
