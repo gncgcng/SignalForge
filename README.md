@@ -12,6 +12,8 @@ npm run dev
 
 Open `http://localhost:4173`.
 
+The web server also applies pending idempotent migrations before accepting requests, then verifies that `sessions.expires_at` exists and is `NOT NULL`.
+
 ## PostgreSQL
 
 SignalForge now uses PostgreSQL for users, sessions, subscriptions, credit balances, saved/unlocked signals, and signal outcomes.
