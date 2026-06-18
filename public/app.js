@@ -351,7 +351,7 @@ async function loadMarketData() {
     renderChart([]);
     setMarketStatus(
       state.selectedPair?.category === "Commodities"
-        ? `${state.selectedPair.symbol} commodity data is Coming Soon.`
+        ? `${state.selectedPair.symbol}: ${state.selectedPair.availabilityMessage || "Data provider not configured"}.`
         : "Stocks and ETFs are Coming Soon.",
       "idle"
     );
@@ -375,11 +375,11 @@ async function loadMarketData() {
     renderPairs();
     renderSelectedMarket();
     renderChart(marketData.candles);
-    document.querySelector("#provider-name").textContent = marketData.source.replace("-", " ");
+    const providerLabel = marketData.source === "coinbase-exchange" ? "Coinbase" : marketData.source.replaceAll("-", " ");
+    document.querySelector("#provider-name").textContent = providerLabel;
     document.querySelector("#candle-count").textContent = `${marketData.candles.length}`;
     document.querySelector("#market-regime").textContent = inferRegime(marketData.candles);
     document.querySelector("#provider-status").textContent = marketData.cache === "hit" ? "Cached live" : "Live candles";
-    const providerLabel = marketData.source === "coinbase-exchange" ? "Coinbase" : marketData.source.replaceAll("-", " ");
     state.marketStatus[statusKey] = {
       type: "loaded",
       message: `Loaded ${marketData.candles.length} live ${state.selectedPair.symbol} ${state.timeframe} candles from ${providerLabel}.`
@@ -471,7 +471,7 @@ function renderPairs() {
         <strong>${category}</strong>
         <span>${state.pairs.filter((pair) => pair.category === category && pair.status === "active").length} live</span>
       </div>
-      ${state.pairs.filter((pair) => pair.category === category).map((pair) => `
+      ${state.pairs.filter((pair) => pair.category === category).map((pair) => pair.selectable ? `
         <button class="pair-button ${state.selectedPair?.symbol === pair.symbol ? "active" : ""}" data-symbol="${pair.symbol}" data-status="${pair.status}" ${pair.status !== "active" ? "disabled" : ""} aria-busy="${getPairIsLoading(pair)}">
           <span>
             <strong>${pair.symbol}</strong><br />
@@ -479,6 +479,14 @@ function renderPairs() {
           </span>
           <strong>${getPairBadge(pair)}</strong>
         </button>
+      ` : `
+        <div class="pair-button unavailable" data-symbol="${pair.symbol}" data-status="${pair.status}" aria-disabled="true">
+          <span>
+            <strong>${pair.symbol}</strong><br />
+            <small>${pair.name} · ${pair.availabilityMessage}</small>
+          </span>
+          <strong>${getPairBadge(pair)}</strong>
+        </div>
       `).join("")}
     </section>
   `).join("");
@@ -495,7 +503,10 @@ function renderPairs() {
 
 function getPairBadge(pair) {
   if (pair.status !== "active") {
-    return "Coming Soon";
+    return pair.category === "Commodities" &&
+      pair.availabilityCode === "PROVIDER_NOT_CONFIGURED"
+      ? "Not configured"
+      : "Coming Soon";
   }
 
   return Number.isFinite(pair.change24h) ? formatPercent(pair.change24h) : "Live";
@@ -526,7 +537,9 @@ function renderMarketStatus() {
 function renderSelectedMarket() {
   if (!state.selectedPair) return;
   document.querySelector("#selected-symbol").textContent = state.selectedPair.symbol;
-  document.querySelector("#selected-price").textContent = Number.isFinite(state.selectedPair.lastPrice) ? formatCurrency(state.selectedPair.lastPrice) : "Coming soon";
+  document.querySelector("#selected-price").textContent = Number.isFinite(state.selectedPair.lastPrice)
+    ? formatCurrency(state.selectedPair.lastPrice)
+    : state.selectedPair.availabilityMessage || "Coming Soon";
   document.querySelector("#selected-change").textContent = Number.isFinite(state.selectedPair.change24h) ? formatPercent(state.selectedPair.change24h) : "--";
 }
 

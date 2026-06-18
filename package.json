@@ -10,6 +10,7 @@
     "db:seed": "node scripts/db-seed.js",
     "test:auth-security": "node scripts/auth-security-test.js",
     "test:database-config": "node scripts/database-config-test.js",
+    "test:commodities-enabled": "node scripts/commodities-enabled-test.js",
     "test:market-providers": "node scripts/market-provider-test.js",
     "test:session-migration": "node scripts/session-migration-test.js",
     "smoke": "node scripts/smoke-test.js",

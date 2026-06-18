@@ -24,3 +24,39 @@ export function isPairProviderConfigured(pair) {
   const provider = providers.get(pair.provider);
   return Boolean(provider?.isConfigured());
 }
+
+export function getPairProviderAvailability(pair) {
+  if (!pair.provider) {
+    return {
+      configured: false,
+      code: "MARKET_COMING_SOON",
+      message: "Coming Soon"
+    };
+  }
+
+  const provider = providers.get(pair.provider);
+
+  if (!provider) {
+    return {
+      configured: false,
+      code: "PROVIDER_NOT_REGISTERED",
+      message: "Data provider not available"
+    };
+  }
+
+  if (!provider.isConfigured()) {
+    return {
+      configured: false,
+      code: "PROVIDER_NOT_CONFIGURED",
+      message: pair.category === "Commodities"
+        ? "Data provider not configured"
+        : "Coming Soon"
+    };
+  }
+
+  return {
+    configured: true,
+    code: "LIVE",
+    message: "Live"
+  };
+}

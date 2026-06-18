@@ -45,7 +45,12 @@ const result = {
   naturalGasOptionalCoverage: optionalCommoditySymbols.every((symbol) => commodities.some((pair) => pair.symbol === symbol && pair.optional)),
   allTimeframesSupported: supportChecks.every((check) => check.supported),
   allUnavailableMarketsRejectCleanly: comingSoonChecks.every((check) => {
-    return check.rejected && check.code === "MARKET_COMING_SOON" && check.statusCode === 503;
+    return check.rejected && check.code === "PROVIDER_NOT_CONFIGURED" && check.statusCode === 503;
+  }),
+  clearProviderMessage: commodities.every((pair) => {
+    return pair.selectable === false &&
+      pair.availabilityCode === "PROVIDER_NOT_CONFIGURED" &&
+      pair.availabilityMessage === "Data provider not configured";
   }),
   unsupportedSymbol: !commoditiesMarketDataProvider.supports("COPPER", "15m"),
   unsupportedTimeframe: !commoditiesMarketDataProvider.supports("XAU/USD", "1d"),
@@ -62,6 +67,7 @@ if (
   !result.stocksComingSoon ||
   !result.allTimeframesSupported ||
   !result.allUnavailableMarketsRejectCleanly ||
+  !result.clearProviderMessage ||
   !result.unsupportedSymbol ||
   !result.unsupportedTimeframe ||
   result.combinationsTested !== 20

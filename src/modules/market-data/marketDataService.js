@@ -1,4 +1,4 @@
-import { getMarketDataProvider, isPairProviderConfigured } from "./marketDataProviderRegistry.js";
+import { getMarketDataProvider, getPairProviderAvailability } from "./marketDataProviderRegistry.js";
 import { MarketDataProviderError } from "./marketDataProviderError.js";
 
 const marketCatalog = [
@@ -63,10 +63,13 @@ export async function getOhlcv(symbol, timeframe) {
 
   if (pair.status !== "active") {
     throw new MarketDataProviderError(
-      pair.category === "Commodities"
-        ? `${pair.symbol} commodity data is Coming Soon because no supported live OHLCV provider is configured.`
+      pair.category === "Commodities" && pair.availabilityCode === "PROVIDER_NOT_CONFIGURED"
+        ? `${pair.symbol}: Data provider not configured.`
         : `${pair.symbol} market data is Coming Soon.`,
-      { statusCode: 503, code: "MARKET_COMING_SOON" }
+      {
+        statusCode: 503,
+        code: pair.availabilityCode || "MARKET_COMING_SOON"
+      }
     );
   }
 
@@ -95,10 +98,13 @@ export async function getOhlcv(symbol, timeframe) {
 }
 
 function withAvailability(pair) {
-  const active = Boolean(pair.provider) && isPairProviderConfigured(pair);
+  const availability = getPairProviderAvailability(pair);
 
   return {
     ...pair,
-    status: active ? "active" : "coming-soon"
+    status: availability.configured ? "active" : "coming-soon",
+    selectable: availability.configured,
+    availabilityCode: availability.code,
+    availabilityMessage: availability.message
   };
 }
