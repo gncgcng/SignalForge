@@ -451,6 +451,14 @@
                   <option value="4h">4h</option>
                 </select>
               </label>
+              <label>
+                Direction
+                <select id="performance-direction">
+                  <option value="">All directions</option>
+                  <option value="long">Long</option>
+                  <option value="short">Short</option>
+                </select>
+              </label>
               <button type="submit">Apply Filters</button>
               <button class="secondary-action" id="performance-clear" type="button">Clear</button>
             </form>
@@ -461,6 +469,8 @@
               <div><span>Hit SL</span><strong id="performance-hit-sl">0</strong></div>
               <div><span>Expired</span><strong id="performance-expired">0</strong></div>
               <div><span>Average R/R</span><strong id="performance-average-rr">0</strong></div>
+              <div><span>Best market</span><strong id="performance-best-market">--</strong></div>
+              <div><span>Best timeframe</span><strong id="performance-best-timeframe">--</strong></div>
             </div>
             <div class="performance-charts">
               <article class="analytics-panel">
@@ -468,7 +478,7 @@
                 <div class="line-chart" id="win-rate-chart"></div>
               </article>
               <article class="analytics-panel">
-                <div class="panel-header"><div><span class="eyebrow">Outcomes</span><h3>TP vs SL</h3></div></div>
+                <div class="panel-header"><div><span class="eyebrow">Outcomes</span><h3>TP vs SL vs Expired</h3></div></div>
                 <div class="bar-chart" id="tp-sl-chart"></div>
               </article>
               <article class="analytics-panel">

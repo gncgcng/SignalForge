@@ -3,6 +3,7 @@ import { getPair } from "../market-data/marketDataService.js";
 import { calculateSignalStats, updateSignalsForUser } from "../signals/signalOutcomeService.js";
 
 const timeframes = new Set(["5m", "15m", "1h", "4h"]);
+const directions = new Set(["long", "short"]);
 
 export async function getPerformance(user, input) {
   const filters = normalizeFilters(input);
@@ -19,12 +20,16 @@ export function buildPerformanceAnalytics(signals, filters = {}) {
   const byMarket = aggregateCounts(signals, (signal) => signal.symbol);
   const byTimeframe = aggregateCounts(signals, (signal) => signal.timeframe);
   const monthly = aggregateMonthly(signals);
+  const bestMarket = findBestPerformer(signals, (signal) => signal.symbol);
+  const bestTimeframe = findBestPerformer(signals, (signal) => signal.timeframe);
 
   return {
     filters,
     summary: {
       ...stats,
-      averageRiskReward
+      averageRiskReward,
+      bestMarket,
+      bestTimeframe
     },
     signalsByMarket: byMarket,
     signalsByTimeframe: byTimeframe,
@@ -34,9 +39,10 @@ export function buildPerformanceAnalytics(signals, filters = {}) {
         label: item.label,
         winRate: item.winRate
       })),
-      tpVsSl: [
+      outcomes: [
         { label: "Hit TP", value: stats.hitTpCount },
-        { label: "Hit SL", value: stats.hitSlCount }
+        { label: "Hit SL", value: stats.hitSlCount },
+        { label: "Expired", value: stats.expiredCount }
       ],
       marketDistribution: byMarket
     }
@@ -72,6 +78,13 @@ function normalizeFilters(input) {
       throw validationError("Unsupported performance timeframe.");
     }
     filters.timeframe = input.timeframe;
+  }
+
+  if (input.direction) {
+    if (!directions.has(input.direction)) {
+      throw validationError("Unsupported performance direction.");
+    }
+    filters.direction = input.direction;
   }
 
   if (filters.from && filters.to && new Date(filters.from) >= new Date(filters.to)) {
@@ -149,6 +162,51 @@ function aggregateMonthly(signals) {
         winRate: resolved ? Math.round((month.hitTpCount / resolved) * 100) : 0
       };
     });
+}
+
+function findBestPerformer(signals, keyFn) {
+  const groups = new Map();
+
+  for (const signal of signals) {
+    const key = keyFn(signal);
+    const group = groups.get(key) || {
+      label: key,
+      totalSignals: 0,
+      hitTpCount: 0,
+      hitSlCount: 0,
+      netR: 0
+    };
+
+    group.totalSignals += 1;
+    if (signal.status === "Hit TP") {
+      group.hitTpCount += 1;
+      group.netR += signal.riskRewardRatio;
+    }
+    if (signal.status === "Hit SL") {
+      group.hitSlCount += 1;
+      group.netR -= 1;
+    }
+    groups.set(key, group);
+  }
+
+  const ranked = [...groups.values()]
+    .map((group) => {
+      const resolved = group.hitTpCount + group.hitSlCount;
+      return {
+        ...group,
+        netR: round(group.netR),
+        winRate: resolved ? Math.round((group.hitTpCount / resolved) * 100) : 0
+      };
+    })
+    .filter((group) => group.hitTpCount + group.hitSlCount > 0)
+    .sort((a, b) => {
+      return b.netR - a.netR ||
+        b.winRate - a.winRate ||
+        b.totalSignals - a.totalSignals ||
+        a.label.localeCompare(b.label);
+    });
+
+  return ranked[0] || null;
 }
 
 function round(value) {

@@ -967,14 +967,14 @@ polyline {
 
 .performance-filters {
   display: grid;
-  grid-template-columns: repeat(4, minmax(130px, 1fr)) auto auto;
+  grid-template-columns: repeat(5, minmax(120px, 1fr)) auto auto;
   gap: 10px;
   align-items: end;
 }
 
 .performance-summary-grid {
   display: grid;
-  grid-template-columns: repeat(6, minmax(110px, 1fr));
+  grid-template-columns: repeat(4, minmax(130px, 1fr));
   gap: 10px;
 }
 

@@ -168,6 +168,11 @@ export async function listPerformanceSignalsByUser(userId, filters = {}) {
     clauses.push(`s.timeframe = $${values.length}`);
   }
 
+  if (filters.direction) {
+    values.push(filters.direction);
+    clauses.push(`s.direction = $${values.length}`);
+  }
+
   const result = await query(
     signalSelectSql(`WHERE ${clauses.join(" AND ")} ORDER BY s.generated_at ASC`),
     values

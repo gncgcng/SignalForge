@@ -17,7 +17,8 @@ export async function handlePerformanceRoutes(req, res, pathname, url) {
           from: url.searchParams.get("from") || "",
           to: url.searchParams.get("to") || "",
           symbol: url.searchParams.get("symbol") || "",
-          timeframe: url.searchParams.get("timeframe") || ""
+          timeframe: url.searchParams.get("timeframe") || "",
+          direction: url.searchParams.get("direction") || ""
         })
       });
     } catch (error) {
