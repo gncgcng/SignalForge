@@ -10,6 +10,7 @@ import { handleAuthRoutes } from "./modules/auth/authController.js";
 import { handleAlertRoutes } from "./modules/alerts/alertController.js";
 import { handleMarketDataRoutes } from "./modules/market-data/marketDataController.js";
 import { handleNotificationRoutes } from "./modules/notifications/notificationController.js";
+import { handlePerformanceRoutes } from "./modules/performance/performanceController.js";
 import { startTelegramNotificationQueue } from "./modules/notifications/notificationQueue.js";
 import { startTelegramConnectionPoller } from "./modules/notifications/telegramConnectionService.js";
 import { handleSignalRoutes } from "./modules/signals/signalController.js";
@@ -41,6 +42,7 @@ const server = createServer(async (req, res) => {
       (await handleSubscriptionRoutes(req, res, url.pathname)) ||
       (await handleTesterAccessRoutes(req, res, url.pathname)) ||
       (await handleMarketDataRoutes(req, res, url.pathname, url)) ||
+      (await handlePerformanceRoutes(req, res, url.pathname, url)) ||
       (await handleSignalRoutes(req, res, url.pathname));
 
     if (handled !== false) {

@@ -161,6 +161,7 @@
             <a href="#alerts" data-view-link="alerts">Alerts <span class="nav-count hidden" id="unread-alert-count">0</span></a>
             <a href="#notifications" data-view-link="notifications">Notifications</a>
             <a href="#signals" data-view-link="signals">Signals</a>
+            <a href="#performance" data-view-link="performance">Performance</a>
             <a href="#settings" data-view-link="settings">Settings</a>
             <a href="#billing" data-view-link="billing">Billing</a>
             <a class="hidden" href="#admin" data-view-link="admin" id="admin-nav-link">Admin</a>
@@ -426,6 +427,67 @@
               <span>Past signal outcomes do not predict future results.</span>
             </div>
             <div class="signals-table-wrap" id="signals-history"></div>
+          </section>
+
+          <section class="page-view hidden" id="performance-view" data-view="performance">
+            <div class="section-title">
+              <div>
+                <span class="eyebrow">Outcome analytics</span>
+                <h3>Performance</h3>
+              </div>
+              <span id="performance-filter-label">All history</span>
+            </div>
+            <form class="performance-filters" id="performance-filters">
+              <label>From<input id="performance-from" type="date" /></label>
+              <label>To<input id="performance-to" type="date" /></label>
+              <label>Market<select id="performance-market"><option value="">All markets</option></select></label>
+              <label>
+                Timeframe
+                <select id="performance-timeframe">
+                  <option value="">All timeframes</option>
+                  <option value="5m">5m</option>
+                  <option value="15m">15m</option>
+                  <option value="1h">1h</option>
+                  <option value="4h">4h</option>
+                </select>
+              </label>
+              <button type="submit">Apply Filters</button>
+              <button class="secondary-action" id="performance-clear" type="button">Clear</button>
+            </form>
+            <div class="performance-summary-grid">
+              <div><span>Total signals</span><strong id="performance-total">0</strong></div>
+              <div><span>Win rate</span><strong id="performance-win-rate">0%</strong></div>
+              <div><span>Hit TP</span><strong id="performance-hit-tp">0</strong></div>
+              <div><span>Hit SL</span><strong id="performance-hit-sl">0</strong></div>
+              <div><span>Expired</span><strong id="performance-expired">0</strong></div>
+              <div><span>Average R/R</span><strong id="performance-average-rr">0</strong></div>
+            </div>
+            <div class="performance-charts">
+              <article class="analytics-panel">
+                <div class="panel-header"><div><span class="eyebrow">Trend</span><h3>Win rate over time</h3></div></div>
+                <div class="line-chart" id="win-rate-chart"></div>
+              </article>
+              <article class="analytics-panel">
+                <div class="panel-header"><div><span class="eyebrow">Outcomes</span><h3>TP vs SL</h3></div></div>
+                <div class="bar-chart" id="tp-sl-chart"></div>
+              </article>
+              <article class="analytics-panel">
+                <div class="panel-header"><div><span class="eyebrow">Exposure</span><h3>Market distribution</h3></div></div>
+                <div class="bar-chart" id="market-distribution-chart"></div>
+              </article>
+            </div>
+            <div class="performance-breakdowns">
+              <article class="analytics-panel"><h3>Signals by market</h3><div id="signals-by-market"></div></article>
+              <article class="analytics-panel"><h3>Signals by timeframe</h3><div id="signals-by-timeframe"></div></article>
+            </div>
+            <article class="analytics-panel">
+              <div class="panel-header"><div><span class="eyebrow">Realized R</span><h3>Monthly performance</h3></div></div>
+              <div class="monthly-performance" id="monthly-performance"></div>
+            </article>
+            <div class="signal-disclaimer">
+              <strong>Educational tool only. Not financial advice.</strong>
+              <span>Tracked outcomes exclude fees, slippage, and personal execution.</span>
+            </div>
           </section>
 
           <section class="page-view hidden" id="settings-view" data-view="settings">

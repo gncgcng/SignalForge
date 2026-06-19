@@ -31,7 +31,8 @@ const state = {
     settings: null
   },
   testerAccess: null,
-  adminRequests: []
+  adminRequests: [],
+  performance: null
 };
 
 const authScreen = document.querySelector("#auth-screen");
@@ -90,6 +91,12 @@ const testerAccessMessage = document.querySelector("#tester-access-message");
 const adminNavLink = document.querySelector("#admin-nav-link");
 const adminRequestList = document.querySelector("#admin-request-list");
 const adminRequestCount = document.querySelector("#admin-request-count");
+const performanceFilters = document.querySelector("#performance-filters");
+const performanceFrom = document.querySelector("#performance-from");
+const performanceTo = document.querySelector("#performance-to");
+const performanceMarket = document.querySelector("#performance-market");
+const performanceTimeframe = document.querySelector("#performance-timeframe");
+const performanceClear = document.querySelector("#performance-clear");
 let marketRequestId = 0;
 let signalRefreshTimer = null;
 let marketLoadTimer = null;
@@ -463,6 +470,19 @@ adminRequestList.addEventListener("click", async (event) => {
   }
 });
 
+performanceFilters.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await loadPerformance();
+});
+
+performanceClear.addEventListener("click", async () => {
+  performanceFrom.value = "";
+  performanceTo.value = "";
+  performanceMarket.value = "";
+  performanceTimeframe.value = "";
+  await loadPerformance();
+});
+
 signalsGrid.addEventListener("click", async (event) => {
   const button = event.target.closest("[data-unlock-symbol]");
 
@@ -578,6 +598,7 @@ function clearClientAuthState() {
   };
   state.testerAccess = null;
   state.adminRequests = [];
+  state.performance = null;
   state.signalStats = {
     totalSignals: 0,
     winRate: 0,
@@ -623,7 +644,7 @@ async function bootDashboard() {
   }
   renderTimeframes();
   const requestedView = location.hash?.replace("#", "");
-  const allowedInitialViews = ["signals", "watchlist", "alerts", "notifications", "settings"];
+  const allowedInitialViews = ["signals", "performance", "watchlist", "alerts", "notifications", "settings"];
   if (state.user.isAdmin) allowedInitialViews.push("admin");
   showView(allowedInitialViews.includes(requestedView) ? requestedView : "scanner");
   startSignalHistoryRefresh();
@@ -649,6 +670,7 @@ async function loadPairs(query = "") {
     pairs.find((pair) => pair.status === "active") ||
     pairs[0];
   renderHistoryPairOptions();
+  renderPerformanceMarketOptions();
   renderPairs();
   renderSelectedMarket();
 }
@@ -660,6 +682,20 @@ function renderHistoryPairOptions() {
     ${state.marketCatalog.map((pair) => `<option value="${pair.symbol}">${pair.symbol}</option>`).join("")}
   `;
   historyPairFilter.value = state.marketCatalog.some((pair) => pair.symbol === currentValue) ? currentValue : "all";
+}
+
+function renderPerformanceMarketOptions() {
+  const currentValue = performanceMarket.value;
+  performanceMarket.innerHTML = `
+    <option value="">All markets</option>
+    ${state.marketCatalog
+      .filter((pair) => pair.category === "Crypto" || pair.category === "Commodities")
+      .map((pair) => `<option value="${pair.symbol}">${pair.symbol}</option>`)
+      .join("")}
+  `;
+  performanceMarket.value = state.marketCatalog.some((pair) => pair.symbol === currentValue)
+    ? currentValue
+    : "";
 }
 
 async function loadMarketData() {
@@ -736,6 +772,18 @@ async function loadSignals() {
   renderPerformanceStats();
 }
 
+async function loadPerformance() {
+  const params = new URLSearchParams();
+  if (performanceFrom.value) params.set("from", performanceFrom.value);
+  if (performanceTo.value) params.set("to", performanceTo.value);
+  if (performanceMarket.value) params.set("symbol", performanceMarket.value);
+  if (performanceTimeframe.value) params.set("timeframe", performanceTimeframe.value);
+  const query = params.toString();
+  const { performance } = await api.request(`/api/performance${query ? `?${query}` : ""}`);
+  state.performance = performance;
+  renderPerformance();
+}
+
 async function loadWatchlist() {
   const { watchlist } = await api.request("/api/watchlist");
   state.watchlist = watchlist;
@@ -809,7 +857,7 @@ function startSignalHistoryRefresh() {
 }
 
 function showView(view) {
-  const allowedViews = ["scanner", "watchlist", "alerts", "notifications", "signals", "settings", "billing"];
+  const allowedViews = ["scanner", "watchlist", "alerts", "notifications", "signals", "performance", "settings", "billing"];
   if (state.user?.isAdmin) allowedViews.push("admin");
   const normalizedView = allowedViews.includes(view) ? view : "scanner";
   state.activeView = normalizedView;
@@ -828,6 +876,7 @@ function showView(view) {
     alerts: ["Detected setups", "In-app alerts"],
     notifications: ["Delivery channels", "Notifications"],
     signals: ["Signals history", "Saved signal desk"],
+    performance: ["Outcome analytics", "Performance"],
     settings: ["Account", "Settings"],
     admin: ["Administration", "Tester access requests"],
     billing: ["Subscription", "Billing"]
@@ -846,6 +895,12 @@ function showView(view) {
 
   if (normalizedView === "admin") {
     renderAdminRequests();
+  }
+
+  if (normalizedView === "performance") {
+    loadPerformance().catch((error) => {
+      document.querySelector("#performance-filter-label").textContent = error.message;
+    });
   }
 }
 
@@ -1098,6 +1153,116 @@ function renderPerformanceStats() {
   statHitTp.textContent = `${state.signalStats.hitTpCount || 0}`;
   statHitSl.textContent = `${state.signalStats.hitSlCount || 0}`;
   statExpired.textContent = `${state.signalStats.expiredCount || 0}`;
+}
+
+function renderPerformance() {
+  if (!state.performance) return;
+  const { summary, signalsByMarket, signalsByTimeframe, monthlyPerformance, charts } = state.performance;
+  document.querySelector("#performance-total").textContent = `${summary.totalSignals}`;
+  document.querySelector("#performance-win-rate").textContent = `${summary.winRate}%`;
+  document.querySelector("#performance-hit-tp").textContent = `${summary.hitTpCount}`;
+  document.querySelector("#performance-hit-sl").textContent = `${summary.hitSlCount}`;
+  document.querySelector("#performance-expired").textContent = `${summary.expiredCount}`;
+  document.querySelector("#performance-average-rr").textContent = `${summary.averageRiskReward}:1`;
+  document.querySelector("#performance-filter-label").textContent = getPerformanceFilterLabel();
+  renderWinRateChart(charts.winRateOverTime);
+  renderAnalyticsBars(document.querySelector("#tp-sl-chart"), charts.tpVsSl, true);
+  renderAnalyticsBars(document.querySelector("#market-distribution-chart"), charts.marketDistribution);
+  renderAnalyticsBars(document.querySelector("#signals-by-market"), signalsByMarket);
+  renderAnalyticsBars(document.querySelector("#signals-by-timeframe"), signalsByTimeframe);
+  renderMonthlyPerformance(monthlyPerformance);
+}
+
+function renderWinRateChart(points) {
+  const container = document.querySelector("#win-rate-chart");
+
+  if (!points.length) {
+    container.innerHTML = `<div class="empty-state"><span>No resolved outcomes in this range.</span></div>`;
+    return;
+  }
+
+  const width = 620;
+  const height = 220;
+  const padding = 28;
+  const innerWidth = width - padding * 2;
+  const innerHeight = height - padding * 2;
+  const x = (index) => padding + (points.length === 1 ? innerWidth / 2 : (index / (points.length - 1)) * innerWidth);
+  const y = (value) => height - padding - (value / 100) * innerHeight;
+  const path = points.map((point, index) => `${index ? "L" : "M"} ${x(index)} ${y(point.winRate)}`).join(" ");
+
+  container.innerHTML = `
+    <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Win rate over time">
+      <line class="chart-axis" x1="${padding}" y1="${y(100)}" x2="${padding}" y2="${y(0)}"></line>
+      <line class="chart-axis" x1="${padding}" y1="${y(0)}" x2="${width - padding}" y2="${y(0)}"></line>
+      <text class="chart-label" x="2" y="${y(100) + 4}">100%</text>
+      <text class="chart-label" x="10" y="${y(0) + 4}">0%</text>
+      <path class="chart-line" d="${path}"></path>
+      ${points.map((point, index) => `
+        <circle class="chart-dot" cx="${x(index)}" cy="${y(point.winRate)}" r="4"></circle>
+        <text class="chart-label" x="${x(index)}" y="${height - 6}" text-anchor="middle">${point.label}</text>
+      `).join("")}
+    </svg>
+  `;
+}
+
+function renderAnalyticsBars(container, items, outcomeColors = false) {
+  if (!items.length || items.every((item) => item.value === 0)) {
+    container.innerHTML = `<div class="empty-state"><span>No signal data in this range.</span></div>`;
+    return;
+  }
+
+  const max = Math.max(...items.map((item) => item.value), 1);
+  container.classList.add("distribution-list");
+  container.innerHTML = items.map((item) => {
+    const colorClass = outcomeColors
+      ? item.label === "Hit TP" ? "positive" : "negative"
+      : "";
+    return `
+      <div class="analytics-bar">
+        <span>${item.label}</span>
+        <div class="analytics-bar-track">
+          <span class="analytics-bar-fill ${colorClass}" style="width:${(item.value / max) * 100}%"></span>
+        </div>
+        <strong>${item.value}</strong>
+      </div>
+    `;
+  }).join("");
+}
+
+function renderMonthlyPerformance(months) {
+  const container = document.querySelector("#monthly-performance");
+
+  if (!months.length) {
+    container.innerHTML = `<div class="empty-state"><span>No monthly performance data in this range.</span></div>`;
+    return;
+  }
+
+  container.innerHTML = `
+    <table>
+      <thead><tr><th>Month</th><th>Signals</th><th>Win rate</th><th>TP</th><th>SL</th><th>Expired</th><th>Net R</th></tr></thead>
+      <tbody>${months.map((month) => `
+        <tr>
+          <td><strong>${month.label}</strong></td>
+          <td>${month.totalSignals}</td>
+          <td>${month.winRate}%</td>
+          <td>${month.hitTpCount}</td>
+          <td>${month.hitSlCount}</td>
+          <td>${month.expiredCount}</td>
+          <td class="${month.netR >= 0 ? "net-r-positive" : "net-r-negative"}">${month.netR >= 0 ? "+" : ""}${month.netR}R</td>
+        </tr>
+      `).join("")}</tbody>
+    </table>
+  `;
+}
+
+function getPerformanceFilterLabel() {
+  const parts = [];
+  if (performanceFrom.value || performanceTo.value) {
+    parts.push(`${performanceFrom.value || "Start"} to ${performanceTo.value || "Today"}`);
+  }
+  if (performanceMarket.value) parts.push(performanceMarket.value);
+  if (performanceTimeframe.value) parts.push(performanceTimeframe.value);
+  return parts.length ? parts.join(" · ") : "All history";
 }
 
 function renderSignalHistoryRow(signal) {

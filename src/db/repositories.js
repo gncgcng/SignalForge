@@ -144,6 +144,37 @@ export async function listSignalsByUser(userId, executeQuery = query) {
   return result.rows.map(mapSignal);
 }
 
+export async function listPerformanceSignalsByUser(userId, filters = {}) {
+  const values = [userId];
+  const clauses = ["s.user_id = $1"];
+
+  if (filters.from) {
+    values.push(filters.from);
+    clauses.push(`s.generated_at >= $${values.length}`);
+  }
+
+  if (filters.to) {
+    values.push(filters.to);
+    clauses.push(`s.generated_at < $${values.length}`);
+  }
+
+  if (filters.symbol) {
+    values.push(filters.symbol);
+    clauses.push(`s.symbol = $${values.length}`);
+  }
+
+  if (filters.timeframe) {
+    values.push(filters.timeframe);
+    clauses.push(`s.timeframe = $${values.length}`);
+  }
+
+  const result = await query(
+    signalSelectSql(`WHERE ${clauses.join(" AND ")} ORDER BY s.generated_at ASC`),
+    values
+  );
+  return result.rows.map(mapSignal);
+}
+
 export async function listActiveSignals() {
   const result = await query(signalSelectSql("WHERE COALESCE(o.status, 'Active') = 'Active' ORDER BY s.created_at DESC"), []);
   return result.rows.map(mapSignal);

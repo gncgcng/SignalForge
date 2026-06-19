@@ -965,6 +965,158 @@ polyline {
   font-size: 22px;
 }
 
+.performance-filters {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(130px, 1fr)) auto auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.performance-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(110px, 1fr));
+  gap: 10px;
+}
+
+.performance-summary-grid > div,
+.analytics-panel {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(16, 20, 29, 0.88);
+}
+
+.performance-summary-grid span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.performance-summary-grid strong {
+  display: block;
+  margin-top: 5px;
+  font-size: 23px;
+}
+
+.performance-charts {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr 1fr;
+  gap: 12px;
+}
+
+.performance-breakdowns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.analytics-panel {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.analytics-panel h3 {
+  margin: 0;
+}
+
+.line-chart {
+  min-height: 220px;
+}
+
+.line-chart svg {
+  position: static;
+  height: 220px;
+}
+
+.chart-axis {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.chart-line {
+  fill: none;
+  stroke: var(--cyan);
+  stroke-width: 3;
+}
+
+.chart-dot {
+  fill: var(--bg);
+  stroke: var(--cyan);
+  stroke-width: 3;
+}
+
+.chart-label {
+  fill: var(--muted);
+  font-size: 11px;
+}
+
+.bar-chart,
+.distribution-list {
+  display: grid;
+  gap: 10px;
+}
+
+.analytics-bar {
+  display: grid;
+  grid-template-columns: minmax(70px, auto) 1fr auto;
+  gap: 10px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.analytics-bar-track {
+  height: 9px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-2);
+}
+
+.analytics-bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--cyan);
+}
+
+.analytics-bar-fill.positive {
+  background: var(--green);
+}
+
+.analytics-bar-fill.negative {
+  background: var(--red);
+}
+
+.monthly-performance {
+  overflow: auto;
+}
+
+.monthly-performance table {
+  width: 100%;
+  min-width: 620px;
+  border-collapse: collapse;
+}
+
+.monthly-performance th,
+.monthly-performance td {
+  padding: 11px 10px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+
+.monthly-performance th {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.net-r-positive {
+  color: var(--green);
+}
+
+.net-r-negative {
+  color: var(--red);
+}
+
 .status-legend {
   display: flex;
   flex-wrap: wrap;
@@ -1220,7 +1372,7 @@ polyline {
   }
 
   nav {
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
@@ -1239,6 +1391,7 @@ polyline {
   nav,
   .metric-strip,
   .performance-grid,
+  .performance-summary-grid,
   .signal-metrics,
   .alert-preferences {
     grid-template-columns: 1fr;
@@ -1254,5 +1407,11 @@ polyline {
 
   .landing-footer {
     flex-direction: column;
+  }
+
+  .performance-charts,
+  .performance-breakdowns,
+  .performance-filters {
+    grid-template-columns: 1fr;
   }
 }
