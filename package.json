@@ -18,7 +18,8 @@
     "test:provider-routing": "node scripts/provider-routing-test.js",
     "test:session-migration": "node scripts/session-migration-test.js",
     "smoke": "node scripts/smoke-test.js",
-    "test:signals": "node scripts/signal-rules-test.js"
+    "test:signals": "node scripts/signal-rules-test.js",
+    "test:signal-transparency": "node scripts/signal-transparency-test.js"
   },
   "dependencies": {
     "pg": "^8.13.1"

@@ -697,9 +697,12 @@ function renderSignalsHistory() {
           <th>Created</th>
         </tr>
       </thead>
-      <tbody>
-        ${filtered.map((signal) => renderSignalHistoryRow(signal)).join("")}
-      </tbody>
+      <tbody>${filtered.map((signal) => `
+        ${renderSignalHistoryRow(signal)}
+        <tr class="history-transparency">
+          <td colspan="10">${renderSignalTransparency(signal)}</td>
+        </tr>
+      `).join("")}</tbody>
     </table>
   `;
 }
@@ -776,6 +779,10 @@ function renderNoSetup(analysis) {
       </div>
       <p class="reasoning">${analysis?.message || "Conditions are too weak for a rule-based setup."}</p>
       <div class="signal-metrics">${rows}</div>
+      <div class="signal-disclaimer">
+        <strong>Educational tool only. Not financial advice.</strong>
+        <span>No trial credit was used for this analysis.</span>
+      </div>
     </article>
     ${state.signals.map((signal) => renderSignalCard(signal)).join("")}
   `;
@@ -837,6 +844,7 @@ function renderScanCard(setup) {
         <div><span>Status</span><strong>Locked</strong></div>
       </div>
       <p class="reasoning">Passed confirmations: ${passed}. Unlock the full signal to save entry, stop loss, and take profit.</p>
+      ${renderSignalTransparency(setup)}
       <button class="secondary-action" data-unlock-symbol="${setup.symbol}" data-unlock-timeframe="${setup.timeframe}" type="button">Unlock Signal</button>
     </article>
   `;
@@ -861,8 +869,111 @@ function renderSignalCard(signal) {
         <div><span>Generated</span><strong>${formatTime(signal.generatedAt)}</strong></div>
       </div>
       <p class="reasoning">${signal.reasoning}</p>
+      ${renderSignalTransparency(signal)}
     </article>
   `;
+}
+
+function renderSignalTransparency(signal) {
+  const confirmations = normalizeConfirmations(signal.confirmations || [], signal.indicators || {});
+  const passedCount = confirmations.filter((item) => item.passed).length;
+  const totalCount = confirmations.length;
+  const alignment = totalCount ? Math.round((passedCount / totalCount) * 100) : 0;
+  const confidence = Number(signal.confidenceScore || 0);
+
+  return `
+    <section class="signal-transparency">
+      <h4>Why this signal?</h4>
+      <div class="confidence-breakdown">
+        <span>Confidence ${confidence}%</span>
+        <div class="confidence-track" aria-label="${confidence}% confidence">
+          <span style="width: ${Math.min(100, Math.max(0, confidence))}%"></span>
+        </div>
+        <strong>${passedCount}/${totalCount} checks · ${alignment}% aligned</strong>
+      </div>
+      <p class="reasoning">Confidence summarizes rule alignment and setup quality. It is not a forecast or probability of profit.</p>
+      <div class="confirmation-list">
+        ${confirmations.map((item) => `
+          <div class="confirmation-item ${item.passed ? "passed" : "failed"}">
+            <strong>${item.passed ? "Passed" : "Failed"} · ${item.name}</strong>
+            <span>${item.detail}</span>
+          </div>
+        `).join("")}
+      </div>
+      <p class="risk-guidance"><strong>Risk per trade:</strong> Define a consistent maximum loss before entering, size the position from the stop distance, and avoid risking capital you cannot afford to lose.</p>
+      <div class="signal-disclaimer">
+        <strong>Educational tool only. Not financial advice.</strong>
+        <span>Review the market and your own risk limits before making any decision.</span>
+      </div>
+    </section>
+  `;
+}
+
+function normalizeConfirmations(confirmations, indicators) {
+  const grouped = new Map();
+
+  for (const item of confirmations) {
+    const name = getConfirmationGroup(item.name);
+    const existing = grouped.get(name);
+
+    if (!existing) {
+      grouped.set(name, {
+        name,
+        passed: Boolean(item.passed),
+        detail: item.detail || "No additional detail available."
+      });
+      continue;
+    }
+
+    existing.passed = existing.passed && Boolean(item.passed);
+    existing.detail = `${existing.detail} ${item.detail || ""}`.trim();
+  }
+
+  const required = ["Trend", "RSI", "ATR", "Support/resistance"];
+
+  for (const name of required) {
+    if (grouped.has(name)) {
+      continue;
+    }
+
+    if (name === "ATR" && Number.isFinite(Number(indicators.atr14))) {
+      grouped.set(name, {
+        name,
+        passed: Number(indicators.atr14) > 0,
+        detail: `ATR14 was ${indicators.atr14}; this value was used to frame stop and target distances.`
+      });
+      continue;
+    }
+
+    grouped.set(name, {
+      name,
+      passed: false,
+      detail: "This confirmation was not recorded for this earlier signal."
+    });
+  }
+
+  const displayOrder = ["Trend", "RSI", "ATR", "Support/resistance", "Volume"];
+  return [...grouped.values()].sort((a, b) => {
+    const aIndex = displayOrder.indexOf(a.name);
+    const bIndex = displayOrder.indexOf(b.name);
+    return (aIndex === -1 ? displayOrder.length : aIndex) -
+      (bIndex === -1 ? displayOrder.length : bIndex);
+  });
+}
+
+function getConfirmationGroup(name = "") {
+  const normalized = name.toLowerCase();
+
+  if (normalized.includes("support") || normalized.includes("resistance")) {
+    return "Support/resistance";
+  }
+
+  if (normalized.includes("ema")) return "Trend";
+  if (normalized.includes("trend")) return "Trend";
+  if (normalized.includes("rsi")) return "RSI";
+  if (normalized.includes("atr")) return "ATR";
+  if (normalized.includes("volume")) return "Volume";
+  return name;
 }
 
 function formatCurrency(value) {

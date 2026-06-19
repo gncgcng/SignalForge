@@ -78,12 +78,13 @@ function evaluateCryptoLong(latest, indicators, levels, volumeAvailable) {
   const confirmations = [
     confirmation("Trend", indicators.ema20 > indicators.ema50 && entry > indicators.ema20, `EMA20 ${formatNumber(indicators.ema20)} is above EMA50 ${formatNumber(indicators.ema50)} and price is above EMA20.`),
     confirmation("RSI", indicators.rsi14 >= 45 && indicators.rsi14 <= 68, `RSI14 is ${formatNumber(indicators.rsi14)}, favoring bullish momentum without being overextended.`),
+    atrConfirmation(atr, entry),
     volumeConfirmation(latest, indicators, volumeAvailable),
     confirmation("Support", Boolean(support) && entry > support.price && entry - support.price <= atr * 2.5, support ? `Price is holding above swing support near ${formatNumber(support.price)}.` : "No recent swing support found."),
     confirmation("Resistance room", roomToResistance >= risk * 1.5, resistance ? `Nearest resistance leaves ${formatNumber(roomToResistance / risk)}R of upside room.` : "No nearby resistance overhead.")
   ];
 
-  return buildCandidate("long", entry, stopLoss, confirmations, risk, latest, indicators);
+  return buildCandidate("long", entry, stopLoss, confirmations, risk, 5);
 }
 
 function evaluateCryptoShort(latest, indicators, levels, volumeAvailable) {
@@ -99,12 +100,13 @@ function evaluateCryptoShort(latest, indicators, levels, volumeAvailable) {
   const confirmations = [
     confirmation("Trend", indicators.ema20 < indicators.ema50 && entry < indicators.ema20, `EMA20 ${formatNumber(indicators.ema20)} is below EMA50 ${formatNumber(indicators.ema50)} and price is below EMA20.`),
     confirmation("RSI", indicators.rsi14 >= 32 && indicators.rsi14 <= 55, `RSI14 is ${formatNumber(indicators.rsi14)}, favoring bearish momentum without being deeply oversold.`),
+    atrConfirmation(atr, entry),
     volumeConfirmation(latest, indicators, volumeAvailable),
     confirmation("Resistance", Boolean(resistance) && resistance.price > entry && resistance.price - entry <= atr * 2.5, resistance ? `Price is rejecting below swing resistance near ${formatNumber(resistance.price)}.` : "No recent swing resistance found."),
     confirmation("Support room", roomToSupport >= risk * 1.5, support ? `Nearest support leaves ${formatNumber(roomToSupport / risk)}R of downside room.` : "No nearby support underneath.")
   ];
 
-  return buildCandidate("short", entry, stopLoss, confirmations, risk, latest, indicators);
+  return buildCandidate("short", entry, stopLoss, confirmations, risk, 5);
 }
 
 function evaluateCommodityLong(latest, indicators, levels) {
