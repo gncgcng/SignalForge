@@ -110,3 +110,13 @@ TELEGRAM_BOT_USERNAME=your_bot_username
 Users connect from the Notifications page with a short-lived pairing code. SignalForge opens the bot link, the user sends `/start CODE`, and the app verifies the connection automatically. Manual numeric chat ID entry remains available only as an advanced fallback.
 
 Telegram alerts are limited to favorite markets and the user's selected timeframes, direction, and minimum confidence. Matching setups are written to a persistent queue with duplicate protection before delivery. Alerts remain disabled until pairing is confirmed and the user enables them. Scanning and notification delivery do not use signal credits.
+
+## Tester Access
+
+Configure one or more administrator accounts with a comma-separated environment variable:
+
+```text
+ADMIN_EMAILS=admin@example.com,ops@example.com
+```
+
+Users request tester access from Settings. Only authenticated users whose normalized email appears in `ADMIN_EMAILS` can access the Admin API and review requests. Approved accounts receive the `tester` role and effectively unlimited signal access.

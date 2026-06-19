@@ -558,6 +558,94 @@ export async function releaseTelegramBotPollLease(owner) {
   `, [owner]);
 }
 
+export async function createTesterAccessRequest(userId) {
+  const result = await query(`
+    INSERT INTO tester_access_requests (id, user_id, status)
+    VALUES ($1, $2, 'pending')
+    ON CONFLICT (user_id) WHERE status = 'pending'
+    DO NOTHING
+    RETURNING *
+  `, [createId("tstreq"), userId]);
+
+  if (result.rows[0]) {
+    return mapTesterRequest(result.rows[0]);
+  }
+
+  return getLatestTesterAccessRequest(userId);
+}
+
+export async function getLatestTesterAccessRequest(userId) {
+  const result = await query(`
+    SELECT *
+    FROM tester_access_requests
+    WHERE user_id = $1
+    ORDER BY requested_at DESC
+    LIMIT 1
+  `, [userId]);
+  return result.rows[0] ? mapTesterRequest(result.rows[0]) : null;
+}
+
+export async function listPendingTesterAccessRequests() {
+  const result = await query(`
+    SELECT r.*, u.name, u.email, u.role
+    FROM tester_access_requests r
+    JOIN users u ON u.id = r.user_id
+    WHERE r.status = 'pending'
+    ORDER BY r.requested_at ASC
+  `);
+  return result.rows.map((row) => ({
+    ...mapTesterRequest(row),
+    user: {
+      id: row.user_id,
+      name: row.name,
+      email: row.email,
+      role: row.role
+    }
+  }));
+}
+
+export async function reviewTesterAccessRequest(requestId, adminUserId, decision) {
+  return transaction(async (client) => {
+    const result = await client.query(`
+      SELECT *
+      FROM tester_access_requests
+      WHERE id = $1 AND status = 'pending'
+      FOR UPDATE
+    `, [requestId]);
+    const request = result.rows[0];
+
+    if (!request) {
+      return null;
+    }
+
+    await client.query(`
+      UPDATE tester_access_requests
+      SET status = $2, reviewed_by = $3, reviewed_at = now()
+      WHERE id = $1
+    `, [requestId, decision, adminUserId]);
+
+    if (decision === "approved") {
+      await client.query(`
+        UPDATE users
+        SET role = 'tester', plan = 'tester', updated_at = now()
+        WHERE id = $1
+      `, [request.user_id]);
+      await client.query(`
+        UPDATE credit_balances
+        SET paid_credits = GREATEST(paid_credits, $2), updated_at = now()
+        WHERE user_id = $1
+      `, [request.user_id, appConfig.testerCreditAllowance]);
+    }
+
+    return {
+      ...mapTesterRequest(request),
+      status: decision,
+      reviewedBy: adminUserId,
+      reviewedAt: new Date().toISOString()
+    };
+  });
+}
+
 function mapDetectedAlert(row) {
   return {
     id: row.id,
@@ -587,6 +675,17 @@ function mapTelegramSettings(row) {
   };
 }
 
+function mapTesterRequest(row) {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    status: row.status,
+    requestedAt: row.requested_at,
+    reviewedBy: row.reviewed_by,
+    reviewedAt: row.reviewed_at
+  };
+}
+
 function signalSelectSql(whereClause) {
   return `
     SELECT s.*, o.status, o.status_reason, o.resolved_at, o.last_tracking_error,
@@ -602,6 +701,7 @@ function mapUser(row) {
     id: row.id,
     name: row.name,
     email: row.email,
+    role: row.role || "user",
     password: {
       salt: row.password_salt,
       hash: row.password_hash

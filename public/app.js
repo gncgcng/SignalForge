@@ -29,7 +29,9 @@ const state = {
     connected: false,
     botUsername: "",
     settings: null
-  }
+  },
+  testerAccess: null,
+  adminRequests: []
 };
 
 const authScreen = document.querySelector("#auth-screen");
@@ -80,6 +82,14 @@ const telegramEnabled = document.querySelector("#telegram-enabled");
 const telegramDirection = document.querySelector("#telegram-direction");
 const telegramMinimumConfidence = document.querySelector("#telegram-minimum-confidence");
 const telegramStatusLine = document.querySelector("#telegram-status-line");
+const testerAccountBadge = document.querySelector("#tester-account-badge");
+const accountRoleLabel = document.querySelector("#account-role-label");
+const testerRequestStatus = document.querySelector("#tester-request-status");
+const requestTesterAccessButton = document.querySelector("#request-tester-access");
+const testerAccessMessage = document.querySelector("#tester-access-message");
+const adminNavLink = document.querySelector("#admin-nav-link");
+const adminRequestList = document.querySelector("#admin-request-list");
+const adminRequestCount = document.querySelector("#admin-request-count");
 let marketRequestId = 0;
 let signalRefreshTimer = null;
 let marketLoadTimer = null;
@@ -417,6 +427,42 @@ telegramEnabled.addEventListener("change", async () => {
   }
 });
 
+requestTesterAccessButton.addEventListener("click", async () => {
+  try {
+    requestTesterAccessButton.disabled = true;
+    testerAccessMessage.textContent = "Submitting tester access request...";
+    state.testerAccess = await api.request("/api/tester-access/request", { method: "POST" });
+    renderTesterAccess();
+    testerAccessMessage.textContent = "Tester access request submitted for review.";
+  } catch (error) {
+    testerAccessMessage.textContent = error.message;
+  } finally {
+    renderTesterAccess();
+  }
+});
+
+adminRequestList.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-tester-request-id]");
+
+  if (!button) return;
+
+  try {
+    button.disabled = true;
+    const result = await api.request(
+      `/api/admin/tester-access/${button.dataset.testerRequestId}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ decision: button.dataset.decision })
+      }
+    );
+    state.adminRequests = result.requests;
+    renderAdminRequests();
+  } catch (error) {
+    button.disabled = false;
+    alert(error.message);
+  }
+});
+
 signalsGrid.addEventListener("click", async (event) => {
   const button = event.target.closest("[data-unlock-symbol]");
 
@@ -530,6 +576,8 @@ function clearClientAuthState() {
     botUsername: "",
     settings: null
   };
+  state.testerAccess = null;
+  state.adminRequests = [];
   state.signalStats = {
     totalSignals: 0,
     winRate: 0,
@@ -559,17 +607,25 @@ async function bootDashboard() {
   authScreen.classList.add("hidden");
   dashboard.classList.remove("hidden");
   document.querySelector("#user-name").textContent = state.user.name;
+  adminNavLink.classList.toggle("hidden", !state.user.isAdmin);
+  testerAccountBadge.classList.toggle("hidden", state.user.role !== "tester");
   await Promise.all([
     loadPairs(),
     loadSubscription(),
     loadSignals(),
     loadWatchlist(),
     loadAlerts(),
-    loadNotifications()
+    loadNotifications(),
+    loadTesterAccess()
   ]);
+  if (state.user.isAdmin) {
+    await loadAdminRequests();
+  }
   renderTimeframes();
   const requestedView = location.hash?.replace("#", "");
-  showView(["signals", "watchlist", "alerts", "notifications"].includes(requestedView) ? requestedView : "scanner");
+  const allowedInitialViews = ["signals", "watchlist", "alerts", "notifications", "settings"];
+  if (state.user.isAdmin) allowedInitialViews.push("admin");
+  showView(allowedInitialViews.includes(requestedView) ? requestedView : "scanner");
   startSignalHistoryRefresh();
   await loadMarketData();
 }
@@ -715,6 +771,18 @@ async function loadNotifications() {
   }
 }
 
+async function loadTesterAccess() {
+  state.testerAccess = await api.request("/api/tester-access");
+  renderTesterAccess();
+}
+
+async function loadAdminRequests() {
+  if (!state.user.isAdmin) return;
+  const { requests } = await api.request("/api/admin/tester-access");
+  state.adminRequests = requests;
+  renderAdminRequests();
+}
+
 function applyAlerts({ alerts, unreadCount }) {
   state.alerts = alerts;
   state.unreadAlertCount = unreadCount;
@@ -741,7 +809,9 @@ function startSignalHistoryRefresh() {
 }
 
 function showView(view) {
-  const normalizedView = ["scanner", "watchlist", "alerts", "notifications", "signals", "billing"].includes(view) ? view : "scanner";
+  const allowedViews = ["scanner", "watchlist", "alerts", "notifications", "signals", "settings", "billing"];
+  if (state.user?.isAdmin) allowedViews.push("admin");
+  const normalizedView = allowedViews.includes(view) ? view : "scanner";
   state.activeView = normalizedView;
 
   document.querySelectorAll("[data-view]").forEach((section) => {
@@ -758,6 +828,8 @@ function showView(view) {
     alerts: ["Detected setups", "In-app alerts"],
     notifications: ["Delivery channels", "Notifications"],
     signals: ["Signals history", "Saved signal desk"],
+    settings: ["Account", "Settings"],
+    admin: ["Administration", "Tester access requests"],
     billing: ["Subscription", "Billing"]
   };
   const [eyebrow, title] = titles[normalizedView];
@@ -770,6 +842,10 @@ function showView(view) {
 
   if (normalizedView === "alerts") {
     renderAlerts();
+  }
+
+  if (normalizedView === "admin") {
+    renderAdminRequests();
   }
 }
 
@@ -945,7 +1021,9 @@ function inferRegime(candles) {
 
 function renderSubscription() {
   if (!state.subscription) return;
-  document.querySelector("#trial-count").textContent = `${state.subscription.trialSignalsRemaining} signals left`;
+  document.querySelector("#trial-count").textContent = state.subscription.unlimitedSignals
+    ? "Unlimited signals"
+    : `${state.subscription.trialSignalsRemaining} signals left`;
 }
 
 function renderSignals() {
@@ -1420,6 +1498,81 @@ function renderNotifications() {
   });
 
   setTelegramConnectionFeedback("Connected successfully", "success");
+}
+
+function renderTesterAccess() {
+  const role = state.testerAccess?.role || state.user?.role || "user";
+  const request = state.testerAccess?.request;
+  const isTester = role === "tester";
+  const status = isTester ? "approved" : request?.status || "not-requested";
+  const labels = {
+    "not-requested": "Not requested",
+    pending: "Pending",
+    approved: "Approved",
+    rejected: "Rejected"
+  };
+
+  testerAccountBadge.classList.toggle("hidden", !isTester);
+  accountRoleLabel.textContent = isTester ? "Tester account" : "Standard account";
+  testerRequestStatus.textContent = labels[status] || status;
+  testerRequestStatus.className = `status-pill ${
+    status === "approved"
+      ? "status-hit-tp"
+      : status === "rejected"
+        ? "status-hit-sl"
+        : status === "pending"
+          ? "status-active"
+          : ""
+  }`.trim();
+  requestTesterAccessButton.disabled = isTester || status === "pending";
+  requestTesterAccessButton.textContent = isTester
+    ? "Tester access active"
+    : status === "pending"
+      ? "Request pending"
+      : status === "rejected"
+        ? "Request tester access again"
+        : "Request tester access";
+}
+
+function renderAdminRequests() {
+  if (!state.user?.isAdmin) {
+    adminNavLink.classList.add("hidden");
+    return;
+  }
+
+  adminRequestCount.textContent = `${state.adminRequests.length} pending`;
+
+  if (!state.adminRequests.length) {
+    adminRequestList.innerHTML = `
+      <div class="empty-state">
+        <strong>No pending tester requests</strong>
+        <p class="reasoning">New requests will appear here for manual review.</p>
+      </div>
+    `;
+    return;
+  }
+
+  adminRequestList.innerHTML = state.adminRequests.map((request) => `
+    <article class="admin-request-item">
+      <div>
+        <strong>${escapeHtml(request.user.name)}</strong>
+        <p class="reasoning">${escapeHtml(request.user.email)} · Requested ${formatDateTime(request.requestedAt)}</p>
+      </div>
+      <div class="admin-request-actions">
+        <button data-tester-request-id="${request.id}" data-decision="approved" type="button">Approve</button>
+        <button class="reject-action" data-tester-request-id="${request.id}" data-decision="rejected" type="button">Reject</button>
+      </div>
+    </article>
+  `).join("");
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
 function getSelectedTelegramTimeframes() {

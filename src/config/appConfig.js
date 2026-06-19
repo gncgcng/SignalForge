@@ -34,6 +34,13 @@ if (existsSync(envPath)) {
   }
 }
 
+const adminEmails = new Set(
+  (process.env.ADMIN_EMAILS || "")
+    .split(",")
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean)
+);
+
 export const appConfig = {
   appName: "SignalForge",
   nodeEnv: process.env.NODE_ENV || "development",
@@ -44,6 +51,8 @@ export const appConfig = {
   sessionMaxAgeSeconds: 60 * 60 * 24 * 7,
   demoEnabled: process.env.NODE_ENV !== "production" && process.env.ENABLE_DEMO !== "false",
   freeSignalAllowance: 3,
+  adminEmails,
+  testerCreditAllowance: 1000000,
   supportedTimeframes: ["5m", "15m", "1h", "4h"],
   marketData: {
     provider: "coinbase-exchange",

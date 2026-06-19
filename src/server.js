@@ -15,6 +15,7 @@ import { startTelegramConnectionPoller } from "./modules/notifications/telegramC
 import { handleSignalRoutes } from "./modules/signals/signalController.js";
 import { startSignalOutcomeTracker } from "./modules/signals/signalOutcomeService.js";
 import { handleSubscriptionRoutes } from "./modules/subscriptions/subscriptionController.js";
+import { handleTesterAccessRoutes } from "./modules/tester-access/testerAccessController.js";
 import { sendError } from "./shared/http.js";
 
 const rootDir = fileURLToPath(new URL("..", import.meta.url));
@@ -38,6 +39,7 @@ const server = createServer(async (req, res) => {
       (await handleAlertRoutes(req, res, url.pathname, url)) ||
       (await handleNotificationRoutes(req, res, url.pathname)) ||
       (await handleSubscriptionRoutes(req, res, url.pathname)) ||
+      (await handleTesterAccessRoutes(req, res, url.pathname)) ||
       (await handleMarketDataRoutes(req, res, url.pathname, url)) ||
       (await handleSignalRoutes(req, res, url.pathname));
 

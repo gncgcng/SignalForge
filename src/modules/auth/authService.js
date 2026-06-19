@@ -19,6 +19,8 @@ function publicUser(user) {
     id: user.id,
     name: user.name,
     email: user.email,
+    role: user.role,
+    isAdmin: appConfig.adminEmails.has(user.email.toLowerCase()),
     plan: user.plan,
     trialSignalsUsed: user.trialSignalsUsed,
     freeSignalAllowance: user.freeSignalAllowance || appConfig.freeSignalAllowance
@@ -90,4 +92,8 @@ export async function destroySession(sessionId) {
 
 export function toPublicUser(user) {
   return user ? publicUser(user) : null;
+}
+
+export function isAdminUser(user) {
+  return Boolean(user?.email && appConfig.adminEmails.has(user.email.toLowerCase()));
 }

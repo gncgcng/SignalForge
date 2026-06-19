@@ -161,7 +161,9 @@
             <a href="#alerts" data-view-link="alerts">Alerts <span class="nav-count hidden" id="unread-alert-count">0</span></a>
             <a href="#notifications" data-view-link="notifications">Notifications</a>
             <a href="#signals" data-view-link="signals">Signals</a>
+            <a href="#settings" data-view-link="settings">Settings</a>
             <a href="#billing" data-view-link="billing">Billing</a>
+            <a class="hidden" href="#admin" data-view-link="admin" id="admin-nav-link">Admin</a>
           </nav>
           <div class="trial-card">
             <span>Free trial</span>
@@ -178,6 +180,7 @@
             </div>
             <div class="user-chip">
               <span id="user-name">Trader</span>
+              <span class="status-pill status-hit-tp hidden" id="tester-account-badge">Tester account</span>
               <button id="logout-button">Logout</button>
             </div>
           </header>
@@ -423,6 +426,39 @@
               <span>Past signal outcomes do not predict future results.</span>
             </div>
             <div class="signals-table-wrap" id="signals-history"></div>
+          </section>
+
+          <section class="page-view hidden" id="settings-view" data-view="settings">
+            <div class="section-title">
+              <div>
+                <span class="eyebrow">Account</span>
+                <h3>Settings</h3>
+              </div>
+              <span id="account-role-label">Standard account</span>
+            </div>
+            <article class="panel tester-access-panel">
+              <div class="panel-header">
+                <div>
+                  <span class="eyebrow">Early access</span>
+                  <h3>Tester program</h3>
+                </div>
+                <span class="status-pill" id="tester-request-status">Not requested</span>
+              </div>
+              <p class="reasoning">Request manual tester access for extended SignalForge evaluation. Approval is reviewed by an administrator.</p>
+              <button id="request-tester-access" type="button">Request tester access</button>
+              <p class="status-line" id="tester-access-message"></p>
+            </article>
+          </section>
+
+          <section class="page-view hidden" id="admin-view" data-view="admin">
+            <div class="section-title">
+              <div>
+                <span class="eyebrow">Administration</span>
+                <h3>Tester access requests</h3>
+              </div>
+              <span id="admin-request-count">0 pending</span>
+            </div>
+            <div class="admin-request-list" id="admin-request-list"></div>
           </section>
 
           <section class="page-view hidden" id="billing-view" data-view="billing">

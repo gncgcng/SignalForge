@@ -13,14 +13,17 @@ export function ensureTrialSubscription(user) {
 
 export function getSubscriptionSummary(user) {
   ensureTrialSubscription(user);
+  const isTester = user.role === "tester";
   const allowance = user.freeSignalAllowance || appConfig.freeSignalAllowance;
   const remaining = Math.max(0, allowance - user.trialSignalsUsed);
 
   return {
     plan: user.plan,
+    role: user.role || "user",
+    unlimitedSignals: isTester,
     status: user.subscription.status,
     trialSignalsUsed: user.trialSignalsUsed,
-    trialSignalsRemaining: remaining,
+    trialSignalsRemaining: isTester ? null : remaining,
     freeSignalAllowance: allowance,
     paidCredits: user.paidCredits || 0,
     stripeReady: true,
@@ -29,6 +32,10 @@ export function getSubscriptionSummary(user) {
 }
 
 export function canGenerateSignal(user) {
+  if (user.role === "tester") {
+    return true;
+  }
+
   if (user.plan !== "trial") {
     return true;
   }
@@ -37,7 +44,7 @@ export function canGenerateSignal(user) {
 }
 
 export async function recordSignalUsage(user) {
-  if (user.plan === "trial") {
+  if (user.role !== "tester" && user.plan === "trial") {
     await incrementTrialSignalsUsed(user.id);
     user.trialSignalsUsed += 1;
   }
