@@ -4,7 +4,7 @@ import { canGenerateSignal, getSubscriptionSummary, recordSignalUsage } from "..
 import { generateMarketDataSetup } from "./signalGenerator.js";
 import { calculateSignalStats, updateSignalsForUser } from "./signalOutcomeService.js";
 
-const scanTimeframes = ["5m", "15m", "1h", "4h"];
+const scanTimeframes = ["1h", "4h", "15m", "5m"];
 
 export async function createSignal(user, { symbol, timeframe }) {
   if (!canGenerateSignal(user)) {
@@ -82,9 +82,7 @@ export async function scanAllMarkets() {
     }
   }
 
-  setups.sort((a, b) => {
-    return b.confidenceScore - a.confidenceScore || b.riskRewardRatio - a.riskRewardRatio;
-  });
+  rankSetups(setups);
 
   return {
     setups,
@@ -92,6 +90,12 @@ export async function scanAllMarkets() {
     errors,
     message: setups.length ? "Valid setups found." : "No high-probability setups right now"
   };
+}
+
+export function rankSetups(setups) {
+  return setups.sort((a, b) => {
+    return b.confidenceScore - a.confidenceScore || b.riskRewardRatio - a.riskRewardRatio;
+  });
 }
 
 export async function listUserSignals(user) {

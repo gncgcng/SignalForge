@@ -13,6 +13,7 @@
     "test:commodities-enabled": "node scripts/commodities-enabled-test.js",
     "test:commodity-lazy-loading": "node scripts/commodity-lazy-loading-test.js",
     "test:commodity-insufficient": "node scripts/commodity-insufficient-candles-test.js",
+    "test:commodity-signals": "node scripts/commodity-signal-test.js",
     "test:market-providers": "node scripts/market-provider-test.js",
     "test:provider-routing": "node scripts/provider-routing-test.js",
     "test:session-migration": "node scripts/session-migration-test.js",

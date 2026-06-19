@@ -1,7 +1,7 @@
 process.env.TWELVEDATA_API_KEY = "test-key";
 
 const commoditySymbols = ["XAU/USD", "XAG/USD", "WTI", "BRENT", "NATGAS"];
-const timeframes = ["5m", "15m", "1h", "4h"];
+const timeframes = ["1h", "4h", "15m", "5m"];
 const expectedProviderSymbols = {
   "XAU/USD": "XAU/USD",
   "XAG/USD": "XAG/USD",

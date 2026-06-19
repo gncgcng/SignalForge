@@ -146,7 +146,7 @@ pairSearch.addEventListener("input", async () => {
 
 scanAllButton.addEventListener("click", async () => {
   const symbols = state.marketCatalog.filter((pair) => pair.status === "active").map((pair) => pair.symbol);
-  const frames = ["5m", "15m", "1h", "4h"];
+  const frames = ["1h", "4h", "15m", "5m"];
   const jobs = symbols.flatMap((symbol) => frames.map((timeframe) => ({ symbol, timeframe })));
   const setups = [];
   const errors = [];
@@ -833,7 +833,7 @@ function renderScanCard(setup) {
       <div class="signal-metrics">
         <div><span>Confidence</span><strong>${setup.confidenceScore}%</strong></div>
         <div><span>Risk/reward</span><strong>${setup.riskRewardRatio}:1</strong></div>
-        <div><span>Passed</span><strong>${setup.confirmations.filter((item) => item.passed).length}/5</strong></div>
+        <div><span>Passed</span><strong>${setup.confirmations.filter((item) => item.passed).length}/${setup.confirmations.length}</strong></div>
         <div><span>Status</span><strong>Locked</strong></div>
       </div>
       <p class="reasoning">Passed confirmations: ${passed}. Unlock the full signal to save entry, stop loss, and take profit.</p>

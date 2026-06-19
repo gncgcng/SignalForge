@@ -1,5 +1,6 @@
 import { generateMarketDataSetup } from "../src/modules/signals/signalGenerator.js";
 import { calculateSignalStats } from "../src/modules/signals/signalOutcomeService.js";
+import { rankSetups } from "../src/modules/signals/signalService.js";
 
 function makeFlatCandles() {
   const candles = [];
@@ -32,8 +33,21 @@ const commodityResult = generateMarketDataSetup({
     assetClass: "Commodity"
   },
   source: "commodity-test-fixture",
+  volumeAvailable: false,
   candles: makeFlatCandles()
 }, "15m");
+const commodityConfirmations = commodityResult.valid
+  ? commodityResult.signal.confirmations
+  : commodityResult.analysis.candidates[0].confirmations;
+const commodityConfirmationNames = commodityConfirmations.map((item) => item.name);
+const commodityExplanation = commodityResult.valid
+  ? commodityResult.signal.reasoning
+  : commodityResult.analysis.message;
+const ranked = rankSetups([
+  { symbol: "BTC-USD", confidenceScore: 82, riskRewardRatio: 2.5 },
+  { symbol: "XAG/USD", confidenceScore: 88, riskRewardRatio: 1.8 },
+  { symbol: "WTI", confidenceScore: 88, riskRewardRatio: 2.2 }
+]);
 const stats = calculateSignalStats([
   { status: "Hit TP" },
   { status: "Hit TP" },
@@ -44,7 +58,12 @@ const stats = calculateSignalStats([
 
 console.log(JSON.stringify({
   valid: result.valid,
-  commodityEngineEvaluated: commodityResult.analysis.symbol === "XAU/USD",
+  commodityEngineEvaluated: (commodityResult.analysis?.symbol || commodityResult.signal?.symbol) === "XAU/USD",
+  commodityDoesNotRequireVolume: !commodityConfirmationNames.includes("Volume"),
+  commodityUsesPriceConfirmations: ["Trend", "EMA structure", "RSI", "ATR", "Support", "Resistance"]
+    .every((name) => commodityConfirmationNames.includes(name)),
+  commodityExplanation,
+  mixedAssetRanking: ranked.map((setup) => setup.symbol),
   message: result.analysis.message,
   longPassed: result.analysis.candidates.find((candidate) => candidate.direction === "long")?.passedCount,
   shortPassed: result.analysis.candidates.find((candidate) => candidate.direction === "short")?.passedCount,
@@ -54,8 +73,13 @@ console.log(JSON.stringify({
 if (
   result.valid ||
   result.signal ||
-  !commodityResult.analysis ||
-  commodityResult.analysis.symbol !== "XAU/USD" ||
+  (!commodityResult.analysis && !commodityResult.signal) ||
+  (commodityResult.analysis?.symbol || commodityResult.signal?.symbol) !== "XAU/USD" ||
+  commodityConfirmationNames.includes("Volume") ||
+  !["Trend", "EMA structure", "RSI", "ATR", "Support", "Resistance"]
+    .every((name) => commodityConfirmationNames.includes(name)) ||
+  !commodityExplanation.toLowerCase().includes("commodity") ||
+  ranked.map((setup) => setup.symbol).join(",") !== "WTI,XAG/USD,BTC-USD" ||
   !result.analysis.message.includes("No valid setup") ||
   stats.totalSignals !== 5 ||
   stats.hitTpCount !== 2 ||

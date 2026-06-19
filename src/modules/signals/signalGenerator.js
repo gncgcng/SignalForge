@@ -17,15 +17,22 @@ export function generateMarketDataSetup(marketData, timeframe) {
   const indicators = calculateIndicators(candles);
   const latest = candles[candles.length - 1];
   const levels = detectSupportResistance(candles);
-  const longCase = evaluateLong(latest, indicators, levels, marketData.volumeAvailable !== false);
-  const shortCase = evaluateShort(latest, indicators, levels, marketData.volumeAvailable !== false);
+  const isCommodity = marketData.pair.assetClass === "Commodity";
+  const longCase = isCommodity
+    ? evaluateCommodityLong(latest, indicators, levels)
+    : evaluateCryptoLong(latest, indicators, levels, marketData.volumeAvailable !== false);
+  const shortCase = isCommodity
+    ? evaluateCommodityShort(latest, indicators, levels)
+    : evaluateCryptoShort(latest, indicators, levels, marketData.volumeAvailable !== false);
   const bestCase = [longCase, shortCase]
     .filter((candidate) => candidate.valid)
     .sort((a, b) => b.passedCount - a.passedCount || b.confidenceScore - a.confidenceScore)[0];
 
   if (!bestCase) {
     return noSetup(
-      "No valid setup found. Conditions are too mixed for a high-probability entry.",
+      isCommodity
+        ? "No valid commodity setup found. EMA trend, RSI, ATR, support, and resistance are not sufficiently aligned."
+        : "No valid setup found. Conditions are too mixed for a high-probability entry.",
       marketData,
       timeframe,
       [longCase, shortCase]
@@ -44,7 +51,7 @@ export function generateMarketDataSetup(marketData, timeframe) {
       takeProfit: roundPrice(bestCase.takeProfit),
       riskRewardRatio: Number(bestCase.riskRewardRatio.toFixed(2)),
       confidenceScore: bestCase.confidenceScore,
-      reasoning: buildReasoning(bestCase, indicators, levels),
+      reasoning: buildReasoning(bestCase, indicators, levels, isCommodity),
       confirmations: bestCase.confirmations,
       indicators: serializeIndicators(indicators, levels),
       generatedAt: new Date().toISOString(),
@@ -58,7 +65,7 @@ export function generateMarketDataSetup(marketData, timeframe) {
   };
 }
 
-function evaluateLong(latest, indicators, levels, volumeAvailable) {
+function evaluateCryptoLong(latest, indicators, levels, volumeAvailable) {
   const support = levels.nearestSupport;
   const resistance = levels.nearestResistance;
   const entry = latest.close;
@@ -79,7 +86,7 @@ function evaluateLong(latest, indicators, levels, volumeAvailable) {
   return buildCandidate("long", entry, stopLoss, confirmations, risk, latest, indicators);
 }
 
-function evaluateShort(latest, indicators, levels, volumeAvailable) {
+function evaluateCryptoShort(latest, indicators, levels, volumeAvailable) {
   const support = levels.nearestSupport;
   const resistance = levels.nearestResistance;
   const entry = latest.close;
@@ -100,9 +107,53 @@ function evaluateShort(latest, indicators, levels, volumeAvailable) {
   return buildCandidate("short", entry, stopLoss, confirmations, risk, latest, indicators);
 }
 
-function buildCandidate(direction, entry, stopLoss, confirmations, risk) {
+function evaluateCommodityLong(latest, indicators, levels) {
+  const support = levels.nearestSupport;
+  const resistance = levels.nearestResistance;
+  const entry = latest.close;
+  const atr = indicators.atr14;
+  const swingStop = support ? support.price - atr * 0.2 : null;
+  const atrStop = entry - atr * 1.4;
+  const stopLoss = swingStop && entry - swingStop <= atr * 3 ? swingStop : atrStop;
+  const risk = entry - stopLoss;
+  const roomToResistance = resistance ? resistance.price - entry : atr * 4;
+  const confirmations = [
+    confirmation("Trend", entry > indicators.ema20, `Price ${formatNumber(entry)} is above EMA20 ${formatNumber(indicators.ema20)}.`),
+    confirmation("EMA structure", indicators.ema20 > indicators.ema50, `EMA20 ${formatNumber(indicators.ema20)} is above EMA50 ${formatNumber(indicators.ema50)}.`),
+    confirmation("RSI", indicators.rsi14 >= 45 && indicators.rsi14 <= 70, `RSI14 is ${formatNumber(indicators.rsi14)}, supporting bullish momentum without excessive extension.`),
+    atrConfirmation(atr, entry),
+    confirmation("Support", Boolean(support) && entry > support.price && entry - support.price <= atr * 3, support ? `Price is holding above commodity swing support near ${formatNumber(support.price)}.` : "No recent commodity swing support found."),
+    confirmation("Resistance", roomToResistance >= risk * 1.5, resistance ? `Resistance near ${formatNumber(resistance.price)} leaves ${formatNumber(roomToResistance / risk)}R of upside room.` : "No nearby commodity resistance overhead.")
+  ];
+
+  return buildCandidate("long", entry, stopLoss, confirmations, risk, 5);
+}
+
+function evaluateCommodityShort(latest, indicators, levels) {
+  const support = levels.nearestSupport;
+  const resistance = levels.nearestResistance;
+  const entry = latest.close;
+  const atr = indicators.atr14;
+  const swingStop = resistance ? resistance.price + atr * 0.2 : null;
+  const atrStop = entry + atr * 1.4;
+  const stopLoss = swingStop && swingStop - entry <= atr * 3 ? swingStop : atrStop;
+  const risk = stopLoss - entry;
+  const roomToSupport = support ? entry - support.price : atr * 4;
+  const confirmations = [
+    confirmation("Trend", entry < indicators.ema20, `Price ${formatNumber(entry)} is below EMA20 ${formatNumber(indicators.ema20)}.`),
+    confirmation("EMA structure", indicators.ema20 < indicators.ema50, `EMA20 ${formatNumber(indicators.ema20)} is below EMA50 ${formatNumber(indicators.ema50)}.`),
+    confirmation("RSI", indicators.rsi14 >= 30 && indicators.rsi14 <= 55, `RSI14 is ${formatNumber(indicators.rsi14)}, supporting bearish momentum without deep oversold conditions.`),
+    atrConfirmation(atr, entry),
+    confirmation("Resistance", Boolean(resistance) && resistance.price > entry && resistance.price - entry <= atr * 3, resistance ? `Price is trading below commodity swing resistance near ${formatNumber(resistance.price)}.` : "No recent commodity swing resistance found."),
+    confirmation("Support", roomToSupport >= risk * 1.5, support ? `Support near ${formatNumber(support.price)} leaves ${formatNumber(roomToSupport / risk)}R of downside room.` : "No nearby commodity support underneath.")
+  ];
+
+  return buildCandidate("short", entry, stopLoss, confirmations, risk, 5);
+}
+
+function buildCandidate(direction, entry, stopLoss, confirmations, risk, requiredPassCount = 4) {
   const passedCount = confirmations.filter((item) => item.passed).length;
-  const valid = passedCount >= 4 && Number.isFinite(risk) && risk > 0;
+  const valid = passedCount >= requiredPassCount && Number.isFinite(risk) && risk > 0;
   const rewardMultiple = Math.min(2.5, Math.max(1.5, 1.5 + (passedCount - 3) * 0.35));
   const targetDistance = risk * rewardMultiple;
   const takeProfit = direction === "long" ? entry + targetDistance : entry - targetDistance;
@@ -113,7 +164,7 @@ function buildCandidate(direction, entry, stopLoss, confirmations, risk) {
     stopLoss,
     takeProfit,
     riskRewardRatio: rewardMultiple,
-    confidenceScore: Math.min(92, 48 + passedCount * 9),
+    confidenceScore: Math.min(92, 48 + Math.round((passedCount / confirmations.length) * 44)),
     passedCount,
     valid,
     confirmations
@@ -272,6 +323,15 @@ function volumeConfirmation(latest, indicators, volumeAvailable) {
   );
 }
 
+function atrConfirmation(atrValue, price) {
+  const atrPercent = price > 0 ? (atrValue / price) * 100 : 0;
+  return confirmation(
+    "ATR",
+    Number.isFinite(atrValue) && atrValue > 0 && atrPercent >= 0.03 && atrPercent <= 12,
+    `ATR14 is ${formatNumber(atrValue)} (${formatNumber(atrPercent)}% of price), providing a usable volatility range for stops and targets.`
+  );
+}
+
 function noSetup(message, marketData, timeframe, candidates) {
   return {
     valid: false,
@@ -290,11 +350,14 @@ function noSetup(message, marketData, timeframe, candidates) {
   };
 }
 
-function buildReasoning(candidate, indicators, levels) {
+function buildReasoning(candidate, indicators, levels, isCommodity) {
   const passed = candidate.confirmations.filter((item) => item.passed).map((item) => item.name).join(", ");
   const failed = candidate.confirmations.filter((item) => !item.passed).map((item) => item.name).join(", ") || "none";
+  const prefix = isCommodity
+    ? `Commodity ${candidate.direction.toUpperCase()} analysis uses Twelve Data price structure; volume is not required. Setup`
+    : `${candidate.direction.toUpperCase()} setup`;
 
-  return `${candidate.direction.toUpperCase()} setup confirmed by ${passed}. Failed checks: ${failed}. EMA20 ${formatNumber(indicators.ema20)}, EMA50 ${formatNumber(indicators.ema50)}, RSI14 ${formatNumber(indicators.rsi14)}, ATR14 ${formatNumber(indicators.atr14)}. Support ${levels.nearestSupport ? formatNumber(levels.nearestSupport.price) : "n/a"}, resistance ${levels.nearestResistance ? formatNumber(levels.nearestResistance.price) : "n/a"}.`;
+  return `${prefix} confirmed by ${passed}. Failed checks: ${failed}. EMA20 ${formatNumber(indicators.ema20)}, EMA50 ${formatNumber(indicators.ema50)}, RSI14 ${formatNumber(indicators.rsi14)}, ATR14 ${formatNumber(indicators.atr14)}. Support ${levels.nearestSupport ? formatNumber(levels.nearestSupport.price) : "n/a"}, resistance ${levels.nearestResistance ? formatNumber(levels.nearestResistance.price) : "n/a"}.`;
 }
 
 function serializeIndicators(indicators, levels) {
