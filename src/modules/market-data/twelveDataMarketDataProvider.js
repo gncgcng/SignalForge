@@ -1,7 +1,7 @@
 import { appConfig } from "../../config/appConfig.js";
 import { MarketDataProviderError } from "./marketDataProviderError.js";
 
-const providerSymbols = {
+export const twelveDataSymbolMap = {
   "XAU/USD": "XAU/USD",
   "XAG/USD": "XAG/USD",
   WTI: "XTI/USD",
@@ -26,7 +26,7 @@ export const twelveDataMarketDataProvider = {
     return Boolean(appConfig.twelveData.apiKey);
   },
   supports(symbol, timeframe) {
-    return Object.hasOwn(providerSymbols, symbol) &&
+    return Object.hasOwn(twelveDataSymbolMap, symbol) &&
       Object.hasOwn(providerIntervals, timeframe);
   },
   getCachedCandles(symbol, timeframe) {
@@ -80,7 +80,7 @@ export const twelveDataMarketDataProvider = {
 
 async function fetchCandles(providerId, symbol, timeframe, cacheKey) {
     const url = new URL("/time_series", appConfig.twelveData.baseUrl);
-    url.searchParams.set("symbol", providerSymbols[symbol]);
+    url.searchParams.set("symbol", twelveDataSymbolMap[symbol]);
     url.searchParams.set("interval", providerIntervals[timeframe]);
     url.searchParams.set("outputsize", String(appConfig.marketData.candleLimit));
     url.searchParams.set("format", "JSON");
@@ -113,21 +113,30 @@ async function fetchCandles(providerId, symbol, timeframe, cacheKey) {
         );
       }
 
-      const candles = body.values
-        .map((value) => ({
+      const parsedCandles = body.values
+        .map((value) => {
+          const hasRawVolume = value.volume !== undefined &&
+            value.volume !== null &&
+            value.volume !== "";
+          const volume = Number(value.volume);
+
+          return {
           time: Math.floor(new Date(`${value.datetime}Z`).getTime() / 1000),
           open: Number(value.open),
           high: Number(value.high),
           low: Number(value.low),
           close: Number(value.close),
-          volume: Number(value.volume)
-        }))
-        .filter(isValidOhlcvCandle)
+            volume: hasRawVolume && Number.isFinite(volume) && volume >= 0 ? volume : 0,
+            volumeAvailable: hasRawVolume && Number.isFinite(volume) && volume >= 0
+          };
+        });
+      const candles = parsedCandles
+        .filter(isValidPriceCandle)
         .sort((a, b) => a.time - b.time);
 
       if (candles.length < 60) {
         throw providerError(
-          `${symbol} returned insufficient OHLCV data for signal analysis. Volume data may be unavailable on the configured Twelve Data plan.`,
+          `Twelve Data returned ${candles.length} usable ${symbol} ${timeframe} candles; at least 60 are required. Check symbol support and your Twelve Data plan.`,
           422,
           "INSUFFICIENT_OHLCV"
         );
@@ -135,10 +144,12 @@ async function fetchCandles(providerId, symbol, timeframe, cacheKey) {
 
       const latest = candles[candles.length - 1];
       const previous = candles[Math.max(0, candles.length - 25)];
+      const volumeAvailable = candles.every((candle) => candle.volumeAvailable);
       const payload = {
         symbol,
         timeframe,
         candles,
+        volumeAvailable,
         latestPrice: latest.close,
         change24h: previous.close === 0 ? 0 : ((latest.close - previous.close) / previous.close) * 100,
         source: providerId,
@@ -162,14 +173,12 @@ async function fetchCandles(providerId, symbol, timeframe, cacheKey) {
     }
 }
 
-function isValidOhlcvCandle(candle) {
+function isValidPriceCandle(candle) {
   return Number.isFinite(candle.time) &&
     Number.isFinite(candle.open) &&
     Number.isFinite(candle.high) &&
     Number.isFinite(candle.low) &&
-    Number.isFinite(candle.close) &&
-    Number.isFinite(candle.volume) &&
-    candle.volume >= 0;
+    Number.isFinite(candle.close);
 }
 
 function providerError(message, statusCode, code) {

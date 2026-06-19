@@ -2,6 +2,19 @@ process.env.TWELVEDATA_API_KEY = "test-key";
 
 const commoditySymbols = ["XAU/USD", "XAG/USD", "WTI", "BRENT", "NATGAS"];
 const timeframes = ["5m", "15m", "1h", "4h"];
+const expectedProviderSymbols = {
+  "XAU/USD": "XAU/USD",
+  "XAG/USD": "XAG/USD",
+  WTI: "XTI/USD",
+  BRENT: "XBR/USD",
+  NATGAS: "XNG/USD"
+};
+const expectedProviderIntervals = {
+  "5m": "5min",
+  "15m": "15min",
+  "1h": "1h",
+  "4h": "4h"
+};
 const requests = [];
 
 globalThis.fetch = async (url) => {
@@ -20,8 +33,7 @@ globalThis.fetch = async (url) => {
       open: String(price),
       high: String(price + 0.5),
       low: String(price - 0.5),
-      close: String(price + 0.2),
-      volume: String(1000 + index)
+      close: String(price + 0.2)
     };
   });
 
@@ -57,7 +69,8 @@ for (const symbol of commoditySymbols) {
       statusCode: response.statusCode,
       returnedSymbol: body.marketData?.pair?.symbol,
       candleCount: body.marketData?.candles?.length,
-      source: body.marketData?.source
+      source: body.marketData?.source,
+      volumeAvailable: body.marketData?.volumeAvailable
     });
   }
 }
@@ -75,7 +88,16 @@ const result = {
     return check.statusCode === 200 &&
       check.returnedSymbol === check.symbol &&
       check.candleCount === 120 &&
-      check.source === "twelve-data";
+      check.source === "twelve-data" &&
+      check.volumeAvailable === false;
+  }),
+  symbolMappingsCorrect: requests.every((request, index) => {
+    const symbol = commoditySymbols[Math.floor(index / timeframes.length)];
+    return request.symbol === expectedProviderSymbols[symbol];
+  }),
+  timeframeMappingsCorrect: requests.every((request, index) => {
+    const timeframe = timeframes[index % timeframes.length];
+    return request.interval === expectedProviderIntervals[timeframe];
   }),
   scanAllEligible: commoditySymbols.every((symbol) => activeSymbols.includes(symbol)),
   combinationsTested: routeChecks.length,
@@ -87,6 +109,8 @@ console.log(JSON.stringify(result, null, 2));
 if (
   !result.commoditiesSelectable ||
   !result.routesSupported ||
+  !result.symbolMappingsCorrect ||
+  !result.timeframeMappingsCorrect ||
   !result.scanAllEligible ||
   result.combinationsTested !== 20 ||
   result.providerRequests !== 20

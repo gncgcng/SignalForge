@@ -17,8 +17,8 @@ export function generateMarketDataSetup(marketData, timeframe) {
   const indicators = calculateIndicators(candles);
   const latest = candles[candles.length - 1];
   const levels = detectSupportResistance(candles);
-  const longCase = evaluateLong(latest, indicators, levels);
-  const shortCase = evaluateShort(latest, indicators, levels);
+  const longCase = evaluateLong(latest, indicators, levels, marketData.volumeAvailable !== false);
+  const shortCase = evaluateShort(latest, indicators, levels, marketData.volumeAvailable !== false);
   const bestCase = [longCase, shortCase]
     .filter((candidate) => candidate.valid)
     .sort((a, b) => b.passedCount - a.passedCount || b.confidenceScore - a.confidenceScore)[0];
@@ -58,7 +58,7 @@ export function generateMarketDataSetup(marketData, timeframe) {
   };
 }
 
-function evaluateLong(latest, indicators, levels) {
+function evaluateLong(latest, indicators, levels, volumeAvailable) {
   const support = levels.nearestSupport;
   const resistance = levels.nearestResistance;
   const entry = latest.close;
@@ -71,7 +71,7 @@ function evaluateLong(latest, indicators, levels) {
   const confirmations = [
     confirmation("Trend", indicators.ema20 > indicators.ema50 && entry > indicators.ema20, `EMA20 ${formatNumber(indicators.ema20)} is above EMA50 ${formatNumber(indicators.ema50)} and price is above EMA20.`),
     confirmation("RSI", indicators.rsi14 >= 45 && indicators.rsi14 <= 68, `RSI14 is ${formatNumber(indicators.rsi14)}, favoring bullish momentum without being overextended.`),
-    confirmation("Volume", latest.volume >= indicators.volumeMa20 * 1.05, `Latest volume is ${formatNumber(latest.volume)} versus ${formatNumber(indicators.volumeMa20)} volume MA.`),
+    volumeConfirmation(latest, indicators, volumeAvailable),
     confirmation("Support", Boolean(support) && entry > support.price && entry - support.price <= atr * 2.5, support ? `Price is holding above swing support near ${formatNumber(support.price)}.` : "No recent swing support found."),
     confirmation("Resistance room", roomToResistance >= risk * 1.5, resistance ? `Nearest resistance leaves ${formatNumber(roomToResistance / risk)}R of upside room.` : "No nearby resistance overhead.")
   ];
@@ -79,7 +79,7 @@ function evaluateLong(latest, indicators, levels) {
   return buildCandidate("long", entry, stopLoss, confirmations, risk, latest, indicators);
 }
 
-function evaluateShort(latest, indicators, levels) {
+function evaluateShort(latest, indicators, levels, volumeAvailable) {
   const support = levels.nearestSupport;
   const resistance = levels.nearestResistance;
   const entry = latest.close;
@@ -92,7 +92,7 @@ function evaluateShort(latest, indicators, levels) {
   const confirmations = [
     confirmation("Trend", indicators.ema20 < indicators.ema50 && entry < indicators.ema20, `EMA20 ${formatNumber(indicators.ema20)} is below EMA50 ${formatNumber(indicators.ema50)} and price is below EMA20.`),
     confirmation("RSI", indicators.rsi14 >= 32 && indicators.rsi14 <= 55, `RSI14 is ${formatNumber(indicators.rsi14)}, favoring bearish momentum without being deeply oversold.`),
-    confirmation("Volume", latest.volume >= indicators.volumeMa20 * 1.05, `Latest volume is ${formatNumber(latest.volume)} versus ${formatNumber(indicators.volumeMa20)} volume MA.`),
+    volumeConfirmation(latest, indicators, volumeAvailable),
     confirmation("Resistance", Boolean(resistance) && resistance.price > entry && resistance.price - entry <= atr * 2.5, resistance ? `Price is rejecting below swing resistance near ${formatNumber(resistance.price)}.` : "No recent swing resistance found."),
     confirmation("Support room", roomToSupport >= risk * 1.5, support ? `Nearest support leaves ${formatNumber(roomToSupport / risk)}R of downside room.` : "No nearby support underneath.")
   ];
@@ -254,6 +254,22 @@ function confirmation(name, passed, detail) {
     passed,
     detail
   };
+}
+
+function volumeConfirmation(latest, indicators, volumeAvailable) {
+  if (!volumeAvailable) {
+    return confirmation(
+      "Volume",
+      false,
+      "Twelve Data did not provide volume for this commodity series, so volume confirmation cannot pass."
+    );
+  }
+
+  return confirmation(
+    "Volume",
+    latest.volume >= indicators.volumeMa20 * 1.05,
+    `Latest volume is ${formatNumber(latest.volume)} versus ${formatNumber(indicators.volumeMa20)} volume MA.`
+  );
 }
 
 function noSetup(message, marketData, timeframe, candidates) {

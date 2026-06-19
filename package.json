@@ -12,7 +12,9 @@
     "test:database-config": "node scripts/database-config-test.js",
     "test:commodities-enabled": "node scripts/commodities-enabled-test.js",
     "test:commodity-lazy-loading": "node scripts/commodity-lazy-loading-test.js",
+    "test:commodity-insufficient": "node scripts/commodity-insufficient-candles-test.js",
     "test:market-providers": "node scripts/market-provider-test.js",
+    "test:provider-routing": "node scripts/provider-routing-test.js",
     "test:session-migration": "node scripts/session-migration-test.js",
     "smoke": "node scripts/smoke-test.js",
     "test:signals": "node scripts/signal-rules-test.js"

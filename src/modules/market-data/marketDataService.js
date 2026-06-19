@@ -75,6 +75,16 @@ export async function getOhlcv(symbol, timeframe) {
 
   const provider = getMarketDataProvider(pair);
 
+  if (
+    (pair.category === "Crypto" && provider.id !== "coinbase-exchange") ||
+    (pair.category === "Commodities" && provider.id !== "twelve-data")
+  ) {
+    throw new MarketDataProviderError(
+      `Invalid provider routing for ${pair.symbol}: ${provider.id}.`,
+      { statusCode: 500, code: "INVALID_PROVIDER_ROUTING" }
+    );
+  }
+
   if (!provider.supports(pair.symbol, timeframe)) {
     throw new MarketDataProviderError(
       `${provider.id} does not support ${pair.symbol} on ${timeframe}.`,
@@ -82,6 +92,9 @@ export async function getOhlcv(symbol, timeframe) {
     );
   }
 
+  console.info(
+    `[market-data] provider=${provider.id} category=${pair.category} symbol=${pair.symbol} timeframe=${timeframe}`
+  );
   const marketData = await provider.getCandles(pair.symbol, timeframe);
 
   return {
@@ -92,6 +105,7 @@ export async function getOhlcv(symbol, timeframe) {
     },
     candles: marketData.candles,
     source: marketData.source,
+    volumeAvailable: marketData.volumeAvailable !== false,
     cache: marketData.cache,
     receivedAt: marketData.receivedAt
   };
@@ -119,6 +133,7 @@ export function getCachedOhlcv(symbol, timeframe) {
     },
     candles: marketData.candles,
     source: marketData.source,
+    volumeAvailable: marketData.volumeAvailable !== false,
     cache: marketData.cache,
     receivedAt: marketData.receivedAt
   };

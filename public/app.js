@@ -374,8 +374,10 @@ async function loadMarketData() {
 
   const requestId = marketRequestId += 1;
   const statusKey = getMarketStatusKey();
+  const providerLabel = getProviderLabel(state.selectedPair);
 
   try {
+    document.querySelector("#provider-name").textContent = providerLabel;
     setMarketStatus(`Loading ${state.selectedPair.symbol} ${state.timeframe} candles...`, "loading");
     const { marketData } = await api.request(`/api/market-data/candles?symbol=${encodeURIComponent(state.selectedPair.symbol)}&timeframe=${encodeURIComponent(state.timeframe)}`);
 
@@ -389,7 +391,6 @@ async function loadMarketData() {
     renderPairs();
     renderSelectedMarket();
     renderChart(marketData.candles);
-    const providerLabel = marketData.source === "coinbase-exchange" ? "Coinbase" : marketData.source.replaceAll("-", " ");
     document.querySelector("#provider-name").textContent = providerLabel;
     document.querySelector("#candle-count").textContent = `${marketData.candles.length}`;
     document.querySelector("#market-regime").textContent = inferRegime(marketData.candles);
@@ -406,6 +407,7 @@ async function loadMarketData() {
 
     state.marketData = null;
     renderChart([]);
+    document.querySelector("#provider-name").textContent = providerLabel;
     document.querySelector("#provider-status").textContent = "Provider issue";
     document.querySelector("#candle-count").textContent = "--";
     document.querySelector("#market-regime").textContent = "Unavailable";
@@ -550,11 +552,18 @@ function renderMarketStatus() {
 
 function renderSelectedMarket() {
   if (!state.selectedPair) return;
+  document.querySelector("#provider-name").textContent = getProviderLabel(state.selectedPair);
   document.querySelector("#selected-symbol").textContent = state.selectedPair.symbol;
   document.querySelector("#selected-price").textContent = Number.isFinite(state.selectedPair.lastPrice)
     ? formatCurrency(state.selectedPair.lastPrice)
     : state.selectedPair.availabilityMessage || "Coming Soon";
   document.querySelector("#selected-change").textContent = Number.isFinite(state.selectedPair.change24h) ? formatPercent(state.selectedPair.change24h) : "--";
+}
+
+function getProviderLabel(pair) {
+  if (pair?.provider === "twelve-data") return "Twelve Data";
+  if (pair?.provider === "coinbase-exchange") return "Coinbase";
+  return "Not configured";
 }
 
 function renderTimeframes() {
