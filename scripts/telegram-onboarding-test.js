@@ -42,8 +42,10 @@ const result = {
     controller.includes("/connect/status"),
   automaticStatusPolling: app.includes("startTelegramConnectionStatusPolling") &&
     app.includes("setInterval(checkStatus, 2000)"),
-  botOpensFromButton: app.includes('window.open("about:blank"') &&
-    app.includes("botWindow.location.href = connection.botUrl"),
+  connectStaysInApp: !app.includes('window.open("about:blank"') &&
+    app.includes("telegramOpenBotLink.href = connection.botUrl"),
+  botLinkIncludesCode: service.includes("https://t.me/") &&
+    service.includes("?start=${encodeURIComponent(code)}"),
   statusMessagesPresent: [
     "Telegram bot not configured",
     "Waiting for Telegram confirmation",
@@ -53,10 +55,13 @@ const result = {
   ].every((message) => app.includes(message) || service.includes(message)),
   testAlertButtonPresent: html.includes("telegram-test-button") &&
     controller.includes("/telegram/test"),
-  manualIdIsAdvancedOnly: html.includes("Advanced: connect with chat ID") &&
+  copyCommandFallbackPresent: html.includes("telegram-copy-command") &&
+    app.includes("copyText(command)") &&
+    app.includes("Copy /start CODE"),
+  manualIdIsAdvancedOnly: html.includes("Advanced setup") &&
     html.includes("advanced-fallback"),
   mainFlowHasNoChatIdField: html.indexOf("telegram-chat-id") >
-    html.indexOf("Advanced: connect with chat ID"),
+    html.indexOf("Advanced setup"),
   pollerUsesRailwayToken: service.includes("getTelegramUpdates") &&
     repositories.includes("acquireTelegramBotPollLease")
 };

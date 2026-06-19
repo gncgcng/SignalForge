@@ -71,6 +71,7 @@ const telegramConnectionPanel = document.querySelector("#telegram-connection-pan
 const telegramConnectionCode = document.querySelector("#telegram-connection-code");
 const telegramStartCommand = document.querySelector("#telegram-start-command");
 const telegramOpenBotLink = document.querySelector("#telegram-open-bot-link");
+const telegramCopyCommand = document.querySelector("#telegram-copy-command");
 const telegramConnectionMessage = document.querySelector("#telegram-connection-message");
 const telegramTestButton = document.querySelector("#telegram-test-button");
 const telegramPreferencesForm = document.querySelector("#telegram-preferences-form");
@@ -322,8 +323,6 @@ telegramConnectForm.addEventListener("submit", async (event) => {
 });
 
 telegramConnectButton.addEventListener("click", async () => {
-  const botWindow = window.open("about:blank", "_blank", "noopener");
-
   try {
     telegramConnectButton.disabled = true;
     telegramConnectButton.textContent = "Generating code...";
@@ -336,16 +335,9 @@ telegramConnectButton.addEventListener("click", async () => {
     telegramStartCommand.textContent = `/start ${connection.code}`;
     telegramOpenBotLink.href = connection.botUrl;
     telegramConnectionPanel.classList.remove("hidden");
-
-    if (botWindow) {
-      botWindow.location.href = connection.botUrl;
-    } else {
-      telegramOpenBotLink.focus();
-    }
-
+    telegramOpenBotLink.focus();
     startTelegramConnectionStatusPolling();
   } catch (error) {
-    botWindow?.close();
     const message = error.message.includes("not configured")
       ? "Telegram bot not configured"
       : "Connection failed";
@@ -353,6 +345,23 @@ telegramConnectButton.addEventListener("click", async () => {
     telegramStatusLine.textContent = error.message;
     telegramConnectButton.disabled = false;
     telegramConnectButton.textContent = "Connect Telegram";
+  }
+});
+
+telegramCopyCommand.addEventListener("click", async () => {
+  const command = telegramStartCommand.textContent;
+
+  try {
+    await copyText(command);
+    telegramCopyCommand.textContent = "Copied";
+    telegramStatusLine.textContent = `${command} copied. Paste it into the SignalForge Telegram bot.`;
+  } catch {
+    telegramCopyCommand.textContent = "Copy failed";
+    telegramStatusLine.textContent = "Copy failed. Select the command above and copy it manually.";
+  } finally {
+    setTimeout(() => {
+      telegramCopyCommand.textContent = "Copy /start CODE";
+    }, 1800);
   }
 });
 
@@ -1475,6 +1484,27 @@ function startTelegramConnectionStatusPolling() {
 function setTelegramConnectionFeedback(message, type = "") {
   telegramConnectionMessage.textContent = message;
   telegramConnectionMessage.className = `connection-status ${type}`.trim();
+}
+
+async function copyText(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand("copy");
+  textarea.remove();
+
+  if (!copied) {
+    throw new Error("Clipboard unavailable.");
+  }
 }
 
 function formatCurrency(value) {

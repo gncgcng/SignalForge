@@ -304,12 +304,15 @@
                   <span>Connection code</span>
                   <strong id="telegram-connection-code">--------</strong>
                   <p class="reasoning">Send <code id="telegram-start-command">/start CODE</code> to the SignalForge bot.</p>
-                  <a class="button-link" id="telegram-open-bot-link" href="#" target="_blank" rel="noopener">Open Telegram Bot</a>
+                  <div class="connection-actions">
+                    <a class="button-link" id="telegram-open-bot-link" href="#" target="_blank" rel="noopener">Open Telegram Bot</a>
+                    <button class="secondary-action" id="telegram-copy-command" type="button">Copy /start CODE</button>
+                  </div>
                 </div>
                 <p class="connection-status" id="telegram-connection-message" aria-live="polite">Telegram is not connected.</p>
                 <button class="secondary-action hidden" id="telegram-test-button" type="button">Send Test Alert</button>
                 <details class="advanced-fallback">
-                  <summary>Advanced: connect with chat ID</summary>
+                  <summary>Advanced setup</summary>
                   <form id="telegram-connect-form">
                     <label>
                       Telegram chat ID
