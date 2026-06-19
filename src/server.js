@@ -11,6 +11,7 @@ import { handleAlertRoutes } from "./modules/alerts/alertController.js";
 import { handleMarketDataRoutes } from "./modules/market-data/marketDataController.js";
 import { handleNotificationRoutes } from "./modules/notifications/notificationController.js";
 import { startTelegramNotificationQueue } from "./modules/notifications/notificationQueue.js";
+import { startTelegramConnectionPoller } from "./modules/notifications/telegramConnectionService.js";
 import { handleSignalRoutes } from "./modules/signals/signalController.js";
 import { startSignalOutcomeTracker } from "./modules/signals/signalOutcomeService.js";
 import { handleSubscriptionRoutes } from "./modules/subscriptions/subscriptionController.js";
@@ -83,4 +84,5 @@ server.listen(appConfig.port, () => {
   console.log(`${appConfig.appName} running at http://localhost:${appConfig.port}`);
   startSignalOutcomeTracker();
   startTelegramNotificationQueue();
+  startTelegramConnectionPoller();
 });

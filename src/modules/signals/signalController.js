@@ -25,11 +25,6 @@ export async function handleSignalRoutes(req, res, pathname) {
     try {
       const body = await readJson(req);
       const result = await scanMarketSetupDetailed(body);
-
-      if (result.fullSetup) {
-        await enqueueMatchingTelegramNotifications(req.user, [result.fullSetup]);
-      }
-
       return sendJson(res, 200, result.publicResult);
     } catch (error) {
       return sendError(res, error.statusCode || 400, error.message);

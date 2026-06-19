@@ -284,7 +284,7 @@
               <span id="telegram-connection-status">Not connected</span>
             </div>
             <div class="notifications-layout">
-              <form class="panel notification-panel" id="telegram-connect-form">
+              <section class="panel notification-panel">
                 <div class="panel-header">
                   <div>
                     <span class="eyebrow">Telegram</span>
@@ -292,13 +292,33 @@
                   </div>
                   <span class="status-pill" id="telegram-provider-status">Checking</span>
                 </div>
-                <p class="reasoning" id="telegram-connect-help">Start the SignalForge bot, then enter your numeric Telegram chat ID.</p>
-                <label>
-                  Telegram chat ID
-                  <input id="telegram-chat-id" inputmode="numeric" placeholder="123456789" required />
-                </label>
-                <button type="submit">Connect Telegram</button>
-              </form>
+                <p class="reasoning" id="telegram-connect-help">Connect in a few seconds. SignalForge will generate a private code and open the Telegram bot.</p>
+                <ol class="connection-steps">
+                  <li>Click Connect Telegram.</li>
+                  <li>Telegram opens with your private connection code.</li>
+                  <li>Tap Start or send the prefilled command.</li>
+                  <li>Return here; SignalForge verifies automatically.</li>
+                </ol>
+                <button id="telegram-connect-button" type="button">Connect Telegram</button>
+                <div class="connection-code-panel hidden" id="telegram-connection-panel">
+                  <span>Connection code</span>
+                  <strong id="telegram-connection-code">--------</strong>
+                  <p class="reasoning">Send <code id="telegram-start-command">/start CODE</code> to the SignalForge bot.</p>
+                  <a class="button-link" id="telegram-open-bot-link" href="#" target="_blank" rel="noopener">Open Telegram Bot</a>
+                </div>
+                <p class="connection-status" id="telegram-connection-message" aria-live="polite">Telegram is not connected.</p>
+                <button class="secondary-action hidden" id="telegram-test-button" type="button">Send Test Alert</button>
+                <details class="advanced-fallback">
+                  <summary>Advanced: connect with chat ID</summary>
+                  <form id="telegram-connect-form">
+                    <label>
+                      Telegram chat ID
+                      <input id="telegram-chat-id" inputmode="numeric" placeholder="123456789" />
+                    </label>
+                    <button class="secondary-action" type="submit">Connect Manually</button>
+                  </form>
+                </details>
+              </section>
 
               <form class="panel notification-panel" id="telegram-preferences-form">
                 <div class="panel-header">

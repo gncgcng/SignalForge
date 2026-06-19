@@ -107,4 +107,6 @@ TELEGRAM_BOT_TOKEN=...
 TELEGRAM_BOT_USERNAME=your_bot_username
 ```
 
-Users connect a numeric Telegram chat ID from the Notifications page. Telegram alerts are limited to favorite markets and the user's selected timeframes, direction, and minimum confidence. Matching setups are written to a persistent queue with duplicate protection before delivery. Scanning and notification delivery do not use signal credits.
+Users connect from the Notifications page with a short-lived pairing code. SignalForge opens the bot link, the user sends `/start CODE`, and the app verifies the connection automatically. Manual numeric chat ID entry remains available only as an advanced fallback.
+
+Telegram alerts are limited to favorite markets and the user's selected timeframes, direction, and minimum confidence. Matching setups are written to a persistent queue with duplicate protection before delivery. Alerts remain disabled until pairing is confirmed and the user enables them. Scanning and notification delivery do not use signal credits.

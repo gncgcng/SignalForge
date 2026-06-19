@@ -721,6 +721,86 @@ polyline {
   gap: 16px;
 }
 
+.connection-steps {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 22px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.connection-code-panel {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid rgba(34, 211, 238, 0.45);
+  border-radius: 8px;
+  background: #071a22;
+}
+
+.connection-code-panel > span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.connection-code-panel > strong {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 26px;
+  letter-spacing: 0.12em;
+}
+
+.connection-code-panel code {
+  color: var(--text);
+}
+
+.button-link {
+  display: inline-flex;
+  justify-content: center;
+  padding: 11px 14px;
+  border-radius: 8px;
+  background: var(--cyan);
+  color: #041014;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.connection-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.connection-status.waiting {
+  color: var(--amber);
+}
+
+.connection-status.success {
+  color: var(--green);
+}
+
+.connection-status.error {
+  color: var(--red);
+}
+
+.advanced-fallback {
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.advanced-fallback summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.advanced-fallback form {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
 .switch-row {
   display: flex;
   grid-auto-flow: column;

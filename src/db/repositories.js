@@ -446,6 +446,118 @@ export async function markTelegramNotificationFailed(id, error, retry) {
   `, [id, error, retry]);
 }
 
+export async function createTelegramConnectionCode(userId, code, expiresAt) {
+  return transaction(async (client) => {
+    await client.query(`
+      UPDATE telegram_connection_codes
+      SET status = 'expired'
+      WHERE user_id = $1 AND status = 'pending'
+    `, [userId]);
+    await client.query(`
+      INSERT INTO telegram_connection_codes (code, user_id, expires_at)
+      VALUES ($1, $2, $3)
+    `, [code, userId, expiresAt]);
+  });
+}
+
+export async function getTelegramConnectionCodeByUser(userId) {
+  const result = await query(`
+    SELECT *
+    FROM telegram_connection_codes
+    WHERE user_id = $1
+    ORDER BY created_at DESC
+    LIMIT 1
+  `, [userId]);
+  return result.rows[0] || null;
+}
+
+export async function confirmTelegramConnectionCode(code, chatId) {
+  return transaction(async (client) => {
+    const result = await client.query(`
+      SELECT *
+      FROM telegram_connection_codes
+      WHERE code = $1
+      FOR UPDATE
+    `, [code]);
+    const connection = result.rows[0];
+
+    if (!connection || connection.status !== "pending") {
+      return { status: "invalid" };
+    }
+
+    if (new Date(connection.expires_at).getTime() <= Date.now()) {
+      await client.query(`
+        UPDATE telegram_connection_codes
+        SET status = 'expired'
+        WHERE code = $1
+      `, [code]);
+      return { status: "expired" };
+    }
+
+    await client.query(`
+      UPDATE telegram_connection_codes
+      SET status = 'connected', chat_id = $2, confirmed_at = now()
+      WHERE code = $1
+    `, [code, chatId]);
+    await client.query(`
+      INSERT INTO telegram_notification_settings (
+        user_id, chat_id, enabled, favorite_markets_only, timeframes,
+        direction, minimum_confidence
+      )
+      VALUES ($1,$2,false,true,ARRAY['1h','4h']::text[],'both',75)
+      ON CONFLICT (user_id)
+      DO UPDATE SET
+        chat_id = EXCLUDED.chat_id,
+        enabled = false,
+        updated_at = now()
+    `, [connection.user_id, chatId]);
+
+    return {
+      status: "connected",
+      userId: connection.user_id,
+      chatId
+    };
+  });
+}
+
+export async function getTelegramBotOffset() {
+  const result = await query(`
+    SELECT last_update_id
+    FROM telegram_bot_state
+    WHERE id = 'primary'
+  `);
+  return Number(result.rows[0]?.last_update_id || 0);
+}
+
+export async function saveTelegramBotOffset(updateId) {
+  await query(`
+    UPDATE telegram_bot_state
+    SET last_update_id = GREATEST(last_update_id, $1), updated_at = now()
+    WHERE id = 'primary'
+  `, [updateId]);
+}
+
+export async function acquireTelegramBotPollLease(owner) {
+  const result = await query(`
+    UPDATE telegram_bot_state
+    SET poll_lease_owner = $1,
+      poll_lease_until = now() + interval '20 seconds',
+      updated_at = now()
+    WHERE id = 'primary'
+      AND (poll_lease_until IS NULL OR poll_lease_until < now() OR poll_lease_owner = $1)
+    RETURNING id
+  `, [owner]);
+  return Boolean(result.rows[0]);
+}
+
+export async function releaseTelegramBotPollLease(owner) {
+  await query(`
+    UPDATE telegram_bot_state
+    SET poll_lease_until = now(), updated_at = now()
+    WHERE id = 'primary' AND poll_lease_owner = $1
+  `, [owner]);
+}
+
 function mapDetectedAlert(row) {
   return {
     id: row.id,

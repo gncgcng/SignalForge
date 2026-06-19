@@ -61,7 +61,9 @@ export const appConfig = {
     botToken: process.env.TELEGRAM_BOT_TOKEN || "",
     botUsername: process.env.TELEGRAM_BOT_USERNAME || "",
     queueIntervalMs: Number(process.env.TELEGRAM_QUEUE_INTERVAL_MS || 2000),
-    maxAttempts: Number(process.env.TELEGRAM_MAX_ATTEMPTS || 3)
+    maxAttempts: Number(process.env.TELEGRAM_MAX_ATTEMPTS || 3),
+    connectionCodeTtlMinutes: Number(process.env.TELEGRAM_CONNECTION_CODE_TTL_MINUTES || 10),
+    updatePollIntervalMs: Number(process.env.TELEGRAM_UPDATE_POLL_INTERVAL_MS || 3000)
   },
   signalTracking: {
     enabled: true,

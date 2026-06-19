@@ -39,7 +39,8 @@ const result = {
     timeframe: "1h"
   }),
   directionEnforced: !preferenceMatchesSetup({ ...preference, direction: "short" }, matchingSetup),
-  scanAllCreatesAlerts: app.includes("/api/alerts/detect") && app.includes("body: JSON.stringify({ setups })"),
+  scanAllCreatesAlerts: app.includes("/api/signals/scan-all") &&
+    signalControllerIncludesAlertDetection(),
   creditsOnlyUsedOnUnlock: !app.slice(
     app.indexOf("scanAllButton.addEventListener"),
     app.indexOf("generateButton.addEventListener")
@@ -53,4 +54,13 @@ console.log(JSON.stringify(result, null, 2));
 
 if (Object.values(result).some((value) => value !== true)) {
   process.exitCode = 1;
+}
+
+function signalControllerIncludesAlertDetection() {
+  const controller = readFileSync(
+    new URL("../src/modules/signals/signalController.js", import.meta.url),
+    "utf8"
+  );
+  return controller.includes("detectMatchingAlerts") &&
+    controller.includes("enqueueMatchingTelegramNotifications");
 }

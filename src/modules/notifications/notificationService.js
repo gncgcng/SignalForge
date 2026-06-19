@@ -23,7 +23,10 @@ export async function getNotificationSettings(user) {
 
 export async function connectTelegram(user, input) {
   assertTelegramConfigured();
-  const settings = validateSettings(input);
+  const settings = {
+    ...validateSettings(input),
+    enabled: false
+  };
   await sendTelegramMessage(
     settings.chatId,
     "SignalForge Telegram notifications connected.\n\nEducational tool only. Not financial advice."
@@ -54,6 +57,28 @@ export async function toggleTelegramNotifications(user, enabled) {
   }
 
   return getNotificationSettings(user);
+}
+
+export async function sendTelegramTestAlert(user) {
+  const settings = await getTelegramSettingsByUser(user.id);
+
+  if (!settings) {
+    throw validationError("Connect Telegram before sending a test alert.");
+  }
+
+  assertTelegramConfigured();
+  await sendTelegramMessage(
+    settings.chatId,
+    [
+      "🚨 SignalForge Test Alert",
+      "",
+      "Telegram notifications are connected correctly.",
+      "",
+      "Educational tool only. Not financial advice."
+    ].join("\n")
+  );
+
+  return { message: "Test alert sent successfully." };
 }
 
 export async function enqueueMatchingTelegramNotifications(user, setups) {

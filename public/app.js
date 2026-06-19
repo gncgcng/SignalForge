@@ -66,6 +66,13 @@ const alertsGrid = document.querySelector("#alerts-grid");
 const alertsCount = document.querySelector("#alerts-count");
 const unreadAlertCount = document.querySelector("#unread-alert-count");
 const telegramConnectForm = document.querySelector("#telegram-connect-form");
+const telegramConnectButton = document.querySelector("#telegram-connect-button");
+const telegramConnectionPanel = document.querySelector("#telegram-connection-panel");
+const telegramConnectionCode = document.querySelector("#telegram-connection-code");
+const telegramStartCommand = document.querySelector("#telegram-start-command");
+const telegramOpenBotLink = document.querySelector("#telegram-open-bot-link");
+const telegramConnectionMessage = document.querySelector("#telegram-connection-message");
+const telegramTestButton = document.querySelector("#telegram-test-button");
 const telegramPreferencesForm = document.querySelector("#telegram-preferences-form");
 const telegramChatId = document.querySelector("#telegram-chat-id");
 const telegramEnabled = document.querySelector("#telegram-enabled");
@@ -75,6 +82,7 @@ const telegramStatusLine = document.querySelector("#telegram-status-line");
 let marketRequestId = 0;
 let signalRefreshTimer = null;
 let marketLoadTimer = null;
+let telegramConnectionTimer = null;
 
 const api = {
   async request(path, options = {}) {
@@ -169,53 +177,26 @@ pairSearch.addEventListener("input", async () => {
 scanAllButton.addEventListener("click", async () => {
   const symbols = state.marketCatalog.filter((pair) => pair.status === "active").map((pair) => pair.symbol);
   const frames = ["1h", "4h", "15m", "5m"];
-  const jobs = symbols.flatMap((symbol) => frames.map((timeframe) => ({ symbol, timeframe })));
-  const setups = [];
-  const errors = [];
+  const total = symbols.length * frames.length;
 
   scanAllButton.disabled = true;
   generateButton.disabled = true;
   scanProgress.classList.remove("hidden");
   signalsGrid.innerHTML = "";
-  updateScanProgress(0, jobs.length, "Starting market scan...");
+  updateScanProgress(0, total, "Scanning all active crypto and commodity markets...");
 
-  for (let index = 0; index < jobs.length; index += 1) {
-    const job = jobs[index];
-    updateScanProgress(index, jobs.length, `Scanning ${job.symbol} ${job.timeframe}...`);
-
-    try {
-      const result = await api.request("/api/signals/scan", {
-        method: "POST",
-        body: JSON.stringify(job)
-      });
-
-      if (result.valid && result.setup) {
-        setups.push(result.setup);
-      }
-    } catch (error) {
-      errors.push({ ...job, message: error.message });
-    }
-
-    updateScanProgress(index + 1, jobs.length, `Scanned ${job.symbol} ${job.timeframe}`);
+  try {
+    const result = await api.request("/api/signals/scan-all", { method: "POST" });
+    updateScanProgress(total, total, "Market scan complete");
+    await loadAlerts();
+    renderScanResults(result.setups, result.errors);
+  } catch (error) {
+    updateScanProgress(0, total, "Scan All failed");
+    renderScanResults([], [{ symbol: "Scan All", timeframe: "", message: error.message }]);
+  } finally {
+    scanAllButton.disabled = false;
+    generateButton.disabled = false;
   }
-
-  setups.sort((a, b) => b.confidenceScore - a.confidenceScore || b.riskRewardRatio - a.riskRewardRatio);
-
-  if (setups.length) {
-    try {
-      await api.request("/api/alerts/detect", {
-        method: "POST",
-        body: JSON.stringify({ setups })
-      });
-      await loadAlerts();
-    } catch (error) {
-      errors.push({ symbol: "Alerts", timeframe: "", message: error.message });
-    }
-  }
-
-  renderScanResults(setups, errors);
-  scanAllButton.disabled = false;
-  generateButton.disabled = false;
 });
 
 generateButton.addEventListener("click", async () => {
@@ -325,16 +306,67 @@ telegramConnectForm.addEventListener("submit", async (event) => {
       method: "POST",
       body: JSON.stringify({
         chatId: telegramChatId.value,
-        enabled: true,
+        enabled: false,
         timeframes: getSelectedTelegramTimeframes(),
         direction: telegramDirection.value,
         minimumConfidence: Number(telegramMinimumConfidence.value)
       })
     });
     renderNotifications();
-    telegramStatusLine.textContent = "Telegram connected. A confirmation message was sent.";
+    setTelegramConnectionFeedback("Connected successfully", "success");
+    telegramStatusLine.textContent = "Connected successfully. Enable alerts when your preferences are ready.";
   } catch (error) {
+    setTelegramConnectionFeedback("Connection failed", "error");
     telegramStatusLine.textContent = error.message;
+  }
+});
+
+telegramConnectButton.addEventListener("click", async () => {
+  const botWindow = window.open("about:blank", "_blank", "noopener");
+
+  try {
+    telegramConnectButton.disabled = true;
+    telegramConnectButton.textContent = "Generating code...";
+    setTelegramConnectionFeedback("Waiting for Telegram confirmation", "waiting");
+    const connection = await api.request("/api/notifications/telegram/connect/start", {
+      method: "POST"
+    });
+
+    telegramConnectionCode.textContent = connection.code;
+    telegramStartCommand.textContent = `/start ${connection.code}`;
+    telegramOpenBotLink.href = connection.botUrl;
+    telegramConnectionPanel.classList.remove("hidden");
+
+    if (botWindow) {
+      botWindow.location.href = connection.botUrl;
+    } else {
+      telegramOpenBotLink.focus();
+    }
+
+    startTelegramConnectionStatusPolling();
+  } catch (error) {
+    botWindow?.close();
+    const message = error.message.includes("not configured")
+      ? "Telegram bot not configured"
+      : "Connection failed";
+    setTelegramConnectionFeedback(message, "error");
+    telegramStatusLine.textContent = error.message;
+    telegramConnectButton.disabled = false;
+    telegramConnectButton.textContent = "Connect Telegram";
+  }
+});
+
+telegramTestButton.addEventListener("click", async () => {
+  try {
+    telegramTestButton.disabled = true;
+    telegramTestButton.textContent = "Sending...";
+    const result = await api.request("/api/notifications/telegram/test", { method: "POST" });
+    telegramStatusLine.textContent = result.message;
+  } catch (error) {
+    telegramStatusLine.textContent = `Connection failed: ${error.message}`;
+  } finally {
+    telegramTestButton.disabled = false;
+    telegramTestButton.textContent = "Send Test Alert";
   }
 });
 
@@ -506,6 +538,11 @@ function clearClientAuthState() {
     clearTimeout(marketLoadTimer);
     marketLoadTimer = null;
   }
+
+  if (telegramConnectionTimer) {
+    clearInterval(telegramConnectionTimer);
+    telegramConnectionTimer = null;
+  }
 }
 
 async function bootDashboard() {
@@ -648,6 +685,25 @@ async function loadAlerts() {
 async function loadNotifications() {
   state.notifications = await api.request("/api/notifications/telegram");
   renderNotifications();
+
+  if (!state.notifications.connected && state.notifications.configured) {
+    try {
+      const connection = await api.request("/api/notifications/telegram/connect/status");
+
+      if (connection.status === "waiting") {
+        telegramConnectionCode.textContent = connection.code;
+        telegramStartCommand.textContent = `/start ${connection.code}`;
+        if (connection.botUrl) {
+          telegramOpenBotLink.href = connection.botUrl;
+        }
+        telegramConnectionPanel.classList.remove("hidden");
+        setTelegramConnectionFeedback("Waiting for Telegram confirmation", "waiting");
+        startTelegramConnectionStatusPolling();
+      }
+    } catch {
+      // The main Notifications panel still shows provider configuration state.
+    }
+  }
 }
 
 function applyAlerts({ alerts, unreadCount }) {
@@ -1330,12 +1386,18 @@ function renderNotifications() {
     ? `Start @${botUsername}, obtain your numeric chat ID, then connect it here.`
     : "Start the configured SignalForge bot, obtain your numeric chat ID, then connect it here.";
 
+  telegramConnectButton.disabled = !configured || connected;
+  telegramConnectButton.textContent = connected ? "Telegram Connected" : "Connect Telegram";
   telegramConnectForm.querySelector("button").disabled = !configured;
   telegramPreferencesForm.querySelector("button").disabled = !connected;
   telegramEnabled.disabled = !connected;
+  telegramTestButton.classList.toggle("hidden", !connected);
 
   if (!settings) {
     telegramEnabled.checked = false;
+    if (!configured) {
+      setTelegramConnectionFeedback("Telegram bot not configured", "error");
+    }
     return;
   }
 
@@ -1347,11 +1409,72 @@ function renderNotifications() {
   document.querySelectorAll('input[name="telegram-timeframe"]').forEach((input) => {
     input.checked = settings.timeframes.includes(input.value);
   });
+
+  setTelegramConnectionFeedback("Connected successfully", "success");
 }
 
 function getSelectedTelegramTimeframes() {
   return [...document.querySelectorAll('input[name="telegram-timeframe"]:checked')]
     .map((input) => input.value);
+}
+
+function startTelegramConnectionStatusPolling() {
+  if (telegramConnectionTimer) {
+    clearInterval(telegramConnectionTimer);
+  }
+
+  const checkStatus = async () => {
+    try {
+      const connection = await api.request("/api/notifications/telegram/connect/status");
+
+      if (connection.status === "waiting") {
+        setTelegramConnectionFeedback("Waiting for Telegram confirmation", "waiting");
+        telegramConnectionCode.textContent = connection.code;
+        telegramStartCommand.textContent = `/start ${connection.code}`;
+        if (connection.botUrl) {
+          telegramOpenBotLink.href = connection.botUrl;
+        }
+        telegramConnectionPanel.classList.remove("hidden");
+        return;
+      }
+
+      if (connection.status === "connected") {
+        clearInterval(telegramConnectionTimer);
+        telegramConnectionTimer = null;
+        setTelegramConnectionFeedback("Connected successfully", "success");
+        await loadNotifications();
+        telegramStatusLine.textContent = "Connected successfully. Alerts remain disabled until you enable them.";
+        return;
+      }
+
+      if (["invalid", "expired", "failed"].includes(connection.status)) {
+        clearInterval(telegramConnectionTimer);
+        telegramConnectionTimer = null;
+        setTelegramConnectionFeedback(
+          connection.status === "invalid" ? "Invalid code" : "Connection failed",
+          "error"
+        );
+        telegramStatusLine.textContent = connection.message;
+        telegramConnectButton.disabled = false;
+        telegramConnectButton.textContent = "Connect Telegram";
+      }
+    } catch (error) {
+      clearInterval(telegramConnectionTimer);
+      telegramConnectionTimer = null;
+      setTelegramConnectionFeedback("Connection failed", "error");
+      telegramStatusLine.textContent = error.message;
+      telegramConnectButton.disabled = false;
+      telegramConnectButton.textContent = "Connect Telegram";
+    }
+  };
+
+  checkStatus();
+  telegramConnectionTimer = setInterval(checkStatus, 2000);
+}
+
+function setTelegramConnectionFeedback(message, type = "") {
+  telegramConnectionMessage.textContent = message;
+  telegramConnectionMessage.className = `connection-status ${type}`.trim();
 }
 
 function formatCurrency(value) {

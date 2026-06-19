@@ -1,6 +1,26 @@
 import { appConfig } from "../../config/appConfig.js";
 
 export async function sendTelegramMessage(chatId, text) {
+  return telegramRequest("sendMessage", {
+    chat_id: chatId,
+    text
+  });
+}
+
+export async function getTelegramBotIdentity() {
+  return telegramRequest("getMe");
+}
+
+export async function getTelegramUpdates(offset) {
+  return telegramRequest("getUpdates", {
+    offset,
+    limit: 100,
+    timeout: 0,
+    allowed_updates: ["message"]
+  });
+}
+
+async function telegramRequest(method, payload = undefined) {
   if (!appConfig.telegram.botToken) {
     const error = new Error("Telegram notifications are not configured. Set TELEGRAM_BOT_TOKEN.");
     error.code = "TELEGRAM_NOT_CONFIGURED";
@@ -12,24 +32,21 @@ export async function sendTelegramMessage(chatId, text) {
 
   try {
     const response = await fetch(
-      `https://api.telegram.org/bot${appConfig.telegram.botToken}/sendMessage`,
+      `https://api.telegram.org/bot${appConfig.telegram.botToken}/${method}`,
       {
         method: "POST",
         signal: controller.signal,
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          chat_id: chatId,
-          text
-        })
+        body: JSON.stringify(payload || {})
       }
     );
-    const body = await response.json();
+    const responseBody = await response.json();
 
-    if (!response.ok || body.ok === false) {
-      throw new Error(body.description || `Telegram returned ${response.status}.`);
+    if (!response.ok || responseBody.ok === false) {
+      throw new Error(responseBody.description || `Telegram returned ${response.status}.`);
     }
 
-    return body.result;
+    return responseBody.result;
   } catch (error) {
     if (error.name === "AbortError") {
       throw new Error("Telegram request timed out.");
