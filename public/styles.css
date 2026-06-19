@@ -384,6 +384,17 @@ nav a:hover {
   color: var(--text);
 }
 
+.nav-count {
+  float: right;
+  min-width: 20px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--red);
+  color: #fff;
+  font-size: 11px;
+  text-align: center;
+}
+
 .trial-card {
   display: grid;
   gap: 10px;
@@ -561,6 +572,28 @@ progress::-webkit-progress-value {
   font-size: 28px;
 }
 
+.market-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.icon-action {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--amber);
+  font-size: 22px;
+  line-height: 1;
+}
+
+.icon-action.active {
+  border-color: var(--amber);
+  background: rgba(248, 193, 74, 0.12);
+}
+
 #selected-change {
   color: var(--green);
   font-weight: 800;
@@ -667,6 +700,62 @@ polyline {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px;
   margin-top: 14px;
+}
+
+.watchlist-grid,
+.alerts-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.watchlist-item,
+.alert-item {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(16, 20, 29, 0.88);
+}
+
+.watchlist-item-header,
+.alert-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.alert-preferences {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.alert-preferences label:last-child {
+  grid-column: 1 / -1;
+}
+
+.alert-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.alert-actions button {
+  flex: 1;
+}
+
+.alert-item.unread {
+  border-color: rgba(34, 211, 238, 0.55);
+}
+
+.unread-label {
+  color: var(--cyan);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
 }
 
 .page-view {
@@ -932,6 +1021,8 @@ polyline {
   .dashboard,
   .scanner-grid,
   .signals-grid,
+  .watchlist-grid,
+  .alerts-grid,
   .landing-cards.three,
   .landing-cards.five,
   .pricing-grid {
@@ -956,7 +1047,7 @@ polyline {
   }
 
   nav {
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(5, 1fr);
   }
 }
 
@@ -975,7 +1066,8 @@ polyline {
   nav,
   .metric-strip,
   .performance-grid,
-  .signal-metrics {
+  .signal-metrics,
+  .alert-preferences {
     grid-template-columns: 1fr;
   }
 

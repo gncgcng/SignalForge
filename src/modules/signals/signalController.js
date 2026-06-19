@@ -1,4 +1,5 @@
 import { readJson, sendError, sendJson } from "../../shared/http.js";
+import { detectMatchingAlerts } from "../alerts/alertService.js";
 import { createSignal, listUserSignals, scanAllMarkets, scanMarketSetup } from "./signalService.js";
 
 export async function handleSignalRoutes(req, res, pathname) {
@@ -24,7 +25,9 @@ export async function handleSignalRoutes(req, res, pathname) {
   }
 
   if (pathname === "/api/signals/scan-all" && req.method === "POST") {
-    return sendJson(res, 200, await scanAllMarkets());
+    const result = await scanAllMarkets();
+    const detectedAlerts = await detectMatchingAlerts(req.user, result.setups);
+    return sendJson(res, 200, { ...result, detectedAlerts });
   }
 
   if (pathname === "/api/signals/generate" && req.method === "POST") {

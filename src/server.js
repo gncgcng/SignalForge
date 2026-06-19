@@ -7,6 +7,7 @@ import { verifyDatabaseConnection } from "./db/client.js";
 import { runPendingMigrations, verifySessionSchema } from "./db/migrations.js";
 import { attachAuth } from "./middleware/authMiddleware.js";
 import { handleAuthRoutes } from "./modules/auth/authController.js";
+import { handleAlertRoutes } from "./modules/alerts/alertController.js";
 import { handleMarketDataRoutes } from "./modules/market-data/marketDataController.js";
 import { handleSignalRoutes } from "./modules/signals/signalController.js";
 import { startSignalOutcomeTracker } from "./modules/signals/signalOutcomeService.js";
@@ -31,6 +32,7 @@ const server = createServer(async (req, res) => {
   try {
     const handled =
       (await handleAuthRoutes(req, res, url.pathname)) ||
+      (await handleAlertRoutes(req, res, url.pathname, url)) ||
       (await handleSubscriptionRoutes(req, res, url.pathname)) ||
       (await handleMarketDataRoutes(req, res, url.pathname, url)) ||
       (await handleSignalRoutes(req, res, url.pathname));

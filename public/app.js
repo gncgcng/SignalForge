@@ -20,7 +20,10 @@ const state = {
     hitSlCount: 0,
     expiredCount: 0
   },
-  signals: []
+  signals: [],
+  watchlist: [],
+  alerts: [],
+  unreadAlertCount: 0
 };
 
 const authScreen = document.querySelector("#auth-screen");
@@ -50,6 +53,12 @@ const statWinRate = document.querySelector("#stat-win-rate");
 const statHitTp = document.querySelector("#stat-hit-tp");
 const statHitSl = document.querySelector("#stat-hit-sl");
 const statExpired = document.querySelector("#stat-expired");
+const favoriteMarketButton = document.querySelector("#favorite-market-button");
+const watchlistGrid = document.querySelector("#watchlist-grid");
+const watchlistCount = document.querySelector("#watchlist-count");
+const alertsGrid = document.querySelector("#alerts-grid");
+const alertsCount = document.querySelector("#alerts-count");
+const unreadAlertCount = document.querySelector("#unread-alert-count");
 let marketRequestId = 0;
 let signalRefreshTimer = null;
 let marketLoadTimer = null;
@@ -178,6 +187,19 @@ scanAllButton.addEventListener("click", async () => {
   }
 
   setups.sort((a, b) => b.confidenceScore - a.confidenceScore || b.riskRewardRatio - a.riskRewardRatio);
+
+  if (setups.length) {
+    try {
+      await api.request("/api/alerts/detect", {
+        method: "POST",
+        body: JSON.stringify({ setups })
+      });
+      await loadAlerts();
+    } catch (error) {
+      errors.push({ symbol: "Alerts", timeframe: "", message: error.message });
+    }
+  }
+
   renderScanResults(setups, errors);
   scanAllButton.disabled = false;
   generateButton.disabled = false;
@@ -220,6 +242,67 @@ generateButton.addEventListener("click", async () => {
   }
 });
 
+favoriteMarketButton.addEventListener("click", async () => {
+  if (!state.selectedPair?.selectable) return;
+
+  const favorite = state.watchlist.some((item) => item.symbol === state.selectedPair.symbol);
+  const path = favorite
+    ? `/api/watchlist?symbol=${encodeURIComponent(state.selectedPair.symbol)}`
+    : "/api/watchlist";
+  const options = favorite
+    ? { method: "DELETE" }
+    : { method: "POST", body: JSON.stringify({ symbol: state.selectedPair.symbol }) };
+  const { watchlist } = await api.request(path, options);
+  state.watchlist = watchlist;
+  renderFavoriteButton();
+  renderWatchlist();
+});
+
+watchlistGrid.addEventListener("click", async (event) => {
+  const removeButton = event.target.closest("[data-watchlist-remove]");
+  const saveButton = event.target.closest("[data-alert-save]");
+
+  if (removeButton) {
+    const { watchlist } = await api.request(
+      `/api/watchlist?symbol=${encodeURIComponent(removeButton.dataset.watchlistRemove)}`,
+      { method: "DELETE" }
+    );
+    state.watchlist = watchlist;
+    renderWatchlist();
+    renderFavoriteButton();
+    return;
+  }
+
+  if (saveButton) {
+    const item = saveButton.closest("[data-watchlist-symbol]");
+    const { watchlist } = await api.request("/api/alerts/preferences", {
+      method: "PUT",
+      body: JSON.stringify({
+        symbol: item.dataset.watchlistSymbol,
+        timeframe: item.querySelector("[data-alert-timeframe]").value,
+        direction: item.querySelector("[data-alert-direction]").value,
+        minimumConfidence: Number(item.querySelector("[data-alert-confidence]").value)
+      })
+    });
+    state.watchlist = watchlist;
+    renderWatchlist();
+  }
+});
+
+alertsGrid.addEventListener("click", async (event) => {
+  const readButton = event.target.closest("[data-alert-read]");
+  const unlockButton = event.target.closest("[data-alert-unlock]");
+
+  if (readButton) {
+    applyAlerts(await api.request(`/api/alerts/${readButton.dataset.alertRead}/read`, { method: "POST" }));
+    return;
+  }
+
+  if (unlockButton) {
+    await unlockSignal(unlockButton, unlockButton.dataset.alertUnlock, unlockButton.dataset.alertTimeframe);
+  }
+});
+
 signalsGrid.addEventListener("click", async (event) => {
   const button = event.target.closest("[data-unlock-symbol]");
 
@@ -259,6 +342,33 @@ signalsGrid.addEventListener("click", async (event) => {
   }
 });
 
+async function unlockSignal(button, symbol, timeframe) {
+  try {
+    button.disabled = true;
+    statusLine.textContent = `Unlocking ${symbol} ${timeframe}...`;
+    const { signal, subscription, analysis } = await api.request("/api/signals/generate", {
+      method: "POST",
+      body: JSON.stringify({ symbol, timeframe })
+    });
+
+    state.subscription = subscription;
+    renderSubscription();
+
+    if (!signal) {
+      renderNoSetup(analysis);
+      statusLine.textContent = "Setup no longer qualifies. Trial credit was not used.";
+      return;
+    }
+
+    await loadSignals();
+    statusLine.textContent = "Full signal unlocked and saved.";
+  } catch (error) {
+    statusLine.textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+
 async function init() {
   const [{ user }, authConfig] = await Promise.all([
     api.request("/api/auth/session"),
@@ -297,6 +407,9 @@ function clearClientAuthState() {
   state.marketData = null;
   state.marketStatus = {};
   state.signals = [];
+  state.watchlist = [];
+  state.alerts = [];
+  state.unreadAlertCount = 0;
   state.signalStats = {
     totalSignals: 0,
     winRate: 0,
@@ -321,9 +434,10 @@ async function bootDashboard() {
   authScreen.classList.add("hidden");
   dashboard.classList.remove("hidden");
   document.querySelector("#user-name").textContent = state.user.name;
-  await Promise.all([loadPairs(), loadSubscription(), loadSignals()]);
+  await Promise.all([loadPairs(), loadSubscription(), loadSignals(), loadWatchlist(), loadAlerts()]);
   renderTimeframes();
-  showView(location.hash?.replace("#", "") === "signals" ? "signals" : "scanner");
+  const requestedView = location.hash?.replace("#", "");
+  showView(["signals", "watchlist", "alerts"].includes(requestedView) ? requestedView : "scanner");
   startSignalHistoryRefresh();
   await loadMarketData();
 }
@@ -434,6 +548,24 @@ async function loadSignals() {
   renderPerformanceStats();
 }
 
+async function loadWatchlist() {
+  const { watchlist } = await api.request("/api/watchlist");
+  state.watchlist = watchlist;
+  renderWatchlist();
+  renderFavoriteButton();
+}
+
+async function loadAlerts() {
+  applyAlerts(await api.request("/api/alerts"));
+}
+
+function applyAlerts({ alerts, unreadCount }) {
+  state.alerts = alerts;
+  state.unreadAlertCount = unreadCount;
+  renderAlerts();
+  renderUnreadAlertCount();
+}
+
 function startSignalHistoryRefresh() {
   if (signalRefreshTimer) {
     return;
@@ -453,7 +585,7 @@ function startSignalHistoryRefresh() {
 }
 
 function showView(view) {
-  const normalizedView = ["scanner", "signals", "portfolio", "billing"].includes(view) ? view : "scanner";
+  const normalizedView = ["scanner", "watchlist", "alerts", "signals", "billing"].includes(view) ? view : "scanner";
   state.activeView = normalizedView;
 
   document.querySelectorAll("[data-view]").forEach((section) => {
@@ -466,8 +598,9 @@ function showView(view) {
 
   const titles = {
     scanner: ["Market scanner", "High-probability setup lab"],
+    watchlist: ["Favorite markets", "Watchlist & alert rules"],
+    alerts: ["Detected setups", "In-app alerts"],
     signals: ["Signals history", "Saved signal desk"],
-    portfolio: ["Portfolio", "Portfolio workspace"],
     billing: ["Subscription", "Billing"]
   };
   const [eyebrow, title] = titles[normalizedView];
@@ -476,6 +609,10 @@ function showView(view) {
 
   if (normalizedView === "signals") {
     renderSignalsHistory();
+  }
+
+  if (normalizedView === "alerts") {
+    renderAlerts();
   }
 }
 
@@ -558,6 +695,19 @@ function renderSelectedMarket() {
     ? formatCurrency(state.selectedPair.lastPrice)
     : state.selectedPair.availabilityMessage || "Coming Soon";
   document.querySelector("#selected-change").textContent = Number.isFinite(state.selectedPair.change24h) ? formatPercent(state.selectedPair.change24h) : "--";
+  renderFavoriteButton();
+}
+
+function renderFavoriteButton() {
+  const favorite = state.watchlist.some((item) => item.symbol === state.selectedPair?.symbol);
+  favoriteMarketButton.textContent = favorite ? "★" : "☆";
+  favoriteMarketButton.classList.toggle("active", favorite);
+  favoriteMarketButton.title = favorite ? "Remove from watchlist" : "Add to watchlist";
+  favoriteMarketButton.setAttribute(
+    "aria-label",
+    favorite ? "Remove selected market from watchlist" : "Add selected market to watchlist"
+  );
+  favoriteMarketButton.disabled = !state.selectedPair?.selectable;
 }
 
 function getProviderLabel(pair) {
@@ -974,6 +1124,103 @@ function getConfirmationGroup(name = "") {
   if (normalized.includes("atr")) return "ATR";
   if (normalized.includes("volume")) return "Volume";
   return name;
+}
+
+function renderWatchlist() {
+  watchlistCount.textContent = `${state.watchlist.length} market${state.watchlist.length === 1 ? "" : "s"}`;
+
+  if (!state.watchlist.length) {
+    watchlistGrid.innerHTML = `
+      <div class="empty-state">
+        <strong>Your watchlist is empty</strong>
+        <p class="reasoning">Select an active crypto or commodity market in the scanner, then use the star button.</p>
+      </div>
+    `;
+    return;
+  }
+
+  watchlistGrid.innerHTML = state.watchlist.map((item) => {
+    const preference = item.preference || {
+      timeframe: "1h",
+      direction: "both",
+      minimumConfidence: 75
+    };
+
+    return `
+      <article class="watchlist-item" data-watchlist-symbol="${item.symbol}">
+        <div class="watchlist-item-header">
+          <div>
+            <strong>${item.symbol}</strong>
+            <p class="reasoning">${item.preference ? "Alert active" : "Favorite market"}</p>
+          </div>
+          <button class="icon-action active" data-watchlist-remove="${item.symbol}" type="button" title="Remove from watchlist" aria-label="Remove ${item.symbol} from watchlist">★</button>
+        </div>
+        <div class="alert-preferences">
+          <label>
+            Timeframe
+            <select data-alert-timeframe>
+              ${["5m", "15m", "1h", "4h"].map((frame) => `<option value="${frame}" ${preference.timeframe === frame ? "selected" : ""}>${frame}</option>`).join("")}
+            </select>
+          </label>
+          <label>
+            Direction
+            <select data-alert-direction>
+              ${["long", "short", "both"].map((direction) => `<option value="${direction}" ${preference.direction === direction ? "selected" : ""}>${direction[0].toUpperCase()}${direction.slice(1)}</option>`).join("")}
+            </select>
+          </label>
+          <label>
+            Minimum confidence
+            <input data-alert-confidence type="number" min="0" max="100" step="1" value="${preference.minimumConfidence}" />
+          </label>
+        </div>
+        <button class="secondary-action" data-alert-save="${item.symbol}" type="button">Save Alert Preference</button>
+      </article>
+    `;
+  }).join("");
+}
+
+function renderAlerts() {
+  alertsCount.textContent = `${state.alerts.length} alert${state.alerts.length === 1 ? "" : "s"}`;
+
+  if (!state.alerts.length) {
+    alertsGrid.innerHTML = `
+      <div class="empty-state">
+        <strong>No alerts detected yet</strong>
+        <p class="reasoning">Save alert preferences in your Watchlist, then run Scan All to detect matching setups.</p>
+      </div>
+    `;
+    return;
+  }
+
+  alertsGrid.innerHTML = state.alerts.map((alert) => `
+    <article class="alert-item ${alert.readAt ? "" : "unread"}">
+      <div class="alert-item-header">
+        <div>
+          <strong>${alert.symbol} · ${alert.timeframe}</strong>
+          <p class="reasoning">${formatDateTime(alert.detectedAt)}</p>
+        </div>
+        <div>
+          ${alert.readAt ? "" : `<span class="unread-label">New</span>`}
+          <strong class="direction ${alert.direction}">${alert.direction}</strong>
+        </div>
+      </div>
+      <div class="signal-metrics">
+        <div><span>Confidence</span><strong>${alert.confidenceScore}%</strong></div>
+        <div><span>Risk/reward</span><strong>${alert.riskRewardRatio}:1</strong></div>
+      </div>
+      <p class="reasoning">${alert.reasoning}</p>
+      ${renderSignalTransparency(alert)}
+      <div class="alert-actions">
+        ${alert.readAt ? "" : `<button class="secondary-action" data-alert-read="${alert.id}" type="button">Mark Read</button>`}
+        <button data-alert-unlock="${alert.symbol}" data-alert-timeframe="${alert.timeframe}" type="button">Unlock Full Signal</button>
+      </div>
+    </article>
+  `).join("");
+}
+
+function renderUnreadAlertCount() {
+  unreadAlertCount.textContent = `${state.unreadAlertCount}`;
+  unreadAlertCount.classList.toggle("hidden", state.unreadAlertCount === 0);
 }
 
 function formatCurrency(value) {

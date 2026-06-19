@@ -157,8 +157,9 @@
           </div>
           <nav>
             <a class="active" href="#scanner" data-view-link="scanner">Scanner</a>
+            <a href="#watchlist" data-view-link="watchlist">Watchlist</a>
+            <a href="#alerts" data-view-link="alerts">Alerts <span class="nav-count hidden" id="unread-alert-count">0</span></a>
             <a href="#signals" data-view-link="signals">Signals</a>
-            <a href="#portfolio" data-view-link="portfolio">Portfolio</a>
             <a href="#billing" data-view-link="billing">Billing</a>
           </nav>
           <div class="trial-card">
@@ -210,7 +211,10 @@
                     <span id="selected-symbol">BTC-USD</span>
                     <strong id="selected-price">$68,420.50</strong>
                   </div>
-                  <span id="selected-change">+2.4%</span>
+                  <div class="market-actions">
+                    <span id="selected-change">+2.4%</span>
+                    <button class="icon-action" id="favorite-market-button" type="button" title="Add to watchlist" aria-label="Add selected market to watchlist">☆</button>
+                  </div>
                 </div>
                 <div class="chart-canvas" aria-label="mock trading chart">
                   <div class="grid-lines"></div>
@@ -238,6 +242,36 @@
               </div>
               <div class="signals-grid" id="signals-grid"></div>
             </section>
+          </section>
+
+          <section class="page-view hidden" id="watchlist-view" data-view="watchlist">
+            <div class="section-title">
+              <div>
+                <span class="eyebrow">Favorite markets</span>
+                <h3>Watchlist & alert rules</h3>
+              </div>
+              <span id="watchlist-count">0 markets</span>
+            </div>
+            <div class="signal-disclaimer">
+              <strong>Alerts are in-app only.</strong>
+              <span>Scanning and alert detection do not use signal credits.</span>
+            </div>
+            <div class="watchlist-grid" id="watchlist-grid"></div>
+          </section>
+
+          <section class="page-view hidden" id="alerts-view" data-view="alerts">
+            <div class="section-title">
+              <div>
+                <span class="eyebrow">Detected setups</span>
+                <h3>Alerts</h3>
+              </div>
+              <span id="alerts-count">0 alerts</span>
+            </div>
+            <div class="signal-disclaimer">
+              <strong>Educational tool only. Not financial advice.</strong>
+              <span>Unlocking a full signal is optional and is the only action that uses a credit.</span>
+            </div>
+            <div class="alerts-grid" id="alerts-grid"></div>
           </section>
 
           <section class="page-view hidden" id="signals-view" data-view="signals">
@@ -295,10 +329,6 @@
               <span>Past signal outcomes do not predict future results.</span>
             </div>
             <div class="signals-table-wrap" id="signals-history"></div>
-          </section>
-
-          <section class="page-view hidden" id="portfolio-view" data-view="portfolio">
-            <article class="panel"><p class="reasoning">Portfolio tools are coming soon.</p></article>
           </section>
 
           <section class="page-view hidden" id="billing-view" data-view="billing">
