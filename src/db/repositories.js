@@ -92,10 +92,10 @@ export async function saveUnlockedSignal(userId, signal) {
     await client.query(`
       INSERT INTO saved_signals (
         id, user_id, symbol, timeframe, direction, entry_price, stop_loss, take_profit,
-        risk_reward_ratio, confidence_score, reasoning, confirmations, indicators,
-        market_source, generated_at
+        risk_reward_ratio, confidence_score, quality_score, setup_type, reasoning,
+        confirmations, indicators, market_source, generated_at
       )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
     `, [
       signal.id,
       userId,
@@ -107,6 +107,8 @@ export async function saveUnlockedSignal(userId, signal) {
       signal.takeProfit,
       signal.riskRewardRatio,
       signal.confidenceScore,
+      signal.qualityScore,
+      signal.setupType,
       signal.reasoning,
       JSON.stringify(signal.confirmations || []),
       JSON.stringify(signal.indicators || {}),
@@ -769,6 +771,8 @@ function mapSignal(row) {
     takeProfit: Number(row.take_profit),
     riskRewardRatio: Number(row.risk_reward_ratio),
     confidenceScore: Number(row.confidence_score),
+    qualityScore: Number(row.quality_score || 0),
+    setupType: row.setup_type || "Qualified setup",
     reasoning: row.reasoning,
     confirmations: row.confirmations || [],
     indicators: row.indicators || {},

@@ -113,7 +113,9 @@ export async function scanAllMarketsDetailed() {
 
 export function rankSetups(setups) {
   return setups.sort((a, b) => {
-    return b.confidenceScore - a.confidenceScore || b.riskRewardRatio - a.riskRewardRatio;
+    return b.qualityScore - a.qualityScore ||
+      b.confidenceScore - a.confidenceScore ||
+      b.riskRewardRatio - a.riskRewardRatio;
   });
 }
 
@@ -134,8 +136,10 @@ function toScanPreview(signal) {
     symbol: signal.symbol,
     timeframe: signal.timeframe,
     direction: signal.direction,
+    setupType: signal.setupType,
     riskRewardRatio: signal.riskRewardRatio,
     confidenceScore: signal.confidenceScore,
+    qualityScore: signal.qualityScore,
     reasoning: signal.reasoning,
     confirmations: signal.confirmations,
     generatedAt: signal.generatedAt,

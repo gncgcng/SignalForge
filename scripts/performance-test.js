@@ -27,14 +27,15 @@ const result = {
   monthlyPerformanceCorrect: analytics.monthlyPerformance[0].netR === 1 &&
     analytics.monthlyPerformance[1].netR === 2.5,
   chartsPresent: analytics.charts.winRateOverTime.length === 2 &&
-    analytics.charts.tpVsSl[0].value === 2 &&
+    analytics.charts.outcomes[0].value === 2 &&
+    analytics.charts.outcomes[2].value === 1 &&
     analytics.charts.marketDistribution.length === 3,
   repositoryUserScoped: repositories.includes('const clauses = ["s.user_id = $1"]') &&
     repositories.includes("s.generated_at >= $") &&
     repositories.includes("s.symbol = $"),
   performanceTabPresent: html.includes('data-view-link="performance"') &&
     html.includes('data-view="performance"'),
-  filtersPresent: ["performance-from", "performance-to", "performance-market", "performance-timeframe"]
+  filtersPresent: ["performance-from", "performance-to", "performance-market", "performance-timeframe", "performance-direction"]
     .every((id) => html.includes(`id="${id}"`)),
   requiredChartsRendered: app.includes("renderWinRateChart") &&
     app.includes("renderAnalyticsBars") &&

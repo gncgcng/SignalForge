@@ -1415,3 +1415,65 @@ polyline {
     grid-template-columns: 1fr;
   }
 }
+.backtest-panel {
+  margin-top: 24px;
+}
+
+.backtest-controls {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(140px, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+  margin-top: 18px;
+}
+
+.backtest-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 1px;
+  margin-top: 20px;
+  background: var(--line);
+  border: 1px solid var(--line);
+}
+
+.backtest-summary-grid > div {
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  background: var(--surface);
+}
+
+.backtest-summary-grid span,
+.backtest-review span,
+.backtest-trades span {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.backtest-review {
+  padding: 16px 0;
+}
+
+.backtest-trades {
+  border-top: 1px solid var(--line);
+}
+
+.backtest-trades > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+@media (max-width: 900px) {
+  .backtest-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 620px) {
+  .backtest-controls {
+    grid-template-columns: 1fr;
+  }
+}

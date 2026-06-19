@@ -531,6 +531,42 @@
               <span id="admin-request-count">0 pending</span>
             </div>
             <div class="admin-request-list" id="admin-request-list"></div>
+            <section class="panel backtest-panel">
+              <div class="panel-header">
+                <div>
+                  <span class="eyebrow">Internal signal research</span>
+                  <h3>Historical rule-set backtest</h3>
+                </div>
+                <span class="status-pill" id="backtest-status">Not run</span>
+              </div>
+              <p class="reasoning">Runs the production signal engine against real provider candles. Results are evaluation-only and never enable a rule set automatically.</p>
+              <form class="backtest-controls" id="backtest-form">
+                <label>
+                  Market
+                  <select id="backtest-symbol">
+                    <option value="BTC-USD">BTC-USD</option>
+                    <option value="ETH-USD">ETH-USD</option>
+                    <option value="SOL-USD">SOL-USD</option>
+                    <option value="XAU/USD">XAU/USD</option>
+                  </select>
+                </label>
+                <label>
+                  Timeframe
+                  <select id="backtest-timeframe">
+                    <option value="15m">15m</option>
+                    <option value="1h" selected>1h</option>
+                    <option value="4h">4h</option>
+                  </select>
+                </label>
+                <button type="submit">Run Backtest</button>
+              </form>
+              <div class="backtest-output" id="backtest-output">
+                <div class="empty-state">
+                  <strong>No backtest selected</strong>
+                  <p class="reasoning">Choose a supported market and timeframe to evaluate the current rules.</p>
+                </div>
+              </div>
+            </section>
           </section>
 
           <section class="page-view hidden" id="billing-view" data-view="billing">

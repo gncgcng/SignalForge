@@ -19,12 +19,14 @@
     "test:session-migration": "node scripts/session-migration-test.js",
     "smoke": "node scripts/smoke-test.js",
     "test:signals": "node scripts/signal-rules-test.js",
+    "test:signal-accuracy": "node scripts/signal-accuracy-test.js",
     "test:signal-transparency": "node scripts/signal-transparency-test.js",
     "test:watchlist-alerts": "node scripts/watchlist-alerts-test.js",
     "test:telegram-notifications": "node scripts/telegram-notifications-test.js",
     "test:telegram-onboarding": "node scripts/telegram-onboarding-test.js",
     "test:tester-access": "node scripts/tester-access-test.js",
-    "test:performance": "node scripts/performance-test.js"
+    "test:performance": "node scripts/performance-test.js",
+    "test:backtesting": "node scripts/backtest-test.js"
   },
   "dependencies": {
     "pg": "^8.13.1"

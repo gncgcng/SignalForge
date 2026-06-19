@@ -91,11 +91,17 @@ const testerAccessMessage = document.querySelector("#tester-access-message");
 const adminNavLink = document.querySelector("#admin-nav-link");
 const adminRequestList = document.querySelector("#admin-request-list");
 const adminRequestCount = document.querySelector("#admin-request-count");
+const backtestForm = document.querySelector("#backtest-form");
+const backtestSymbol = document.querySelector("#backtest-symbol");
+const backtestTimeframe = document.querySelector("#backtest-timeframe");
+const backtestStatus = document.querySelector("#backtest-status");
+const backtestOutput = document.querySelector("#backtest-output");
 const performanceFilters = document.querySelector("#performance-filters");
 const performanceFrom = document.querySelector("#performance-from");
 const performanceTo = document.querySelector("#performance-to");
 const performanceMarket = document.querySelector("#performance-market");
 const performanceTimeframe = document.querySelector("#performance-timeframe");
+const performanceDirection = document.querySelector("#performance-direction");
 const performanceClear = document.querySelector("#performance-clear");
 let marketRequestId = 0;
 let signalRefreshTimer = null;
@@ -470,6 +476,35 @@ adminRequestList.addEventListener("click", async (event) => {
   }
 });
 
+backtestForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const submitButton = backtestForm.querySelector("button");
+
+  try {
+    submitButton.disabled = true;
+    submitButton.textContent = "Running...";
+    backtestStatus.textContent = "Loading live candles";
+    const query = new URLSearchParams({
+      symbol: backtestSymbol.value,
+      timeframe: backtestTimeframe.value
+    });
+    const { backtest } = await api.request(`/api/backtesting?${query}`);
+    renderBacktest(backtest);
+  } catch (error) {
+    backtestStatus.textContent = "Failed";
+    backtestStatus.className = "status-pill status-hit-sl";
+    backtestOutput.innerHTML = `
+      <div class="empty-state">
+        <strong>Backtest unavailable</strong>
+        <p class="reasoning">${escapeHtml(error.message)}</p>
+      </div>
+    `;
+  } finally {
+    submitButton.disabled = false;
+    submitButton.textContent = "Run Backtest";
+  }
+});
+
 performanceFilters.addEventListener("submit", async (event) => {
   event.preventDefault();
   await loadPerformance();
@@ -480,6 +515,7 @@ performanceClear.addEventListener("click", async () => {
   performanceTo.value = "";
   performanceMarket.value = "";
   performanceTimeframe.value = "";
+  performanceDirection.value = "";
   await loadPerformance();
 });
 
@@ -778,6 +814,7 @@ async function loadPerformance() {
   if (performanceTo.value) params.set("to", performanceTo.value);
   if (performanceMarket.value) params.set("symbol", performanceMarket.value);
   if (performanceTimeframe.value) params.set("timeframe", performanceTimeframe.value);
+  if (performanceDirection.value) params.set("direction", performanceDirection.value);
   const query = params.toString();
   const { performance } = await api.request(`/api/performance${query ? `?${query}` : ""}`);
   state.performance = performance;
@@ -1164,9 +1201,15 @@ function renderPerformance() {
   document.querySelector("#performance-hit-sl").textContent = `${summary.hitSlCount}`;
   document.querySelector("#performance-expired").textContent = `${summary.expiredCount}`;
   document.querySelector("#performance-average-rr").textContent = `${summary.averageRiskReward}:1`;
+  document.querySelector("#performance-best-market").textContent = summary.bestMarket
+    ? `${summary.bestMarket.label} · ${summary.bestMarket.winRate}%`
+    : "--";
+  document.querySelector("#performance-best-timeframe").textContent = summary.bestTimeframe
+    ? `${summary.bestTimeframe.label} · ${summary.bestTimeframe.winRate}%`
+    : "--";
   document.querySelector("#performance-filter-label").textContent = getPerformanceFilterLabel();
   renderWinRateChart(charts.winRateOverTime);
-  renderAnalyticsBars(document.querySelector("#tp-sl-chart"), charts.tpVsSl, true);
+  renderAnalyticsBars(document.querySelector("#tp-sl-chart"), charts.outcomes, true);
   renderAnalyticsBars(document.querySelector("#market-distribution-chart"), charts.marketDistribution);
   renderAnalyticsBars(document.querySelector("#signals-by-market"), signalsByMarket);
   renderAnalyticsBars(document.querySelector("#signals-by-timeframe"), signalsByTimeframe);
@@ -1388,6 +1431,8 @@ function renderScanCard(setup) {
         <strong class="direction ${setup.direction}">${setup.direction}</strong>
       </div>
       <div class="signal-metrics">
+        <div><span>Setup type</span><strong>${setup.setupType || "Qualified setup"}</strong></div>
+        <div><span>Quality</span><strong>${setup.qualityScore || 0}/100</strong></div>
         <div><span>Confidence</span><strong>${setup.confidenceScore}%</strong></div>
         <div><span>Risk/reward</span><strong>${setup.riskRewardRatio}:1</strong></div>
         <div><span>Passed</span><strong>${setup.confirmations.filter((item) => item.passed).length}/${setup.confirmations.length}</strong></div>
@@ -1411,6 +1456,8 @@ function renderSignalCard(signal) {
         <strong class="direction ${signal.direction}">${signal.direction}</strong>
       </div>
       <div class="signal-metrics">
+        <div><span>Setup type</span><strong>${signal.setupType || "Qualified setup"}</strong></div>
+        <div><span>Quality</span><strong>${signal.qualityScore || 0}/100</strong></div>
         <div><span>Entry</span><strong>${formatCurrency(signal.entryPrice)}</strong></div>
         <div><span>Stop loss</span><strong>${formatCurrency(signal.stopLoss)}</strong></div>
         <div><span>Take profit</span><strong>${formatCurrency(signal.takeProfit)}</strong></div>
@@ -1729,6 +1776,53 @@ function renderAdminRequests() {
       </div>
     </article>
   `).join("");
+}
+
+function renderBacktest(backtest) {
+  const { metrics, ruleSetEvaluation } = backtest;
+  const statusLabels = {
+    passed: "Historical checks passed",
+    failed: "Historical checks failed",
+    "insufficient-sample": "Insufficient sample"
+  };
+  const statusClass = ruleSetEvaluation.status === "passed"
+    ? "status-hit-tp"
+    : ruleSetEvaluation.status === "failed"
+      ? "status-hit-sl"
+      : "status-expired";
+
+  backtestStatus.textContent = statusLabels[ruleSetEvaluation.status] || "Review required";
+  backtestStatus.className = `status-pill ${statusClass}`;
+  backtestOutput.innerHTML = `
+    <div class="backtest-summary-grid">
+      <div><span>Total trades</span><strong>${metrics.totalTrades}</strong></div>
+      <div><span>Win rate</span><strong>${metrics.winRate}%</strong></div>
+      <div><span>Average R</span><strong>${metrics.averageR}R</strong></div>
+      <div><span>Net R</span><strong>${metrics.netR}R</strong></div>
+      <div><span>Max drawdown</span><strong>${metrics.maxDrawdownR}R</strong></div>
+      <div><span>Average quality</span><strong>${metrics.averageQualityScore}/100</strong></div>
+    </div>
+    <div class="backtest-review">
+      <strong>${escapeHtml(backtest.symbol)} · ${escapeHtml(backtest.timeframe)} · ${escapeHtml(backtest.provider)}</strong>
+      <p class="reasoning">${escapeHtml(ruleSetEvaluation.message)}</p>
+      <span>${backtest.candleCount} real candles · ${metrics.wins} TP · ${metrics.losses} SL · ${metrics.expired} expired</span>
+    </div>
+    ${backtest.trades.length ? `
+      <div class="backtest-trades">
+        ${backtest.trades.slice(0, 12).map((trade) => `
+          <div>
+            <span>${escapeHtml(trade.setupType)} · ${escapeHtml(trade.direction.toUpperCase())}</span>
+            <strong class="${trade.outcome === "Hit TP" ? "positive" : trade.outcome === "Hit SL" ? "negative" : ""}">${escapeHtml(trade.outcome)} · ${trade.realizedR}R</strong>
+          </div>
+        `).join("")}
+      </div>
+    ` : `
+      <div class="empty-state">
+        <strong>No qualifying historical trades</strong>
+        <p class="reasoning">The stricter rules correctly returned no trade for this candle sample.</p>
+      </div>
+    `}
+  `;
 }
 
 function escapeHtml(value) {
