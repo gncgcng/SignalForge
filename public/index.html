@@ -159,6 +159,7 @@
             <a class="active" href="#scanner" data-view-link="scanner">Scanner</a>
             <a href="#watchlist" data-view-link="watchlist">Watchlist</a>
             <a href="#alerts" data-view-link="alerts">Alerts <span class="nav-count hidden" id="unread-alert-count">0</span></a>
+            <a href="#notifications" data-view-link="notifications">Notifications</a>
             <a href="#signals" data-view-link="signals">Signals</a>
             <a href="#billing" data-view-link="billing">Billing</a>
           </nav>
@@ -272,6 +273,76 @@
               <span>Unlocking a full signal is optional and is the only action that uses a credit.</span>
             </div>
             <div class="alerts-grid" id="alerts-grid"></div>
+          </section>
+
+          <section class="page-view hidden" id="notifications-view" data-view="notifications">
+            <div class="section-title">
+              <div>
+                <span class="eyebrow">Delivery channels</span>
+                <h3>Notifications</h3>
+              </div>
+              <span id="telegram-connection-status">Not connected</span>
+            </div>
+            <div class="notifications-layout">
+              <form class="panel notification-panel" id="telegram-connect-form">
+                <div class="panel-header">
+                  <div>
+                    <span class="eyebrow">Telegram</span>
+                    <h3>Connect account</h3>
+                  </div>
+                  <span class="status-pill" id="telegram-provider-status">Checking</span>
+                </div>
+                <p class="reasoning" id="telegram-connect-help">Start the SignalForge bot, then enter your numeric Telegram chat ID.</p>
+                <label>
+                  Telegram chat ID
+                  <input id="telegram-chat-id" inputmode="numeric" placeholder="123456789" required />
+                </label>
+                <button type="submit">Connect Telegram</button>
+              </form>
+
+              <form class="panel notification-panel" id="telegram-preferences-form">
+                <div class="panel-header">
+                  <div>
+                    <span class="eyebrow">Alert rules</span>
+                    <h3>Telegram preferences</h3>
+                  </div>
+                  <label class="switch-row">
+                    <input id="telegram-enabled" type="checkbox" />
+                    Enabled
+                  </label>
+                </div>
+                <p class="reasoning">Telegram alerts apply to markets in your Watchlist. Scan All remains free; credits are used only when you unlock a signal.</p>
+                <label class="switch-row">
+                  <input type="checkbox" checked disabled />
+                  Favorite markets
+                </label>
+                <fieldset class="timeframe-options">
+                  <legend>Timeframes</legend>
+                  <label><input type="checkbox" name="telegram-timeframe" value="5m" /> 5m</label>
+                  <label><input type="checkbox" name="telegram-timeframe" value="15m" /> 15m</label>
+                  <label><input type="checkbox" name="telegram-timeframe" value="1h" checked /> 1h</label>
+                  <label><input type="checkbox" name="telegram-timeframe" value="4h" checked /> 4h</label>
+                </fieldset>
+                <label>
+                  Direction
+                  <select id="telegram-direction">
+                    <option value="both">Long and short</option>
+                    <option value="long">Long only</option>
+                    <option value="short">Short only</option>
+                  </select>
+                </label>
+                <label>
+                  Minimum confidence
+                  <input id="telegram-minimum-confidence" type="number" min="0" max="100" step="1" value="75" />
+                </label>
+                <button type="submit">Save Preferences</button>
+                <p class="status-line" id="telegram-status-line"></p>
+              </form>
+            </div>
+            <div class="signal-disclaimer">
+              <strong>Educational tool only. Not financial advice.</strong>
+              <span>Telegram delivery does not change signal confidence or guarantee outcomes.</span>
+            </div>
           </section>
 
           <section class="page-view hidden" id="signals-view" data-view="signals">

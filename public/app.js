@@ -23,7 +23,13 @@ const state = {
   signals: [],
   watchlist: [],
   alerts: [],
-  unreadAlertCount: 0
+  unreadAlertCount: 0,
+  notifications: {
+    configured: false,
+    connected: false,
+    botUsername: "",
+    settings: null
+  }
 };
 
 const authScreen = document.querySelector("#auth-screen");
@@ -59,6 +65,13 @@ const watchlistCount = document.querySelector("#watchlist-count");
 const alertsGrid = document.querySelector("#alerts-grid");
 const alertsCount = document.querySelector("#alerts-count");
 const unreadAlertCount = document.querySelector("#unread-alert-count");
+const telegramConnectForm = document.querySelector("#telegram-connect-form");
+const telegramPreferencesForm = document.querySelector("#telegram-preferences-form");
+const telegramChatId = document.querySelector("#telegram-chat-id");
+const telegramEnabled = document.querySelector("#telegram-enabled");
+const telegramDirection = document.querySelector("#telegram-direction");
+const telegramMinimumConfidence = document.querySelector("#telegram-minimum-confidence");
+const telegramStatusLine = document.querySelector("#telegram-status-line");
 let marketRequestId = 0;
 let signalRefreshTimer = null;
 let marketLoadTimer = null;
@@ -303,6 +316,66 @@ alertsGrid.addEventListener("click", async (event) => {
   }
 });
 
+telegramConnectForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+
+  try {
+    telegramStatusLine.textContent = "Connecting Telegram...";
+    state.notifications = await api.request("/api/notifications/telegram/connect", {
+      method: "POST",
+      body: JSON.stringify({
+        chatId: telegramChatId.value,
+        enabled: true,
+        timeframes: getSelectedTelegramTimeframes(),
+        direction: telegramDirection.value,
+        minimumConfidence: Number(telegramMinimumConfidence.value)
+      })
+    });
+    renderNotifications();
+    telegramStatusLine.textContent = "Telegram connected. A confirmation message was sent.";
+  } catch (error) {
+    telegramStatusLine.textContent = error.message;
+  }
+});
+
+telegramPreferencesForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+
+  try {
+    state.notifications = await api.request("/api/notifications/telegram/preferences", {
+      method: "PUT",
+      body: JSON.stringify({
+        enabled: telegramEnabled.checked,
+        timeframes: getSelectedTelegramTimeframes(),
+        direction: telegramDirection.value,
+        minimumConfidence: Number(telegramMinimumConfidence.value)
+      })
+    });
+    renderNotifications();
+    telegramStatusLine.textContent = "Telegram preferences saved.";
+  } catch (error) {
+    telegramStatusLine.textContent = error.message;
+  }
+});
+
+telegramEnabled.addEventListener("change", async () => {
+  if (!state.notifications.connected) return;
+
+  try {
+    state.notifications = await api.request("/api/notifications/telegram/enabled", {
+      method: "PUT",
+      body: JSON.stringify({ enabled: telegramEnabled.checked })
+    });
+    renderNotifications();
+    telegramStatusLine.textContent = telegramEnabled.checked
+      ? "Telegram notifications enabled."
+      : "Telegram notifications disabled.";
+  } catch (error) {
+    telegramEnabled.checked = !telegramEnabled.checked;
+    telegramStatusLine.textContent = error.message;
+  }
+});
+
 signalsGrid.addEventListener("click", async (event) => {
   const button = event.target.closest("[data-unlock-symbol]");
 
@@ -410,6 +483,12 @@ function clearClientAuthState() {
   state.watchlist = [];
   state.alerts = [];
   state.unreadAlertCount = 0;
+  state.notifications = {
+    configured: false,
+    connected: false,
+    botUsername: "",
+    settings: null
+  };
   state.signalStats = {
     totalSignals: 0,
     winRate: 0,
@@ -434,10 +513,17 @@ async function bootDashboard() {
   authScreen.classList.add("hidden");
   dashboard.classList.remove("hidden");
   document.querySelector("#user-name").textContent = state.user.name;
-  await Promise.all([loadPairs(), loadSubscription(), loadSignals(), loadWatchlist(), loadAlerts()]);
+  await Promise.all([
+    loadPairs(),
+    loadSubscription(),
+    loadSignals(),
+    loadWatchlist(),
+    loadAlerts(),
+    loadNotifications()
+  ]);
   renderTimeframes();
   const requestedView = location.hash?.replace("#", "");
-  showView(["signals", "watchlist", "alerts"].includes(requestedView) ? requestedView : "scanner");
+  showView(["signals", "watchlist", "alerts", "notifications"].includes(requestedView) ? requestedView : "scanner");
   startSignalHistoryRefresh();
   await loadMarketData();
 }
@@ -559,6 +645,11 @@ async function loadAlerts() {
   applyAlerts(await api.request("/api/alerts"));
 }
 
+async function loadNotifications() {
+  state.notifications = await api.request("/api/notifications/telegram");
+  renderNotifications();
+}
+
 function applyAlerts({ alerts, unreadCount }) {
   state.alerts = alerts;
   state.unreadAlertCount = unreadCount;
@@ -585,7 +676,7 @@ function startSignalHistoryRefresh() {
 }
 
 function showView(view) {
-  const normalizedView = ["scanner", "watchlist", "alerts", "signals", "billing"].includes(view) ? view : "scanner";
+  const normalizedView = ["scanner", "watchlist", "alerts", "notifications", "signals", "billing"].includes(view) ? view : "scanner";
   state.activeView = normalizedView;
 
   document.querySelectorAll("[data-view]").forEach((section) => {
@@ -600,6 +691,7 @@ function showView(view) {
     scanner: ["Market scanner", "High-probability setup lab"],
     watchlist: ["Favorite markets", "Watchlist & alert rules"],
     alerts: ["Detected setups", "In-app alerts"],
+    notifications: ["Delivery channels", "Notifications"],
     signals: ["Signals history", "Saved signal desk"],
     billing: ["Subscription", "Billing"]
   };
@@ -1221,6 +1313,45 @@ function renderAlerts() {
 function renderUnreadAlertCount() {
   unreadAlertCount.textContent = `${state.unreadAlertCount}`;
   unreadAlertCount.classList.toggle("hidden", state.unreadAlertCount === 0);
+}
+
+function renderNotifications() {
+  const { configured, connected, botUsername, settings } = state.notifications;
+  const providerStatus = document.querySelector("#telegram-provider-status");
+  const connectionStatus = document.querySelector("#telegram-connection-status");
+  const connectHelp = document.querySelector("#telegram-connect-help");
+
+  providerStatus.textContent = configured ? "Bot ready" : "Not configured";
+  providerStatus.className = `status-pill ${configured ? "status-hit-tp" : "status-expired"}`;
+  connectionStatus.textContent = connected
+    ? settings.enabled ? "Connected · Enabled" : "Connected · Disabled"
+    : "Not connected";
+  connectHelp.textContent = botUsername
+    ? `Start @${botUsername}, obtain your numeric chat ID, then connect it here.`
+    : "Start the configured SignalForge bot, obtain your numeric chat ID, then connect it here.";
+
+  telegramConnectForm.querySelector("button").disabled = !configured;
+  telegramPreferencesForm.querySelector("button").disabled = !connected;
+  telegramEnabled.disabled = !connected;
+
+  if (!settings) {
+    telegramEnabled.checked = false;
+    return;
+  }
+
+  telegramChatId.value = settings.chatId;
+  telegramEnabled.checked = settings.enabled;
+  telegramDirection.value = settings.direction;
+  telegramMinimumConfidence.value = settings.minimumConfidence;
+
+  document.querySelectorAll('input[name="telegram-timeframe"]').forEach((input) => {
+    input.checked = settings.timeframes.includes(input.value);
+  });
+}
+
+function getSelectedTelegramTimeframes() {
+  return [...document.querySelectorAll('input[name="telegram-timeframe"]:checked')]
+    .map((input) => input.value);
 }
 
 function formatCurrency(value) {

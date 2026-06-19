@@ -43,6 +43,7 @@ export function generateMarketDataSetup(marketData, timeframe) {
     valid: true,
     signal: {
       id: createId("sig"),
+      setupKey: `${marketData.pair.symbol}:${timeframe}:${bestCase.direction}:${latest.time}`,
       symbol: marketData.pair.symbol,
       timeframe,
       direction: bestCase.direction,

@@ -57,6 +57,12 @@ export const appConfig = {
     apiKey: process.env.TWELVEDATA_API_KEY || "",
     cacheTtlMs: Number(process.env.TWELVEDATA_CACHE_TTL_MS || 300000)
   },
+  telegram: {
+    botToken: process.env.TELEGRAM_BOT_TOKEN || "",
+    botUsername: process.env.TELEGRAM_BOT_USERNAME || "",
+    queueIntervalMs: Number(process.env.TELEGRAM_QUEUE_INTERVAL_MS || 2000),
+    maxAttempts: Number(process.env.TELEGRAM_MAX_ATTEMPTS || 3)
+  },
   signalTracking: {
     enabled: true,
     intervalMs: Number(process.env.SIGNAL_TRACKING_INTERVAL_MS || 60000),

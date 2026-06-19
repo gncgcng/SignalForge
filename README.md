@@ -97,3 +97,14 @@ TWELVEDATA_API_KEY=...
 Commodity responses are cached for five minutes by default. Override this with `TWELVEDATA_CACHE_TTL_MS`.
 
 No synthetic commodity candles or volume are generated. Unsupported symbols, timeframes, plans, or missing volume return explicit provider errors.
+
+## Telegram Notifications
+
+Configure a Telegram bot in local or Railway environment variables:
+
+```text
+TELEGRAM_BOT_TOKEN=...
+TELEGRAM_BOT_USERNAME=your_bot_username
+```
+
+Users connect a numeric Telegram chat ID from the Notifications page. Telegram alerts are limited to favorite markets and the user's selected timeframes, direction, and minimum confidence. Matching setups are written to a persistent queue with duplicate protection before delivery. Scanning and notification delivery do not use signal credits.

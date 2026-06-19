@@ -299,6 +299,153 @@ export async function markDetectedAlertRead(userId, alertId) {
   `, [alertId, userId]);
 }
 
+export async function getTelegramSettingsByUser(userId) {
+  const result = await query(`
+    SELECT *
+    FROM telegram_notification_settings
+    WHERE user_id = $1
+  `, [userId]);
+  return result.rows[0] ? mapTelegramSettings(result.rows[0]) : null;
+}
+
+export async function upsertTelegramSettings(userId, settings) {
+  return transaction(async (client) => {
+    const result = await client.query(`
+      INSERT INTO telegram_notification_settings (
+        user_id, chat_id, enabled, favorite_markets_only, timeframes,
+        direction, minimum_confidence
+      )
+      VALUES ($1,$2,$3,true,$4,$5,$6)
+      ON CONFLICT (user_id)
+      DO UPDATE SET
+        chat_id = EXCLUDED.chat_id,
+        enabled = EXCLUDED.enabled,
+        favorite_markets_only = true,
+        timeframes = EXCLUDED.timeframes,
+        direction = EXCLUDED.direction,
+        minimum_confidence = EXCLUDED.minimum_confidence,
+        updated_at = now()
+      RETURNING *
+    `, [
+      userId,
+      settings.chatId,
+      settings.enabled,
+      settings.timeframes,
+      settings.direction,
+      settings.minimumConfidence
+    ]);
+
+    await client.query(`
+      UPDATE telegram_notification_queue
+      SET chat_id = $2, updated_at = now()
+      WHERE user_id = $1 AND status = 'queued'
+    `, [userId, settings.chatId]);
+
+    return mapTelegramSettings(result.rows[0]);
+  });
+}
+
+export async function setTelegramNotificationsEnabled(userId, enabled) {
+  return transaction(async (client) => {
+    const result = await client.query(`
+      UPDATE telegram_notification_settings
+      SET enabled = $2, updated_at = now()
+      WHERE user_id = $1
+      RETURNING *
+    `, [userId, enabled]);
+
+    if (!enabled) {
+      await client.query(`
+        UPDATE telegram_notification_queue
+        SET status = 'failed',
+          last_error = 'Notifications disabled by user.',
+          next_attempt_at = 'infinity'::timestamptz,
+          updated_at = now()
+        WHERE user_id = $1 AND status IN ('queued', 'failed')
+      `, [userId]);
+    }
+
+    return result.rows[0] ? mapTelegramSettings(result.rows[0]) : null;
+  });
+}
+
+export async function enqueueTelegramNotification(userId, settings, setup) {
+  const result = await query(`
+    INSERT INTO telegram_notification_queue (
+      id, user_id, setup_key, chat_id, payload
+    )
+    VALUES ($1,$2,$3,$4,$5)
+    ON CONFLICT (user_id, setup_key) DO NOTHING
+    RETURNING id
+  `, [
+    createId("tgq"),
+    userId,
+    setup.setupKey,
+    settings.chatId,
+    JSON.stringify(setup)
+  ]);
+  return result.rows[0] || null;
+}
+
+export async function claimNextTelegramNotification() {
+  return transaction(async (client) => {
+    const result = await client.query(`
+      SELECT q.*
+      FROM telegram_notification_queue q
+      JOIN telegram_notification_settings s ON s.user_id = q.user_id
+      WHERE s.enabled = true
+        AND (
+          (q.status IN ('queued', 'failed') AND q.next_attempt_at <= now())
+          OR (q.status = 'sending' AND q.updated_at < now() - interval '5 minutes')
+        )
+      ORDER BY q.created_at
+      LIMIT 1
+      FOR UPDATE OF q SKIP LOCKED
+    `);
+    const row = result.rows[0];
+
+    if (!row) {
+      return null;
+    }
+
+    await client.query(`
+      UPDATE telegram_notification_queue
+      SET status = 'sending', attempts = attempts + 1, updated_at = now()
+      WHERE id = $1
+    `, [row.id]);
+
+    return {
+      id: row.id,
+      userId: row.user_id,
+      chatId: row.chat_id,
+      payload: row.payload,
+      attempts: Number(row.attempts) + 1
+    };
+  });
+}
+
+export async function markTelegramNotificationSent(id) {
+  await query(`
+    UPDATE telegram_notification_queue
+    SET status = 'sent', sent_at = now(), last_error = null, updated_at = now()
+    WHERE id = $1
+  `, [id]);
+}
+
+export async function markTelegramNotificationFailed(id, error, retry) {
+  await query(`
+    UPDATE telegram_notification_queue
+    SET status = 'failed',
+      last_error = $2,
+      next_attempt_at = CASE
+        WHEN $3 THEN now() + interval '1 minute'
+        ELSE 'infinity'::timestamptz
+      END,
+      updated_at = now()
+    WHERE id = $1
+  `, [id, error, retry]);
+}
+
 function mapDetectedAlert(row) {
   return {
     id: row.id,
@@ -312,6 +459,19 @@ function mapDetectedAlert(row) {
     confirmations: row.confirmations || [],
     detectedAt: row.detected_at,
     readAt: row.read_at
+  };
+}
+
+function mapTelegramSettings(row) {
+  return {
+    chatId: row.chat_id,
+    enabled: row.enabled,
+    favoriteMarketsOnly: row.favorite_markets_only,
+    timeframes: row.timeframes || [],
+    direction: row.direction,
+    minimumConfidence: Number(row.minimum_confidence),
+    connectedAt: row.connected_at,
+    updatedAt: row.updated_at
   };
 }
 

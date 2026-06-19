@@ -20,7 +20,8 @@
     "smoke": "node scripts/smoke-test.js",
     "test:signals": "node scripts/signal-rules-test.js",
     "test:signal-transparency": "node scripts/signal-transparency-test.js",
-    "test:watchlist-alerts": "node scripts/watchlist-alerts-test.js"
+    "test:watchlist-alerts": "node scripts/watchlist-alerts-test.js",
+    "test:telegram-notifications": "node scripts/telegram-notifications-test.js"
   },
   "dependencies": {
     "pg": "^8.13.1"

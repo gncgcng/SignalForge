@@ -709,6 +709,59 @@ polyline {
   gap: 14px;
 }
 
+.notifications-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.8fr) minmax(340px, 1.2fr);
+  gap: 14px;
+}
+
+.notification-panel {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+}
+
+.switch-row {
+  display: flex;
+  grid-auto-flow: column;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+}
+
+.switch-row input,
+.timeframe-options input {
+  width: auto;
+}
+
+.timeframe-options {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.timeframe-options legend {
+  padding: 0 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.timeframe-options label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0b1018;
+  color: var(--text);
+}
+
 .watchlist-item,
 .alert-item {
   display: grid;
@@ -1023,6 +1076,7 @@ polyline {
   .signals-grid,
   .watchlist-grid,
   .alerts-grid,
+  .notifications-layout,
   .landing-cards.three,
   .landing-cards.five,
   .pricing-grid {

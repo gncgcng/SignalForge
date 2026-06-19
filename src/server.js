@@ -9,6 +9,8 @@ import { attachAuth } from "./middleware/authMiddleware.js";
 import { handleAuthRoutes } from "./modules/auth/authController.js";
 import { handleAlertRoutes } from "./modules/alerts/alertController.js";
 import { handleMarketDataRoutes } from "./modules/market-data/marketDataController.js";
+import { handleNotificationRoutes } from "./modules/notifications/notificationController.js";
+import { startTelegramNotificationQueue } from "./modules/notifications/notificationQueue.js";
 import { handleSignalRoutes } from "./modules/signals/signalController.js";
 import { startSignalOutcomeTracker } from "./modules/signals/signalOutcomeService.js";
 import { handleSubscriptionRoutes } from "./modules/subscriptions/subscriptionController.js";
@@ -33,6 +35,7 @@ const server = createServer(async (req, res) => {
     const handled =
       (await handleAuthRoutes(req, res, url.pathname)) ||
       (await handleAlertRoutes(req, res, url.pathname, url)) ||
+      (await handleNotificationRoutes(req, res, url.pathname)) ||
       (await handleSubscriptionRoutes(req, res, url.pathname)) ||
       (await handleMarketDataRoutes(req, res, url.pathname, url)) ||
       (await handleSignalRoutes(req, res, url.pathname));
@@ -79,4 +82,5 @@ await verifySessionSchema();
 server.listen(appConfig.port, () => {
   console.log(`${appConfig.appName} running at http://localhost:${appConfig.port}`);
   startSignalOutcomeTracker();
+  startTelegramNotificationQueue();
 });

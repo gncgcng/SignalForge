@@ -1,6 +1,12 @@
 import { readJson, sendError, sendJson } from "../../shared/http.js";
 import { detectMatchingAlerts } from "../alerts/alertService.js";
-import { createSignal, listUserSignals, scanAllMarkets, scanMarketSetup } from "./signalService.js";
+import { enqueueMatchingTelegramNotifications } from "../notifications/notificationService.js";
+import {
+  createSignal,
+  listUserSignals,
+  scanAllMarketsDetailed,
+  scanMarketSetupDetailed
+} from "./signalService.js";
 
 export async function handleSignalRoutes(req, res, pathname) {
   if (!pathname.startsWith("/api/signals")) {
@@ -18,16 +24,27 @@ export async function handleSignalRoutes(req, res, pathname) {
   if (pathname === "/api/signals/scan" && req.method === "POST") {
     try {
       const body = await readJson(req);
-      return sendJson(res, 200, await scanMarketSetup(body));
+      const result = await scanMarketSetupDetailed(body);
+
+      if (result.fullSetup) {
+        await enqueueMatchingTelegramNotifications(req.user, [result.fullSetup]);
+      }
+
+      return sendJson(res, 200, result.publicResult);
     } catch (error) {
       return sendError(res, error.statusCode || 400, error.message);
     }
   }
 
   if (pathname === "/api/signals/scan-all" && req.method === "POST") {
-    const result = await scanAllMarkets();
-    const detectedAlerts = await detectMatchingAlerts(req.user, result.setups);
-    return sendJson(res, 200, { ...result, detectedAlerts });
+    const result = await scanAllMarketsDetailed();
+    const detectedAlerts = await detectMatchingAlerts(req.user, result.publicResult.setups);
+    const queuedTelegramAlerts = await enqueueMatchingTelegramNotifications(req.user, result.fullSetups);
+    return sendJson(res, 200, {
+      ...result.publicResult,
+      detectedAlerts,
+      queuedTelegramAlerts: queuedTelegramAlerts.length
+    });
   }
 
   if (pathname === "/api/signals/generate" && req.method === "POST") {

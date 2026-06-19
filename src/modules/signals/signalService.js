@@ -44,32 +44,48 @@ export async function createSignal(user, { symbol, timeframe }) {
 }
 
 export async function scanMarketSetup({ symbol, timeframe }) {
+  const result = await scanMarketSetupDetailed({ symbol, timeframe });
+  return result.publicResult;
+}
+
+export async function scanMarketSetupDetailed({ symbol, timeframe }) {
   const marketData = await getOhlcv(symbol, timeframe);
   const result = generateMarketDataSetup(marketData, timeframe);
 
   return {
-    symbol,
-    timeframe,
-    valid: result.valid,
-    setup: result.valid ? toScanPreview(result.signal) : null,
-    analysis: result.analysis
+    publicResult: {
+      symbol,
+      timeframe,
+      valid: result.valid,
+      setup: result.valid ? toScanPreview(result.signal) : null,
+      analysis: result.analysis
+    },
+    fullSetup: result.valid ? result.signal : null
   };
 }
 
 export async function scanAllMarkets() {
+  const result = await scanAllMarketsDetailed();
+  return result.publicResult;
+}
+
+export async function scanAllMarketsDetailed() {
   const scanned = [];
   const setups = [];
+  const fullSetups = [];
   const errors = [];
   const scanSymbols = listActivePairs().map((pair) => pair.symbol);
 
   for (const symbol of scanSymbols) {
     for (const timeframe of scanTimeframes) {
       try {
-        const result = await scanMarketSetup({ symbol, timeframe });
+        const detailed = await scanMarketSetupDetailed({ symbol, timeframe });
+        const result = detailed.publicResult;
         scanned.push({ symbol, timeframe, valid: result.valid });
 
         if (result.valid) {
           setups.push(result.setup);
+          fullSetups.push(detailed.fullSetup);
         }
       } catch (error) {
         scanned.push({ symbol, timeframe, valid: false });
@@ -85,10 +101,13 @@ export async function scanAllMarkets() {
   rankSetups(setups);
 
   return {
-    setups,
-    scanned,
-    errors,
-    message: setups.length ? "Valid setups found." : "No high-probability setups right now"
+    publicResult: {
+      setups,
+      scanned,
+      errors,
+      message: setups.length ? "Valid setups found." : "No high-probability setups right now"
+    },
+    fullSetups
   };
 }
 
@@ -111,6 +130,7 @@ export async function listUserSignals(user) {
 function toScanPreview(signal) {
   return {
     id: signal.id,
+    setupKey: signal.setupKey,
     symbol: signal.symbol,
     timeframe: signal.timeframe,
     direction: signal.direction,
