@@ -34,6 +34,15 @@ export function buildPerformanceAnalytics(signals, filters = {}) {
   const newsRiskPerformance = aggregatePerformance(signals, getNewsRiskGroup);
   const bestSessionByMarket = aggregateBestSessionByMarket(signals);
   const smcPerformance = aggregateSmcPerformance(signals);
+  const expectancyByRiskLevel = aggregateRiskExpectancy(signals, (signal) => (
+    signal.riskPlan?.riskTier || signal.indicators?.riskTier || "Unknown"
+  ));
+  const stopStylePerformance = aggregateRiskExpectancy(signals, (signal) => (
+    signal.riskPlan?.stopStyle || signal.indicators?.stopStyle || "Unknown"
+  ));
+  const targetStylePerformance = aggregateRiskExpectancy(signals, (signal) => (
+    signal.riskPlan?.targetStyle || signal.indicators?.targetStyle || "Unknown"
+  ));
 
   return {
     filters,
@@ -53,6 +62,9 @@ export function buildPerformanceAnalytics(signals, filters = {}) {
     newsRiskPerformance,
     bestSessionByMarket,
     smcPerformance,
+    expectancyByRiskLevel,
+    stopStylePerformance,
+    targetStylePerformance,
     monthlyPerformance: monthly,
     charts: {
       winRateOverTime: monthly.map((item) => ({
@@ -67,6 +79,14 @@ export function buildPerformanceAnalytics(signals, filters = {}) {
       marketDistribution: byMarket
     }
   };
+}
+
+function aggregateRiskExpectancy(signals, keyFn) {
+  const completed = signals.filter((signal) => signal.status !== "Active");
+  return aggregatePerformance(completed, keyFn).map((item) => ({
+    ...item,
+    expectancy: item.totalSignals ? round(item.netR / item.totalSignals) : 0
+  }));
 }
 
 function aggregateSmcPerformance(signals) {

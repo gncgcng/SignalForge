@@ -6,9 +6,12 @@ import {
   analyzeSmartMoneyConcepts,
   evaluateSmcConfluence
 } from "../market-data/smartMoneyConceptsService.js";
+import {
+  buildDynamicRiskPlan,
+  minimumRiskReward
+} from "../risk/riskEngineService.js";
 
 const minimumCandles = 60;
-const minimumRiskReward = 1.8;
 const minimumQualityScore = 78;
 
 export function generateMarketDataSetup(marketData, timeframe) {
@@ -94,6 +97,7 @@ export function generateMarketDataSetup(marketData, timeframe) {
       setupType: bestCase.setupType,
       confluence: bestCase.confluence,
       smc: bestCase.smc,
+      riskPlan: bestCase.riskPlan,
       reasoning: buildReasoning(bestCase, indicators, levels, regime, isCommodity),
       confirmations: bestCase.confirmations,
       indicators: serializeIndicators(
@@ -103,7 +107,8 @@ export function generateMarketDataSetup(marketData, timeframe) {
         bestCase.confluence,
         bestCase.session,
         bestCase.newsRisk,
-        bestCase.smc
+        bestCase.smc,
+        bestCase.riskPlan
       ),
       generatedAt: new Date().toISOString(),
       marketSource: marketData.source
@@ -120,7 +125,8 @@ export function generateMarketDataSetup(marketData, timeframe) {
         bestCase.confluence,
         bestCase.session,
         bestCase.newsRisk,
-        bestCase.smc
+        bestCase.smc,
+        bestCase.riskPlan
       )
     }
   };
@@ -368,14 +374,37 @@ function validateCandidate(candidate, candles, indicators, levels, regime, confl
     opposingRoom,
     emaAligned
   }) + confluence.qualityAdjustment + smc.qualityAdjustment));
+  const protectiveLevel = candidate.direction === "long"
+    ? levels.nearestSupport
+    : levels.nearestResistance;
+  const riskPlan = buildDynamicRiskPlan({
+    direction: candidate.direction,
+    entry: candidate.entry,
+    atr: indicators.atr14,
+    regime,
+    setupType,
+    qualityScore,
+    protectiveLevel,
+    opposingLevel
+  });
   const requiredQuality = setupType === "Reversal" ? 86 : minimumQualityScore;
 
   if (qualityScore < requiredQuality) {
     rejectionReasons.push(`Quality score ${qualityScore} is below the required ${requiredQuality}.`);
   }
+  if (!riskPlan.tradeAllowed) {
+    rejectionReasons.push(
+      riskPlan.riskTier === "No trade"
+        ? "Dynamic Risk Engine classifies this as low quality and suggests no trade."
+        : `Dynamic target is only ${riskPlan.riskRewardRatio.toFixed(2)}R; at least ${minimumRiskReward}R is required.`
+    );
+  }
 
   return {
     ...candidate,
+    stopLoss: riskPlan.stopLoss,
+    takeProfit: riskPlan.takeProfit,
+    riskRewardRatio: riskPlan.riskRewardRatio,
     setupType,
     qualityScore,
     confidenceScore: Math.max(0, Math.min(
@@ -388,6 +417,7 @@ function validateCandidate(candidate, candles, indicators, levels, regime, confl
     )),
     confluence,
     smc,
+    riskPlan,
     session,
     newsRisk,
     regime: regime.label,
@@ -709,10 +739,19 @@ function buildReasoning(candidate, indicators, levels, regime, isCommodity) {
     ? `Commodity ${candidate.direction.toUpperCase()} analysis uses Twelve Data price structure; volume is not required. Setup`
     : `${candidate.direction.toUpperCase()} setup`;
 
-  return `${prefix} classified as ${candidate.setupType} with quality ${candidate.qualityScore}/100 in a ${regime.label} regime. ${regime.explanation} ${candidate.confluence.explanation} ${candidate.smc.explanation} ${candidate.session.explanation} ${candidate.newsRisk.explanation} Confirmed by ${passed}. Failed checks: ${failed}. EMA20 ${formatNumber(indicators.ema20)}, EMA50 ${formatNumber(indicators.ema50)}, ADX14 ${formatNumber(regime.metrics.adx14)}, RSI14 ${formatNumber(indicators.rsi14)}, ATR14 ${formatNumber(indicators.atr14)}. Support ${levels.nearestSupport ? formatNumber(levels.nearestSupport.price) : "n/a"}, resistance ${levels.nearestResistance ? formatNumber(levels.nearestResistance.price) : "n/a"}.`;
+  return `${prefix} classified as ${candidate.setupType} with quality ${candidate.qualityScore}/100 in a ${regime.label} regime. ${regime.explanation} ${candidate.confluence.explanation} ${candidate.smc.explanation} ${candidate.riskPlan.explanation} ${candidate.session.explanation} ${candidate.newsRisk.explanation} Confirmed by ${passed}. Failed checks: ${failed}. EMA20 ${formatNumber(indicators.ema20)}, EMA50 ${formatNumber(indicators.ema50)}, ADX14 ${formatNumber(regime.metrics.adx14)}, RSI14 ${formatNumber(indicators.rsi14)}, ATR14 ${formatNumber(indicators.atr14)}. Support ${levels.nearestSupport ? formatNumber(levels.nearestSupport.price) : "n/a"}, resistance ${levels.nearestResistance ? formatNumber(levels.nearestResistance.price) : "n/a"}.`;
 }
 
-function serializeIndicators(indicators, levels, regime, confluence = null, session = null, newsRisk = null, smc = null) {
+function serializeIndicators(
+  indicators,
+  levels,
+  regime,
+  confluence = null,
+  session = null,
+  newsRisk = null,
+  smc = null,
+  riskPlan = null
+) {
   return {
     ema20: roundPrice(indicators.ema20),
     ema50: roundPrice(indicators.ema50),
@@ -744,7 +783,14 @@ function serializeIndicators(indicators, levels, regime, confluence = null, sess
     smcScore: smc?.score ?? 0,
     smcConflict: smc?.conflict ?? false,
     smcExplanation: smc?.explanation || "SMC unavailable.",
-    smcFactors: smc?.factors || []
+    smcFactors: smc?.factors || [],
+    stopStyle: riskPlan?.stopStyle || "ATR regime",
+    stopMultiplier: riskPlan?.stopMultiplier ?? null,
+    targetStyle: riskPlan?.targetStyle || "Regime dynamic",
+    targetMultiple: riskPlan?.targetMultiple ?? null,
+    riskTier: riskPlan?.riskTier || "Unknown",
+    recommendedRiskPercent: riskPlan?.recommendedRiskPercent ?? 0,
+    riskExplanation: riskPlan?.explanation || ""
   };
 }
 

@@ -33,7 +33,8 @@
     "test:trade-journal": "node scripts/trade-journal-test.js",
     "test:backtesting": "node scripts/backtest-test.js",
     "test:backtesting-lab": "node scripts/backtesting-lab-test.js",
-    "test:smart-money": "node scripts/smart-money-concepts-test.js"
+    "test:smart-money": "node scripts/smart-money-concepts-test.js",
+    "test:dynamic-risk": "node scripts/dynamic-risk-engine-test.js"
   },
   "dependencies": {
     "pg": "^8.13.1"

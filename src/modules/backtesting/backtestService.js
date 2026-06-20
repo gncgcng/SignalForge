@@ -37,6 +37,8 @@ export async function runHistoricalBacktest(_user, input) {
   const sessionFilters = normalizeSessionFilters(input.sessions);
   const reports = [];
   const withoutSmcReports = [];
+  const fixedStopReports = [];
+  const fixedTargetReports = [];
   const errors = [];
 
   for (const symbol of symbols) {
@@ -49,6 +51,14 @@ export async function runHistoricalBacktest(_user, input) {
           higherTimeframeData: bundle.higherTimeframeData
         };
         reports.push(backtestMarketData(bundle.marketData, timeframe, options));
+        fixedStopReports.push(backtestMarketData(bundle.marketData, timeframe, {
+          ...options,
+          stopMode: "fixed"
+        }));
+        fixedTargetReports.push(backtestMarketData(bundle.marketData, timeframe, {
+          ...options,
+          targetMode: "fixed"
+        }));
         if (hasEnabledSmc(components)) {
           withoutSmcReports.push(backtestMarketData(bundle.marketData, timeframe, {
             ...options,
@@ -67,7 +77,14 @@ export async function runHistoricalBacktest(_user, input) {
     throw error;
   }
 
-  return aggregateBacktestReports(reports, errors, components, withoutSmcReports);
+  return aggregateBacktestReports(
+    reports,
+    errors,
+    components,
+    withoutSmcReports,
+    fixedStopReports,
+    fixedTargetReports
+  );
 }
 
 export function backtestMarketData(marketData, timeframe, options = {}) {
@@ -75,6 +92,8 @@ export function backtestMarketData(marketData, timeframe, options = {}) {
   const components = normalizeComponents(options.components);
   const higherTimeframeData = options.higherTimeframeData || {};
   const sessionFilters = options.sessionFilters || tradingSessions;
+  const stopMode = options.stopMode || "atr";
+  const targetMode = options.targetMode || "dynamic";
   const trades = [];
   let index = warmupCandles - 1;
 
@@ -87,7 +106,9 @@ export function backtestMarketData(marketData, timeframe, options = {}) {
       higherTimeframeData,
       components
       ,
-      sessionFilters
+      sessionFilters,
+      stopMode,
+      targetMode
     });
 
     if (!setup) {
@@ -117,6 +138,8 @@ export function backtestMarketData(marketData, timeframe, options = {}) {
       stopLoss: setup.stopLoss,
       takeProfit: setup.takeProfit,
       riskRewardRatio: setup.riskRewardRatio,
+      stopStyle: setup.stopStyle,
+      targetStyle: setup.targetStyle,
       openedAt: toIso(candles[index].time),
       closedAt: toIso(candles[outcome.exitIndex]?.time),
       outcome: outcome.status,
@@ -202,7 +225,16 @@ export function calculateBacktestMetrics(trades) {
   };
 }
 
-function evaluateHistoricalSetup({ marketData, timeframe, candles, higherTimeframeData, components, sessionFilters }) {
+function evaluateHistoricalSetup({
+  marketData,
+  timeframe,
+  candles,
+  higherTimeframeData,
+  components,
+  sessionFilters,
+  stopMode,
+  targetMode
+}) {
   const regime = analyzeMarketRegime(candles);
   const metrics = regime.metrics || {};
   const latest = candles[candles.length - 1];
@@ -262,8 +294,19 @@ function evaluateHistoricalSetup({ marketData, timeframe, candles, higherTimefra
   const stopMultiple = components.atr
     ? regime.volatilityLevel === "High" ? 1.8 : 1.4
     : 1.2;
-  const risk = Math.max(atrValue * stopMultiple, latest.close * 0.001);
-  const riskRewardRatio = qualityScore >= 88 ? 2.4 : qualityScore >= 80 ? 2.1 : 1.8;
+  const risk = stopMode === "fixed"
+    ? latest.close * 0.01
+    : Math.max(atrValue * stopMultiple, latest.close * 0.001);
+  const dynamicTarget = regime.label === "Range"
+    ? 1.8
+    : regime.trendStrength >= 0.8
+      ? 2.6
+      : regime.trendStrength >= 0.65
+        ? 2.3
+        : qualityScore >= 80
+          ? 2.1
+          : 1.8;
+  const riskRewardRatio = targetMode === "fixed" ? 2 : dynamicTarget;
   const stopLoss = direction === "long" ? latest.close - risk : latest.close + risk;
   const takeProfit = direction === "long"
     ? latest.close + risk * riskRewardRatio
@@ -285,6 +328,9 @@ function evaluateHistoricalSetup({ marketData, timeframe, candles, higherTimefra
     stopLoss,
     takeProfit,
     riskRewardRatio
+    ,
+    stopStyle: stopMode === "fixed" ? "Fixed 1%" : "ATR regime",
+    targetStyle: targetMode === "fixed" ? "Fixed 2R" : "Regime dynamic"
   };
 }
 
@@ -363,7 +409,14 @@ async function loadHistoricalBundle(symbol, timeframe) {
   return { marketData, higherTimeframeData };
 }
 
-function aggregateBacktestReports(reports, errors, components, withoutSmcReports = []) {
+function aggregateBacktestReports(
+  reports,
+  errors,
+  components,
+  withoutSmcReports = [],
+  fixedStopReports = [],
+  fixedTargetReports = []
+) {
   const trades = reports.flatMap((report) => report.trades)
     .sort((a, b) => new Date(a.openedAt) - new Date(b.openedAt));
   const metrics = calculateBacktestMetrics(trades);
@@ -402,6 +455,20 @@ function aggregateBacktestReports(reports, errors, components, withoutSmcReports
     breakdowns,
     components,
     smcComparison: buildSmcComparison(metrics, withoutSmcReports),
+    riskComparison: {
+      stops: buildVariantComparison(
+        "ATR stops",
+        metrics,
+        "Fixed 1% stops",
+        fixedStopReports
+      ),
+      targets: buildVariantComparison(
+        "Dynamic targets",
+        metrics,
+        "Fixed 2R targets",
+        fixedTargetReports
+      )
+    },
     sessionFilters: reports[0]?.sessionFilters || null,
     errors,
     evaluation: {
@@ -419,6 +486,18 @@ function aggregateBacktestReports(reports, errors, components, withoutSmcReports
     },
     trades: trades.slice(-100).reverse(),
     generatedAt: new Date().toISOString()
+  };
+}
+
+function buildVariantComparison(primaryLabel, primaryMetrics, variantLabel, variantReports) {
+  const variantMetrics = calculateBacktestMetrics(
+    variantReports.flatMap((report) => report.trades)
+  );
+  return {
+    primary: { label: primaryLabel, metrics: primaryMetrics },
+    variant: { label: variantLabel, metrics: variantMetrics },
+    expectancyDelta: round(primaryMetrics.expectancy - variantMetrics.expectancy),
+    drawdownDelta: round(primaryMetrics.maxDrawdownR - variantMetrics.maxDrawdownR)
   };
 }
 

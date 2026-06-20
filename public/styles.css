@@ -2081,3 +2081,67 @@ polyline {
     text-align: left;
   }
 }
+.risk-engine-card {
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid rgba(56, 189, 248, 0.24);
+  border-radius: 8px;
+  background: rgba(56, 189, 248, 0.045);
+}
+
+.risk-engine-heading,
+.risk-engine-policy,
+.risk-results > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.risk-engine-heading > span,
+.risk-engine-policy,
+.risk-results span,
+.risk-scaling-note {
+  color: var(--muted);
+}
+
+.risk-engine-policy {
+  margin-top: 10px;
+  font-size: 0.82rem;
+}
+
+.risk-inputs,
+.risk-results {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.risk-inputs label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.risk-inputs input,
+.risk-inputs select {
+  width: 100%;
+}
+
+.risk-results > div {
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.risk-scaling-note {
+  margin: 10px 0 0;
+  font-size: 0.8rem;
+}
+
+@media (max-width: 620px) {
+  .risk-inputs,
+  .risk-results {
+    grid-template-columns: 1fr;
+  }
+}

@@ -699,6 +699,16 @@ signalsGrid.addEventListener("click", async (event) => {
   }
 });
 
+signalsGrid.addEventListener("input", (event) => {
+  const control = event.target.closest("[data-risk-account], [data-risk-percent]");
+  if (control) updateRiskCard(control.closest(".risk-engine-card"));
+});
+
+signalsGrid.addEventListener("change", (event) => {
+  const control = event.target.closest("[data-risk-account], [data-risk-percent]");
+  if (control) updateRiskCard(control.closest(".risk-engine-card"));
+});
+
 signalsHistory.addEventListener("click", async (event) => {
   const button = event.target.closest("[data-paper-signal-id]");
 
@@ -738,9 +748,14 @@ async function enterPaperTrade(button) {
   try {
     button.disabled = true;
     button.textContent = "Adding...";
+    const riskCard = button.closest(".signal-card, tr")?.querySelector(".risk-engine-card");
     state.paperPortfolio = await api.request("/api/paper-trades", {
       method: "POST",
-      body: JSON.stringify({ signalId: button.dataset.paperSignalId })
+      body: JSON.stringify({
+        signalId: button.dataset.paperSignalId,
+        accountSize: Number(riskCard?.querySelector("[data-risk-account]")?.value || 10000),
+        riskPercent: Number(riskCard?.querySelector("[data-risk-percent]")?.value || 1)
+      })
     });
     renderPaperPortfolio();
     renderSignals();
@@ -1506,6 +1521,7 @@ function renderPaperPortfolio() {
   document.querySelector("#paper-stat-best-timeframe").textContent = stats.bestTimeframe
     ? `${stats.bestTimeframe.label} · ${formatR(stats.bestTimeframe.netR)}`
     : "--";
+  renderAccountGrowthCurve(document.querySelector("#paper-growth-curve"), stats.accountGrowthCurve || []);
 
   if (!trades.length) {
     paperPortfolioGrid.innerHTML = `
@@ -1533,6 +1549,11 @@ function renderPaperPortfolio() {
         <div><span>Target</span><strong>${formatCurrency(trade.takeProfit)}</strong></div>
         <div><span>Planned R/R</span><strong>${trade.riskRewardRatio}:1</strong></div>
         <div><span>Paper P/L</span><strong class="${trade.realizedR > 0 ? "positive" : trade.realizedR < 0 ? "negative" : ""}">${formatR(trade.realizedR)}</strong></div>
+        <div><span>Position size</span><strong>${Number(trade.positionSize || 0).toFixed(4)}</strong></div>
+        <div><span>Risk amount</span><strong>${formatCurrency(trade.riskAmount || 0)}</strong></div>
+        <div><span>Effective risk</span><strong>${trade.effectiveRiskPercent || 0}%</strong></div>
+        <div><span>Potential profit</span><strong>${formatCurrency(trade.potentialProfit || 0)}</strong></div>
+        <div><span>Simulated P/L</span><strong class="${trade.realizedPnl > 0 ? "positive" : trade.realizedPnl < 0 ? "negative" : ""}">${formatCurrency(trade.realizedPnl || 0)}</strong></div>
       </div>
       <p class="reasoning">Entered ${formatDateTime(trade.enteredAt)}${trade.resolvedAt ? ` · Resolved ${formatDateTime(trade.resolvedAt)}` : ""}.</p>
       <button
@@ -1660,6 +1681,18 @@ function renderPerformance() {
     state.performance.smcPerformance || [],
     "signals"
   );
+  renderRiskPerformance(
+    document.querySelector("#signals-by-risk-level"),
+    state.performance.expectancyByRiskLevel || []
+  );
+  renderRiskPerformance(
+    document.querySelector("#signals-by-stop-style"),
+    state.performance.stopStylePerformance || []
+  );
+  renderRiskPerformance(
+    document.querySelector("#signals-by-target-style"),
+    state.performance.targetStylePerformance || []
+  );
   renderMonthlyPerformance(monthlyPerformance);
 }
 
@@ -1681,6 +1714,22 @@ function renderSmcPerformance(container, items, unit = "trades") {
       </div>
     `;
   }).join("");
+}
+
+function renderRiskPerformance(container, items) {
+  if (!container) return;
+  if (!items?.length) {
+    container.innerHTML = `<div class="empty-state"><span>No tracked risk-engine outcomes yet.</span></div>`;
+    return;
+  }
+  container.classList.add("distribution-list");
+  container.innerHTML = items.map((item) => `
+    <div class="distribution-row">
+      <div><span>${escapeHtml(item.label)}</span><strong>${formatR(item.expectancy)} expectancy</strong></div>
+      <div class="distribution-track"><span style="width: ${Math.max(2, item.winRate)}%"></span></div>
+      <small>${item.winRate}% win rate · ${item.totalSignals} signals</small>
+    </div>
+  `).join("");
 }
 
 function renderConfluencePerformance(items) {
@@ -1956,6 +2005,7 @@ function renderScanCard(setup) {
       <p class="reasoning">Passed confirmations: ${passed}. Unlock the full signal to save entry, stop loss, and take profit.</p>
       ${renderSignalTransparency(setup)}
       ${renderSignalConfluence(setup)}
+      ${renderRiskEngineCard(setup, true)}
       <button class="secondary-action" data-unlock-symbol="${setup.symbol}" data-unlock-timeframe="${setup.timeframe}" type="button">Unlock Signal</button>
     </article>
   `;
@@ -1986,9 +2036,86 @@ function renderSignalCard(signal) {
       <p class="reasoning">${signal.reasoning}</p>
       ${renderSignalTransparency(signal)}
       ${renderSignalConfluence(signal)}
+      ${renderRiskEngineCard(signal)}
       ${renderPaperTradeAction(signal)}
     </article>
   `;
+}
+
+function renderRiskEngineCard(signal, locked = false) {
+  const plan = signal.riskPlan || {
+    stopStyle: signal.indicators?.stopStyle || "ATR regime",
+    stopMultiplier: signal.indicators?.stopMultiplier,
+    targetStyle: signal.indicators?.targetStyle || "Regime dynamic",
+    targetMultiple: signal.indicators?.targetMultiple || signal.riskRewardRatio,
+    riskTier: signal.indicators?.riskTier || "Unknown",
+    recommendedRiskPercent: signal.indicators?.recommendedRiskPercent || 0,
+    explanation: signal.indicators?.riskExplanation || ""
+  };
+
+  if (locked || !Number.isFinite(Number(signal.entryPrice))) {
+    return `
+      <section class="risk-engine-card">
+        <div class="risk-engine-heading"><span>Dynamic Risk Engine</span><strong>${escapeHtml(plan.riskTier)}</strong></div>
+        <div class="risk-engine-policy">
+          <span>${escapeHtml(plan.stopStyle)} · ${Number(plan.stopMultiplier || 0).toFixed(2)}x ATR</span>
+          <span>${escapeHtml(plan.targetStyle)} · ${Number(plan.targetMultiple || signal.riskRewardRatio || 0).toFixed(2)}R</span>
+        </div>
+        <p class="reasoning">${escapeHtml(plan.explanation || "Unlock the signal to calculate position size.")}</p>
+      </section>
+    `;
+  }
+  const initialEffectiveRisk = Number(signal.qualityScore) >= 86 ? 1 : 0.5;
+  const initialRiskAmount = 10000 * initialEffectiveRisk / 100;
+  const initialUnitRisk = Math.abs(Number(signal.entryPrice) - Number(signal.stopLoss));
+  const initialPositionSize = initialUnitRisk ? initialRiskAmount / initialUnitRisk : 0;
+  const initialPotentialProfit = initialPositionSize *
+    Math.abs(Number(signal.takeProfit) - Number(signal.entryPrice));
+
+  return `
+    <section
+      class="risk-engine-card"
+      data-entry="${signal.entryPrice}"
+      data-stop="${signal.stopLoss}"
+      data-target="${signal.takeProfit}"
+      data-quality="${signal.qualityScore}"
+    >
+      <div class="risk-engine-heading"><span>Dynamic Risk Engine</span><strong>${escapeHtml(plan.riskTier)}</strong></div>
+      <p class="reasoning">${escapeHtml(plan.explanation)}</p>
+      <div class="risk-inputs">
+        <label>Account size (USD)<input data-risk-account type="number" min="1" step="100" value="10000" /></label>
+        <label>Risk %<select data-risk-percent><option>0.25</option><option>0.5</option><option selected>1</option><option>2</option></select></label>
+      </div>
+      <div class="risk-results">
+        <div><span>Position size</span><strong data-risk-position>${initialPositionSize.toFixed(4)}</strong></div>
+        <div><span>Risk amount</span><strong data-risk-amount>${formatCurrency(initialRiskAmount)}</strong></div>
+        <div><span>Potential profit</span><strong data-risk-profit>${formatCurrency(initialPotentialProfit)}</strong></div>
+        <div><span>R multiple</span><strong>${Number(signal.riskRewardRatio).toFixed(2)}R</strong></div>
+      </div>
+      <p class="risk-scaling-note" data-risk-note>${Number(signal.qualityScore) >= 86 ? "Normal risk applies, capped at 2%." : "Medium quality reduces requested risk by half."}</p>
+    </section>
+  `;
+}
+
+function updateRiskCard(card) {
+  if (!card?.dataset.entry) return;
+  const accountSize = Number(card.querySelector("[data-risk-account]").value);
+  const requestedRisk = Number(card.querySelector("[data-risk-percent]").value);
+  const quality = Number(card.dataset.quality);
+  const effectiveRisk = quality >= 86 ? requestedRisk : quality >= 78 ? requestedRisk * 0.5 : 0;
+  const riskAmount = accountSize * Math.min(2, effectiveRisk) / 100;
+  const unitRisk = Math.abs(Number(card.dataset.entry) - Number(card.dataset.stop));
+  const reward = Math.abs(Number(card.dataset.target) - Number(card.dataset.entry));
+  const positionSize = unitRisk ? riskAmount / unitRisk : 0;
+
+  card.querySelector("[data-risk-position]").textContent = positionSize.toFixed(4);
+  card.querySelector("[data-risk-amount]").textContent = formatCurrency(riskAmount);
+  card.querySelector("[data-risk-profit]").textContent = formatCurrency(positionSize * reward);
+  card.querySelector("[data-risk-note]").textContent = quality >= 86
+    ? `Normal risk applies, capped at 2%. Effective risk: ${Math.min(2, effectiveRisk)}%.`
+    : quality >= 78
+      ? `Medium quality reduces requested risk by half. Effective risk: ${effectiveRisk}%.`
+      : "Low quality: no trade suggested.";
 }
 
 function renderSignalConfluence(signal) {
@@ -2443,7 +2570,45 @@ function renderBacktestingLab() {
   renderLabBreakdown(document.querySelector("#lab-by-confluence"), breakdowns.confluence);
   renderSmcPerformance(document.querySelector("#lab-by-smc"), breakdowns.smc || [], "trades");
   renderSmcComparison(document.querySelector("#lab-smc-comparison"), report.smcComparison);
+  renderRiskComparison(document.querySelector("#lab-stop-comparison"), report.riskComparison?.stops);
+  renderRiskComparison(document.querySelector("#lab-target-comparison"), report.riskComparison?.targets);
   renderLabTrades(trades);
+}
+
+function renderRiskComparison(container, comparison) {
+  if (!container || !comparison) return;
+  container.innerHTML = `
+    <div class="smc-comparison-grid">
+      <div><span>${escapeHtml(comparison.primary.label)}</span><strong>${formatR(comparison.primary.metrics.expectancy)} expectancy · ${formatR(comparison.primary.metrics.maxDrawdownR)} drawdown</strong></div>
+      <div><span>${escapeHtml(comparison.variant.label)}</span><strong>${formatR(comparison.variant.metrics.expectancy)} expectancy · ${formatR(comparison.variant.metrics.maxDrawdownR)} drawdown</strong></div>
+      <div><span>Dynamic advantage</span><strong>${formatR(comparison.expectancyDelta)} expectancy · ${formatR(comparison.drawdownDelta)} drawdown delta</strong></div>
+    </div>
+  `;
+}
+
+function renderAccountGrowthCurve(container, points) {
+  if (!container) return;
+  if (!points?.length || points.length === 1) {
+    container.innerHTML = `<div class="empty-state"><span>Close a paper trade to build the growth curve.</span></div>`;
+    return;
+  }
+  const width = 620;
+  const height = 220;
+  const padding = 30;
+  const values = points.map((point) => Number(point.value));
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = Math.max(max - min, 1);
+  const x = (index) => padding + (index / Math.max(1, points.length - 1)) * (width - padding * 2);
+  const y = (value) => height - padding - ((value - min) / range) * (height - padding * 2);
+  const path = points.map((point, index) => `${index ? "L" : "M"} ${x(index)} ${y(point.value)}`).join(" ");
+  container.innerHTML = `
+    <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Paper account growth curve">
+      <path class="chart-line" d="${path}"></path>
+      <text class="chart-label" x="4" y="${y(max) + 4}">${formatCurrency(max)}</text>
+      <text class="chart-label" x="4" y="${y(min) + 4}">${formatCurrency(min)}</text>
+    </svg>
+  `;
 }
 
 function renderSmcComparison(container, comparison) {

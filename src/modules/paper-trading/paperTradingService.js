@@ -4,6 +4,7 @@ import {
   listPaperTradesByUser
 } from "../../db/repositories.js";
 import { updateSignalsForUser } from "../signals/signalOutcomeService.js";
+import { calculatePositionSizing } from "../risk/riskEngineService.js";
 
 export async function getPaperPortfolio(user) {
   await updateSignalsForUser(user);
@@ -15,7 +16,7 @@ export async function getPaperPortfolio(user) {
   };
 }
 
-export async function enterPaperTrade(user, signalId) {
+export async function enterPaperTrade(user, signalId, input = {}) {
   if (!signalId) {
     throw validationError("Choose an unlocked signal to paper trade.");
   }
@@ -31,7 +32,20 @@ export async function enterPaperTrade(user, signalId) {
     throw validationError("Only active unlocked signals can be entered as paper trades.");
   }
 
-  const inserted = await createPaperTrade(user.id, signal.id);
+  const sizing = calculatePositionSizing({
+    accountSize: input.accountSize,
+    requestedRiskPercent: input.riskPercent,
+    qualityScore: signal.qualityScore,
+    entryPrice: signal.entryPrice,
+    stopLoss: signal.stopLoss,
+    takeProfit: signal.takeProfit
+  });
+
+  if (!sizing.tradeAllowed) {
+    throw validationError(sizing.explanation || "Dynamic Risk Engine suggests no trade.");
+  }
+
+  const inserted = await createPaperTrade(user.id, signal.id, sizing);
 
   if (!inserted) {
     const error = validationError("This signal is already in your Paper Portfolio.");
@@ -57,8 +71,27 @@ export function calculatePaperStats(trades) {
     winRate: resolved ? Math.round((wins / resolved) * 100) : 0,
     averageR,
     bestMarket: findBestGroup(trades, (trade) => trade.symbol),
-    bestTimeframe: findBestGroup(trades, (trade) => trade.timeframe)
+    bestTimeframe: findBestGroup(trades, (trade) => trade.timeframe),
+    accountGrowthCurve: calculateAccountGrowthCurve(trades)
   };
+}
+
+export function calculateAccountGrowthCurve(trades) {
+  const ordered = [...trades].sort((a, b) => new Date(a.enteredAt) - new Date(b.enteredAt));
+  if (!ordered.length) return [];
+  let balance = Number(ordered[0].accountSize || 0);
+  const curve = [{ label: "Start", value: round(balance) }];
+
+  for (const trade of ordered) {
+    if (trade.status === "Open") continue;
+    balance += Number(trade.realizedPnl || 0);
+    curve.push({
+      label: trade.resolvedAt || trade.enteredAt,
+      value: round(balance)
+    });
+  }
+
+  return curve;
 }
 
 function findBestGroup(trades, keyFn) {

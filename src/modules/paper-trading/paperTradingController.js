@@ -21,7 +21,10 @@ export async function handlePaperTradingRoutes(req, res, pathname) {
   if (pathname === "/api/paper-trades" && req.method === "POST") {
     try {
       const body = await readJson(req);
-      return sendJson(res, 201, await enterPaperTrade(req.user, body.signalId));
+      return sendJson(res, 201, await enterPaperTrade(req.user, body.signalId, {
+        accountSize: body.accountSize,
+        riskPercent: body.riskPercent
+      }));
     } catch (error) {
       return sendError(res, error.statusCode || 400, error.message);
     }

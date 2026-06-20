@@ -226,24 +226,39 @@ export async function updateSignalOutcome(signal) {
   ]);
 }
 
-export async function createPaperTrade(userId, signalId) {
+export async function createPaperTrade(userId, signalId, sizing) {
   const result = await query(`
-    INSERT INTO paper_trades (id, user_id, saved_signal_id)
-    SELECT $1, $2, s.id
+    INSERT INTO paper_trades (
+      id, user_id, saved_signal_id, account_size, requested_risk_percent,
+      effective_risk_percent, risk_amount, position_size, potential_profit
+    )
+    SELECT $1, $2, s.id, $4, $5, $6, $7, $8, $9
     FROM saved_signals s
     JOIN unlocked_signals u
       ON u.saved_signal_id = s.id AND u.user_id = $2
     WHERE s.id = $3 AND s.user_id = $2
     ON CONFLICT (user_id, saved_signal_id) DO NOTHING
     RETURNING id
-  `, [createId("paper"), userId, signalId]);
+  `, [
+    createId("paper"),
+    userId,
+    signalId,
+    sizing.accountSize,
+    sizing.requestedRiskPercent,
+    sizing.effectiveRiskPercent,
+    sizing.riskAmount,
+    sizing.positionSize,
+    sizing.potentialProfit
+  ]);
 
   return result.rows[0] || null;
 }
 
 export async function listPaperTradesByUser(userId) {
   const result = await query(`
-    SELECT p.id AS paper_trade_id, p.entered_at,
+    SELECT p.id AS paper_trade_id, p.entered_at, p.account_size,
+      p.requested_risk_percent, p.effective_risk_percent, p.risk_amount,
+      p.position_size, p.potential_profit,
       s.*, o.status, o.status_reason, o.resolved_at,
       o.updated_at AS status_updated_at
     FROM paper_trades p
@@ -287,7 +302,9 @@ export async function listJournalEntriesByUser(userId, filters = {}) {
   }
 
   const result = await query(`
-    SELECT p.id AS paper_trade_id, p.entered_at,
+    SELECT p.id AS paper_trade_id, p.entered_at, p.account_size,
+      p.requested_risk_percent, p.effective_risk_percent, p.risk_amount,
+      p.position_size, p.potential_profit,
       s.*, o.status, o.status_reason, o.resolved_at,
       o.updated_at AS status_updated_at,
       j.notes_before_entry, j.notes_after_exit, j.emotion_tags,
@@ -872,6 +889,13 @@ function mapPaperTrade(row) {
     qualityScore: signal.qualityScore,
     status,
     realizedR,
+    accountSize: Number(row.account_size || 0),
+    requestedRiskPercent: Number(row.requested_risk_percent || 0),
+    effectiveRiskPercent: Number(row.effective_risk_percent || 0),
+    riskAmount: Number(row.risk_amount || 0),
+    positionSize: Number(row.position_size || 0),
+    potentialProfit: Number(row.potential_profit || 0),
+    realizedPnl: realizedR * Number(row.risk_amount || 0),
     enteredAt: row.entered_at,
     resolvedAt: signal.resolvedAt,
     statusReason: signal.statusReason
@@ -955,6 +979,15 @@ function mapSignal(row) {
       conflict: Boolean(row.indicators?.smcConflict),
       explanation: row.indicators?.smcExplanation || "SMC unavailable.",
       factors: row.indicators?.smcFactors || []
+    },
+    riskPlan: {
+      stopStyle: row.indicators?.stopStyle || "ATR regime",
+      stopMultiplier: Number(row.indicators?.stopMultiplier || 0),
+      targetStyle: row.indicators?.targetStyle || "Regime dynamic",
+      targetMultiple: Number(row.indicators?.targetMultiple || row.risk_reward_ratio || 0),
+      riskTier: row.indicators?.riskTier || "Unknown",
+      recommendedRiskPercent: Number(row.indicators?.recommendedRiskPercent || 0),
+      explanation: row.indicators?.riskExplanation || ""
     },
     reasoning: row.reasoning,
     confirmations: row.confirmations || [],

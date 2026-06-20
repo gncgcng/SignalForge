@@ -143,6 +143,7 @@ function toScanPreview(signal) {
     session: signal.session,
     newsRisk: signal.newsRisk,
     smc: signal.smc,
+    riskPlan: signal.riskPlan,
     riskRewardRatio: signal.riskRewardRatio,
     confidenceScore: signal.confidenceScore,
     qualityScore: signal.qualityScore,

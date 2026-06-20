@@ -44,7 +44,13 @@ for (const setupType of [
 ]) {
   assert.ok(source.includes(`"${setupType}"`), `Missing setup type ${setupType}.`);
 }
-assert.ok(source.includes("const minimumRiskReward = 1.8"));
+assert.ok(
+  source.includes("minimumRiskReward") &&
+  readFileSync(
+    new URL("../src/modules/risk/riskEngineService.js", import.meta.url),
+    "utf8"
+  ).includes("export const minimumRiskReward = 1.8")
+);
 assert.ok(source.includes("qualityScore"));
 
 console.log(JSON.stringify({
