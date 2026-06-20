@@ -39,8 +39,12 @@ const metrics = calculateBacktestMetrics([
 assert.equal(metrics.totalTrades, 5);
 assert.equal(metrics.winRate, 50);
 assert.equal(metrics.averageR, 0.44);
+assert.equal(metrics.expectancy, 0.44);
+assert.equal(metrics.profitFactor, 2.1);
 assert.equal(metrics.netR, 2.2);
 assert.equal(metrics.maxDrawdownR, 2);
+assert.equal(metrics.consecutiveWins, 1);
+assert.equal(metrics.consecutiveLosses, 2);
 assert.equal(metrics.averageQualityScore, 84.8);
 
 console.log(JSON.stringify({

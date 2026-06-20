@@ -51,7 +51,8 @@ const state = {
       bestPerformingMarket: null,
       bestPerformingTimeframe: null
     }
-  }
+  },
+  backtesting: null
 };
 
 const authScreen = document.querySelector("#auth-screen");
@@ -82,6 +83,9 @@ const journalEmotion = document.querySelector("#journal-emotion");
 const journalClear = document.querySelector("#journal-clear");
 const journalList = document.querySelector("#journal-list");
 const journalEntryCount = document.querySelector("#journal-entry-count");
+const backtestingLabForm = document.querySelector("#backtesting-lab-form");
+const labStatus = document.querySelector("#lab-status");
+const labEvaluation = document.querySelector("#lab-evaluation");
 const historyCount = document.querySelector("#history-count");
 const signalsHistory = document.querySelector("#signals-history");
 const historyPairFilter = document.querySelector("#history-pair-filter");
@@ -596,6 +600,49 @@ journalList.addEventListener("submit", async (event) => {
   }
 });
 
+backtestingLabForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = backtestingLabForm.querySelector('button[type="submit"]');
+  const markets = [...document.querySelectorAll('input[name="lab-market"]:checked')]
+    .map((input) => input.value);
+  const timeframes = [...document.querySelectorAll('input[name="lab-timeframe"]:checked')]
+    .map((input) => input.value);
+  const enabledComponents = new Set(
+    [...document.querySelectorAll('input[name="lab-component"]:checked')]
+      .map((input) => input.value)
+  );
+  const componentNames = [
+    "marketRegime", "multiTimeframe", "ema", "rsi", "adx", "atr", "supportResistance"
+  ];
+
+  try {
+    button.disabled = true;
+    button.textContent = "Running...";
+    labStatus.textContent = "Loading historical candles";
+    labStatus.className = "status-pill status-active";
+    const { backtest } = await api.request("/api/backtesting/run", {
+      method: "POST",
+      body: JSON.stringify({
+        symbols: markets,
+        timeframes,
+        components: Object.fromEntries(
+          componentNames.map((name) => [name, enabledComponents.has(name)])
+        )
+      })
+    });
+    state.backtesting = backtest;
+    renderBacktestingLab();
+  } catch (error) {
+    labStatus.textContent = "Failed";
+    labStatus.className = "status-pill status-hit-sl";
+    labEvaluation.classList.remove("hidden");
+    labEvaluation.innerHTML = `<strong>Backtest unavailable</strong><span>${escapeHtml(error.message)}</span>`;
+  } finally {
+    button.disabled = false;
+    button.textContent = "Run Backtest";
+  }
+});
+
 paperPortfolioGrid.addEventListener("click", (event) => {
   const button = event.target.closest("[data-open-journal]");
 
@@ -778,6 +825,7 @@ function clearClientAuthState() {
       bestPerformingTimeframe: null
     }
   };
+  state.backtesting = null;
   state.signalStats = {
     totalSignals: 0,
     winRate: 0,
@@ -823,7 +871,7 @@ async function bootDashboard() {
   }
   renderTimeframes();
   const requestedView = location.hash?.replace("#", "");
-  const allowedInitialViews = ["signals", "paper-portfolio", "journal", "performance", "watchlist", "alerts", "notifications", "settings"];
+  const allowedInitialViews = ["signals", "paper-portfolio", "journal", "backtesting", "performance", "watchlist", "alerts", "notifications", "settings"];
   if (state.user.isAdmin) allowedInitialViews.push("admin");
   showView(allowedInitialViews.includes(requestedView) ? requestedView : "scanner");
   startSignalHistoryRefresh();
@@ -1077,7 +1125,7 @@ function startSignalHistoryRefresh() {
 }
 
 function showView(view) {
-  const allowedViews = ["scanner", "watchlist", "alerts", "notifications", "signals", "paper-portfolio", "journal", "performance", "settings", "billing"];
+  const allowedViews = ["scanner", "watchlist", "alerts", "notifications", "signals", "paper-portfolio", "journal", "backtesting", "performance", "settings", "billing"];
   if (state.user?.isAdmin) allowedViews.push("admin");
   const normalizedView = allowedViews.includes(view) ? view : "scanner";
   state.activeView = normalizedView;
@@ -1098,6 +1146,7 @@ function showView(view) {
     signals: ["Signals history", "Saved signal desk"],
     "paper-portfolio": ["Simulated execution", "Paper Portfolio"],
     journal: ["Review and discipline", "Trade Journal"],
+    backtesting: ["Historical strategy research", "Backtesting Lab"],
     performance: ["Outcome analytics", "Performance"],
     settings: ["Account", "Settings"],
     admin: ["Administration", "Tester access requests"],
@@ -2306,6 +2355,109 @@ function renderBacktest(backtest) {
         <p class="reasoning">The stricter rules correctly returned no trade for this candle sample.</p>
       </div>
     `}
+  `;
+}
+
+function renderBacktestingLab() {
+  const report = state.backtesting;
+  if (!report) return;
+  const { metrics, evaluation, curves, breakdowns, trades, errors } = report;
+  const edgeFound = evaluation.status === "edge-detected";
+
+  labStatus.textContent = edgeFound ? "Edge detected" : "No edge found";
+  labStatus.className = `status-pill ${edgeFound ? "status-hit-tp" : "status-expired"}`;
+  labEvaluation.classList.remove("hidden");
+  labEvaluation.className = `lab-evaluation ${edgeFound ? "edge" : "no-edge"}`;
+  labEvaluation.innerHTML = `
+    <strong>${escapeHtml(evaluation.message)}</strong>
+    <span>${errors.length ? `${errors.length} market/timeframe combinations were unavailable.` : "All selected combinations completed."}</span>
+  `;
+  document.querySelector("#lab-total-trades").textContent = `${metrics.totalTrades}`;
+  document.querySelector("#lab-win-rate").textContent = `${metrics.winRate}%`;
+  document.querySelector("#lab-profit-factor").textContent = metrics.profitFactor === null ? "∞" : `${metrics.profitFactor}`;
+  document.querySelector("#lab-average-r").textContent = formatR(metrics.averageR);
+  document.querySelector("#lab-max-drawdown").textContent = formatR(metrics.maxDrawdownR);
+  document.querySelector("#lab-win-streak").textContent = `${metrics.consecutiveWins}`;
+  document.querySelector("#lab-loss-streak").textContent = `${metrics.consecutiveLosses}`;
+  document.querySelector("#lab-expectancy").textContent = formatR(metrics.expectancy);
+  renderLabCurve(document.querySelector("#lab-equity-curve"), curves.equity, "Equity curve");
+  renderLabCurve(document.querySelector("#lab-drawdown-curve"), curves.drawdown, "Drawdown curve");
+  renderLabBreakdown(document.querySelector("#lab-by-market"), breakdowns.markets);
+  renderLabBreakdown(document.querySelector("#lab-by-timeframe"), breakdowns.timeframes);
+  renderLabBreakdown(document.querySelector("#lab-by-regime"), breakdowns.regimes);
+  renderLabBreakdown(document.querySelector("#lab-by-confluence"), breakdowns.confluence);
+  renderLabTrades(trades);
+}
+
+function renderLabCurve(container, points, label) {
+  if (!points?.length || points.length === 1) {
+    container.innerHTML = `<div class="empty-state"><span>No completed trades to chart.</span></div>`;
+    return;
+  }
+  const width = 620;
+  const height = 220;
+  const padding = 28;
+  const values = points.map((point) => Number(point.value));
+  const min = Math.min(...values, 0);
+  const max = Math.max(...values, 0);
+  const range = Math.max(max - min, 1);
+  const x = (index) => padding + (index / Math.max(1, points.length - 1)) * (width - padding * 2);
+  const y = (value) => height - padding - ((value - min) / range) * (height - padding * 2);
+  const path = points.map((point, index) => `${index ? "L" : "M"} ${x(index)} ${y(point.value)}`).join(" ");
+
+  container.innerHTML = `
+    <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${label}">
+      <line class="chart-axis" x1="${padding}" y1="${y(0)}" x2="${width - padding}" y2="${y(0)}"></line>
+      <path class="chart-line" d="${path}"></path>
+      <text class="chart-label" x="4" y="${y(max) + 4}">${max.toFixed(1)}R</text>
+      <text class="chart-label" x="4" y="${y(min) + 4}">${min.toFixed(1)}R</text>
+    </svg>
+  `;
+}
+
+function renderLabBreakdown(container, items) {
+  if (!items?.length) {
+    container.innerHTML = `<div class="empty-state"><span>No completed trades.</span></div>`;
+    return;
+  }
+  container.classList.add("distribution-list");
+  container.innerHTML = items.map((item) => `
+    <div class="distribution-row">
+      <div><span>${escapeHtml(item.label)}</span><strong>${item.winRate}% · ${formatR(item.netR)}</strong></div>
+      <div class="distribution-track"><span style="width: ${Math.max(2, item.winRate)}%"></span></div>
+      <small>${item.totalTrades} trades</small>
+    </div>
+  `).join("");
+}
+
+function renderLabTrades(trades) {
+  const container = document.querySelector("#lab-trades");
+  if (!trades?.length) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <strong>No historical trades qualified</strong>
+        <p class="reasoning">The selected components produced no valid setups without using future candles.</p>
+      </div>
+    `;
+    return;
+  }
+  container.innerHTML = `
+    <table class="signals-table">
+      <thead><tr><th>Market</th><th>TF</th><th>Direction</th><th>Setup</th><th>Regime</th><th>Confluence</th><th>Outcome</th><th>R</th><th>Opened</th></tr></thead>
+      <tbody>${trades.map((trade) => `
+        <tr>
+          <td>${escapeHtml(trade.symbol)}</td>
+          <td>${escapeHtml(trade.timeframe)}</td>
+          <td><strong class="direction ${trade.direction}">${trade.direction.toUpperCase()}</strong></td>
+          <td>${escapeHtml(trade.setupType)}</td>
+          <td>${escapeHtml(trade.regime)}</td>
+          <td>${trade.confluenceScore}</td>
+          <td><span class="status-pill ${getPaperStatusClass(trade.outcome)}">${escapeHtml(trade.outcome)}</span></td>
+          <td>${formatR(trade.realizedR)}</td>
+          <td>${formatDateTime(trade.openedAt)}</td>
+        </tr>
+      `).join("")}</tbody>
+    </table>
   `;
 }
 

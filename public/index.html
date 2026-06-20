@@ -163,6 +163,7 @@
             <a href="#signals" data-view-link="signals">Signals</a>
             <a href="#paper-portfolio" data-view-link="paper-portfolio">Paper Portfolio</a>
             <a href="#journal" data-view-link="journal">Journal</a>
+            <a href="#backtesting" data-view-link="backtesting">Backtesting</a>
             <a href="#performance" data-view-link="performance">Performance</a>
             <a href="#settings" data-view-link="settings">Settings</a>
             <a href="#billing" data-view-link="billing">Billing</a>
@@ -529,6 +530,89 @@
               <span>Journal entries stay linked to the original unlocked signal and tracked paper outcome.</span>
             </div>
             <div class="journal-list" id="journal-list"></div>
+          </section>
+
+          <section class="page-view hidden" id="backtesting-view" data-view="backtesting">
+            <div class="section-title">
+              <div>
+                <span class="eyebrow">Historical strategy research</span>
+                <h3>Backtesting Lab</h3>
+              </div>
+              <span class="status-pill" id="lab-status">Ready</span>
+            </div>
+            <form class="backtesting-lab-controls" id="backtesting-lab-form">
+              <fieldset>
+                <legend>Markets</legend>
+                <div class="lab-option-grid market-options">
+                  <label><input type="checkbox" name="lab-market" value="BTC-USD" checked /> BTC-USD</label>
+                  <label><input type="checkbox" name="lab-market" value="ETH-USD" /> ETH-USD</label>
+                  <label><input type="checkbox" name="lab-market" value="SOL-USD" /> SOL-USD</label>
+                  <label><input type="checkbox" name="lab-market" value="XRP-USD" /> XRP-USD</label>
+                  <label><input type="checkbox" name="lab-market" value="ADA-USD" /> ADA-USD</label>
+                  <label><input type="checkbox" name="lab-market" value="DOGE-USD" /> DOGE-USD</label>
+                  <label><input type="checkbox" name="lab-market" value="LINK-USD" /> LINK-USD</label>
+                  <label><input type="checkbox" name="lab-market" value="AVAX-USD" /> AVAX-USD</label>
+                  <label><input type="checkbox" name="lab-market" value="LTC-USD" /> LTC-USD</label>
+                  <label><input type="checkbox" name="lab-market" value="XAU/USD" /> XAU/USD</label>
+                  <label><input type="checkbox" name="lab-market" value="XAG/USD" /> XAG/USD</label>
+                  <label><input type="checkbox" name="lab-market" value="WTI" /> WTI</label>
+                  <label><input type="checkbox" name="lab-market" value="BRENT" /> BRENT</label>
+                </div>
+              </fieldset>
+              <fieldset>
+                <legend>Timeframes</legend>
+                <div class="lab-option-grid">
+                  <label><input type="checkbox" name="lab-timeframe" value="15m" /> 15m</label>
+                  <label><input type="checkbox" name="lab-timeframe" value="1h" checked /> 1h</label>
+                  <label><input type="checkbox" name="lab-timeframe" value="4h" /> 4h</label>
+                </div>
+              </fieldset>
+              <fieldset>
+                <legend>Strategy components</legend>
+                <div class="lab-option-grid component-options">
+                  <label><input type="checkbox" name="lab-component" value="marketRegime" checked /> Market regime</label>
+                  <label><input type="checkbox" name="lab-component" value="multiTimeframe" checked /> Multi-timeframe</label>
+                  <label><input type="checkbox" name="lab-component" value="ema" checked /> EMA20/EMA50</label>
+                  <label><input type="checkbox" name="lab-component" value="rsi" checked /> RSI</label>
+                  <label><input type="checkbox" name="lab-component" value="adx" checked /> ADX</label>
+                  <label><input type="checkbox" name="lab-component" value="atr" checked /> ATR</label>
+                  <label><input type="checkbox" name="lab-component" value="supportResistance" checked /> Support/resistance</label>
+                </div>
+              </fieldset>
+              <button type="submit">Run Backtest</button>
+            </form>
+            <div class="signal-disclaimer">
+              <strong>Historical OHLCV only.</strong>
+              <span>Each decision uses only candles available at that timestamp. Lab settings never alter production scanner rules.</span>
+            </div>
+            <div class="lab-evaluation hidden" id="lab-evaluation"></div>
+            <div class="lab-metrics-grid">
+              <div><span>Total trades</span><strong id="lab-total-trades">0</strong></div>
+              <div><span>Win rate</span><strong id="lab-win-rate">0%</strong></div>
+              <div><span>Profit factor</span><strong id="lab-profit-factor">0</strong></div>
+              <div><span>Average R</span><strong id="lab-average-r">0R</strong></div>
+              <div><span>Max drawdown</span><strong id="lab-max-drawdown">0R</strong></div>
+              <div><span>Consecutive wins</span><strong id="lab-win-streak">0</strong></div>
+              <div><span>Consecutive losses</span><strong id="lab-loss-streak">0</strong></div>
+              <div><span>Expectancy</span><strong id="lab-expectancy">0R</strong></div>
+            </div>
+            <div class="lab-curves">
+              <article class="analytics-panel">
+                <div class="panel-header"><div><span class="eyebrow">Cumulative R</span><h3>Equity curve</h3></div></div>
+                <div class="line-chart" id="lab-equity-curve"></div>
+              </article>
+              <article class="analytics-panel">
+                <div class="panel-header"><div><span class="eyebrow">Peak-to-trough</span><h3>Drawdown curve</h3></div></div>
+                <div class="line-chart" id="lab-drawdown-curve"></div>
+              </article>
+            </div>
+            <div class="lab-breakdowns">
+              <article class="analytics-panel"><h3>Win rate by market</h3><div id="lab-by-market"></div></article>
+              <article class="analytics-panel"><h3>Win rate by timeframe</h3><div id="lab-by-timeframe"></div></article>
+              <article class="analytics-panel"><h3>Win rate by regime</h3><div id="lab-by-regime"></div></article>
+              <article class="analytics-panel"><h3>Win rate by confluence</h3><div id="lab-by-confluence"></div></article>
+            </div>
+            <div class="signals-table-wrap" id="lab-trades"></div>
           </section>
 
           <section class="page-view hidden" id="performance-view" data-view="performance">

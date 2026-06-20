@@ -1,4 +1,4 @@
-import { sendError, sendJson } from "../../shared/http.js";
+import { readJson, sendError, sendJson } from "../../shared/http.js";
 import { runHistoricalBacktest } from "./backtestService.js";
 
 export async function handleBacktestRoutes(req, res, pathname, url) {
@@ -17,6 +17,17 @@ export async function handleBacktestRoutes(req, res, pathname, url) {
           symbol: url.searchParams.get("symbol") || "",
           timeframe: url.searchParams.get("timeframe") || ""
         })
+      });
+    } catch (error) {
+      return sendError(res, error.statusCode || 400, error.message);
+    }
+  }
+
+  if (pathname === "/api/backtesting/run" && req.method === "POST") {
+    try {
+      const body = await readJson(req);
+      return sendJson(res, 200, {
+        backtest: await runHistoricalBacktest(req.user, body)
       });
     } catch (error) {
       return sendError(res, error.statusCode || 400, error.message);
