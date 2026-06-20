@@ -1,6 +1,7 @@
 import { getMarketDataProvider, getPairProviderAvailability } from "./marketDataProviderRegistry.js";
 import { MarketDataProviderError } from "./marketDataProviderError.js";
 import { analyzeMarketRegime } from "./marketRegimeService.js";
+import { analyzeAdvancedMarketStructure } from "./advancedMarketStructureService.js";
 
 const marketCatalog = [
   { symbol: "BTC-USD", name: "Bitcoin", category: "Crypto", group: "Major crypto", assetClass: "Crypto", venue: "Coinbase", provider: "coinbase-exchange" },
@@ -103,6 +104,9 @@ export async function getOhlcv(symbol, timeframe) {
     `[market-data] provider=${provider.id} category=${pair.category} symbol=${pair.symbol} timeframe=${timeframe}`
   );
   const marketData = await provider.getCandles(pair.symbol, timeframe);
+  const advancedStructure = analyzeAdvancedMarketStructure(marketData.candles, {
+    volumeAvailable: marketData.volumeAvailable !== false
+  });
 
   return {
     pair: {
@@ -112,6 +116,7 @@ export async function getOhlcv(symbol, timeframe) {
     },
     candles: marketData.candles,
     regime: analyzeMarketRegime(marketData.candles),
+    advancedStructure,
     source: marketData.source,
     volumeAvailable: marketData.volumeAvailable !== false,
     cache: marketData.cache,
@@ -141,6 +146,9 @@ export function getCachedOhlcv(symbol, timeframe) {
     },
     candles: marketData.candles,
     regime: analyzeMarketRegime(marketData.candles),
+    advancedStructure: analyzeAdvancedMarketStructure(marketData.candles, {
+      volumeAvailable: marketData.volumeAvailable !== false
+    }),
     source: marketData.source,
     volumeAvailable: marketData.volumeAvailable !== false,
     cache: marketData.cache,

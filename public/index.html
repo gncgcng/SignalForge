@@ -224,7 +224,7 @@
                     <button class="icon-action" id="favorite-market-button" type="button" title="Add to watchlist" aria-label="Add selected market to watchlist">☆</button>
                   </div>
                 </div>
-                <div class="chart-canvas" aria-label="mock trading chart">
+                <div class="chart-canvas" aria-label="live OHLCV trading chart">
                   <div class="grid-lines"></div>
                   <svg id="candle-chart" viewBox="0 0 680 280" role="img"></svg>
                 </div>
@@ -278,6 +278,24 @@
                       <span class="status-pill" id="calendar-status">Checking</span>
                     </div>
                     <div class="upcoming-events" id="upcoming-events"></div>
+                  </article>
+                </div>
+                <div class="advanced-structure-intelligence">
+                  <article>
+                    <span class="eyebrow">VWAP Context</span>
+                    <strong id="vwap-context-label">Loading</strong>
+                    <p id="vwap-context-detail">Waiting for real volume-weighted analysis.</p>
+                  </article>
+                  <article>
+                    <span class="eyebrow">Volume Profile</span>
+                    <strong id="volume-profile-label">Loading</strong>
+                    <p id="volume-profile-detail">Waiting for POC and value-area analysis.</p>
+                  </article>
+                  <article>
+                    <span class="eyebrow">Correlation Matrix</span>
+                    <strong id="correlation-context-label">Loading</strong>
+                    <div class="correlation-matrix" id="correlation-matrix"></div>
+                    <p id="correlation-context-detail">Waiting for synchronized market returns.</p>
                   </article>
                 </div>
               </div>
@@ -613,6 +631,9 @@
                   <label><input type="checkbox" name="lab-component" value="fairValueGaps" checked /> Fair value gaps</label>
                   <label><input type="checkbox" name="lab-component" value="orderBlocks" checked /> Order blocks</label>
                   <label><input type="checkbox" name="lab-component" value="structure" checked /> BOS / CHoCH</label>
+                  <label><input type="checkbox" name="lab-component" value="vwap" checked /> VWAP</label>
+                  <label><input type="checkbox" name="lab-component" value="volumeProfile" checked /> Volume profile</label>
+                  <label><input type="checkbox" name="lab-component" value="correlation" checked /> Correlation filter</label>
                 </div>
               </fieldset>
               <button type="submit">Run Backtest</button>
@@ -651,6 +672,9 @@
               <article class="analytics-panel"><h3>SMC comparison</h3><div id="lab-smc-comparison"></div></article>
               <article class="analytics-panel"><h3>Stop comparison</h3><div id="lab-stop-comparison"></div></article>
               <article class="analytics-panel"><h3>Target comparison</h3><div id="lab-target-comparison"></div></article>
+              <article class="analytics-panel"><h3>VWAP comparison</h3><div id="lab-vwap-comparison"></div></article>
+              <article class="analytics-panel"><h3>Volume profile comparison</h3><div id="lab-profile-comparison"></div></article>
+              <article class="analytics-panel"><h3>Correlation comparison</h3><div id="lab-correlation-comparison"></div></article>
             </div>
             <div class="signals-table-wrap" id="lab-trades"></div>
           </section>
@@ -744,6 +768,9 @@
               <article class="analytics-panel"><h3>Expectancy by risk level</h3><div id="signals-by-risk-level"></div></article>
               <article class="analytics-panel"><h3>Performance by stop style</h3><div id="signals-by-stop-style"></div></article>
               <article class="analytics-panel"><h3>Performance by target style</h3><div id="signals-by-target-style"></div></article>
+              <article class="analytics-panel"><h3>VWAP performance</h3><div id="signals-by-vwap"></div></article>
+              <article class="analytics-panel"><h3>Volume profile performance</h3><div id="signals-by-volume-profile"></div></article>
+              <article class="analytics-panel"><h3>Correlation filter performance</h3><div id="signals-by-correlation"></div></article>
             </div>
             <article class="analytics-panel">
               <h3>Best session by market</h3>

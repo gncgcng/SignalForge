@@ -613,7 +613,8 @@ backtestingLabForm.addEventListener("submit", async (event) => {
   );
   const componentNames = [
     "marketRegime", "multiTimeframe", "ema", "rsi", "adx", "atr", "supportResistance",
-    "liquiditySweeps", "fairValueGaps", "orderBlocks", "structure"
+    "liquiditySweeps", "fairValueGaps", "orderBlocks", "structure",
+    "vwap", "volumeProfile", "correlation"
   ];
 
   try {
@@ -958,6 +959,7 @@ async function loadMarketData() {
     renderChart([]);
     renderMarketRegime(null);
     renderMultiTimeframeConfluence(null);
+    renderAdvancedMarketStructure(null, null);
     setMarketStatus(
       state.selectedPair?.category === "Commodities"
         ? `${state.selectedPair.symbol}: ${state.selectedPair.availabilityMessage || "Data provider not configured"}.`
@@ -985,11 +987,12 @@ async function loadMarketData() {
     state.pairs = state.pairs.map((pair) => pair.symbol === marketData.pair.symbol ? marketData.pair : pair);
     renderPairs();
     renderSelectedMarket();
-    renderChart(marketData.candles);
+    renderChart(marketData.candles, marketData.advancedStructure);
     document.querySelector("#provider-name").textContent = providerLabel;
     document.querySelector("#candle-count").textContent = `${marketData.candles.length}`;
     renderMarketRegime(marketData.regime);
     renderMultiTimeframeConfluence(marketData.confluence);
+    renderAdvancedMarketStructure(marketData.advancedStructure, marketData.correlation);
     document.querySelector("#provider-status").textContent = marketData.cache === "hit" ? "Cached live" : "Live candles";
     state.marketStatus[statusKey] = {
       type: "loaded",
@@ -1009,6 +1012,7 @@ async function loadMarketData() {
     document.querySelector("#market-regime").textContent = "Unavailable";
     renderMarketRegime(null);
     renderMultiTimeframeConfluence(null);
+    renderAdvancedMarketStructure(null, null);
     state.marketStatus[statusKey] = {
       type: "error",
       message: `${state.selectedPair.symbol} ${state.timeframe}: ${error.message}`
@@ -1335,7 +1339,7 @@ function queueMarketDataLoad() {
   }, 250);
 }
 
-function renderChart(candles) {
+function renderChart(candles, advancedStructure = null) {
   const svg = document.querySelector("#candle-chart");
 
   if (!candles.length) {
@@ -1347,14 +1351,18 @@ function renderChart(candles) {
   const height = 280;
   const padding = 18;
   const visible = candles.slice(-72);
-  const min = Math.min(...visible.map((candle) => candle.low));
-  const max = Math.max(...visible.map((candle) => candle.high));
+  const zones = [
+    ...(advancedStructure?.chartZones?.vwap || []),
+    ...(advancedStructure?.chartZones?.profile || [])
+  ].filter((zone) => Number.isFinite(Number(zone.price)));
+  const min = Math.min(...visible.map((candle) => candle.low), ...zones.map((zone) => zone.price));
+  const max = Math.max(...visible.map((candle) => candle.high), ...zones.map((zone) => zone.price));
   const range = Math.max(max - min, 1);
   const slot = (width - padding * 2) / visible.length;
   const bodyWidth = Math.max(3, slot * 0.58);
   const y = (price) => height - padding - ((price - min) / range) * (height - padding * 2);
 
-  svg.innerHTML = visible.map((candle, index) => {
+  const candlesMarkup = visible.map((candle, index) => {
     const x = padding + index * slot + slot / 2;
     const openY = y(candle.open);
     const closeY = y(candle.close);
@@ -1369,6 +1377,48 @@ function renderChart(candles) {
       <rect class="candle-body ${directionClass}" x="${(x - bodyWidth / 2).toFixed(2)}" y="${bodyY.toFixed(2)}" width="${bodyWidth.toFixed(2)}" height="${bodyHeight.toFixed(2)}"></rect>
     `;
   }).join("");
+  const zonesMarkup = zones.map((zone) => {
+    const zoneY = y(zone.price);
+    const className = zone.label.includes("VWAP") ? "chart-vwap-zone" : "chart-profile-zone";
+    return `
+      <line class="${className}" x1="${padding}" x2="${width - padding}" y1="${zoneY}" y2="${zoneY}"></line>
+      <text class="chart-zone-label" x="${width - padding - 4}" y="${zoneY - 4}" text-anchor="end">${escapeHtml(zone.label)}</text>
+    `;
+  }).join("");
+  svg.innerHTML = `${candlesMarkup}${zonesMarkup}`;
+}
+
+function renderAdvancedMarketStructure(structure, correlation) {
+  const vwapLabel = document.querySelector("#vwap-context-label");
+  const vwapDetail = document.querySelector("#vwap-context-detail");
+  const profileLabel = document.querySelector("#volume-profile-label");
+  const profileDetail = document.querySelector("#volume-profile-detail");
+  const correlationLabel = document.querySelector("#correlation-context-label");
+  const correlationDetail = document.querySelector("#correlation-context-detail");
+  const matrix = document.querySelector("#correlation-matrix");
+
+  if (!structure?.available) {
+    vwapLabel.textContent = "Unavailable";
+    vwapDetail.textContent = structure?.reason || "Real volume data is unavailable.";
+    profileLabel.textContent = "Unavailable";
+    profileDetail.textContent = structure?.reason || "Real volume data is unavailable.";
+  } else {
+    vwapLabel.textContent = `${structure.vwap.event} · ${formatCurrency(structure.vwap.session.value)}`;
+    vwapDetail.textContent = structure.vwap.explanation;
+    profileLabel.textContent = `POC ${formatCurrency(structure.volumeProfile.poc)}`;
+    profileDetail.textContent = structure.volumeProfile.explanation;
+  }
+
+  correlationLabel.textContent = correlation?.available
+    ? `${correlation.peers.length} synchronized peers`
+    : "Unavailable";
+  correlationDetail.textContent = correlation?.explanation ||
+    "Synchronized real-market returns are unavailable.";
+  matrix.innerHTML = (correlation?.peers || []).slice(0, 6).map((peer) => `
+    <span class="${Math.abs(peer.correlation) >= 0.75 ? "strong" : ""}">
+      ${escapeHtml(peer.symbol)} ${Number(peer.correlation).toFixed(2)}
+    </span>
+  `).join("");
 }
 
 function inferRegime(candles) {
@@ -1693,7 +1743,35 @@ function renderPerformance() {
     document.querySelector("#signals-by-target-style"),
     state.performance.targetStylePerformance || []
   );
+  renderEvidencePerformance(
+    document.querySelector("#signals-by-vwap"),
+    state.performance.vwapPerformance || []
+  );
+  renderEvidencePerformance(
+    document.querySelector("#signals-by-volume-profile"),
+    state.performance.volumeProfilePerformance || []
+  );
+  renderEvidencePerformance(
+    document.querySelector("#signals-by-correlation"),
+    state.performance.correlationPerformance || []
+  );
   renderMonthlyPerformance(monthlyPerformance);
+}
+
+function renderEvidencePerformance(container, items) {
+  if (!container) return;
+  if (!items?.length) {
+    container.innerHTML = `<div class="empty-state"><span>No tracked outcomes yet.</span></div>`;
+    return;
+  }
+  container.classList.add("distribution-list");
+  container.innerHTML = items.map((item) => `
+    <div class="distribution-row">
+      <div><span>${escapeHtml(item.label)}</span><strong>${item.winRate}% · ${formatR(item.netR)}</strong></div>
+      <div class="distribution-track"><span style="width: ${Math.max(2, item.winRate)}%"></span></div>
+      <small>${item.totalSignals} signals</small>
+    </div>
+  `).join("");
 }
 
 function renderSmcPerformance(container, items, unit = "trades") {
@@ -2184,10 +2262,52 @@ function renderSignalTransparency(signal) {
         `).join("")}
       </div>
       ${renderSmcExplanation(signal)}
+      ${renderAdvancedStructureExplanation(signal)}
       <p class="risk-guidance"><strong>Risk per trade:</strong> Define a consistent maximum loss before entering, size the position from the stop distance, and avoid risking capital you cannot afford to lose.</p>
       <div class="signal-disclaimer">
         <strong>Educational tool only. Not financial advice.</strong>
         <span>Review the market and your own risk limits before making any decision.</span>
+      </div>
+    </section>
+  `;
+}
+
+function renderAdvancedStructureExplanation(signal) {
+  const structure = signal.marketStructure || {
+    available: Boolean(signal.indicators?.vwapAvailable),
+    factors: signal.indicators?.marketStructureFactors || [],
+    explanation: signal.indicators?.marketStructureExplanation || "",
+    vwap: {
+      session: { value: signal.indicators?.sessionVwap },
+      anchored: { value: signal.indicators?.anchoredVwap },
+      event: signal.indicators?.vwapEvent || "None"
+    },
+    volumeProfile: signal.indicators?.volumeProfile || null
+  };
+  const correlation = signal.correlation || {
+    available: Boolean(signal.indicators?.correlationAvailable),
+    conflict: Boolean(signal.indicators?.correlationConflict),
+    breakdown: Boolean(signal.indicators?.correlationBreakdown),
+    explanation: signal.indicators?.correlationExplanation || "",
+    peers: signal.indicators?.correlationPeers || []
+  };
+
+  return `
+    <section class="advanced-explanation">
+      <div class="smc-heading"><span>Advanced Market Structure</span><strong>${structure.available ? "Live volume context" : "Unavailable"}</strong></div>
+      <div class="advanced-factor-grid">
+        <div>
+          <strong>VWAP context</strong>
+          <span>${escapeHtml(structure.factors?.find((factor) => factor.name === "VWAP")?.detail || structure.explanation || "VWAP unavailable.")}</span>
+        </div>
+        <div>
+          <strong>Volume profile context</strong>
+          <span>${escapeHtml(structure.factors?.find((factor) => factor.name === "Volume Profile")?.detail || "Volume profile unavailable.")}</span>
+        </div>
+        <div class="${correlation.conflict ? "conflict" : ""}">
+          <strong>Correlation context</strong>
+          <span>${escapeHtml(correlation.explanation || "Correlation context unavailable.")}</span>
+        </div>
       </div>
     </section>
   `;
@@ -2572,7 +2692,34 @@ function renderBacktestingLab() {
   renderSmcComparison(document.querySelector("#lab-smc-comparison"), report.smcComparison);
   renderRiskComparison(document.querySelector("#lab-stop-comparison"), report.riskComparison?.stops);
   renderRiskComparison(document.querySelector("#lab-target-comparison"), report.riskComparison?.targets);
+  renderComponentComparison(
+    document.querySelector("#lab-vwap-comparison"),
+    report.advancedStructureComparison?.vwap
+  );
+  renderComponentComparison(
+    document.querySelector("#lab-profile-comparison"),
+    report.advancedStructureComparison?.volumeProfile
+  );
+  renderComponentComparison(
+    document.querySelector("#lab-correlation-comparison"),
+    report.advancedStructureComparison?.correlation
+  );
   renderLabTrades(trades);
+}
+
+function renderComponentComparison(container, comparison) {
+  if (!container) return;
+  if (!comparison) {
+    container.innerHTML = `<div class="empty-state"><span>Component disabled for this run.</span></div>`;
+    return;
+  }
+  container.innerHTML = `
+    <div class="smc-comparison-grid">
+      <div><span>${escapeHtml(comparison.primary.label)}</span><strong>${formatR(comparison.primary.metrics.expectancy)} expectancy</strong></div>
+      <div><span>${escapeHtml(comparison.variant.label)}</span><strong>${formatR(comparison.variant.metrics.expectancy)} expectancy</strong></div>
+      <div><span>Improvement</span><strong>${formatR(comparison.expectancyDelta)} expectancy · ${comparison.winRateDelta >= 0 ? "+" : ""}${comparison.winRateDelta}% win rate</strong></div>
+    </div>
+  `;
 }
 
 function renderRiskComparison(container, comparison) {

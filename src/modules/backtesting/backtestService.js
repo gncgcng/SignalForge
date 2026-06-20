@@ -5,6 +5,16 @@ import {
   analyzeSmartMoneyConcepts,
   evaluateSmcConfluence
 } from "../market-data/smartMoneyConceptsService.js";
+import {
+  analyzeAdvancedMarketStructure,
+  evaluateAdvancedStructure
+} from "../market-data/advancedMarketStructureService.js";
+import {
+  buildCorrelationContext,
+  buildCorrelationSnapshot,
+  correlationSymbols,
+  evaluateCorrelationContext
+} from "../market-data/correlationService.js";
 import { getTradingSession, tradingSessions } from "../intelligence/sessionIntelligenceService.js";
 
 export const backtestSymbols = [
@@ -23,7 +33,10 @@ export const strategyComponentNames = [
   "liquiditySweeps",
   "fairValueGaps",
   "orderBlocks",
-  "structure"
+  "structure",
+  "vwap",
+  "volumeProfile",
+  "correlation"
 ];
 
 const warmupCandles = 60;
@@ -39,6 +52,9 @@ export async function runHistoricalBacktest(_user, input) {
   const withoutSmcReports = [];
   const fixedStopReports = [];
   const fixedTargetReports = [];
+  const withoutVwapReports = [];
+  const withoutProfileReports = [];
+  const withoutCorrelationReports = [];
   const errors = [];
 
   for (const symbol of symbols) {
@@ -48,7 +64,8 @@ export async function runHistoricalBacktest(_user, input) {
         const options = {
           components,
           sessionFilters,
-          higherTimeframeData: bundle.higherTimeframeData
+          higherTimeframeData: bundle.higherTimeframeData,
+          correlationData: bundle.correlationData
         };
         reports.push(backtestMarketData(bundle.marketData, timeframe, options));
         fixedStopReports.push(backtestMarketData(bundle.marketData, timeframe, {
@@ -58,6 +75,18 @@ export async function runHistoricalBacktest(_user, input) {
         fixedTargetReports.push(backtestMarketData(bundle.marketData, timeframe, {
           ...options,
           targetMode: "fixed"
+        }));
+        withoutVwapReports.push(backtestMarketData(bundle.marketData, timeframe, {
+          ...options,
+          components: { ...components, vwap: false }
+        }));
+        withoutProfileReports.push(backtestMarketData(bundle.marketData, timeframe, {
+          ...options,
+          components: { ...components, volumeProfile: false }
+        }));
+        withoutCorrelationReports.push(backtestMarketData(bundle.marketData, timeframe, {
+          ...options,
+          components: { ...components, correlation: false }
         }));
         if (hasEnabledSmc(components)) {
           withoutSmcReports.push(backtestMarketData(bundle.marketData, timeframe, {
@@ -83,7 +112,10 @@ export async function runHistoricalBacktest(_user, input) {
     components,
     withoutSmcReports,
     fixedStopReports,
-    fixedTargetReports
+    fixedTargetReports,
+    withoutVwapReports,
+    withoutProfileReports,
+    withoutCorrelationReports
   );
 }
 
@@ -94,6 +126,7 @@ export function backtestMarketData(marketData, timeframe, options = {}) {
   const sessionFilters = options.sessionFilters || tradingSessions;
   const stopMode = options.stopMode || "atr";
   const targetMode = options.targetMode || "dynamic";
+  const correlationData = options.correlationData || {};
   const trades = [];
   let index = warmupCandles - 1;
 
@@ -108,7 +141,8 @@ export function backtestMarketData(marketData, timeframe, options = {}) {
       ,
       sessionFilters,
       stopMode,
-      targetMode
+      targetMode,
+      correlationData
     });
 
     if (!setup) {
@@ -140,6 +174,8 @@ export function backtestMarketData(marketData, timeframe, options = {}) {
       riskRewardRatio: setup.riskRewardRatio,
       stopStyle: setup.stopStyle,
       targetStyle: setup.targetStyle,
+      advancedStructure: setup.advancedStructure,
+      correlation: setup.correlation,
       openedAt: toIso(candles[index].time),
       closedAt: toIso(candles[outcome.exitIndex]?.time),
       outcome: outcome.status,
@@ -234,6 +270,8 @@ function evaluateHistoricalSetup({
   sessionFilters,
   stopMode,
   targetMode
+  ,
+  correlationData
 }) {
   const regime = analyzeMarketRegime(candles);
   const metrics = regime.metrics || {};
@@ -279,12 +317,33 @@ function evaluateHistoricalSetup({
   if (components.multiTimeframe && confluence.badge === "Countertrend" && confluence.score < 35) return null;
   const smcState = analyzeSmartMoneyConcepts(candles);
   const smc = evaluateBacktestSmc(smcState, direction, regime, components);
+  const advancedState = analyzeAdvancedMarketStructure(candles, {
+    volumeAvailable: marketData.volumeAvailable !== false
+  });
+  const advancedStructure = evaluateAdvancedStructure(advancedState, direction, latest.close, regime);
+  const historicalSeries = {
+    [marketData.pair.symbol]: candles
+  };
+  for (const [peer, peerData] of Object.entries(correlationData)) {
+    const historical = peerData.candles.filter((candle) => candle.time <= latest.time);
+    if (historical.length >= 20) historicalSeries[peer] = historical;
+  }
+  const correlationContext = buildCorrelationContext(
+    buildCorrelationSnapshot(historicalSeries, timeframe),
+    marketData.pair.symbol
+  );
+  const correlation = evaluateCorrelationContext(correlationContext, direction);
 
   const enabledCount = Object.values(components).filter(Boolean).length;
   const agreement = votes.filter((vote) => direction === "long" ? vote > 0 : vote < 0).length;
   let qualityScore = 48 + Math.round((agreement / Math.max(1, votes.length)) * 32);
   qualityScore += confluence.qualityAdjustment;
   qualityScore += smc.qualityAdjustment;
+  if (components.vwap) {
+    qualityScore += advancedStructure.conflict ? -5 : advancedStructure.vwapAligned ? 2 : 0;
+  }
+  if (components.volumeProfile && advancedStructure.volumeProfileAligned) qualityScore += 2;
+  if (components.correlation) qualityScore += correlation.qualityAdjustment;
   if (components.adx && metrics.adx14 >= 25) qualityScore += 5;
   if (components.supportResistance && !hasRoomToTarget(metrics, latest.close, direction, metrics.atr14)) return null;
   qualityScore = Math.max(0, Math.min(100, qualityScore));
@@ -322,7 +381,15 @@ function evaluateHistoricalSetup({
     qualityScore,
     confidenceScore: Math.max(
       0,
-      Math.min(100, qualityScore + confluence.confidenceAdjustment + smc.confidenceAdjustment)
+      Math.min(
+        100,
+        qualityScore +
+          confluence.confidenceAdjustment +
+          smc.confidenceAdjustment +
+          (components.vwap ? (advancedStructure.vwapAligned ? 3 : advancedStructure.conflict ? -7 : 0) : 0) +
+          (components.volumeProfile && advancedStructure.volumeProfileAligned ? 3 : 0) +
+          (components.correlation ? correlation.confidenceAdjustment : 0)
+      )
     ),
     entryPrice: latest.close,
     stopLoss,
@@ -331,6 +398,16 @@ function evaluateHistoricalSetup({
     ,
     stopStyle: stopMode === "fixed" ? "Fixed 1%" : "ATR regime",
     targetStyle: targetMode === "fixed" ? "Fixed 2R" : "Regime dynamic"
+    ,
+    advancedStructure: {
+      vwapAligned: components.vwap && advancedStructure.vwapAligned,
+      volumeProfileAligned: components.volumeProfile && advancedStructure.volumeProfileAligned
+    },
+    correlation: {
+      aligned: components.correlation && correlation.aligned,
+      conflict: components.correlation && correlation.conflict,
+      breakdown: components.correlation && correlation.breakdown
+    }
   };
 }
 
@@ -406,7 +483,19 @@ async function loadHistoricalBundle(symbol, timeframe) {
       higherTimeframeData[higherTimeframes[index]] = result.value;
     }
   });
-  return { marketData, higherTimeframeData };
+  const correlationSettled = await Promise.allSettled(
+    correlationSymbols
+      .filter((peer) => peer !== symbol)
+      .map((peer) => getOhlcv(peer, timeframe))
+  );
+  const correlationData = {};
+  correlationSettled.forEach((result, index) => {
+    if (result.status === "fulfilled") {
+      const peer = correlationSymbols.filter((item) => item !== symbol)[index];
+      correlationData[peer] = result.value;
+    }
+  });
+  return { marketData, higherTimeframeData, correlationData };
 }
 
 function aggregateBacktestReports(
@@ -415,7 +504,10 @@ function aggregateBacktestReports(
   components,
   withoutSmcReports = [],
   fixedStopReports = [],
-  fixedTargetReports = []
+  fixedTargetReports = [],
+  withoutVwapReports = [],
+  withoutProfileReports = [],
+  withoutCorrelationReports = []
 ) {
   const trades = reports.flatMap((report) => report.trades)
     .sort((a, b) => new Date(a.openedAt) - new Date(b.openedAt));
@@ -469,6 +561,23 @@ function aggregateBacktestReports(
         fixedTargetReports
       )
     },
+    advancedStructureComparison: {
+      vwap: components.vwap
+        ? buildComponentComparison("VWAP enabled", metrics, "VWAP disabled", withoutVwapReports)
+        : null,
+      volumeProfile: components.volumeProfile ? buildComponentComparison(
+        "Volume Profile enabled",
+        metrics,
+        "Volume Profile disabled",
+        withoutProfileReports
+      ) : null,
+      correlation: components.correlation ? buildComponentComparison(
+        "Correlation enabled",
+        metrics,
+        "Correlation disabled",
+        withoutCorrelationReports
+      ) : null
+    },
     sessionFilters: reports[0]?.sessionFilters || null,
     errors,
     evaluation: {
@@ -486,6 +595,16 @@ function aggregateBacktestReports(
     },
     trades: trades.slice(-100).reverse(),
     generatedAt: new Date().toISOString()
+  };
+}
+
+function buildComponentComparison(primaryLabel, primaryMetrics, variantLabel, reports) {
+  const variantMetrics = calculateBacktestMetrics(reports.flatMap((report) => report.trades));
+  return {
+    primary: { label: primaryLabel, metrics: primaryMetrics },
+    variant: { label: variantLabel, metrics: variantMetrics },
+    expectancyDelta: round(primaryMetrics.expectancy - variantMetrics.expectancy),
+    winRateDelta: round(primaryMetrics.winRate - variantMetrics.winRate)
   };
 }
 

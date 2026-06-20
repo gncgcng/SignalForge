@@ -43,6 +43,29 @@ export function buildPerformanceAnalytics(signals, filters = {}) {
   const targetStylePerformance = aggregateRiskExpectancy(signals, (signal) => (
     signal.riskPlan?.targetStyle || signal.indicators?.targetStyle || "Unknown"
   ));
+  const vwapPerformance = aggregateEvidencePerformance(
+    signals,
+    (signal) => Boolean(signal.marketStructure?.vwapAligned ?? signal.indicators?.vwapAligned),
+    "With VWAP alignment",
+    "Without VWAP alignment"
+  );
+  const volumeProfilePerformance = aggregateEvidencePerformance(
+    signals,
+    (signal) => Boolean(
+      signal.marketStructure?.volumeProfileAligned ?? signal.indicators?.volumeProfileAligned
+    ),
+    "With Volume Profile",
+    "Without Volume Profile"
+  );
+  const correlationPerformance = aggregateEvidencePerformance(
+    signals,
+    (signal) => Boolean(
+      (signal.correlation?.aligned ?? signal.indicators?.correlationAligned) &&
+      !(signal.correlation?.conflict ?? signal.indicators?.correlationConflict)
+    ),
+    "Correlation filter aligned",
+    "Without correlation alignment"
+  );
 
   return {
     filters,
@@ -65,6 +88,9 @@ export function buildPerformanceAnalytics(signals, filters = {}) {
     expectancyByRiskLevel,
     stopStylePerformance,
     targetStylePerformance,
+    vwapPerformance,
+    volumeProfilePerformance,
+    correlationPerformance,
     monthlyPerformance: monthly,
     charts: {
       winRateOverTime: monthly.map((item) => ({
@@ -79,6 +105,10 @@ export function buildPerformanceAnalytics(signals, filters = {}) {
       marketDistribution: byMarket
     }
   };
+}
+
+function aggregateEvidencePerformance(signals, predicate, withLabel, withoutLabel) {
+  return aggregatePerformance(signals, (signal) => predicate(signal) ? withLabel : withoutLabel);
 }
 
 function aggregateRiskExpectancy(signals, keyFn) {

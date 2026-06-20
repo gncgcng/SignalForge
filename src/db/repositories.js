@@ -989,6 +989,27 @@ function mapSignal(row) {
       recommendedRiskPercent: Number(row.indicators?.recommendedRiskPercent || 0),
       explanation: row.indicators?.riskExplanation || ""
     },
+    marketStructure: {
+      available: Boolean(row.indicators?.vwapAvailable),
+      vwapAligned: Boolean(row.indicators?.vwapAligned),
+      volumeProfileAligned: Boolean(row.indicators?.volumeProfileAligned),
+      factors: row.indicators?.marketStructureFactors || [],
+      explanation: row.indicators?.marketStructureExplanation || "",
+      vwap: {
+        session: { value: row.indicators?.sessionVwap ?? null },
+        anchored: { value: row.indicators?.anchoredVwap ?? null },
+        event: row.indicators?.vwapEvent || "None"
+      },
+      volumeProfile: row.indicators?.volumeProfile || null
+    },
+    correlation: {
+      available: Boolean(row.indicators?.correlationAvailable),
+      aligned: Boolean(row.indicators?.correlationAligned),
+      conflict: Boolean(row.indicators?.correlationConflict),
+      breakdown: Boolean(row.indicators?.correlationBreakdown),
+      explanation: row.indicators?.correlationExplanation || "",
+      peers: row.indicators?.correlationPeers || []
+    },
     reasoning: row.reasoning,
     confirmations: row.confirmations || [],
     indicators: row.indicators || {},

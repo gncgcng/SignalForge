@@ -144,6 +144,8 @@ function toScanPreview(signal) {
     newsRisk: signal.newsRisk,
     smc: signal.smc,
     riskPlan: signal.riskPlan,
+    marketStructure: signal.marketStructure,
+    correlation: signal.correlation,
     riskRewardRatio: signal.riskRewardRatio,
     confidenceScore: signal.confidenceScore,
     qualityScore: signal.qualityScore,

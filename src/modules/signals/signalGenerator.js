@@ -10,6 +10,8 @@ import {
   buildDynamicRiskPlan,
   minimumRiskReward
 } from "../risk/riskEngineService.js";
+import { evaluateAdvancedStructure } from "../market-data/advancedMarketStructureService.js";
+import { evaluateCorrelationContext } from "../market-data/correlationService.js";
 
 const minimumCandles = 60;
 const minimumQualityScore = 78;
@@ -29,9 +31,9 @@ export function generateMarketDataSetup(marketData, timeframe) {
   const latest = candles[candles.length - 1];
   const regime = analyzeMarketRegime(candles);
   const smc = analyzeSmartMoneyConcepts(candles);
-  const levels = mergeOrderBlockLevels(
-    detectSupportResistance(candles),
-    smc,
+  const levels = mergeAdvancedLevels(
+    mergeOrderBlockLevels(detectSupportResistance(candles), smc, latest.close),
+    marketData.advancedStructure,
     latest.close
   );
   const isCommodity = marketData.pair.assetClass === "Commodity";
@@ -49,7 +51,9 @@ export function generateMarketDataSetup(marketData, timeframe) {
     regime,
     marketData.confluence,
     marketData.intelligence,
-    smc
+    smc,
+    marketData.advancedStructure,
+    marketData.correlation
   );
   const shortCase = validateCandidate(
     adjustCandidateForVolatility(rawShortCase, regime),
@@ -59,7 +63,9 @@ export function generateMarketDataSetup(marketData, timeframe) {
     regime,
     marketData.confluence,
     marketData.intelligence,
-    smc
+    smc,
+    marketData.advancedStructure,
+    marketData.correlation
   );
   const bestCase = [longCase, shortCase]
     .filter((candidate) => candidate.valid)
@@ -98,6 +104,8 @@ export function generateMarketDataSetup(marketData, timeframe) {
       confluence: bestCase.confluence,
       smc: bestCase.smc,
       riskPlan: bestCase.riskPlan,
+      marketStructure: bestCase.marketStructure,
+      correlation: bestCase.correlation,
       reasoning: buildReasoning(bestCase, indicators, levels, regime, isCommodity),
       confirmations: bestCase.confirmations,
       indicators: serializeIndicators(
@@ -108,7 +116,9 @@ export function generateMarketDataSetup(marketData, timeframe) {
         bestCase.session,
         bestCase.newsRisk,
         bestCase.smc,
-        bestCase.riskPlan
+        bestCase.riskPlan,
+        bestCase.marketStructure,
+        bestCase.correlation
       ),
       generatedAt: new Date().toISOString(),
       marketSource: marketData.source
@@ -126,7 +136,9 @@ export function generateMarketDataSetup(marketData, timeframe) {
         bestCase.session,
         bestCase.newsRisk,
         bestCase.smc,
-        bestCase.riskPlan
+        bestCase.riskPlan,
+        bestCase.marketStructure,
+        bestCase.correlation
       )
     }
   };
@@ -265,10 +277,28 @@ function adjustCandidateForVolatility(candidate, regime) {
   };
 }
 
-function validateCandidate(candidate, candles, indicators, levels, regime, confluenceContext, intelligence, smcState) {
+function validateCandidate(
+  candidate,
+  candles,
+  indicators,
+  levels,
+  regime,
+  confluenceContext,
+  intelligence,
+  smcState,
+  advancedStructure,
+  correlationContext
+) {
   const setupType = classifySetupType(candidate.direction, candles, indicators, levels, regime);
   const confluence = scoreMultiTimeframeConfluence(confluenceContext, candidate.direction);
   const smc = evaluateSmcConfluence(smcState, candidate.direction, regime);
+  const marketStructure = evaluateAdvancedStructure(
+    advancedStructure,
+    candidate.direction,
+    candidate.entry,
+    regime
+  );
+  const correlation = evaluateCorrelationContext(correlationContext, candidate.direction);
   const opposingLevel = candidate.direction === "long"
     ? levels.nearestResistance
     : levels.nearestSupport;
@@ -373,7 +403,11 @@ function validateCandidate(candidate, candles, indicators, levels, regime, confl
     levelStrength,
     opposingRoom,
     emaAligned
-  }) + confluence.qualityAdjustment + smc.qualityAdjustment));
+  }) +
+    confluence.qualityAdjustment +
+    smc.qualityAdjustment +
+    marketStructure.qualityAdjustment +
+    correlation.qualityAdjustment));
   const protectiveLevel = candidate.direction === "long"
     ? levels.nearestSupport
     : levels.nearestResistance;
@@ -412,11 +446,15 @@ function validateCandidate(candidate, candles, indicators, levels, regime, confl
       candidate.confidenceScore +
         confluence.confidenceAdjustment +
         smc.confidenceAdjustment +
+        marketStructure.confidenceAdjustment +
+        correlation.confidenceAdjustment +
         session.confidenceAdjustment +
         newsRisk.confidenceAdjustment
     )),
     confluence,
     smc,
+    marketStructure,
+    correlation,
     riskPlan,
     session,
     newsRisk,
@@ -723,6 +761,8 @@ function noSetup(message, marketData, timeframe, candidates) {
         regime: candidate.regime,
         confluence: candidate.confluence,
         smc: candidate.smc,
+        marketStructure: candidate.marketStructure,
+        correlation: candidate.correlation,
         session: candidate.session,
         newsRisk: candidate.newsRisk,
         rejectionReasons: candidate.rejectionReasons,
@@ -739,7 +779,7 @@ function buildReasoning(candidate, indicators, levels, regime, isCommodity) {
     ? `Commodity ${candidate.direction.toUpperCase()} analysis uses Twelve Data price structure; volume is not required. Setup`
     : `${candidate.direction.toUpperCase()} setup`;
 
-  return `${prefix} classified as ${candidate.setupType} with quality ${candidate.qualityScore}/100 in a ${regime.label} regime. ${regime.explanation} ${candidate.confluence.explanation} ${candidate.smc.explanation} ${candidate.riskPlan.explanation} ${candidate.session.explanation} ${candidate.newsRisk.explanation} Confirmed by ${passed}. Failed checks: ${failed}. EMA20 ${formatNumber(indicators.ema20)}, EMA50 ${formatNumber(indicators.ema50)}, ADX14 ${formatNumber(regime.metrics.adx14)}, RSI14 ${formatNumber(indicators.rsi14)}, ATR14 ${formatNumber(indicators.atr14)}. Support ${levels.nearestSupport ? formatNumber(levels.nearestSupport.price) : "n/a"}, resistance ${levels.nearestResistance ? formatNumber(levels.nearestResistance.price) : "n/a"}.`;
+  return `${prefix} classified as ${candidate.setupType} with quality ${candidate.qualityScore}/100 in a ${regime.label} regime. ${regime.explanation} ${candidate.confluence.explanation} ${candidate.smc.explanation} ${candidate.marketStructure.explanation} ${candidate.correlation.explanation} ${candidate.riskPlan.explanation} ${candidate.session.explanation} ${candidate.newsRisk.explanation} Confirmed by ${passed}. Failed checks: ${failed}. EMA20 ${formatNumber(indicators.ema20)}, EMA50 ${formatNumber(indicators.ema50)}, ADX14 ${formatNumber(regime.metrics.adx14)}, RSI14 ${formatNumber(indicators.rsi14)}, ATR14 ${formatNumber(indicators.atr14)}. Support ${levels.nearestSupport ? formatNumber(levels.nearestSupport.price) : "n/a"}, resistance ${levels.nearestResistance ? formatNumber(levels.nearestResistance.price) : "n/a"}.`;
 }
 
 function serializeIndicators(
@@ -750,7 +790,9 @@ function serializeIndicators(
   session = null,
   newsRisk = null,
   smc = null,
-  riskPlan = null
+  riskPlan = null,
+  marketStructure = null,
+  correlation = null
 ) {
   return {
     ema20: roundPrice(indicators.ema20),
@@ -790,7 +832,46 @@ function serializeIndicators(
     targetMultiple: riskPlan?.targetMultiple ?? null,
     riskTier: riskPlan?.riskTier || "Unknown",
     recommendedRiskPercent: riskPlan?.recommendedRiskPercent ?? 0,
-    riskExplanation: riskPlan?.explanation || ""
+    riskExplanation: riskPlan?.explanation || "",
+    vwapAvailable: marketStructure?.available ?? false,
+    vwapAligned: marketStructure?.vwapAligned ?? false,
+    volumeProfileAligned: marketStructure?.volumeProfileAligned ?? false,
+    marketStructureFactors: marketStructure?.factors || [],
+    marketStructureExplanation: marketStructure?.explanation || "Advanced structure unavailable.",
+    sessionVwap: marketStructure?.vwap?.session?.value ?? null,
+    anchoredVwap: marketStructure?.vwap?.anchored?.value ?? null,
+    vwapEvent: marketStructure?.vwap?.event || "None",
+    volumeProfile: marketStructure?.volumeProfile || null,
+    correlationAvailable: correlation?.available ?? false,
+    correlationAligned: correlation?.aligned ?? false,
+    correlationConflict: correlation?.conflict ?? false,
+    correlationBreakdown: correlation?.breakdown ?? false,
+    correlationExplanation: correlation?.explanation || "Correlation unavailable.",
+    correlationPeers: correlation?.peers || []
+  };
+}
+
+function mergeAdvancedLevels(levels, advancedStructure, latestClose) {
+  const nodes = advancedStructure?.volumeProfile?.highVolumeNodes || [];
+  if (!nodes.length) return levels;
+  const profileLevels = nodes.map((node) => ({
+    price: node.midpoint,
+    time: null,
+    source: "High-volume node"
+  }));
+  const supports = [...levels.swingLows, ...profileLevels]
+    .filter((level) => level.price < latestClose);
+  const resistances = [...levels.swingHighs, ...profileLevels]
+    .filter((level) => level.price > latestClose);
+  const nearestSupport = nearestLevel(supports, latestClose);
+  const nearestResistance = nearestLevel(resistances, latestClose);
+
+  return {
+    ...levels,
+    nearestSupport,
+    nearestResistance,
+    supportStrength: levels.supportStrength + (nearestSupport?.source === "High-volume node" ? 1 : 0),
+    resistanceStrength: levels.resistanceStrength + (nearestResistance?.source === "High-volume node" ? 1 : 0)
   };
 }
 

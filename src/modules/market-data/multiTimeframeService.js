@@ -1,11 +1,20 @@
 import { getOhlcv } from "./marketDataService.js";
 import { getMarketIntelligence } from "../intelligence/intelligenceService.js";
+import { getCorrelationContext } from "./correlationService.js";
 
 const timeframeOrder = ["5m", "15m", "1h", "4h"];
 
 export async function getMultiTimeframeMarketData(symbol, timeframe) {
   const marketData = await getOhlcv(symbol, timeframe);
-  const intelligence = await getMarketIntelligence(new Date());
+  const [intelligence, correlation] = await Promise.all([
+    getMarketIntelligence(new Date()),
+    getCorrelationContext(symbol, timeframe).catch((error) => ({
+      available: false,
+      peers: [],
+      matrix: {},
+      explanation: `Correlation unavailable: ${error.message}`
+    }))
+  ]);
   const higherTimeframes = timeframeOrder.slice(timeframeOrder.indexOf(timeframe) + 1);
   const results = await Promise.allSettled(
     higherTimeframes.map((higherTimeframe) => getOhlcv(symbol, higherTimeframe))
@@ -36,6 +45,7 @@ export async function getMultiTimeframeMarketData(symbol, timeframe) {
   return {
     ...marketData,
     intelligence,
+    correlation,
     confluence: {
       ...context,
       display: scoreMultiTimeframeConfluence(context, displayDirection)
