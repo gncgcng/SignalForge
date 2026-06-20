@@ -2,18 +2,24 @@ import { getMarketDataProvider, getPairProviderAvailability } from "./marketData
 import { MarketDataProviderError } from "./marketDataProviderError.js";
 
 const marketCatalog = [
-  { symbol: "BTC-USD", name: "Bitcoin", category: "Crypto", assetClass: "Crypto", venue: "Coinbase", provider: "coinbase-exchange" },
-  { symbol: "ETH-USD", name: "Ethereum", category: "Crypto", assetClass: "Crypto", venue: "Coinbase", provider: "coinbase-exchange" },
-  { symbol: "SOL-USD", name: "Solana", category: "Crypto", assetClass: "Crypto", venue: "Coinbase", provider: "coinbase-exchange" },
-  { symbol: "XAU/USD", name: "Gold", category: "Commodities", assetClass: "Commodity", venue: "OTC", provider: "twelve-data" },
-  { symbol: "XAG/USD", name: "Silver", category: "Commodities", assetClass: "Commodity", venue: "OTC", provider: "twelve-data" },
-  { symbol: "WTI", name: "WTI Crude Oil", category: "Commodities", assetClass: "Commodity", venue: "OTC", provider: "twelve-data" },
-  { symbol: "BRENT", name: "Brent Crude Oil", category: "Commodities", assetClass: "Commodity", venue: "OTC", provider: "twelve-data" },
-  { symbol: "NATGAS", name: "Natural Gas", category: "Commodities", assetClass: "Commodity", venue: "OTC", provider: "twelve-data", optional: true },
-  { symbol: "NVDA", name: "NVIDIA Corp", category: "Stocks & ETFs", assetClass: "Stock", venue: "NASDAQ", provider: null },
-  { symbol: "TSLA", name: "Tesla Inc", category: "Stocks & ETFs", assetClass: "Stock", venue: "NASDAQ", provider: null },
-  { symbol: "AAPL", name: "Apple Inc", category: "Stocks & ETFs", assetClass: "Stock", venue: "NASDAQ", provider: null },
-  { symbol: "SPY", name: "S&P 500 ETF", category: "Stocks & ETFs", assetClass: "ETF", venue: "NYSE Arca", provider: null }
+  { symbol: "BTC-USD", name: "Bitcoin", category: "Crypto", group: "Major crypto", assetClass: "Crypto", venue: "Coinbase", provider: "coinbase-exchange" },
+  { symbol: "ETH-USD", name: "Ethereum", category: "Crypto", group: "Major crypto", assetClass: "Crypto", venue: "Coinbase", provider: "coinbase-exchange" },
+  { symbol: "SOL-USD", name: "Solana", category: "Crypto", group: "Major crypto", assetClass: "Crypto", venue: "Coinbase", provider: "coinbase-exchange" },
+  { symbol: "XRP-USD", name: "XRP", category: "Crypto", group: "Altcoins", assetClass: "Crypto", venue: "Coinbase", provider: "coinbase-exchange" },
+  { symbol: "ADA-USD", name: "Cardano", category: "Crypto", group: "Altcoins", assetClass: "Crypto", venue: "Coinbase", provider: "coinbase-exchange" },
+  { symbol: "DOGE-USD", name: "Dogecoin", category: "Crypto", group: "Altcoins", assetClass: "Crypto", venue: "Coinbase", provider: "coinbase-exchange" },
+  { symbol: "LINK-USD", name: "Chainlink", category: "Crypto", group: "Altcoins", assetClass: "Crypto", venue: "Coinbase", provider: "coinbase-exchange" },
+  { symbol: "AVAX-USD", name: "Avalanche", category: "Crypto", group: "Altcoins", assetClass: "Crypto", venue: "Coinbase", provider: "coinbase-exchange" },
+  { symbol: "LTC-USD", name: "Litecoin", category: "Crypto", group: "Altcoins", assetClass: "Crypto", venue: "Coinbase", provider: "coinbase-exchange" },
+  { symbol: "XAU/USD", name: "Gold", category: "Commodities", group: "Commodities", assetClass: "Commodity", venue: "OTC", provider: "twelve-data" },
+  { symbol: "XAG/USD", name: "Silver", category: "Commodities", group: "Commodities", assetClass: "Commodity", venue: "OTC", provider: "twelve-data" },
+  { symbol: "WTI", name: "WTI Crude Oil", category: "Commodities", group: "Commodities", assetClass: "Commodity", venue: "OTC", provider: "twelve-data" },
+  { symbol: "BRENT", name: "Brent Crude Oil", category: "Commodities", group: "Commodities", assetClass: "Commodity", venue: "OTC", provider: "twelve-data" },
+  { symbol: "NATGAS", name: "Natural Gas", category: "Commodities", group: "Commodities", assetClass: "Commodity", venue: "OTC", provider: "twelve-data", optional: true },
+  { symbol: "NVDA", name: "NVIDIA Corp", category: "Stocks & ETFs", group: "Stocks & ETFs", assetClass: "Stock", venue: "NASDAQ", provider: null },
+  { symbol: "TSLA", name: "Tesla Inc", category: "Stocks & ETFs", group: "Stocks & ETFs", assetClass: "Stock", venue: "NASDAQ", provider: null },
+  { symbol: "AAPL", name: "Apple Inc", category: "Stocks & ETFs", group: "Stocks & ETFs", assetClass: "Stock", venue: "NASDAQ", provider: null },
+  { symbol: "SPY", name: "S&P 500 ETF", category: "Stocks & ETFs", group: "Stocks & ETFs", assetClass: "ETF", venue: "NYSE Arca", provider: null }
 ];
 
 export function listPairs(query = "") {
@@ -25,7 +31,7 @@ export function listPairs(query = "") {
   }
 
   return pairs.filter((pair) => {
-    return [pair.symbol, pair.name, pair.category, pair.assetClass, pair.venue]
+    return [pair.symbol, pair.name, pair.group, pair.category, pair.assetClass, pair.venue]
       .join(" ")
       .toLowerCase()
       .includes(normalized);

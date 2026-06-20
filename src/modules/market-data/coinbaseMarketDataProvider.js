@@ -8,6 +8,18 @@ const granularityByTimeframe = {
   "4h": 21600
 };
 
+export const coinbaseSymbols = [
+  "BTC-USD",
+  "ETH-USD",
+  "SOL-USD",
+  "XRP-USD",
+  "ADA-USD",
+  "DOGE-USD",
+  "LINK-USD",
+  "AVAX-USD",
+  "LTC-USD"
+];
+
 const cache = new Map();
 
 export async function getCandlesFromCoinbase(symbol, timeframe) {
@@ -51,6 +63,16 @@ export async function getCandlesFromCoinbase(symbol, timeframe) {
         statusCode: 429,
         code: "RATE_LIMITED"
       });
+    }
+
+    if (response.status === 400 || response.status === 404) {
+      throw new MarketDataProviderError(
+        `Coinbase does not support ${symbol} on ${timeframe}, or the product is temporarily unavailable.`,
+        {
+          statusCode: 400,
+          code: "PROVIDER_UNSUPPORTED_MARKET"
+        }
+      );
     }
 
     if (!response.ok) {
@@ -145,7 +167,7 @@ export const coinbaseMarketDataProvider = {
     return true;
   },
   supports(symbol, timeframe) {
-    return ["BTC-USD", "ETH-USD", "SOL-USD"].includes(symbol) &&
+    return coinbaseSymbols.includes(symbol) &&
       Object.hasOwn(granularityByTimeframe, timeframe);
   },
   async getCandles(symbol, timeframe) {

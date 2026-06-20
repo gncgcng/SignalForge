@@ -942,14 +942,14 @@ function showView(view) {
 }
 
 function renderPairs() {
-  const categories = [...new Set(state.pairs.map((pair) => pair.category))];
-  pairList.innerHTML = categories.map((category) => `
+  const groups = [...new Set(state.pairs.map((pair) => pair.group || pair.category))];
+  pairList.innerHTML = groups.map((group) => `
     <section class="market-category">
       <div class="market-category-title">
-        <strong>${category}</strong>
-        <span>${state.pairs.filter((pair) => pair.category === category && pair.status === "active").length} live</span>
+        <strong>${group}</strong>
+        <span>${state.pairs.filter((pair) => (pair.group || pair.category) === group && pair.status === "active").length} live</span>
       </div>
-      ${state.pairs.filter((pair) => pair.category === category).map((pair) => pair.selectable ? `
+      ${state.pairs.filter((pair) => (pair.group || pair.category) === group).map((pair) => pair.selectable ? `
         <button class="pair-button ${state.selectedPair?.symbol === pair.symbol ? "active" : ""}" data-symbol="${pair.symbol}" data-status="${pair.status}" ${pair.status !== "active" ? "disabled" : ""} aria-busy="${getPairIsLoading(pair)}">
           <span>
             <strong>${pair.symbol}</strong><br />

@@ -15,6 +15,7 @@
     "test:commodity-insufficient": "node scripts/commodity-insufficient-candles-test.js",
     "test:commodity-signals": "node scripts/commodity-signal-test.js",
     "test:market-providers": "node scripts/market-provider-test.js",
+    "test:expanded-crypto": "node scripts/expanded-crypto-test.js",
     "test:provider-routing": "node scripts/provider-routing-test.js",
     "test:session-migration": "node scripts/session-migration-test.js",
     "smoke": "node scripts/smoke-test.js",
