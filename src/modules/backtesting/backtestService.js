@@ -1,6 +1,10 @@
 import { analyzeMarketRegime } from "../market-data/marketRegimeService.js";
 import { getOhlcv } from "../market-data/marketDataService.js";
 import { scoreMultiTimeframeConfluence } from "../market-data/multiTimeframeService.js";
+import {
+  analyzeSmartMoneyConcepts,
+  evaluateSmcConfluence
+} from "../market-data/smartMoneyConceptsService.js";
 import { getTradingSession, tradingSessions } from "../intelligence/sessionIntelligenceService.js";
 
 export const backtestSymbols = [
@@ -15,7 +19,11 @@ export const strategyComponentNames = [
   "rsi",
   "adx",
   "atr",
-  "supportResistance"
+  "supportResistance",
+  "liquiditySweeps",
+  "fairValueGaps",
+  "orderBlocks",
+  "structure"
 ];
 
 const warmupCandles = 60;
@@ -28,17 +36,25 @@ export async function runHistoricalBacktest(_user, input) {
   const components = normalizeComponents(input.components);
   const sessionFilters = normalizeSessionFilters(input.sessions);
   const reports = [];
+  const withoutSmcReports = [];
   const errors = [];
 
   for (const symbol of symbols) {
     for (const timeframe of timeframes) {
       try {
         const bundle = await loadHistoricalBundle(symbol, timeframe);
-        reports.push(backtestMarketData(bundle.marketData, timeframe, {
+        const options = {
           components,
           sessionFilters,
           higherTimeframeData: bundle.higherTimeframeData
-        }));
+        };
+        reports.push(backtestMarketData(bundle.marketData, timeframe, options));
+        if (hasEnabledSmc(components)) {
+          withoutSmcReports.push(backtestMarketData(bundle.marketData, timeframe, {
+            ...options,
+            components: disableSmcComponents(components)
+          }));
+        }
       } catch (error) {
         errors.push({ symbol, timeframe, message: error.message });
       }
@@ -51,7 +67,7 @@ export async function runHistoricalBacktest(_user, input) {
     throw error;
   }
 
-  return aggregateBacktestReports(reports, errors, components);
+  return aggregateBacktestReports(reports, errors, components, withoutSmcReports);
 }
 
 export function backtestMarketData(marketData, timeframe, options = {}) {
@@ -93,6 +109,7 @@ export function backtestMarketData(marketData, timeframe, options = {}) {
       setupType: setup.setupType,
       regime: setup.regime,
       confluenceScore: setup.confluenceScore,
+      smc: setup.smc,
       session: setup.session,
       qualityScore: setup.qualityScore,
       confidenceScore: setup.confidenceScore,
@@ -228,11 +245,14 @@ function evaluateHistoricalSetup({ marketData, timeframe, candles, higherTimefra
     ? scoreMultiTimeframeConfluence(confluenceContext, direction)
     : neutralConfluence(direction);
   if (components.multiTimeframe && confluence.badge === "Countertrend" && confluence.score < 35) return null;
+  const smcState = analyzeSmartMoneyConcepts(candles);
+  const smc = evaluateBacktestSmc(smcState, direction, regime, components);
 
   const enabledCount = Object.values(components).filter(Boolean).length;
   const agreement = votes.filter((vote) => direction === "long" ? vote > 0 : vote < 0).length;
   let qualityScore = 48 + Math.round((agreement / Math.max(1, votes.length)) * 32);
   qualityScore += confluence.qualityAdjustment;
+  qualityScore += smc.qualityAdjustment;
   if (components.adx && metrics.adx14 >= 25) qualityScore += 5;
   if (components.supportResistance && !hasRoomToTarget(metrics, latest.close, direction, metrics.atr14)) return null;
   qualityScore = Math.max(0, Math.min(100, qualityScore));
@@ -254,9 +274,13 @@ function evaluateHistoricalSetup({ marketData, timeframe, candles, higherTimefra
     setupType,
     regime: regime.label,
     confluenceScore: confluence.score,
+    smc,
     session: session.name,
     qualityScore,
-    confidenceScore: Math.max(0, Math.min(100, qualityScore + confluence.confidenceAdjustment)),
+    confidenceScore: Math.max(
+      0,
+      Math.min(100, qualityScore + confluence.confidenceAdjustment + smc.confidenceAdjustment)
+    ),
     entryPrice: latest.close,
     stopLoss,
     takeProfit,
@@ -339,7 +363,7 @@ async function loadHistoricalBundle(symbol, timeframe) {
   return { marketData, higherTimeframeData };
 }
 
-function aggregateBacktestReports(reports, errors, components) {
+function aggregateBacktestReports(reports, errors, components, withoutSmcReports = []) {
   const trades = reports.flatMap((report) => report.trades)
     .sort((a, b) => new Date(a.openedAt) - new Date(b.openedAt));
   const metrics = calculateBacktestMetrics(trades);
@@ -351,6 +375,8 @@ function aggregateBacktestReports(reports, errors, components) {
     confluence: aggregateWinRate(trades, (trade) => confluenceRange(trade.confluenceScore))
     ,
     sessions: aggregateWinRate(trades, (trade) => trade.session || "Unknown")
+    ,
+    smc: aggregateSmcPerformance(trades)
   };
   const noEdge = metrics.totalTrades < 8 ||
     metrics.expectancy <= 0 ||
@@ -375,6 +401,7 @@ function aggregateBacktestReports(reports, errors, components) {
     curves,
     breakdowns,
     components,
+    smcComparison: buildSmcComparison(metrics, withoutSmcReports),
     sessionFilters: reports[0]?.sessionFilters || null,
     errors,
     evaluation: {
@@ -392,6 +419,85 @@ function aggregateBacktestReports(reports, errors, components) {
     },
     trades: trades.slice(-100).reverse(),
     generatedAt: new Date().toISOString()
+  };
+}
+
+function evaluateBacktestSmc(smcState, direction, regime, components) {
+  const full = evaluateSmcConfluence(smcState, direction, regime);
+  const enabledNames = new Set();
+  if (components.liquiditySweeps) enabledNames.add("Liquidity sweep");
+  if (components.fairValueGaps) enabledNames.add("Fair value gap");
+  if (components.orderBlocks) enabledNames.add("Order block");
+  if (components.structure) enabledNames.add("BOS / CHoCH");
+
+  const factors = full.factors.filter((factor) => enabledNames.has(factor.name));
+  if (!factors.length) {
+    return {
+      score: 0,
+      conflict: false,
+      confidenceAdjustment: 0,
+      qualityAdjustment: 0,
+      factors: [],
+      explanation: "SMC components were disabled for this lab run."
+    };
+  }
+
+  const passed = factors.filter((factor) => factor.passed).length;
+  const scale = factors.length / full.factors.length;
+  return {
+    ...full,
+    score: passed,
+    factors,
+    confidenceAdjustment: Math.round(full.confidenceAdjustment * scale),
+    qualityAdjustment: Math.round(full.qualityAdjustment * scale)
+  };
+}
+
+function aggregateSmcPerformance(trades) {
+  const names = ["Liquidity sweep", "Fair value gap", "Order block", "BOS / CHoCH"];
+  return names.map((name) => {
+    const matching = trades.filter((trade) => trade.smc?.factors?.some(
+      (factor) => factor.name === name && factor.passed
+    ));
+    return aggregateWinRate(matching, () => name)[0] || {
+      label: name,
+      totalTrades: 0,
+      wins: 0,
+      losses: 0,
+      netR: 0,
+      winRate: 0
+    };
+  });
+}
+
+function buildSmcComparison(withSmcMetrics, withoutSmcReports) {
+  if (!withoutSmcReports.length) return null;
+  const withoutSmcTrades = withoutSmcReports.flatMap((report) => report.trades);
+  const withoutSmc = calculateBacktestMetrics(withoutSmcTrades);
+  return {
+    withSmc: withSmcMetrics,
+    withoutSmc,
+    delta: {
+      winRate: round(withSmcMetrics.winRate - withoutSmc.winRate),
+      expectancy: round(withSmcMetrics.expectancy - withoutSmc.expectancy),
+      totalTrades: withSmcMetrics.totalTrades - withoutSmc.totalTrades,
+      maxDrawdownR: round(withSmcMetrics.maxDrawdownR - withoutSmc.maxDrawdownR)
+    }
+  };
+}
+
+function hasEnabledSmc(components) {
+  return ["liquiditySweeps", "fairValueGaps", "orderBlocks", "structure"]
+    .some((name) => components[name]);
+}
+
+function disableSmcComponents(components) {
+  return {
+    ...components,
+    liquiditySweeps: false,
+    fairValueGaps: false,
+    orderBlocks: false,
+    structure: false
   };
 }
 

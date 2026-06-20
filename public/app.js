@@ -612,7 +612,8 @@ backtestingLabForm.addEventListener("submit", async (event) => {
       .map((input) => input.value)
   );
   const componentNames = [
-    "marketRegime", "multiTimeframe", "ema", "rsi", "adx", "atr", "supportResistance"
+    "marketRegime", "multiTimeframe", "ema", "rsi", "adx", "atr", "supportResistance",
+    "liquiditySweeps", "fairValueGaps", "orderBlocks", "structure"
   ];
 
   try {
@@ -1654,7 +1655,32 @@ function renderPerformance() {
   renderAnalyticsBars(document.querySelector("#signals-by-timeframe"), signalsByTimeframe);
   renderRegimePerformance(state.performance.regimePerformance || []);
   renderConfluencePerformance(state.performance.confluencePerformance || []);
+  renderSmcPerformance(
+    document.querySelector("#signals-by-smc"),
+    state.performance.smcPerformance || [],
+    "signals"
+  );
   renderMonthlyPerformance(monthlyPerformance);
+}
+
+function renderSmcPerformance(container, items, unit = "trades") {
+  if (!container) return;
+  if (!items?.length || items.every((item) => (item.totalSignals || item.totalTrades || 0) === 0)) {
+    container.innerHTML = `<div class="empty-state"><span>No tracked SMC outcomes yet.</span></div>`;
+    return;
+  }
+
+  container.classList.add("distribution-list");
+  container.innerHTML = items.map((item) => {
+    const total = item.totalSignals ?? item.totalTrades ?? 0;
+    return `
+      <div class="distribution-row">
+        <div><span>${escapeHtml(item.label)}</span><strong>${item.winRate}% · ${formatR(item.netR)}</strong></div>
+        <div class="distribution-track"><span style="width: ${Math.max(2, item.winRate)}%"></span></div>
+        <small>${total} ${unit}</small>
+      </div>
+    `;
+  }).join("");
 }
 
 function renderConfluencePerformance(items) {
@@ -2030,10 +2056,39 @@ function renderSignalTransparency(signal) {
           </div>
         `).join("")}
       </div>
+      ${renderSmcExplanation(signal)}
       <p class="risk-guidance"><strong>Risk per trade:</strong> Define a consistent maximum loss before entering, size the position from the stop distance, and avoid risking capital you cannot afford to lose.</p>
       <div class="signal-disclaimer">
         <strong>Educational tool only. Not financial advice.</strong>
         <span>Review the market and your own risk limits before making any decision.</span>
+      </div>
+    </section>
+  `;
+}
+
+function renderSmcExplanation(signal) {
+  const smc = signal.smc || {
+    score: Number(signal.indicators?.smcScore || 0),
+    conflict: Boolean(signal.indicators?.smcConflict),
+    explanation: signal.indicators?.smcExplanation,
+    factors: signal.indicators?.smcFactors || []
+  };
+  const factors = smc.factors || [];
+
+  return `
+    <section class="smc-explanation ${smc.conflict ? "conflict" : ""}">
+      <div class="smc-heading">
+        <span>Smart Money Concepts</span>
+        <strong>${smc.conflict ? "Conflict" : smc.score ? `${smc.score} confluence points` : "Neutral"}</strong>
+      </div>
+      <p class="reasoning">${escapeHtml(smc.explanation || "No objective Smart Money Concepts confirmation was recorded.")}</p>
+      <div class="smc-factor-grid">
+        ${factors.map((factor) => `
+          <div class="${factor.passed ? "passed" : "failed"}">
+            <strong>${factor.passed ? "Contributed" : "Not active"} · ${escapeHtml(factor.name)}</strong>
+            <span>${escapeHtml(factor.detail)}</span>
+          </div>
+        `).join("") || `<span class="reasoning">No SMC factors contributed to this setup.</span>`}
       </div>
     </section>
   `;
@@ -2386,7 +2441,25 @@ function renderBacktestingLab() {
   renderLabBreakdown(document.querySelector("#lab-by-timeframe"), breakdowns.timeframes);
   renderLabBreakdown(document.querySelector("#lab-by-regime"), breakdowns.regimes);
   renderLabBreakdown(document.querySelector("#lab-by-confluence"), breakdowns.confluence);
+  renderSmcPerformance(document.querySelector("#lab-by-smc"), breakdowns.smc || [], "trades");
+  renderSmcComparison(document.querySelector("#lab-smc-comparison"), report.smcComparison);
   renderLabTrades(trades);
+}
+
+function renderSmcComparison(container, comparison) {
+  if (!container) return;
+  if (!comparison) {
+    container.innerHTML = `<div class="empty-state"><span>Enable an SMC component to compare results.</span></div>`;
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="smc-comparison-grid">
+      <div><span>With SMC</span><strong>${comparison.withSmc.winRate}% · ${formatR(comparison.withSmc.expectancy)} expectancy</strong></div>
+      <div><span>Without SMC</span><strong>${comparison.withoutSmc.winRate}% · ${formatR(comparison.withoutSmc.expectancy)} expectancy</strong></div>
+      <div><span>Difference</span><strong>${comparison.delta.winRate >= 0 ? "+" : ""}${comparison.delta.winRate}% win rate · ${formatR(comparison.delta.expectancy)}</strong></div>
+    </div>
+  `;
 }
 
 function renderLabCurve(container, points, label) {

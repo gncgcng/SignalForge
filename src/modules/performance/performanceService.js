@@ -33,6 +33,7 @@ export function buildPerformanceAnalytics(signals, filters = {}) {
   const sessionPerformance = aggregatePerformance(signals, getSignalSession);
   const newsRiskPerformance = aggregatePerformance(signals, getNewsRiskGroup);
   const bestSessionByMarket = aggregateBestSessionByMarket(signals);
+  const smcPerformance = aggregateSmcPerformance(signals);
 
   return {
     filters,
@@ -51,6 +52,7 @@ export function buildPerformanceAnalytics(signals, filters = {}) {
     sessionPerformance,
     newsRiskPerformance,
     bestSessionByMarket,
+    smcPerformance,
     monthlyPerformance: monthly,
     charts: {
       winRateOverTime: monthly.map((item) => ({
@@ -65,6 +67,28 @@ export function buildPerformanceAnalytics(signals, filters = {}) {
       marketDistribution: byMarket
     }
   };
+}
+
+function aggregateSmcPerformance(signals) {
+  const names = ["Liquidity sweep", "Fair value gap", "Order block", "BOS / CHoCH"];
+  return names.map((name) => {
+    const matching = signals.filter((signal) => getSmcFactors(signal).some(
+      (factor) => factor.name === name && factor.passed
+    ));
+    return aggregatePerformance(matching, () => name)[0] || {
+      label: name,
+      totalSignals: 0,
+      hitTpCount: 0,
+      hitSlCount: 0,
+      expiredCount: 0,
+      netR: 0,
+      winRate: 0
+    };
+  });
+}
+
+function getSmcFactors(signal) {
+  return signal.smc?.factors || signal.indicators?.smcFactors || [];
 }
 
 function aggregatePerformance(signals, keyFn) {

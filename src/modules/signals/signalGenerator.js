@@ -2,6 +2,10 @@ import { appConfig } from "../../config/appConfig.js";
 import { createId } from "../../shared/ids.js";
 import { analyzeMarketRegime } from "../market-data/marketRegimeService.js";
 import { scoreMultiTimeframeConfluence } from "../market-data/multiTimeframeService.js";
+import {
+  analyzeSmartMoneyConcepts,
+  evaluateSmcConfluence
+} from "../market-data/smartMoneyConceptsService.js";
 
 const minimumCandles = 60;
 const minimumRiskReward = 1.8;
@@ -20,8 +24,13 @@ export function generateMarketDataSetup(marketData, timeframe) {
 
   const indicators = calculateIndicators(candles);
   const latest = candles[candles.length - 1];
-  const levels = detectSupportResistance(candles);
   const regime = analyzeMarketRegime(candles);
+  const smc = analyzeSmartMoneyConcepts(candles);
+  const levels = mergeOrderBlockLevels(
+    detectSupportResistance(candles),
+    smc,
+    latest.close
+  );
   const isCommodity = marketData.pair.assetClass === "Commodity";
   const rawLongCase = isCommodity
     ? evaluateCommodityLong(latest, indicators, levels)
@@ -36,7 +45,8 @@ export function generateMarketDataSetup(marketData, timeframe) {
     levels,
     regime,
     marketData.confluence,
-    marketData.intelligence
+    marketData.intelligence,
+    smc
   );
   const shortCase = validateCandidate(
     adjustCandidateForVolatility(rawShortCase, regime),
@@ -45,7 +55,8 @@ export function generateMarketDataSetup(marketData, timeframe) {
     levels,
     regime,
     marketData.confluence,
-    marketData.intelligence
+    marketData.intelligence,
+    smc
   );
   const bestCase = [longCase, shortCase]
     .filter((candidate) => candidate.valid)
@@ -82,6 +93,7 @@ export function generateMarketDataSetup(marketData, timeframe) {
       qualityScore: bestCase.qualityScore,
       setupType: bestCase.setupType,
       confluence: bestCase.confluence,
+      smc: bestCase.smc,
       reasoning: buildReasoning(bestCase, indicators, levels, regime, isCommodity),
       confirmations: bestCase.confirmations,
       indicators: serializeIndicators(
@@ -90,7 +102,8 @@ export function generateMarketDataSetup(marketData, timeframe) {
         regime,
         bestCase.confluence,
         bestCase.session,
-        bestCase.newsRisk
+        bestCase.newsRisk,
+        bestCase.smc
       ),
       generatedAt: new Date().toISOString(),
       marketSource: marketData.source
@@ -106,7 +119,8 @@ export function generateMarketDataSetup(marketData, timeframe) {
         regime,
         bestCase.confluence,
         bestCase.session,
-        bestCase.newsRisk
+        bestCase.newsRisk,
+        bestCase.smc
       )
     }
   };
@@ -245,9 +259,10 @@ function adjustCandidateForVolatility(candidate, regime) {
   };
 }
 
-function validateCandidate(candidate, candles, indicators, levels, regime, confluenceContext, intelligence) {
+function validateCandidate(candidate, candles, indicators, levels, regime, confluenceContext, intelligence, smcState) {
   const setupType = classifySetupType(candidate.direction, candles, indicators, levels, regime);
   const confluence = scoreMultiTimeframeConfluence(confluenceContext, candidate.direction);
+  const smc = evaluateSmcConfluence(smcState, candidate.direction, regime);
   const opposingLevel = candidate.direction === "long"
     ? levels.nearestResistance
     : levels.nearestSupport;
@@ -352,7 +367,7 @@ function validateCandidate(candidate, candles, indicators, levels, regime, confl
     levelStrength,
     opposingRoom,
     emaAligned
-  }) + confluence.qualityAdjustment));
+  }) + confluence.qualityAdjustment + smc.qualityAdjustment));
   const requiredQuality = setupType === "Reversal" ? 86 : minimumQualityScore;
 
   if (qualityScore < requiredQuality) {
@@ -367,10 +382,12 @@ function validateCandidate(candidate, candles, indicators, levels, regime, confl
       100,
       candidate.confidenceScore +
         confluence.confidenceAdjustment +
+        smc.confidenceAdjustment +
         session.confidenceAdjustment +
         newsRisk.confidenceAdjustment
     )),
     confluence,
+    smc,
     session,
     newsRisk,
     regime: regime.label,
@@ -495,6 +512,41 @@ function detectSupportResistance(candles) {
     resistanceStrength: calculateLevelStrength(resistanceCandidates, latestClose, candles),
     swingHighs: swingHighs.slice(-5),
     swingLows: swingLows.slice(-5)
+  };
+}
+
+function mergeOrderBlockLevels(levels, smc, latestClose) {
+  const bullishBlocks = smc.orderBlocks.active
+    .filter((block) => block.upper < latestClose)
+    .map((block) => ({
+      price: block.upper,
+      time: block.time,
+      source: "Bullish order block"
+    }));
+  const bearishBlocks = smc.orderBlocks.active
+    .filter((block) => block.lower > latestClose)
+    .map((block) => ({
+      price: block.lower,
+      time: block.time,
+      source: "Bearish order block"
+    }));
+  const supportCandidates = [...levels.swingLows, ...bullishBlocks];
+  const resistanceCandidates = [...levels.swingHighs, ...bearishBlocks];
+  const nearestSupport = nearestLevel(
+    supportCandidates.filter((level) => level.price < latestClose),
+    latestClose
+  );
+  const nearestResistance = nearestLevel(
+    resistanceCandidates.filter((level) => level.price > latestClose),
+    latestClose
+  );
+
+  return {
+    ...levels,
+    nearestSupport,
+    nearestResistance,
+    supportStrength: levels.supportStrength + (nearestSupport?.source ? 1 : 0),
+    resistanceStrength: levels.resistanceStrength + (nearestResistance?.source ? 1 : 0)
   };
 }
 
@@ -640,6 +692,7 @@ function noSetup(message, marketData, timeframe, candidates) {
         qualityScore: candidate.qualityScore,
         regime: candidate.regime,
         confluence: candidate.confluence,
+        smc: candidate.smc,
         session: candidate.session,
         newsRisk: candidate.newsRisk,
         rejectionReasons: candidate.rejectionReasons,
@@ -656,10 +709,10 @@ function buildReasoning(candidate, indicators, levels, regime, isCommodity) {
     ? `Commodity ${candidate.direction.toUpperCase()} analysis uses Twelve Data price structure; volume is not required. Setup`
     : `${candidate.direction.toUpperCase()} setup`;
 
-  return `${prefix} classified as ${candidate.setupType} with quality ${candidate.qualityScore}/100 in a ${regime.label} regime. ${regime.explanation} ${candidate.confluence.explanation} ${candidate.session.explanation} ${candidate.newsRisk.explanation} Confirmed by ${passed}. Failed checks: ${failed}. EMA20 ${formatNumber(indicators.ema20)}, EMA50 ${formatNumber(indicators.ema50)}, ADX14 ${formatNumber(regime.metrics.adx14)}, RSI14 ${formatNumber(indicators.rsi14)}, ATR14 ${formatNumber(indicators.atr14)}. Support ${levels.nearestSupport ? formatNumber(levels.nearestSupport.price) : "n/a"}, resistance ${levels.nearestResistance ? formatNumber(levels.nearestResistance.price) : "n/a"}.`;
+  return `${prefix} classified as ${candidate.setupType} with quality ${candidate.qualityScore}/100 in a ${regime.label} regime. ${regime.explanation} ${candidate.confluence.explanation} ${candidate.smc.explanation} ${candidate.session.explanation} ${candidate.newsRisk.explanation} Confirmed by ${passed}. Failed checks: ${failed}. EMA20 ${formatNumber(indicators.ema20)}, EMA50 ${formatNumber(indicators.ema50)}, ADX14 ${formatNumber(regime.metrics.adx14)}, RSI14 ${formatNumber(indicators.rsi14)}, ATR14 ${formatNumber(indicators.atr14)}. Support ${levels.nearestSupport ? formatNumber(levels.nearestSupport.price) : "n/a"}, resistance ${levels.nearestResistance ? formatNumber(levels.nearestResistance.price) : "n/a"}.`;
 }
 
-function serializeIndicators(indicators, levels, regime, confluence = null, session = null, newsRisk = null) {
+function serializeIndicators(indicators, levels, regime, confluence = null, session = null, newsRisk = null, smc = null) {
   return {
     ema20: roundPrice(indicators.ema20),
     ema50: roundPrice(indicators.ema50),
@@ -687,7 +740,11 @@ function serializeIndicators(indicators, levels, regime, confluence = null, sess
     newsRiskLevel: newsRisk?.level || "Unknown",
     newsRiskBadge: newsRisk?.badge || "Calendar Unavailable",
     newsRiskExplanation: newsRisk?.explanation || "",
-    newsEvent: newsRisk?.event || null
+    newsEvent: newsRisk?.event || null,
+    smcScore: smc?.score ?? 0,
+    smcConflict: smc?.conflict ?? false,
+    smcExplanation: smc?.explanation || "SMC unavailable.",
+    smcFactors: smc?.factors || []
   };
 }
 

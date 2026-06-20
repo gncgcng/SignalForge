@@ -950,6 +950,12 @@ function mapSignal(row) {
       explanation: row.indicators?.newsRiskExplanation || "",
       event: row.indicators?.newsEvent || null
     },
+    smc: {
+      score: Number(row.indicators?.smcScore || 0),
+      conflict: Boolean(row.indicators?.smcConflict),
+      explanation: row.indicators?.smcExplanation || "SMC unavailable.",
+      factors: row.indicators?.smcFactors || []
+    },
     reasoning: row.reasoning,
     confirmations: row.confirmations || [],
     indicators: row.indicators || {},

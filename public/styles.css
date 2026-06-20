@@ -2008,3 +2008,76 @@ polyline {
     flex-direction: column;
   }
 }
+.smc-explanation {
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid rgba(66, 211, 146, 0.22);
+  border-radius: 8px;
+  background: rgba(66, 211, 146, 0.045);
+}
+
+.smc-explanation.conflict {
+  border-color: rgba(245, 158, 11, 0.3);
+  background: rgba(245, 158, 11, 0.05);
+}
+
+.smc-heading,
+.smc-factor-grid > div,
+.smc-comparison-grid > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.smc-heading span,
+.smc-factor-grid span,
+.smc-comparison-grid span {
+  color: var(--muted);
+}
+
+.smc-factor-grid {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.smc-factor-grid > div {
+  align-items: flex-start;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.smc-factor-grid > div > span {
+  max-width: 62%;
+  text-align: right;
+}
+
+.smc-factor-grid .passed strong {
+  color: var(--positive);
+}
+
+.smc-factor-grid .failed strong {
+  color: var(--muted);
+}
+
+.smc-comparison-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.smc-comparison-grid > div {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+@media (max-width: 720px) {
+  .smc-factor-grid > div,
+  .smc-comparison-grid > div {
+    flex-direction: column;
+  }
+
+  .smc-factor-grid > div > span {
+    max-width: none;
+    text-align: left;
+  }
+}

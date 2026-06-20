@@ -142,6 +142,7 @@ function toScanPreview(signal) {
     alignmentBadge: signal.alignmentBadge,
     session: signal.session,
     newsRisk: signal.newsRisk,
+    smc: signal.smc,
     riskRewardRatio: signal.riskRewardRatio,
     confidenceScore: signal.confidenceScore,
     qualityScore: signal.qualityScore,
