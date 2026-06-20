@@ -4,6 +4,8 @@ import { calculateSignalStats, updateSignalsForUser } from "../signals/signalOut
 
 const timeframes = new Set(["5m", "15m", "1h", "4h"]);
 const directions = new Set(["long", "short"]);
+const sessions = new Set(["Asia", "London", "New York", "London/New York Overlap", "Low Liquidity"]);
+const newsRiskFilters = new Set(["with-news-risk", "without-news-risk"]);
 
 export async function getPerformance(user, input) {
   const filters = normalizeFilters(input);
@@ -28,6 +30,9 @@ export function buildPerformanceAnalytics(signals, filters = {}) {
   const bestConfluenceRange = confluencePerformance
     .filter((item) => item.label !== "Unknown" && item.hitTpCount + item.hitSlCount > 0)
     .sort(rankPerformanceGroup)[0] || null;
+  const sessionPerformance = aggregatePerformance(signals, getSignalSession);
+  const newsRiskPerformance = aggregatePerformance(signals, getNewsRiskGroup);
+  const bestSessionByMarket = aggregateBestSessionByMarket(signals);
 
   return {
     filters,
@@ -43,6 +48,9 @@ export function buildPerformanceAnalytics(signals, filters = {}) {
     signalsByTimeframe: byTimeframe,
     regimePerformance,
     confluencePerformance,
+    sessionPerformance,
+    newsRiskPerformance,
+    bestSessionByMarket,
     monthlyPerformance: monthly,
     charts: {
       winRateOverTime: monthly.map((item) => ({
@@ -57,6 +65,58 @@ export function buildPerformanceAnalytics(signals, filters = {}) {
       marketDistribution: byMarket
     }
   };
+}
+
+function aggregatePerformance(signals, keyFn) {
+  const groups = new Map();
+  for (const signal of signals) {
+    const key = keyFn(signal);
+    const group = groups.get(key) || {
+      label: key, totalSignals: 0, hitTpCount: 0, hitSlCount: 0, expiredCount: 0, netR: 0
+    };
+    group.totalSignals += 1;
+    if (signal.status === "Hit TP") {
+      group.hitTpCount += 1;
+      group.netR += signal.riskRewardRatio;
+    }
+    if (signal.status === "Hit SL") {
+      group.hitSlCount += 1;
+      group.netR -= 1;
+    }
+    if (signal.status === "Expired") group.expiredCount += 1;
+    groups.set(key, group);
+  }
+  return [...groups.values()].map((group) => {
+    const resolved = group.hitTpCount + group.hitSlCount;
+    return {
+      ...group,
+      netR: round(group.netR),
+      winRate: resolved ? Math.round((group.hitTpCount / resolved) * 100) : 0
+    };
+  }).sort(rankPerformanceGroup);
+}
+
+function aggregateBestSessionByMarket(signals) {
+  const markets = [...new Set(signals.map((signal) => signal.symbol))];
+  return markets.map((symbol) => {
+    const sessionsForMarket = aggregatePerformance(
+      signals.filter((signal) => signal.symbol === symbol),
+      getSignalSession
+    ).filter((item) => item.hitTpCount + item.hitSlCount > 0);
+    return {
+      symbol,
+      bestSession: sessionsForMarket[0] || null
+    };
+  }).filter((item) => item.bestSession);
+}
+
+function getSignalSession(signal) {
+  return signal.session || signal.indicators?.session || "Unknown";
+}
+
+function getNewsRiskGroup(signal) {
+  const level = signal.newsRisk?.level || signal.indicators?.newsRiskLevel || "Unknown";
+  return ["Danger", "Elevated"].includes(level) ? "With news risk" : "Without news risk";
 }
 
 function aggregateConfluencePerformance(signals) {
@@ -189,6 +249,16 @@ function normalizeFilters(input) {
       throw validationError("Unsupported performance direction.");
     }
     filters.direction = input.direction;
+  }
+
+  if (input.session) {
+    if (!sessions.has(input.session)) throw validationError("Unsupported performance session.");
+    filters.session = input.session;
+  }
+
+  if (input.newsRisk) {
+    if (!newsRiskFilters.has(input.newsRisk)) throw validationError("Unsupported news-risk filter.");
+    filters.newsRisk = input.newsRisk;
   }
 
   if (filters.from && filters.to && new Date(filters.from) >= new Date(filters.to)) {

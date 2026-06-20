@@ -140,6 +140,8 @@ function toScanPreview(signal) {
     setupType: signal.setupType,
     confluenceScore: signal.confluenceScore,
     alignmentBadge: signal.alignmentBadge,
+    session: signal.session,
+    newsRisk: signal.newsRisk,
     riskRewardRatio: signal.riskRewardRatio,
     confidenceScore: signal.confidenceScore,
     qualityScore: signal.qualityScore,

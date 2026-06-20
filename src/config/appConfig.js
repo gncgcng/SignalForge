@@ -66,6 +66,11 @@ export const appConfig = {
     apiKey: process.env.TWELVEDATA_API_KEY || "",
     cacheTtlMs: Number(process.env.TWELVEDATA_CACHE_TTL_MS || 300000)
   },
+  economicCalendar: {
+    baseUrl: process.env.TRADING_ECONOMICS_API_BASE_URL || "https://api.tradingeconomics.com",
+    apiKey: process.env.TRADING_ECONOMICS_API_KEY || "",
+    cacheTtlMs: Number(process.env.ECONOMIC_CALENDAR_CACHE_TTL_MS || 900000)
+  },
   telegram: {
     botToken: process.env.TELEGRAM_BOT_TOKEN || "",
     botUsername: process.env.TELEGRAM_BOT_USERNAME || "",

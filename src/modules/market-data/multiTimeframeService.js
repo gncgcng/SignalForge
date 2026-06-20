@@ -1,9 +1,11 @@
 import { getOhlcv } from "./marketDataService.js";
+import { getMarketIntelligence } from "../intelligence/intelligenceService.js";
 
 const timeframeOrder = ["5m", "15m", "1h", "4h"];
 
 export async function getMultiTimeframeMarketData(symbol, timeframe) {
   const marketData = await getOhlcv(symbol, timeframe);
+  const intelligence = await getMarketIntelligence(new Date());
   const higherTimeframes = timeframeOrder.slice(timeframeOrder.indexOf(timeframe) + 1);
   const results = await Promise.allSettled(
     higherTimeframes.map((higherTimeframe) => getOhlcv(symbol, higherTimeframe))
@@ -33,6 +35,7 @@ export async function getMultiTimeframeMarketData(symbol, timeframe) {
 
   return {
     ...marketData,
+    intelligence,
     confluence: {
       ...context,
       display: scoreMultiTimeframeConfluence(context, displayDirection)

@@ -19,6 +19,9 @@ export async function handlePerformanceRoutes(req, res, pathname, url) {
           symbol: url.searchParams.get("symbol") || "",
           timeframe: url.searchParams.get("timeframe") || "",
           direction: url.searchParams.get("direction") || ""
+          ,
+          session: url.searchParams.get("session") || "",
+          newsRisk: url.searchParams.get("newsRisk") || ""
         })
       });
     } catch (error) {

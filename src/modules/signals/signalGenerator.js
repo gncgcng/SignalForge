@@ -35,7 +35,8 @@ export function generateMarketDataSetup(marketData, timeframe) {
     indicators,
     levels,
     regime,
-    marketData.confluence
+    marketData.confluence,
+    marketData.intelligence
   );
   const shortCase = validateCandidate(
     adjustCandidateForVolatility(rawShortCase, regime),
@@ -43,7 +44,8 @@ export function generateMarketDataSetup(marketData, timeframe) {
     indicators,
     levels,
     regime,
-    marketData.confluence
+    marketData.confluence,
+    marketData.intelligence
   );
   const bestCase = [longCase, shortCase]
     .filter((candidate) => candidate.valid)
@@ -75,12 +77,21 @@ export function generateMarketDataSetup(marketData, timeframe) {
       confidenceScore: bestCase.confidenceScore,
       confluenceScore: bestCase.confluence.score,
       alignmentBadge: bestCase.confluence.badge,
+      session: bestCase.session,
+      newsRisk: bestCase.newsRisk,
       qualityScore: bestCase.qualityScore,
       setupType: bestCase.setupType,
       confluence: bestCase.confluence,
       reasoning: buildReasoning(bestCase, indicators, levels, regime, isCommodity),
       confirmations: bestCase.confirmations,
-      indicators: serializeIndicators(indicators, levels, regime, bestCase.confluence),
+      indicators: serializeIndicators(
+        indicators,
+        levels,
+        regime,
+        bestCase.confluence,
+        bestCase.session,
+        bestCase.newsRisk
+      ),
       generatedAt: new Date().toISOString(),
       marketSource: marketData.source
     },
@@ -89,7 +100,14 @@ export function generateMarketDataSetup(marketData, timeframe) {
       qualityScore: bestCase.qualityScore,
       setupType: bestCase.setupType,
       confirmations: bestCase.confirmations,
-      indicators: serializeIndicators(indicators, levels, regime, bestCase.confluence)
+      indicators: serializeIndicators(
+        indicators,
+        levels,
+        regime,
+        bestCase.confluence,
+        bestCase.session,
+        bestCase.newsRisk
+      )
     }
   };
 }
@@ -227,7 +245,7 @@ function adjustCandidateForVolatility(candidate, regime) {
   };
 }
 
-function validateCandidate(candidate, candles, indicators, levels, regime, confluenceContext) {
+function validateCandidate(candidate, candles, indicators, levels, regime, confluenceContext, intelligence) {
   const setupType = classifySetupType(candidate.direction, candles, indicators, levels, regime);
   const confluence = scoreMultiTimeframeConfluence(confluenceContext, candidate.direction);
   const opposingLevel = candidate.direction === "long"
@@ -256,6 +274,20 @@ function validateCandidate(candidate, candles, indicators, levels, regime, confl
     requiredConfirmationNames.push("Volume");
   }
   const rejectionReasons = [];
+  const session = intelligence?.session || {
+    name: "Unknown",
+    liquidity: "Unknown",
+    confidenceAdjustment: 0,
+    explanation: "Session intelligence unavailable."
+  };
+  const newsRisk = intelligence?.calendar?.newsRisk || {
+    level: "Unknown",
+    badge: "Calendar Unavailable",
+    blockSignal: false,
+    confidenceAdjustment: 0,
+    explanation: "Economic calendar unavailable.",
+    event: null
+  };
 
   if (regime.label === "Trend Up" && candidate.direction !== "long") {
     rejectionReasons.push("Trend Up only favors continuation and pullback longs.");
@@ -280,6 +312,9 @@ function validateCandidate(candidate, candles, indicators, levels, regime, confl
   }
   if (confluence.badge === "Countertrend" && confluence.score < 35) {
     rejectionReasons.push("Higher-timeframe structure strongly opposes this lower-timeframe setup.");
+  }
+  if (newsRisk.blockSignal) {
+    rejectionReasons.push(newsRisk.explanation);
   }
   if (!emaAligned && setupType !== "Reversal") {
     rejectionReasons.push("Price and EMA20/EMA50 are not fully aligned.");
@@ -328,8 +363,16 @@ function validateCandidate(candidate, candles, indicators, levels, regime, confl
     ...candidate,
     setupType,
     qualityScore,
-    confidenceScore: Math.max(0, Math.min(100, candidate.confidenceScore + confluence.confidenceAdjustment)),
+    confidenceScore: Math.max(0, Math.min(
+      100,
+      candidate.confidenceScore +
+        confluence.confidenceAdjustment +
+        session.confidenceAdjustment +
+        newsRisk.confidenceAdjustment
+    )),
     confluence,
+    session,
+    newsRisk,
     regime: regime.label,
     opposingRoom: Number(opposingRoom.toFixed(2)),
     rejectionReasons,
@@ -597,6 +640,8 @@ function noSetup(message, marketData, timeframe, candidates) {
         qualityScore: candidate.qualityScore,
         regime: candidate.regime,
         confluence: candidate.confluence,
+        session: candidate.session,
+        newsRisk: candidate.newsRisk,
         rejectionReasons: candidate.rejectionReasons,
         confirmations: candidate.confirmations
       }))
@@ -611,10 +656,10 @@ function buildReasoning(candidate, indicators, levels, regime, isCommodity) {
     ? `Commodity ${candidate.direction.toUpperCase()} analysis uses Twelve Data price structure; volume is not required. Setup`
     : `${candidate.direction.toUpperCase()} setup`;
 
-  return `${prefix} classified as ${candidate.setupType} with quality ${candidate.qualityScore}/100 in a ${regime.label} regime. ${regime.explanation} ${candidate.confluence.explanation} Confirmed by ${passed}. Failed checks: ${failed}. EMA20 ${formatNumber(indicators.ema20)}, EMA50 ${formatNumber(indicators.ema50)}, ADX14 ${formatNumber(regime.metrics.adx14)}, RSI14 ${formatNumber(indicators.rsi14)}, ATR14 ${formatNumber(indicators.atr14)}. Support ${levels.nearestSupport ? formatNumber(levels.nearestSupport.price) : "n/a"}, resistance ${levels.nearestResistance ? formatNumber(levels.nearestResistance.price) : "n/a"}.`;
+  return `${prefix} classified as ${candidate.setupType} with quality ${candidate.qualityScore}/100 in a ${regime.label} regime. ${regime.explanation} ${candidate.confluence.explanation} ${candidate.session.explanation} ${candidate.newsRisk.explanation} Confirmed by ${passed}. Failed checks: ${failed}. EMA20 ${formatNumber(indicators.ema20)}, EMA50 ${formatNumber(indicators.ema50)}, ADX14 ${formatNumber(regime.metrics.adx14)}, RSI14 ${formatNumber(indicators.rsi14)}, ATR14 ${formatNumber(indicators.atr14)}. Support ${levels.nearestSupport ? formatNumber(levels.nearestSupport.price) : "n/a"}, resistance ${levels.nearestResistance ? formatNumber(levels.nearestResistance.price) : "n/a"}.`;
 }
 
-function serializeIndicators(indicators, levels, regime, confluence = null) {
+function serializeIndicators(indicators, levels, regime, confluence = null, session = null, newsRisk = null) {
   return {
     ema20: roundPrice(indicators.ema20),
     ema50: roundPrice(indicators.ema50),
@@ -635,7 +680,14 @@ function serializeIndicators(indicators, levels, regime, confluence = null) {
     confluenceScore: confluence?.score ?? null,
     alignmentBadge: confluence?.badge ?? null,
     confluenceExplanation: confluence?.explanation ?? null,
-    higherTimeframes: confluence?.higherTimeframes ?? []
+    higherTimeframes: confluence?.higherTimeframes ?? [],
+    session: session?.name || "Unknown",
+    sessionLiquidity: session?.liquidity || "Unknown",
+    sessionExplanation: session?.explanation || "",
+    newsRiskLevel: newsRisk?.level || "Unknown",
+    newsRiskBadge: newsRisk?.badge || "Calendar Unavailable",
+    newsRiskExplanation: newsRisk?.explanation || "",
+    newsEvent: newsRisk?.event || null
   };
 }
 

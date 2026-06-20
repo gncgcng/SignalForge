@@ -1,6 +1,7 @@
 import { analyzeMarketRegime } from "../market-data/marketRegimeService.js";
 import { getOhlcv } from "../market-data/marketDataService.js";
 import { scoreMultiTimeframeConfluence } from "../market-data/multiTimeframeService.js";
+import { getTradingSession, tradingSessions } from "../intelligence/sessionIntelligenceService.js";
 
 export const backtestSymbols = [
   "BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "ADA-USD", "DOGE-USD",
@@ -25,6 +26,7 @@ export async function runHistoricalBacktest(_user, input) {
   const symbols = normalizeSelections(input.symbols || input.symbol, backtestSymbols, "market");
   const timeframes = normalizeSelections(input.timeframes || input.timeframe, backtestTimeframes, "timeframe");
   const components = normalizeComponents(input.components);
+  const sessionFilters = normalizeSessionFilters(input.sessions);
   const reports = [];
   const errors = [];
 
@@ -34,6 +36,7 @@ export async function runHistoricalBacktest(_user, input) {
         const bundle = await loadHistoricalBundle(symbol, timeframe);
         reports.push(backtestMarketData(bundle.marketData, timeframe, {
           components,
+          sessionFilters,
           higherTimeframeData: bundle.higherTimeframeData
         }));
       } catch (error) {
@@ -55,6 +58,7 @@ export function backtestMarketData(marketData, timeframe, options = {}) {
   const candles = marketData.candles || [];
   const components = normalizeComponents(options.components);
   const higherTimeframeData = options.higherTimeframeData || {};
+  const sessionFilters = options.sessionFilters || tradingSessions;
   const trades = [];
   let index = warmupCandles - 1;
 
@@ -66,6 +70,8 @@ export function backtestMarketData(marketData, timeframe, options = {}) {
       candles: historicalCandles,
       higherTimeframeData,
       components
+      ,
+      sessionFilters
     });
 
     if (!setup) {
@@ -87,6 +93,7 @@ export function backtestMarketData(marketData, timeframe, options = {}) {
       setupType: setup.setupType,
       regime: setup.regime,
       confluenceScore: setup.confluenceScore,
+      session: setup.session,
       qualityScore: setup.qualityScore,
       confidenceScore: setup.confidenceScore,
       entryPrice: setup.entryPrice,
@@ -178,10 +185,12 @@ export function calculateBacktestMetrics(trades) {
   };
 }
 
-function evaluateHistoricalSetup({ marketData, timeframe, candles, higherTimeframeData, components }) {
+function evaluateHistoricalSetup({ marketData, timeframe, candles, higherTimeframeData, components, sessionFilters }) {
   const regime = analyzeMarketRegime(candles);
   const metrics = regime.metrics || {};
   const latest = candles[candles.length - 1];
+  const session = getTradingSession(new Date(latest.time * 1000));
+  if (!sessionFilters.includes(session.name)) return null;
   const votes = [];
 
   if (components.ema) votes.push(metrics.ema20 > metrics.ema50 ? 1 : metrics.ema20 < metrics.ema50 ? -1 : 0);
@@ -245,6 +254,7 @@ function evaluateHistoricalSetup({ marketData, timeframe, candles, higherTimefra
     setupType,
     regime: regime.label,
     confluenceScore: confluence.score,
+    session: session.name,
     qualityScore,
     confidenceScore: Math.max(0, Math.min(100, qualityScore + confluence.confidenceAdjustment)),
     entryPrice: latest.close,
@@ -339,6 +349,8 @@ function aggregateBacktestReports(reports, errors, components) {
     timeframes: aggregateWinRate(trades, (trade) => trade.timeframe),
     regimes: aggregateWinRate(trades, (trade) => trade.regime || "Unknown"),
     confluence: aggregateWinRate(trades, (trade) => confluenceRange(trade.confluenceScore))
+    ,
+    sessions: aggregateWinRate(trades, (trade) => trade.session || "Unknown")
   };
   const noEdge = metrics.totalTrades < 8 ||
     metrics.expectancy <= 0 ||
@@ -363,6 +375,7 @@ function aggregateBacktestReports(reports, errors, components) {
     curves,
     breakdowns,
     components,
+    sessionFilters: reports[0]?.sessionFilters || null,
     errors,
     evaluation: {
       status: noEdge ? "no-edge" : "edge-detected",
@@ -464,6 +477,16 @@ function normalizeComponents(input = {}) {
     throw error;
   }
   return components;
+}
+
+function normalizeSessionFilters(input) {
+  const values = Array.isArray(input) && input.length ? input : tradingSessions;
+  if (values.some((session) => !tradingSessions.includes(session))) {
+    const error = new Error("Choose only supported trading sessions.");
+    error.statusCode = 400;
+    throw error;
+  }
+  return [...new Set(values)];
 }
 
 function neutralConfluence(direction) {

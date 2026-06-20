@@ -175,6 +175,20 @@ export async function listPerformanceSignalsByUser(userId, filters = {}) {
     clauses.push(`s.direction = $${values.length}`);
   }
 
+  if (filters.session) {
+    values.push(filters.session);
+    clauses.push(`COALESCE(s.indicators->>'session', 'Unknown') = $${values.length}`);
+  }
+
+  if (filters.newsRisk) {
+    values.push(filters.newsRisk);
+    clauses.push(`CASE
+      WHEN COALESCE(s.indicators->>'newsRiskLevel', 'Unknown') IN ('Danger', 'Elevated')
+        THEN 'with-news-risk'
+      ELSE 'without-news-risk'
+    END = $${values.length}`);
+  }
+
   const result = await query(
     signalSelectSql(`WHERE ${clauses.join(" AND ")} ORDER BY s.generated_at ASC`),
     values
@@ -929,6 +943,13 @@ function mapSignal(row) {
     setupType: row.setup_type || "Qualified setup",
     confluenceScore: Number(row.indicators?.confluenceScore || 0),
     alignmentBadge: row.indicators?.alignmentBadge || "Partial Alignment",
+    session: row.indicators?.session || "Unknown",
+    newsRisk: {
+      level: row.indicators?.newsRiskLevel || "Unknown",
+      badge: row.indicators?.newsRiskBadge || "Calendar Unavailable",
+      explanation: row.indicators?.newsRiskExplanation || "",
+      event: row.indicators?.newsEvent || null
+    },
     reasoning: row.reasoning,
     confirmations: row.confirmations || [],
     indicators: row.indicators || {},

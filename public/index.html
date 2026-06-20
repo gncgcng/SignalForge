@@ -262,6 +262,24 @@
                     <p id="confluence-explanation">Higher-timeframe analysis has not loaded.</p>
                   </article>
                 </div>
+                <div class="session-news-intelligence">
+                  <article>
+                    <span class="eyebrow">Current Session</span>
+                    <strong id="current-session-label">Loading</strong>
+                    <span id="current-session-liquidity">-- liquidity</span>
+                    <p id="current-session-explanation">Waiting for UTC session analysis.</p>
+                  </article>
+                  <article>
+                    <div class="panel-header">
+                      <div>
+                        <span class="eyebrow">Economic Calendar</span>
+                        <strong>Upcoming high-impact events</strong>
+                      </div>
+                      <span class="status-pill" id="calendar-status">Checking</span>
+                    </div>
+                    <div class="upcoming-events" id="upcoming-events"></div>
+                  </article>
+                </div>
               </div>
             </section>
 
@@ -568,6 +586,16 @@
                 </div>
               </fieldset>
               <fieldset>
+                <legend>Sessions</legend>
+                <div class="lab-option-grid">
+                  <label><input type="checkbox" name="lab-session" value="Asia" checked /> Asia</label>
+                  <label><input type="checkbox" name="lab-session" value="London" checked /> London</label>
+                  <label><input type="checkbox" name="lab-session" value="New York" checked /> New York</label>
+                  <label><input type="checkbox" name="lab-session" value="London/New York Overlap" checked /> Overlap</label>
+                  <label><input type="checkbox" name="lab-session" value="Low Liquidity" checked /> Low liquidity</label>
+                </div>
+              </fieldset>
+              <fieldset>
                 <legend>Strategy components</legend>
                 <div class="lab-option-grid component-options">
                   <label><input type="checkbox" name="lab-component" value="marketRegime" checked /> Market regime</label>
@@ -645,6 +673,25 @@
                   <option value="short">Short</option>
                 </select>
               </label>
+              <label>
+                Session
+                <select id="performance-session">
+                  <option value="">All sessions</option>
+                  <option value="Asia">Asia</option>
+                  <option value="London">London</option>
+                  <option value="New York">New York</option>
+                  <option value="London/New York Overlap">London/New York Overlap</option>
+                  <option value="Low Liquidity">Low Liquidity</option>
+                </select>
+              </label>
+              <label>
+                News risk
+                <select id="performance-news-risk">
+                  <option value="">All news conditions</option>
+                  <option value="with-news-risk">With news risk</option>
+                  <option value="without-news-risk">Without news risk</option>
+                </select>
+              </label>
               <button type="submit">Apply Filters</button>
               <button class="secondary-action" id="performance-clear" type="button">Clear</button>
             </form>
@@ -679,7 +726,13 @@
               <article class="analytics-panel"><h3>Signals by timeframe</h3><div id="signals-by-timeframe"></div></article>
               <article class="analytics-panel"><h3>Win rate by regime</h3><div id="signals-by-regime"></div></article>
               <article class="analytics-panel"><h3>Win rate by confluence</h3><div id="signals-by-confluence"></div></article>
+              <article class="analytics-panel"><h3>Win rate by session</h3><div id="signals-by-session"></div></article>
+              <article class="analytics-panel"><h3>News risk comparison</h3><div id="signals-by-news-risk"></div></article>
             </div>
+            <article class="analytics-panel">
+              <h3>Best session by market</h3>
+              <div id="best-session-by-market"></div>
+            </article>
             <article class="analytics-panel">
               <div class="panel-header"><div><span class="eyebrow">Realized R</span><h3>Monthly performance</h3></div></div>
               <div class="monthly-performance" id="monthly-performance"></div>
