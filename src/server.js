@@ -10,6 +10,7 @@ import { handleAuthRoutes } from "./modules/auth/authController.js";
 import { handleBacktestRoutes } from "./modules/backtesting/backtestController.js";
 import { handleAlertRoutes } from "./modules/alerts/alertController.js";
 import { handleMarketDataRoutes } from "./modules/market-data/marketDataController.js";
+import { handleJournalRoutes } from "./modules/journal/journalController.js";
 import { handleNotificationRoutes } from "./modules/notifications/notificationController.js";
 import { handlePaperTradingRoutes } from "./modules/paper-trading/paperTradingController.js";
 import { handlePerformanceRoutes } from "./modules/performance/performanceController.js";
@@ -45,6 +46,7 @@ const server = createServer(async (req, res) => {
       (await handleSubscriptionRoutes(req, res, url.pathname)) ||
       (await handleTesterAccessRoutes(req, res, url.pathname)) ||
       (await handleMarketDataRoutes(req, res, url.pathname, url)) ||
+      (await handleJournalRoutes(req, res, url.pathname, url)) ||
       (await handleBacktestRoutes(req, res, url.pathname, url)) ||
       (await handlePerformanceRoutes(req, res, url.pathname, url)) ||
       (await handleSignalRoutes(req, res, url.pathname));

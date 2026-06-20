@@ -243,6 +243,85 @@ export async function listPaperTradesByUser(userId) {
   return result.rows.map(mapPaperTrade);
 }
 
+export async function listJournalEntriesByUser(userId, filters = {}) {
+  const values = [userId];
+  const clauses = ["p.user_id = $1", "s.user_id = $1"];
+
+  if (filters.symbol) {
+    values.push(filters.symbol);
+    clauses.push(`s.symbol = $${values.length}`);
+  }
+
+  if (filters.timeframe) {
+    values.push(filters.timeframe);
+    clauses.push(`s.timeframe = $${values.length}`);
+  }
+
+  if (filters.from) {
+    values.push(filters.from);
+    clauses.push(`p.entered_at >= $${values.length}`);
+  }
+
+  if (filters.to) {
+    values.push(filters.to);
+    clauses.push(`p.entered_at < $${values.length}`);
+  }
+
+  if (filters.emotion) {
+    values.push(filters.emotion);
+    clauses.push(`$${values.length} = ANY(COALESCE(j.emotion_tags, ARRAY[]::text[]))`);
+  }
+
+  const result = await query(`
+    SELECT p.id AS paper_trade_id, p.entered_at,
+      s.*, o.status, o.status_reason, o.resolved_at,
+      o.updated_at AS status_updated_at,
+      j.notes_before_entry, j.notes_after_exit, j.emotion_tags,
+      j.rating, j.screenshot_url, j.updated_at AS journal_updated_at
+    FROM paper_trades p
+    JOIN saved_signals s ON s.id = p.saved_signal_id
+    LEFT JOIN signal_outcomes o ON o.saved_signal_id = s.id
+    LEFT JOIN trade_journals j
+      ON j.paper_trade_id = p.id AND j.user_id = p.user_id
+    WHERE ${clauses.join(" AND ")}
+    ORDER BY p.entered_at DESC
+    LIMIT 100
+  `, values);
+
+  return result.rows.map(mapJournalEntry);
+}
+
+export async function upsertTradeJournal(userId, paperTradeId, journal) {
+  const result = await query(`
+    INSERT INTO trade_journals (
+      paper_trade_id, user_id, notes_before_entry, notes_after_exit,
+      emotion_tags, rating, screenshot_url
+    )
+    SELECT p.id, p.user_id, $3, $4, $5, $6, $7
+    FROM paper_trades p
+    WHERE p.id = $2 AND p.user_id = $1
+    ON CONFLICT (paper_trade_id)
+    DO UPDATE SET
+      notes_before_entry = EXCLUDED.notes_before_entry,
+      notes_after_exit = EXCLUDED.notes_after_exit,
+      emotion_tags = EXCLUDED.emotion_tags,
+      rating = EXCLUDED.rating,
+      screenshot_url = EXCLUDED.screenshot_url,
+      updated_at = now()
+    RETURNING paper_trade_id
+  `, [
+    userId,
+    paperTradeId,
+    journal.notesBeforeEntry,
+    journal.notesAfterExit,
+    journal.emotionTags,
+    journal.rating,
+    journal.screenshotUrl
+  ]);
+
+  return result.rows[0] || null;
+}
+
 export async function listWatchlistByUser(userId) {
   const result = await query(`
     SELECT w.symbol, w.created_at, p.id AS preference_id, p.timeframe,
@@ -782,6 +861,20 @@ function mapPaperTrade(row) {
     enteredAt: row.entered_at,
     resolvedAt: signal.resolvedAt,
     statusReason: signal.statusReason
+  };
+}
+
+function mapJournalEntry(row) {
+  return {
+    ...mapPaperTrade(row),
+    journal: {
+      notesBeforeEntry: row.notes_before_entry || "",
+      notesAfterExit: row.notes_after_exit || "",
+      emotionTags: row.emotion_tags || [],
+      rating: row.rating === null || row.rating === undefined ? null : Number(row.rating),
+      screenshotUrl: row.screenshot_url || "",
+      updatedAt: row.journal_updated_at || null
+    }
   };
 }
 

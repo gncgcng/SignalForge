@@ -28,6 +28,7 @@
     "test:tester-access": "node scripts/tester-access-test.js",
     "test:performance": "node scripts/performance-test.js",
     "test:paper-trading": "node scripts/paper-trading-test.js",
+    "test:trade-journal": "node scripts/trade-journal-test.js",
     "test:backtesting": "node scripts/backtest-test.js"
   },
   "dependencies": {

@@ -42,6 +42,15 @@ const state = {
       bestMarket: null,
       bestTimeframe: null
     }
+  },
+  journal: {
+    entries: [],
+    stats: {
+      averageTradeRating: 0,
+      mostCommonEmotion: null,
+      bestPerformingMarket: null,
+      bestPerformingTimeframe: null
+    }
   }
 };
 
@@ -64,6 +73,15 @@ const statusLine = document.querySelector("#status-line");
 const signalsGrid = document.querySelector("#signals-grid");
 const paperPortfolioGrid = document.querySelector("#paper-portfolio-grid");
 const paperTradeCount = document.querySelector("#paper-trade-count");
+const journalFilters = document.querySelector("#journal-filters");
+const journalFrom = document.querySelector("#journal-from");
+const journalTo = document.querySelector("#journal-to");
+const journalMarket = document.querySelector("#journal-market");
+const journalTimeframe = document.querySelector("#journal-timeframe");
+const journalEmotion = document.querySelector("#journal-emotion");
+const journalClear = document.querySelector("#journal-clear");
+const journalList = document.querySelector("#journal-list");
+const journalEntryCount = document.querySelector("#journal-entry-count");
 const historyCount = document.querySelector("#history-count");
 const signalsHistory = document.querySelector("#signals-history");
 const historyPairFilter = document.querySelector("#history-pair-filter");
@@ -531,6 +549,62 @@ performanceClear.addEventListener("click", async () => {
   await loadPerformance();
 });
 
+journalFilters.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await loadJournal();
+});
+
+journalClear.addEventListener("click", async () => {
+  journalFrom.value = "";
+  journalTo.value = "";
+  journalMarket.value = "";
+  journalTimeframe.value = "";
+  journalEmotion.value = "";
+  await loadJournal();
+});
+
+journalList.addEventListener("submit", async (event) => {
+  const form = event.target.closest("[data-journal-paper-trade]");
+
+  if (!form) return;
+  event.preventDefault();
+  const button = form.querySelector('button[type="submit"]');
+
+  try {
+    button.disabled = true;
+    button.textContent = "Saving...";
+    const emotionTags = [...form.querySelectorAll('[name="emotion"]:checked')]
+      .map((input) => input.value);
+    const ratingInput = form.querySelector('[name="rating"]:checked');
+    await api.request(
+      `/api/journal/${encodeURIComponent(form.dataset.journalPaperTrade)}`,
+      {
+        method: "PUT",
+        body: JSON.stringify({
+          notesBeforeEntry: form.querySelector('[name="notesBeforeEntry"]').value,
+          notesAfterExit: form.querySelector('[name="notesAfterExit"]').value,
+          emotionTags,
+          rating: ratingInput ? Number(ratingInput.value) : null,
+          screenshotUrl: form.querySelector('[name="screenshotUrl"]').value
+        })
+      }
+    );
+    await loadJournal();
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = error.message;
+  }
+});
+
+paperPortfolioGrid.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-open-journal]");
+
+  if (!button) return;
+  journalMarket.value = button.dataset.journalSymbol;
+  journalTimeframe.value = button.dataset.journalTimeframe;
+  showView("journal");
+});
+
 signalsGrid.addEventListener("click", async (event) => {
   const paperButton = event.target.closest("[data-paper-signal-id]");
 
@@ -695,6 +769,15 @@ function clearClientAuthState() {
       bestTimeframe: null
     }
   };
+  state.journal = {
+    entries: [],
+    stats: {
+      averageTradeRating: 0,
+      mostCommonEmotion: null,
+      bestPerformingMarket: null,
+      bestPerformingTimeframe: null
+    }
+  };
   state.signalStats = {
     totalSignals: 0,
     winRate: 0,
@@ -740,7 +823,7 @@ async function bootDashboard() {
   }
   renderTimeframes();
   const requestedView = location.hash?.replace("#", "");
-  const allowedInitialViews = ["signals", "paper-portfolio", "performance", "watchlist", "alerts", "notifications", "settings"];
+  const allowedInitialViews = ["signals", "paper-portfolio", "journal", "performance", "watchlist", "alerts", "notifications", "settings"];
   if (state.user.isAdmin) allowedInitialViews.push("admin");
   showView(allowedInitialViews.includes(requestedView) ? requestedView : "scanner");
   startSignalHistoryRefresh();
@@ -791,6 +874,18 @@ function renderPerformanceMarketOptions() {
   `;
   performanceMarket.value = state.marketCatalog.some((pair) => pair.symbol === currentValue)
     ? currentValue
+    : "";
+
+  const journalValue = journalMarket.value;
+  journalMarket.innerHTML = `
+    <option value="">All markets</option>
+    ${state.marketCatalog
+      .filter((pair) => pair.category === "Crypto" || pair.category === "Commodities")
+      .map((pair) => `<option value="${pair.symbol}">${pair.symbol}</option>`)
+      .join("")}
+  `;
+  journalMarket.value = state.marketCatalog.some((pair) => pair.symbol === journalValue)
+    ? journalValue
     : "";
 }
 
@@ -873,6 +968,18 @@ async function loadPaperPortfolio() {
   renderPaperPortfolio();
   renderSignals();
   renderSignalsHistory();
+}
+
+async function loadJournal() {
+  const params = new URLSearchParams();
+  if (journalFrom.value) params.set("from", journalFrom.value);
+  if (journalTo.value) params.set("to", journalTo.value);
+  if (journalMarket.value) params.set("symbol", journalMarket.value);
+  if (journalTimeframe.value) params.set("timeframe", journalTimeframe.value);
+  if (journalEmotion.value) params.set("emotion", journalEmotion.value);
+  const query = params.toString();
+  state.journal = await api.request(`/api/journal${query ? `?${query}` : ""}`);
+  renderJournal();
 }
 
 async function loadPerformance() {
@@ -965,7 +1072,7 @@ function startSignalHistoryRefresh() {
 }
 
 function showView(view) {
-  const allowedViews = ["scanner", "watchlist", "alerts", "notifications", "signals", "paper-portfolio", "performance", "settings", "billing"];
+  const allowedViews = ["scanner", "watchlist", "alerts", "notifications", "signals", "paper-portfolio", "journal", "performance", "settings", "billing"];
   if (state.user?.isAdmin) allowedViews.push("admin");
   const normalizedView = allowedViews.includes(view) ? view : "scanner";
   state.activeView = normalizedView;
@@ -985,6 +1092,7 @@ function showView(view) {
     notifications: ["Delivery channels", "Notifications"],
     signals: ["Signals history", "Saved signal desk"],
     "paper-portfolio": ["Simulated execution", "Paper Portfolio"],
+    journal: ["Review and discipline", "Trade Journal"],
     performance: ["Outcome analytics", "Performance"],
     settings: ["Account", "Settings"],
     admin: ["Administration", "Tester access requests"],
@@ -1017,6 +1125,17 @@ function showView(view) {
       paperPortfolioGrid.innerHTML = `
         <div class="empty-state">
           <strong>Paper Portfolio unavailable</strong>
+          <p class="reasoning">${escapeHtml(error.message)}</p>
+        </div>
+      `;
+    });
+  }
+
+  if (normalizedView === "journal") {
+    loadJournal().catch((error) => {
+      journalList.innerHTML = `
+        <div class="empty-state">
+          <strong>Trade Journal unavailable</strong>
           <p class="reasoning">${escapeHtml(error.message)}</p>
         </div>
       `;
@@ -1319,8 +1438,95 @@ function renderPaperPortfolio() {
         <div><span>Paper P/L</span><strong class="${trade.realizedR > 0 ? "positive" : trade.realizedR < 0 ? "negative" : ""}">${formatR(trade.realizedR)}</strong></div>
       </div>
       <p class="reasoning">Entered ${formatDateTime(trade.enteredAt)}${trade.resolvedAt ? ` · Resolved ${formatDateTime(trade.resolvedAt)}` : ""}.</p>
+      <button
+        class="secondary-action"
+        data-open-journal
+        data-journal-symbol="${escapeHtml(trade.symbol)}"
+        data-journal-timeframe="${escapeHtml(trade.timeframe)}"
+        type="button"
+      >Open Journal</button>
     </article>
   `).join("");
+}
+
+function renderJournal() {
+  const { entries, stats } = state.journal;
+  const emotions = ["Confident", "Fear", "FOMO", "Impatient", "Disciplined"];
+  journalEntryCount.textContent = `${entries.length} entr${entries.length === 1 ? "y" : "ies"}`;
+  document.querySelector("#journal-stat-rating").textContent = `${Number(stats.averageTradeRating || 0).toFixed(1)}/5`;
+  document.querySelector("#journal-stat-emotion").textContent = stats.mostCommonEmotion
+    ? `${stats.mostCommonEmotion.label} · ${stats.mostCommonEmotion.count}`
+    : "--";
+  document.querySelector("#journal-stat-market").textContent = stats.bestPerformingMarket
+    ? `${stats.bestPerformingMarket.label} · ${formatR(stats.bestPerformingMarket.netR)}`
+    : "--";
+  document.querySelector("#journal-stat-timeframe").textContent = stats.bestPerformingTimeframe
+    ? `${stats.bestPerformingTimeframe.label} · ${formatR(stats.bestPerformingTimeframe.netR)}`
+    : "--";
+
+  if (!entries.length) {
+    journalList.innerHTML = `
+      <div class="empty-state">
+        <strong>No journal entries match these filters</strong>
+        <p class="reasoning">Add an unlocked signal to your Paper Portfolio, then record the plan, emotions, and review here.</p>
+      </div>
+    `;
+    return;
+  }
+
+  journalList.innerHTML = entries.map((entry) => {
+    const journal = entry.journal || {};
+    return `
+      <form class="journal-entry" data-journal-paper-trade="${entry.id}">
+        <div class="journal-entry-header">
+          <div>
+            <strong>${escapeHtml(entry.symbol)} · ${escapeHtml(entry.timeframe)}</strong>
+            <span>${escapeHtml(entry.direction.toUpperCase())} · Entered ${formatDateTime(entry.enteredAt)}</span>
+          </div>
+          <div class="journal-outcome">
+            <strong class="${entry.realizedR > 0 ? "positive" : entry.realizedR < 0 ? "negative" : ""}">${formatR(entry.realizedR)}</strong>
+            <span class="status-pill ${getPaperStatusClass(entry.status)}">${escapeHtml(entry.status)}</span>
+          </div>
+        </div>
+        <div class="journal-notes-grid">
+          <label>
+            Notes before entry
+            <textarea name="notesBeforeEntry" maxlength="4000" placeholder="Plan, invalidation, and what must remain true...">${escapeHtml(journal.notesBeforeEntry || "")}</textarea>
+          </label>
+          <label>
+            Notes after exit
+            <textarea name="notesAfterExit" maxlength="4000" placeholder="Execution review, lessons, and what to repeat...">${escapeHtml(journal.notesAfterExit || "")}</textarea>
+          </label>
+        </div>
+        <fieldset class="emotion-options">
+          <legend>Emotion tags</legend>
+          ${emotions.map((emotion) => `
+            <label>
+              <input name="emotion" type="checkbox" value="${emotion}" ${(journal.emotionTags || []).includes(emotion) ? "checked" : ""} />
+              ${emotion}
+            </label>
+          `).join("")}
+        </fieldset>
+        <div class="journal-review-row">
+          <fieldset class="star-rating">
+            <legend>Trade rating</legend>
+            ${[1, 2, 3, 4, 5].map((rating) => `
+              <label title="${rating} star${rating === 1 ? "" : "s"}">
+                <input name="rating" type="radio" value="${rating}" ${journal.rating === rating ? "checked" : ""} />
+                <span>★</span>
+              </label>
+            `).join("")}
+          </fieldset>
+          <label class="screenshot-field">
+            Screenshot URL
+            <input name="screenshotUrl" type="url" value="${escapeHtml(journal.screenshotUrl || "")}" placeholder="https://..." />
+          </label>
+          ${journal.screenshotUrl ? `<a class="journal-screenshot-link" href="${escapeHtml(journal.screenshotUrl)}" target="_blank" rel="noopener">View screenshot</a>` : ""}
+          <button type="submit">Save Journal</button>
+        </div>
+      </form>
+    `;
+  }).join("");
 }
 
 function renderPerformance() {

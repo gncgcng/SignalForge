@@ -162,6 +162,7 @@
             <a href="#notifications" data-view-link="notifications">Notifications</a>
             <a href="#signals" data-view-link="signals">Signals</a>
             <a href="#paper-portfolio" data-view-link="paper-portfolio">Paper Portfolio</a>
+            <a href="#journal" data-view-link="journal">Journal</a>
             <a href="#performance" data-view-link="performance">Performance</a>
             <a href="#settings" data-view-link="settings">Settings</a>
             <a href="#billing" data-view-link="billing">Billing</a>
@@ -450,6 +451,55 @@
               <span>Results are simulated from SignalForge outcome tracking and shown in R-multiples, not dollars.</span>
             </div>
             <div class="paper-portfolio-grid" id="paper-portfolio-grid"></div>
+          </section>
+
+          <section class="page-view hidden" id="journal-view" data-view="journal">
+            <div class="section-title">
+              <div>
+                <span class="eyebrow">Review and discipline</span>
+                <h3>Trade Journal</h3>
+              </div>
+              <span id="journal-entry-count">0 entries</span>
+            </div>
+            <form class="journal-filters" id="journal-filters">
+              <label>From<input id="journal-from" type="date" /></label>
+              <label>To<input id="journal-to" type="date" /></label>
+              <label>Market<select id="journal-market"><option value="">All markets</option></select></label>
+              <label>
+                Timeframe
+                <select id="journal-timeframe">
+                  <option value="">All timeframes</option>
+                  <option value="5m">5m</option>
+                  <option value="15m">15m</option>
+                  <option value="1h">1h</option>
+                  <option value="4h">4h</option>
+                </select>
+              </label>
+              <label>
+                Emotion
+                <select id="journal-emotion">
+                  <option value="">All emotions</option>
+                  <option value="Confident">Confident</option>
+                  <option value="Fear">Fear</option>
+                  <option value="FOMO">FOMO</option>
+                  <option value="Impatient">Impatient</option>
+                  <option value="Disciplined">Disciplined</option>
+                </select>
+              </label>
+              <button type="submit">Apply Filters</button>
+              <button class="secondary-action" id="journal-clear" type="button">Clear</button>
+            </form>
+            <div class="journal-stats-grid">
+              <div><span>Average rating</span><strong id="journal-stat-rating">0/5</strong></div>
+              <div><span>Most common emotion</span><strong id="journal-stat-emotion">--</strong></div>
+              <div><span>Best market</span><strong id="journal-stat-market">--</strong></div>
+              <div><span>Best timeframe</span><strong id="journal-stat-timeframe">--</strong></div>
+            </div>
+            <div class="signal-disclaimer">
+              <strong>Paper trading only. No real orders are placed.</strong>
+              <span>Journal entries stay linked to the original unlocked signal and tracked paper outcome.</span>
+            </div>
+            <div class="journal-list" id="journal-list"></div>
           </section>
 
           <section class="page-view hidden" id="performance-view" data-view="performance">
