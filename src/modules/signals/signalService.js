@@ -4,6 +4,7 @@ import { getMultiTimeframeMarketData } from "../market-data/multiTimeframeServic
 import { canGenerateSignal, getSubscriptionSummary, recordSignalUsage } from "../subscriptions/subscriptionService.js";
 import { generateMarketDataSetup } from "./signalGenerator.js";
 import { calculateSignalStats, updateSignalsForUser } from "./signalOutcomeService.js";
+import { buildAnalystProfile } from "../analyst/signalAnalystService.js";
 
 const scanTimeframes = ["1h", "4h", "15m", "5m"];
 
@@ -17,7 +18,8 @@ export async function createSignal(user, { symbol, timeframe }) {
   }
 
   const marketData = await getMultiTimeframeMarketData(symbol, timeframe);
-  const result = generateMarketDataSetup(marketData, timeframe);
+  const analystProfile = await getUserAnalystProfile(user);
+  const result = generateMarketDataSetup(marketData, timeframe, { analystProfile });
 
   if (!result.valid) {
     return {
@@ -44,14 +46,15 @@ export async function createSignal(user, { symbol, timeframe }) {
   };
 }
 
-export async function scanMarketSetup({ symbol, timeframe }) {
-  const result = await scanMarketSetupDetailed({ symbol, timeframe });
+export async function scanMarketSetup(user, { symbol, timeframe }) {
+  const result = await scanMarketSetupDetailed(user, { symbol, timeframe });
   return result.publicResult;
 }
 
-export async function scanMarketSetupDetailed({ symbol, timeframe }) {
+export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analystProfile = null) {
   const marketData = await getMultiTimeframeMarketData(symbol, timeframe);
-  const result = generateMarketDataSetup(marketData, timeframe);
+  const profile = analystProfile || await getUserAnalystProfile(user);
+  const result = generateMarketDataSetup(marketData, timeframe, { analystProfile: profile });
 
   return {
     publicResult: {
@@ -65,22 +68,27 @@ export async function scanMarketSetupDetailed({ symbol, timeframe }) {
   };
 }
 
-export async function scanAllMarkets() {
-  const result = await scanAllMarketsDetailed();
+export async function scanAllMarkets(user) {
+  const result = await scanAllMarketsDetailed(user);
   return result.publicResult;
 }
 
-export async function scanAllMarketsDetailed() {
+export async function scanAllMarketsDetailed(user) {
   const scanned = [];
   const setups = [];
   const fullSetups = [];
   const errors = [];
   const scanSymbols = listActivePairs().map((pair) => pair.symbol);
+  const analystProfile = await getUserAnalystProfile(user);
 
   for (const symbol of scanSymbols) {
     for (const timeframe of scanTimeframes) {
       try {
-        const detailed = await scanMarketSetupDetailed({ symbol, timeframe });
+        const detailed = await scanMarketSetupDetailed(
+          user,
+          { symbol, timeframe },
+          analystProfile
+        );
         const result = detailed.publicResult;
         scanned.push({ symbol, timeframe, valid: result.valid });
 
@@ -146,6 +154,7 @@ function toScanPreview(signal) {
     riskPlan: signal.riskPlan,
     marketStructure: signal.marketStructure,
     correlation: signal.correlation,
+    analyst: signal.analyst,
     riskRewardRatio: signal.riskRewardRatio,
     confidenceScore: signal.confidenceScore,
     qualityScore: signal.qualityScore,
@@ -155,4 +164,10 @@ function toScanPreview(signal) {
     generatedAt: signal.generatedAt,
     locked: true
   };
+}
+
+async function getUserAnalystProfile(user) {
+  if (!user?.id) return buildAnalystProfile([]);
+  const signals = await listSignalsByUser(user.id);
+  return buildAnalystProfile(signals);
 }

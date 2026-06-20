@@ -12,11 +12,16 @@ import {
 } from "../risk/riskEngineService.js";
 import { evaluateAdvancedStructure } from "../market-data/advancedMarketStructureService.js";
 import { evaluateCorrelationContext } from "../market-data/correlationService.js";
+import {
+  buildSignalAnalystReport,
+  calculateAdaptiveQualityAdjustment,
+  currentStrategyVersion
+} from "../analyst/signalAnalystService.js";
 
 const minimumCandles = 60;
 const minimumQualityScore = 78;
 
-export function generateMarketDataSetup(marketData, timeframe) {
+export function generateMarketDataSetup(marketData, timeframe, options = {}) {
   if (!appConfig.supportedTimeframes.includes(timeframe)) {
     throw new Error("Unsupported timeframe.");
   }
@@ -53,7 +58,8 @@ export function generateMarketDataSetup(marketData, timeframe) {
     marketData.intelligence,
     smc,
     marketData.advancedStructure,
-    marketData.correlation
+    marketData.correlation,
+    options.analystProfile
   );
   const shortCase = validateCandidate(
     adjustCandidateForVolatility(rawShortCase, regime),
@@ -65,7 +71,8 @@ export function generateMarketDataSetup(marketData, timeframe) {
     marketData.intelligence,
     smc,
     marketData.advancedStructure,
-    marketData.correlation
+    marketData.correlation,
+    options.analystProfile
   );
   const bestCase = [longCase, shortCase]
     .filter((candidate) => candidate.valid)
@@ -81,6 +88,7 @@ export function generateMarketDataSetup(marketData, timeframe) {
       [longCase, shortCase]
     );
   }
+  const analyst = buildSignalAnalystReport(bestCase, options.analystProfile);
 
   return {
     valid: true,
@@ -106,7 +114,8 @@ export function generateMarketDataSetup(marketData, timeframe) {
       riskPlan: bestCase.riskPlan,
       marketStructure: bestCase.marketStructure,
       correlation: bestCase.correlation,
-      reasoning: buildReasoning(bestCase, indicators, levels, regime, isCommodity),
+      analyst,
+      reasoning: analyst.summary,
       confirmations: bestCase.confirmations,
       indicators: serializeIndicators(
         indicators,
@@ -118,7 +127,8 @@ export function generateMarketDataSetup(marketData, timeframe) {
         bestCase.smc,
         bestCase.riskPlan,
         bestCase.marketStructure,
-        bestCase.correlation
+        bestCase.correlation,
+        analyst
       ),
       generatedAt: new Date().toISOString(),
       marketSource: marketData.source
@@ -138,7 +148,8 @@ export function generateMarketDataSetup(marketData, timeframe) {
         bestCase.smc,
         bestCase.riskPlan,
         bestCase.marketStructure,
-        bestCase.correlation
+        bestCase.correlation,
+        analyst
       )
     }
   };
@@ -287,7 +298,8 @@ function validateCandidate(
   intelligence,
   smcState,
   advancedStructure,
-  correlationContext
+  correlationContext,
+  analystProfile
 ) {
   const setupType = classifySetupType(candidate.direction, candles, indicators, levels, regime);
   const confluence = scoreMultiTimeframeConfluence(confluenceContext, candidate.direction);
@@ -396,7 +408,7 @@ function validateCandidate(
     );
   }
 
-  const qualityScore = Math.max(0, Math.min(100, calculateQualityScore({
+  const baseQualityScore = Math.max(0, Math.min(100, calculateQualityScore({
     candidate,
     setupType,
     regime,
@@ -408,6 +420,22 @@ function validateCandidate(
     smc.qualityAdjustment +
     marketStructure.qualityAdjustment +
     correlation.qualityAdjustment));
+  const adaptiveQuality = calculateAdaptiveQualityAdjustment({
+    ...candidate,
+    setupType,
+    regime: regime.label,
+    confluence,
+    smc,
+    marketStructure,
+    correlation,
+    session,
+    newsRisk,
+    opposingRoom
+  }, analystProfile);
+  const qualityScore = Math.max(
+    0,
+    Math.min(100, baseQualityScore + adaptiveQuality.adjustment)
+  );
   const protectiveLevel = candidate.direction === "long"
     ? levels.nearestSupport
     : levels.nearestResistance;
@@ -455,6 +483,7 @@ function validateCandidate(
     smc,
     marketStructure,
     correlation,
+    adaptiveQuality,
     riskPlan,
     session,
     newsRisk,
@@ -793,6 +822,8 @@ function serializeIndicators(
   riskPlan = null,
   marketStructure = null,
   correlation = null
+  ,
+  analyst = null
 ) {
   return {
     ema20: roundPrice(indicators.ema20),
@@ -847,7 +878,14 @@ function serializeIndicators(
     correlationConflict: correlation?.conflict ?? false,
     correlationBreakdown: correlation?.breakdown ?? false,
     correlationExplanation: correlation?.explanation || "Correlation unavailable.",
-    correlationPeers: correlation?.peers || []
+    correlationPeers: correlation?.peers || [],
+    strategyVersion: currentStrategyVersion,
+    analystOverallQuality: analyst?.overallQuality || null,
+    analystStrengths: analyst?.strengths || [],
+    analystWeaknesses: analyst?.weaknesses || [],
+    analystSections: analyst?.sections || {},
+    analystAdaptiveAdjustment: analyst?.adaptive?.adjustment || 0,
+    analystAdaptiveFactors: analyst?.adaptive?.factors || []
   };
 }
 

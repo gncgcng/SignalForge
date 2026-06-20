@@ -24,7 +24,7 @@ export async function handleSignalRoutes(req, res, pathname) {
   if (pathname === "/api/signals/scan" && req.method === "POST") {
     try {
       const body = await readJson(req);
-      const result = await scanMarketSetupDetailed(body);
+      const result = await scanMarketSetupDetailed(req.user, body);
       return sendJson(res, 200, result.publicResult);
     } catch (error) {
       return sendError(res, error.statusCode || 400, error.message);
@@ -32,7 +32,7 @@ export async function handleSignalRoutes(req, res, pathname) {
   }
 
   if (pathname === "/api/signals/scan-all" && req.method === "POST") {
-    const result = await scanAllMarketsDetailed();
+    const result = await scanAllMarketsDetailed(req.user);
     const detectedAlerts = await detectMatchingAlerts(req.user, result.publicResult.setups);
     const queuedTelegramAlerts = await enqueueMatchingTelegramNotifications(req.user, result.fullSetups);
     return sendJson(res, 200, {

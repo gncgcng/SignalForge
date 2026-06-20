@@ -2253,6 +2253,7 @@ function renderSignalTransparency(signal) {
         <strong>${passedCount}/${totalCount} checks · ${alignment}% aligned</strong>
       </div>
       <p class="reasoning">Confidence summarizes rule alignment and setup quality. It is not a forecast or probability of profit.</p>
+      ${renderAiAnalyst(signal)}
       <div class="confirmation-list">
         ${confirmations.map((item) => `
           <div class="confirmation-item ${item.passed ? "passed" : "failed"}">
@@ -2270,6 +2271,70 @@ function renderSignalTransparency(signal) {
       </div>
     </section>
   `;
+}
+
+function renderAiAnalyst(signal) {
+  const analyst = signal.analyst || {
+    strategyVersion: signal.indicators?.strategyVersion || "legacy",
+    overallQuality: signal.indicators?.analystOverallQuality || (
+      Number(signal.qualityScore) >= 90 ? "Excellent" :
+        Number(signal.qualityScore) >= 84 ? "Good" :
+          Number(signal.qualityScore) >= 78 ? "Average" : "Avoid"
+    ),
+    strengths: signal.indicators?.analystStrengths || [],
+    weaknesses: signal.indicators?.analystWeaknesses || [],
+    sections: signal.indicators?.analystSections || {},
+    adaptive: {
+      adjustment: Number(signal.indicators?.analystAdaptiveAdjustment || 0),
+      factors: signal.indicators?.analystAdaptiveFactors || []
+    }
+  };
+  const strengths = analyst.strengths || [];
+  const weaknesses = analyst.weaknesses || [];
+
+  return `
+    <section class="ai-analyst-card">
+      <div class="ai-analyst-heading">
+        <div><span class="eyebrow">AI Signal Analyst</span><strong>Overall setup quality: ${escapeHtml(analyst.overallQuality || "Average")}</strong></div>
+        <span>${escapeHtml(analyst.strategyVersion || "current")}</span>
+      </div>
+      <div class="analyst-columns">
+        <div>
+          <strong>Strengths</strong>
+          ${strengths.length
+            ? strengths.map((item) => `<span class="analyst-factor strength">✓ ${escapeHtml(item)}</span>`).join("")
+            : `<span class="analyst-factor">No strong factor recorded.</span>`}
+        </div>
+        <div>
+          <strong>Weaknesses</strong>
+          ${weaknesses.length
+            ? weaknesses.map((item) => `<span class="analyst-factor weakness">✗ ${escapeHtml(item)}</span>`).join("")
+            : `<span class="analyst-factor">No material weakness recorded.</span>`}
+        </div>
+      </div>
+      <details class="analyst-details">
+        <summary>Full analyst context</summary>
+        ${Object.entries(analyst.sections || {}).map(([key, value]) => `
+          <div><strong>${escapeHtml(formatAnalystSection(key))}</strong><span>${escapeHtml(value || "Unavailable")}</span></div>
+        `).join("")}
+      </details>
+      <p class="reasoning">Historical adaptation: ${analyst.adaptive?.adjustment > 0 ? "+" : ""}${analyst.adaptive?.adjustment || 0} quality points. The analyst cannot create or override a trade.</p>
+    </section>
+  `;
+}
+
+function formatAnalystSection(key) {
+  const labels = {
+    marketRegime: "Market regime",
+    multiTimeframe: "Multi-timeframe confluence",
+    session: "Session context",
+    newsRisk: "News risk",
+    smartMoneyConcepts: "Smart Money Concepts",
+    vwap: "VWAP",
+    volumeProfile: "Volume Profile",
+    riskEngine: "Risk Engine"
+  };
+  return labels[key] || key;
 }
 
 function renderAdvancedStructureExplanation(signal) {

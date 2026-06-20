@@ -1010,6 +1010,18 @@ function mapSignal(row) {
       explanation: row.indicators?.correlationExplanation || "",
       peers: row.indicators?.correlationPeers || []
     },
+    analyst: {
+      strategyVersion: row.indicators?.strategyVersion || "legacy",
+      overallQuality: row.indicators?.analystOverallQuality || null,
+      strengths: row.indicators?.analystStrengths || [],
+      weaknesses: row.indicators?.analystWeaknesses || [],
+      sections: row.indicators?.analystSections || {},
+      adaptive: {
+        adjustment: Number(row.indicators?.analystAdaptiveAdjustment || 0),
+        factors: row.indicators?.analystAdaptiveFactors || []
+      },
+      summary: row.reasoning
+    },
     reasoning: row.reasoning,
     confirmations: row.confirmations || [],
     indicators: row.indicators || {},

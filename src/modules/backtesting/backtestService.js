@@ -16,6 +16,7 @@ import {
   evaluateCorrelationContext
 } from "../market-data/correlationService.js";
 import { getTradingSession, tradingSessions } from "../intelligence/sessionIntelligenceService.js";
+import { currentStrategyVersion } from "../analyst/signalAnalystService.js";
 
 export const backtestSymbols = [
   "BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "ADA-USD", "DOGE-USD",
@@ -55,6 +56,8 @@ export async function runHistoricalBacktest(_user, input) {
   const withoutVwapReports = [];
   const withoutProfileReports = [];
   const withoutCorrelationReports = [];
+  const previousV3Reports = [];
+  const previousV2Reports = [];
   const errors = [];
 
   for (const symbol of symbols) {
@@ -88,6 +91,14 @@ export async function runHistoricalBacktest(_user, input) {
           ...options,
           components: { ...components, correlation: false }
         }));
+        previousV3Reports.push(backtestMarketData(bundle.marketData, timeframe, {
+          ...options,
+          components: disableAdvancedStructureComponents(components)
+        }));
+        previousV2Reports.push(backtestMarketData(bundle.marketData, timeframe, {
+          ...options,
+          components: disableSmcComponents(disableAdvancedStructureComponents(components))
+        }));
         if (hasEnabledSmc(components)) {
           withoutSmcReports.push(backtestMarketData(bundle.marketData, timeframe, {
             ...options,
@@ -115,7 +126,9 @@ export async function runHistoricalBacktest(_user, input) {
     fixedTargetReports,
     withoutVwapReports,
     withoutProfileReports,
-    withoutCorrelationReports
+    withoutCorrelationReports,
+    previousV3Reports,
+    previousV2Reports
   );
 }
 
@@ -507,7 +520,9 @@ function aggregateBacktestReports(
   fixedTargetReports = [],
   withoutVwapReports = [],
   withoutProfileReports = [],
-  withoutCorrelationReports = []
+  withoutCorrelationReports = [],
+  previousV3Reports = [],
+  previousV2Reports = []
 ) {
   const trades = reports.flatMap((report) => report.trades)
     .sort((a, b) => new Date(a.openedAt) - new Date(b.openedAt));
@@ -578,6 +593,11 @@ function aggregateBacktestReports(
         withoutCorrelationReports
       ) : null
     },
+    strategyVersionComparison: buildStrategyVersionComparison(
+      metrics,
+      previousV3Reports,
+      previousV2Reports
+    ),
     sessionFilters: reports[0]?.sessionFilters || null,
     errors,
     evaluation: {
@@ -596,6 +616,33 @@ function aggregateBacktestReports(
     trades: trades.slice(-100).reverse(),
     generatedAt: new Date().toISOString()
   };
+}
+
+function buildStrategyVersionComparison(currentMetrics, previousV3Reports, previousV2Reports) {
+  const versions = [
+    {
+      version: currentStrategyVersion,
+      label: "Current rules",
+      metrics: currentMetrics
+    },
+    {
+      version: "v3-advanced-structure",
+      label: "Before advanced structure",
+      metrics: calculateBacktestMetrics(previousV3Reports.flatMap((report) => report.trades))
+    },
+    {
+      version: "v2-regime-confluence",
+      label: "Before SMC and advanced structure",
+      metrics: calculateBacktestMetrics(previousV2Reports.flatMap((report) => report.trades))
+    }
+  ];
+  return versions.map((version, index) => ({
+    ...version,
+    expectancyDeltaFromCurrent: index === 0
+      ? 0
+      : round(currentMetrics.expectancy - version.metrics.expectancy),
+    improved: index === 0 ? null : currentMetrics.expectancy > version.metrics.expectancy
+  }));
 }
 
 function buildComponentComparison(primaryLabel, primaryMetrics, variantLabel, reports) {
@@ -696,6 +743,15 @@ function disableSmcComponents(components) {
     fairValueGaps: false,
     orderBlocks: false,
     structure: false
+  };
+}
+
+function disableAdvancedStructureComponents(components) {
+  return {
+    ...components,
+    vwap: false,
+    volumeProfile: false,
+    correlation: false
   };
 }
 

@@ -1,6 +1,7 @@
 import { listPerformanceSignalsByUser } from "../../db/repositories.js";
 import { getPair } from "../market-data/marketDataService.js";
 import { calculateSignalStats, updateSignalsForUser } from "../signals/signalOutcomeService.js";
+import { buildAnalystProfile } from "../analyst/signalAnalystService.js";
 
 const timeframes = new Set(["5m", "15m", "1h", "4h"]);
 const directions = new Set(["long", "short"]);
@@ -66,6 +67,17 @@ export function buildPerformanceAnalytics(signals, filters = {}) {
     "Correlation filter aligned",
     "Without correlation alignment"
   );
+  const analystProfile = buildAnalystProfile(signals);
+  const factorIntelligence = analystProfile.factors;
+  const ruleSuggestions = factorIntelligence
+    .filter((factor) => factor.sampleSufficient && factor.suggestedAction !== "Keep this rule")
+    .map((factor) => ({
+      factor: factor.label,
+      action: factor.suggestedAction,
+      expectancyDelta: factor.expectancyDelta,
+      winRateDelta: factor.winRateDelta,
+      sampleSize: factor.present.total
+    }));
 
   return {
     filters,
@@ -91,6 +103,14 @@ export function buildPerformanceAnalytics(signals, filters = {}) {
     vwapPerformance,
     volumeProfilePerformance,
     correlationPerformance,
+    factorIntelligence,
+    ruleSuggestions,
+    analystProfile: {
+      strategyVersion: analystProfile.strategyVersion,
+      resolvedSignals: analystProfile.resolvedSignals,
+      adaptive: analystProfile.adaptive,
+      minimumFactorSample: analystProfile.minimumFactorSample
+    },
     monthlyPerformance: monthly,
     charts: {
       winRateOverTime: monthly.map((item) => ({
