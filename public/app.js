@@ -922,7 +922,7 @@ async function loadMarketData() {
     renderChart(marketData.candles);
     document.querySelector("#provider-name").textContent = providerLabel;
     document.querySelector("#candle-count").textContent = `${marketData.candles.length}`;
-    document.querySelector("#market-regime").textContent = inferRegime(marketData.candles);
+    renderMarketRegime(marketData.regime);
     document.querySelector("#provider-status").textContent = marketData.cache === "hit" ? "Cached live" : "Live candles";
     state.marketStatus[statusKey] = {
       type: "loaded",
@@ -940,6 +940,7 @@ async function loadMarketData() {
     document.querySelector("#provider-status").textContent = "Provider issue";
     document.querySelector("#candle-count").textContent = "--";
     document.querySelector("#market-regime").textContent = "Unavailable";
+    renderMarketRegime(null);
     state.marketStatus[statusKey] = {
       type: "error",
       message: `${state.selectedPair.symbol} ${state.timeframe}: ${error.message}`
@@ -1313,6 +1314,15 @@ function inferRegime(candles) {
   return "Range";
 }
 
+function renderMarketRegime(regime) {
+  const label = regime?.label || "Unavailable";
+  document.querySelector("#market-regime").textContent = label;
+  document.querySelector("#regime-card-label").textContent = label;
+  document.querySelector("#regime-volatility-level").textContent = regime?.volatilityLevel || "--";
+  document.querySelector("#regime-explanation").textContent = regime?.explanation ||
+    "Live regime analysis is unavailable for the selected market.";
+}
+
 function renderSubscription() {
   if (!state.subscription) return;
   document.querySelector("#trial-count").textContent = state.subscription.unlimitedSignals
@@ -1544,13 +1554,40 @@ function renderPerformance() {
   document.querySelector("#performance-best-timeframe").textContent = summary.bestTimeframe
     ? `${summary.bestTimeframe.label} · ${summary.bestTimeframe.winRate}%`
     : "--";
+  document.querySelector("#performance-best-regime").textContent = summary.bestRegime
+    ? `${summary.bestRegime.label} · ${summary.bestRegime.winRate}%`
+    : "--";
   document.querySelector("#performance-filter-label").textContent = getPerformanceFilterLabel();
   renderWinRateChart(charts.winRateOverTime);
   renderAnalyticsBars(document.querySelector("#tp-sl-chart"), charts.outcomes, true);
   renderAnalyticsBars(document.querySelector("#market-distribution-chart"), charts.marketDistribution);
   renderAnalyticsBars(document.querySelector("#signals-by-market"), signalsByMarket);
   renderAnalyticsBars(document.querySelector("#signals-by-timeframe"), signalsByTimeframe);
+  renderRegimePerformance(state.performance.regimePerformance || []);
   renderMonthlyPerformance(monthlyPerformance);
+}
+
+function renderRegimePerformance(items) {
+  const container = document.querySelector("#signals-by-regime");
+
+  if (!items.length) {
+    container.innerHTML = `<div class="empty-state"><span>No tracked regime outcomes yet.</span></div>`;
+    return;
+  }
+
+  container.classList.add("distribution-list");
+  container.innerHTML = items.map((item) => `
+    <div class="distribution-row">
+      <div>
+        <span>${escapeHtml(item.label)}</span>
+        <strong>${item.winRate}% · ${item.netR}R</strong>
+      </div>
+      <div class="distribution-track">
+        <span style="width: ${Math.max(2, Math.min(100, item.winRate))}%"></span>
+      </div>
+      <small>${item.hitTpCount} TP · ${item.hitSlCount} SL · ${item.expiredCount} expired</small>
+    </div>
+  `).join("");
 }
 
 function renderWinRateChart(points) {

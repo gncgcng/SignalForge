@@ -26,10 +26,10 @@ const result = generateMarketDataSetup({
 assert.equal(result.valid, false, "A choppy low-efficiency market should return no trade.");
 assert.ok(
   result.analysis.candidates.some((candidate) => {
-    return candidate.regime === "Choppy/range" ||
-      candidate.rejectionReasons.some((reason) => reason.toLowerCase().includes("choppy"));
+    return candidate.regime === "Range" ||
+      candidate.rejectionReasons.some((reason) => reason.toLowerCase().includes("range"));
   }),
-  "No-trade analysis should explain the choppy regime."
+  "No-trade analysis should explain the range regime."
 );
 
 const source = readFileSync(

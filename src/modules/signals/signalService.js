@@ -142,6 +142,7 @@ function toScanPreview(signal) {
     qualityScore: signal.qualityScore,
     reasoning: signal.reasoning,
     confirmations: signal.confirmations,
+    indicators: signal.indicators,
     generatedAt: signal.generatedAt,
     locked: true
   };

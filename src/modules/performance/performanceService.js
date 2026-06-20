@@ -22,6 +22,8 @@ export function buildPerformanceAnalytics(signals, filters = {}) {
   const monthly = aggregateMonthly(signals);
   const bestMarket = findBestPerformer(signals, (signal) => signal.symbol);
   const bestTimeframe = findBestPerformer(signals, (signal) => signal.timeframe);
+  const regimePerformance = aggregateRegimePerformance(signals);
+  const bestRegime = findBestPerformer(signals, getSignalRegime);
 
   return {
     filters,
@@ -29,10 +31,12 @@ export function buildPerformanceAnalytics(signals, filters = {}) {
       ...stats,
       averageRiskReward,
       bestMarket,
-      bestTimeframe
+      bestTimeframe,
+      bestRegime
     },
     signalsByMarket: byMarket,
     signalsByTimeframe: byTimeframe,
+    regimePerformance,
     monthlyPerformance: monthly,
     charts: {
       winRateOverTime: monthly.map((item) => ({
@@ -47,6 +51,48 @@ export function buildPerformanceAnalytics(signals, filters = {}) {
       marketDistribution: byMarket
     }
   };
+}
+
+function aggregateRegimePerformance(signals) {
+  const groups = new Map();
+
+  for (const signal of signals) {
+    const label = getSignalRegime(signal);
+    const group = groups.get(label) || {
+      label,
+      totalSignals: 0,
+      hitTpCount: 0,
+      hitSlCount: 0,
+      expiredCount: 0,
+      netR: 0
+    };
+    group.totalSignals += 1;
+    if (signal.status === "Hit TP") {
+      group.hitTpCount += 1;
+      group.netR += signal.riskRewardRatio;
+    }
+    if (signal.status === "Hit SL") {
+      group.hitSlCount += 1;
+      group.netR -= 1;
+    }
+    if (signal.status === "Expired") group.expiredCount += 1;
+    groups.set(label, group);
+  }
+
+  return [...groups.values()]
+    .map((group) => {
+      const resolved = group.hitTpCount + group.hitSlCount;
+      return {
+        ...group,
+        netR: round(group.netR),
+        winRate: resolved ? Math.round((group.hitTpCount / resolved) * 100) : 0
+      };
+    })
+    .sort((a, b) => b.winRate - a.winRate || b.netR - a.netR || a.label.localeCompare(b.label));
+}
+
+function getSignalRegime(signal) {
+  return signal.indicators?.regime || "Unknown";
 }
 
 function normalizeFilters(input) {

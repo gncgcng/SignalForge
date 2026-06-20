@@ -1671,6 +1671,48 @@ polyline {
   background: var(--line);
 }
 
+.market-regime-card {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.8fr) minmax(110px, 0.5fr) minmax(260px, 2fr);
+  gap: 18px;
+  align-items: center;
+  padding: 16px 18px;
+  border-top: 1px solid var(--line);
+  background: #0d1119;
+}
+
+.market-regime-card > div {
+  display: grid;
+  gap: 5px;
+}
+
+.market-regime-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.5;
+}
+
+.regime-volatility {
+  padding-left: 18px;
+  border-left: 1px solid var(--line);
+}
+
+.regime-volatility span {
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+@media (max-width: 760px) {
+  .market-regime-card {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .market-regime-card p {
+    grid-column: 1 / -1;
+  }
+}
+
 .paper-stats-grid > div {
   display: grid;
   gap: 6px;

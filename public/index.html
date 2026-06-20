@@ -232,6 +232,17 @@
                   <div><span>Candles</span><strong id="candle-count">--</strong></div>
                   <div><span>Regime</span><strong id="market-regime">Loading</strong></div>
                 </div>
+                <article class="market-regime-card" id="market-regime-card">
+                  <div>
+                    <span class="eyebrow">Market Regime</span>
+                    <strong id="regime-card-label">Loading</strong>
+                  </div>
+                  <div class="regime-volatility">
+                    <span>Volatility</span>
+                    <strong id="regime-volatility-level">--</strong>
+                  </div>
+                  <p id="regime-explanation">Waiting for live OHLCV regime analysis.</p>
+                </article>
               </div>
             </section>
 
@@ -544,6 +555,7 @@
               <div><span>Average R/R</span><strong id="performance-average-rr">0</strong></div>
               <div><span>Best market</span><strong id="performance-best-market">--</strong></div>
               <div><span>Best timeframe</span><strong id="performance-best-timeframe">--</strong></div>
+              <div><span>Best regime</span><strong id="performance-best-regime">--</strong></div>
             </div>
             <div class="performance-charts">
               <article class="analytics-panel">
@@ -562,6 +574,7 @@
             <div class="performance-breakdowns">
               <article class="analytics-panel"><h3>Signals by market</h3><div id="signals-by-market"></div></article>
               <article class="analytics-panel"><h3>Signals by timeframe</h3><div id="signals-by-timeframe"></div></article>
+              <article class="analytics-panel"><h3>Win rate by regime</h3><div id="signals-by-regime"></div></article>
             </div>
             <article class="analytics-panel">
               <div class="panel-header"><div><span class="eyebrow">Realized R</span><h3>Monthly performance</h3></div></div>

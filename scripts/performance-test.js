@@ -2,11 +2,11 @@ import { readFileSync } from "node:fs";
 import { buildPerformanceAnalytics } from "../src/modules/performance/performanceService.js";
 
 const signals = [
-  signal("BTC-USD", "1h", "Hit TP", 2, "2026-01-05T00:00:00.000Z"),
-  signal("BTC-USD", "4h", "Hit SL", 1.8, "2026-01-12T00:00:00.000Z"),
-  signal("XAU/USD", "1h", "Hit TP", 2.5, "2026-02-03T00:00:00.000Z"),
-  signal("XAU/USD", "15m", "Expired", 1.5, "2026-02-14T00:00:00.000Z"),
-  signal("ETH-USD", "1h", "Active", 2, "2026-02-20T00:00:00.000Z")
+  signal("BTC-USD", "1h", "Hit TP", 2, "2026-01-05T00:00:00.000Z", "Trend Up"),
+  signal("BTC-USD", "4h", "Hit SL", 1.8, "2026-01-12T00:00:00.000Z", "Range"),
+  signal("XAU/USD", "1h", "Hit TP", 2.5, "2026-02-03T00:00:00.000Z", "Trend Up"),
+  signal("XAU/USD", "15m", "Expired", 1.5, "2026-02-14T00:00:00.000Z", "High Volatility"),
+  signal("ETH-USD", "1h", "Active", 2, "2026-02-20T00:00:00.000Z", "Range")
 ];
 
 const analytics = buildPerformanceAnalytics(signals);
@@ -24,6 +24,8 @@ const result = {
   marketBreakdownCorrect: analytics.signalsByMarket.find((item) => item.label === "BTC-USD")?.value === 2 &&
     analytics.signalsByMarket.find((item) => item.label === "XAU/USD")?.value === 2,
   timeframeBreakdownCorrect: analytics.signalsByTimeframe.find((item) => item.label === "1h")?.value === 3,
+  regimePerformanceCorrect: analytics.regimePerformance.find((item) => item.label === "Trend Up")?.winRate === 100 &&
+    analytics.summary.bestRegime?.label === "Trend Up",
   monthlyPerformanceCorrect: analytics.monthlyPerformance[0].netR === 1 &&
     analytics.monthlyPerformance[1].netR === 2.5,
   chartsPresent: analytics.charts.winRateOverTime.length === 2 &&
@@ -49,12 +51,13 @@ if (Object.values(result).some((value) => value !== true)) {
   process.exitCode = 1;
 }
 
-function signal(symbol, timeframe, status, riskRewardRatio, generatedAt) {
+function signal(symbol, timeframe, status, riskRewardRatio, generatedAt, regime) {
   return {
     symbol,
     timeframe,
     status,
     riskRewardRatio,
-    generatedAt
+    generatedAt,
+    indicators: { regime }
   };
 }

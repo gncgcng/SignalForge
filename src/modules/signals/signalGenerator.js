@@ -1,5 +1,6 @@
 import { appConfig } from "../../config/appConfig.js";
 import { createId } from "../../shared/ids.js";
+import { analyzeMarketRegime } from "../market-data/marketRegimeService.js";
 
 const minimumCandles = 60;
 const minimumRiskReward = 1.8;
@@ -19,7 +20,7 @@ export function generateMarketDataSetup(marketData, timeframe) {
   const indicators = calculateIndicators(candles);
   const latest = candles[candles.length - 1];
   const levels = detectSupportResistance(candles);
-  const regime = analyzeRegime(candles, indicators, levels);
+  const regime = analyzeMarketRegime(candles);
   const isCommodity = marketData.pair.assetClass === "Commodity";
   const rawLongCase = isCommodity
     ? evaluateCommodityLong(latest, indicators, levels)
@@ -27,8 +28,20 @@ export function generateMarketDataSetup(marketData, timeframe) {
   const rawShortCase = isCommodity
     ? evaluateCommodityShort(latest, indicators, levels)
     : evaluateCryptoShort(latest, indicators, levels, marketData.volumeAvailable !== false);
-  const longCase = validateCandidate(rawLongCase, candles, indicators, levels, regime);
-  const shortCase = validateCandidate(rawShortCase, candles, indicators, levels, regime);
+  const longCase = validateCandidate(
+    adjustCandidateForVolatility(rawLongCase, regime),
+    candles,
+    indicators,
+    levels,
+    regime
+  );
+  const shortCase = validateCandidate(
+    adjustCandidateForVolatility(rawShortCase, regime),
+    candles,
+    indicators,
+    levels,
+    regime
+  );
   const bestCase = [longCase, shortCase]
     .filter((candidate) => candidate.valid)
     .sort((a, b) => b.qualityScore - a.qualityScore || b.confidenceScore - a.confidenceScore)[0];
@@ -184,6 +197,30 @@ function buildCandidate(direction, entry, stopLoss, confirmations, risk, require
   };
 }
 
+function adjustCandidateForVolatility(candidate, regime) {
+  if (regime.label !== "High Volatility") {
+    return candidate;
+  }
+
+  const originalRisk = Math.abs(candidate.entry - candidate.stopLoss);
+  const widenedRisk = originalRisk * 1.25;
+  const stopLoss = candidate.direction === "long"
+    ? candidate.entry - widenedRisk
+    : candidate.entry + widenedRisk;
+  const takeProfit = candidate.direction === "long"
+    ? candidate.entry + widenedRisk * candidate.riskRewardRatio
+    : candidate.entry - widenedRisk * candidate.riskRewardRatio;
+
+  return {
+    ...candidate,
+    stopLoss,
+    takeProfit,
+    risk: widenedRisk,
+    confidenceScore: Math.max(0, candidate.confidenceScore - 8),
+    volatilityAdjusted: true
+  };
+}
+
 function validateCandidate(candidate, candles, indicators, levels, regime) {
   const setupType = classifySetupType(candidate.direction, candles, indicators, levels, regime);
   const opposingLevel = candidate.direction === "long"
@@ -213,6 +250,27 @@ function validateCandidate(candidate, candles, indicators, levels, regime) {
   }
   const rejectionReasons = [];
 
+  if (regime.label === "Trend Up" && candidate.direction !== "long") {
+    rejectionReasons.push("Trend Up only favors continuation and pullback longs.");
+  }
+  if (regime.label === "Trend Down" && candidate.direction !== "short") {
+    rejectionReasons.push("Trend Down only favors continuation and pullback shorts.");
+  }
+  if (
+    ["Trend Up", "Trend Down"].includes(regime.label) &&
+    !["Trend continuation", "Pullback bounce"].includes(setupType)
+  ) {
+    rejectionReasons.push(`${regime.label} requires a continuation or pullback setup.`);
+  }
+  if (regime.label === "Range" && setupType !== "Reversal") {
+    rejectionReasons.push("Range conditions avoid trend trades and require strong mean-reversion structure.");
+  }
+  if (regime.label === "Breakout" && setupType !== "Breakout retest") {
+    rejectionReasons.push("Breakout conditions require a confirmed breakout retest.");
+  }
+  if (regime.label === "Low Volatility") {
+    rejectionReasons.push("Low volatility conditions do not justify forcing a trade.");
+  }
   if (!emaAligned && setupType !== "Reversal") {
     rejectionReasons.push("Price and EMA20/EMA50 are not fully aligned.");
   }
@@ -267,33 +325,6 @@ function validateCandidate(candidate, candles, indicators, levels, regime) {
       candidate.valid ||
       (setupType === "Reversal" && candidate.passedCount >= candidate.requiredPassCount - 1)
     ) && rejectionReasons.length === 0
-  };
-}
-
-function analyzeRegime(candles, indicators, levels) {
-  const recent = candles.slice(-20);
-  const netMove = Math.abs(recent[recent.length - 1].close - recent[0].close);
-  const path = recent.slice(1).reduce((sum, candle, index) => {
-    return sum + Math.abs(candle.close - recent[index].close);
-  }, 0);
-  const efficiencyRatio = path > 0 ? netMove / path : 0;
-  const trendStrength = indicators.atr14 > 0
-    ? Math.abs(indicators.ema20 - indicators.ema50) / indicators.atr14
-    : 0;
-  const atrPercent = candles[candles.length - 1].close > 0
-    ? (indicators.atr14 / candles[candles.length - 1].close) * 100
-    : 0;
-  const atrPass = Number.isFinite(atrPercent) && atrPercent >= 0.03 && atrPercent <= 12;
-  const choppy = efficiencyRatio < 0.28 && trendStrength < 0.45;
-
-  return {
-    label: choppy ? "Choppy/range" : trendStrength >= 0.65 ? "Trending" : "Transitional",
-    choppy,
-    efficiencyRatio,
-    trendStrength,
-    atrPercent,
-    atrPass,
-    strongLevel: Math.max(levels.supportStrength, levels.resistanceStrength) >= 3
   };
 }
 
@@ -356,7 +387,8 @@ function calculateQualityScore({ candidate, setupType, regime, levelStrength, op
     Math.min(8, opposingRoom * 2.5) +
     setupPoints +
     (emaAligned ? 8 : 0) -
-    (regime.choppy ? 18 : 0);
+    (regime.choppy ? 18 : 0) -
+    (regime.label === "High Volatility" ? 10 : 0);
 
   return Math.max(0, Math.min(100, Math.round(score)));
 }
@@ -566,7 +598,7 @@ function buildReasoning(candidate, indicators, levels, regime, isCommodity) {
     ? `Commodity ${candidate.direction.toUpperCase()} analysis uses Twelve Data price structure; volume is not required. Setup`
     : `${candidate.direction.toUpperCase()} setup`;
 
-  return `${prefix} classified as ${candidate.setupType} with quality ${candidate.qualityScore}/100 in a ${regime.label.toLowerCase()} regime. Confirmed by ${passed}. Failed checks: ${failed}. EMA20 ${formatNumber(indicators.ema20)}, EMA50 ${formatNumber(indicators.ema50)}, RSI14 ${formatNumber(indicators.rsi14)}, ATR14 ${formatNumber(indicators.atr14)}. Support ${levels.nearestSupport ? formatNumber(levels.nearestSupport.price) : "n/a"}, resistance ${levels.nearestResistance ? formatNumber(levels.nearestResistance.price) : "n/a"}.`;
+  return `${prefix} classified as ${candidate.setupType} with quality ${candidate.qualityScore}/100 in a ${regime.label} regime. ${regime.explanation} Confirmed by ${passed}. Failed checks: ${failed}. EMA20 ${formatNumber(indicators.ema20)}, EMA50 ${formatNumber(indicators.ema50)}, ADX14 ${formatNumber(regime.metrics.adx14)}, RSI14 ${formatNumber(indicators.rsi14)}, ATR14 ${formatNumber(indicators.atr14)}. Support ${levels.nearestSupport ? formatNumber(levels.nearestSupport.price) : "n/a"}, resistance ${levels.nearestResistance ? formatNumber(levels.nearestResistance.price) : "n/a"}.`;
 }
 
 function serializeIndicators(indicators, levels, regime) {
@@ -582,7 +614,11 @@ function serializeIndicators(indicators, levels, regime) {
     resistanceStrength: levels.resistanceStrength,
     trendStrength: Number(regime.trendStrength.toFixed(3)),
     efficiencyRatio: Number(regime.efficiencyRatio.toFixed(3)),
-    regime: regime.label
+    adx14: regime.metrics.adx14,
+    regime: regime.label,
+    regimeExplanation: regime.explanation,
+    volatilityLevel: regime.volatilityLevel,
+    atrRatio: regime.metrics.atrRatio
   };
 }
 
