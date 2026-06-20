@@ -892,6 +892,8 @@ function renderPerformanceMarketOptions() {
 async function loadMarketData() {
   if (!state.selectedPair || state.selectedPair.status !== "active") {
     renderChart([]);
+    renderMarketRegime(null);
+    renderMultiTimeframeConfluence(null);
     setMarketStatus(
       state.selectedPair?.category === "Commodities"
         ? `${state.selectedPair.symbol}: ${state.selectedPair.availabilityMessage || "Data provider not configured"}.`
@@ -923,6 +925,7 @@ async function loadMarketData() {
     document.querySelector("#provider-name").textContent = providerLabel;
     document.querySelector("#candle-count").textContent = `${marketData.candles.length}`;
     renderMarketRegime(marketData.regime);
+    renderMultiTimeframeConfluence(marketData.confluence);
     document.querySelector("#provider-status").textContent = marketData.cache === "hit" ? "Cached live" : "Live candles";
     state.marketStatus[statusKey] = {
       type: "loaded",
@@ -941,6 +944,7 @@ async function loadMarketData() {
     document.querySelector("#candle-count").textContent = "--";
     document.querySelector("#market-regime").textContent = "Unavailable";
     renderMarketRegime(null);
+    renderMultiTimeframeConfluence(null);
     state.marketStatus[statusKey] = {
       type: "error",
       message: `${state.selectedPair.symbol} ${state.timeframe}: ${error.message}`
@@ -1323,6 +1327,39 @@ function renderMarketRegime(regime) {
     "Live regime analysis is unavailable for the selected market.";
 }
 
+function renderMultiTimeframeConfluence(confluence) {
+  const display = confluence?.display;
+  const available = (confluence?.higherTimeframes || []).filter((item) => item.available);
+  const unavailable = (confluence?.higherTimeframes || []).filter((item) => !item.available);
+  const trendLabels = available.map((item) => {
+    return `${item.timeframe} ${item.regime?.label || "Unknown"}`;
+  });
+
+  document.querySelector("#htf-trend-label").textContent = trendLabels.length
+    ? trendLabels.join(" · ")
+    : "No higher timeframe";
+  document.querySelector("#ltf-setup-label").textContent = confluence
+    ? `${confluence.lowerTimeframe} · ${confluence.lowerTimeframeRegime?.label || "Unknown"}`
+    : "Unavailable";
+  document.querySelector("#ltf-setup-detail").textContent = confluence?.lowerTimeframeRegime?.explanation ||
+    "Lower-timeframe structure is unavailable.";
+  document.querySelector("#confluence-score").textContent = display ? `${display.score}/100` : "--";
+  document.querySelector("#confluence-badge").textContent = display?.badge || "Partial Alignment";
+  document.querySelector("#confluence-badge").className = `alignment-badge ${getAlignmentClass(display?.badge)}`;
+  document.querySelector("#confluence-explanation").textContent = display?.explanation ||
+    "Higher-timeframe analysis is unavailable.";
+  document.querySelector("#htf-timeframe-badges").innerHTML = [
+    ...available.map((item) => `
+      <span class="timeframe-alignment">
+        ${escapeHtml(item.timeframe)} · ${escapeHtml(item.regime?.label || "Unknown")}
+      </span>
+    `),
+    ...unavailable.map((item) => `
+      <span class="timeframe-alignment unavailable">${escapeHtml(item.timeframe)} unavailable</span>
+    `)
+  ].join("");
+}
+
 function renderSubscription() {
   if (!state.subscription) return;
   document.querySelector("#trial-count").textContent = state.subscription.unlimitedSignals
@@ -1557,6 +1594,9 @@ function renderPerformance() {
   document.querySelector("#performance-best-regime").textContent = summary.bestRegime
     ? `${summary.bestRegime.label} · ${summary.bestRegime.winRate}%`
     : "--";
+  document.querySelector("#performance-best-confluence").textContent = summary.bestConfluenceRange
+    ? `${summary.bestConfluenceRange.label} · ${summary.bestConfluenceRange.winRate}%`
+    : "--";
   document.querySelector("#performance-filter-label").textContent = getPerformanceFilterLabel();
   renderWinRateChart(charts.winRateOverTime);
   renderAnalyticsBars(document.querySelector("#tp-sl-chart"), charts.outcomes, true);
@@ -1564,7 +1604,31 @@ function renderPerformance() {
   renderAnalyticsBars(document.querySelector("#signals-by-market"), signalsByMarket);
   renderAnalyticsBars(document.querySelector("#signals-by-timeframe"), signalsByTimeframe);
   renderRegimePerformance(state.performance.regimePerformance || []);
+  renderConfluencePerformance(state.performance.confluencePerformance || []);
   renderMonthlyPerformance(monthlyPerformance);
+}
+
+function renderConfluencePerformance(items) {
+  const container = document.querySelector("#signals-by-confluence");
+
+  if (!items.length) {
+    container.innerHTML = `<div class="empty-state"><span>No tracked confluence outcomes yet.</span></div>`;
+    return;
+  }
+
+  container.classList.add("distribution-list");
+  container.innerHTML = items.map((item) => `
+    <div class="distribution-row">
+      <div>
+        <span>${escapeHtml(item.label)} confluence</span>
+        <strong>${item.winRate}% · ${item.netR}R</strong>
+      </div>
+      <div class="distribution-track">
+        <span style="width: ${Math.max(2, Math.min(100, item.winRate))}%"></span>
+      </div>
+      <small>${item.hitTpCount} TP · ${item.hitSlCount} SL · ${item.expiredCount} expired</small>
+    </div>
+  `).join("");
 }
 
 function renderRegimePerformance(items) {
@@ -1806,6 +1870,8 @@ function renderScanCard(setup) {
       </div>
       <div class="signal-metrics">
         <div><span>Setup type</span><strong>${setup.setupType || "Qualified setup"}</strong></div>
+        <div><span>Confluence</span><strong>${setup.confluenceScore || setup.indicators?.confluenceScore || 0}/100</strong></div>
+        <div><span>Alignment</span><strong>${setup.alignmentBadge || setup.indicators?.alignmentBadge || "Partial Alignment"}</strong></div>
         <div><span>Quality</span><strong>${setup.qualityScore || 0}/100</strong></div>
         <div><span>Confidence</span><strong>${setup.confidenceScore}%</strong></div>
         <div><span>Risk/reward</span><strong>${setup.riskRewardRatio}:1</strong></div>
@@ -1814,6 +1880,7 @@ function renderScanCard(setup) {
       </div>
       <p class="reasoning">Passed confirmations: ${passed}. Unlock the full signal to save entry, stop loss, and take profit.</p>
       ${renderSignalTransparency(setup)}
+      ${renderSignalConfluence(setup)}
       <button class="secondary-action" data-unlock-symbol="${setup.symbol}" data-unlock-timeframe="${setup.timeframe}" type="button">Unlock Signal</button>
     </article>
   `;
@@ -1832,6 +1899,8 @@ function renderSignalCard(signal) {
       <div class="signal-metrics">
         <div><span>Setup type</span><strong>${signal.setupType || "Qualified setup"}</strong></div>
         <div><span>Quality</span><strong>${signal.qualityScore || 0}/100</strong></div>
+        <div><span>Confluence</span><strong>${signal.confluenceScore || signal.indicators?.confluenceScore || 0}/100</strong></div>
+        <div><span>Alignment</span><strong>${signal.alignmentBadge || signal.indicators?.alignmentBadge || "Partial Alignment"}</strong></div>
         <div><span>Entry</span><strong>${formatCurrency(signal.entryPrice)}</strong></div>
         <div><span>Stop loss</span><strong>${formatCurrency(signal.stopLoss)}</strong></div>
         <div><span>Take profit</span><strong>${formatCurrency(signal.takeProfit)}</strong></div>
@@ -1841,9 +1910,35 @@ function renderSignalCard(signal) {
       </div>
       <p class="reasoning">${signal.reasoning}</p>
       ${renderSignalTransparency(signal)}
+      ${renderSignalConfluence(signal)}
       ${renderPaperTradeAction(signal)}
     </article>
   `;
+}
+
+function renderSignalConfluence(signal) {
+  const score = signal.confluenceScore || signal.indicators?.confluenceScore;
+  const badge = signal.alignmentBadge || signal.indicators?.alignmentBadge;
+  const explanation = signal.indicators?.confluenceExplanation;
+
+  if (!Number.isFinite(Number(score))) return "";
+
+  return `
+    <section class="signal-confluence">
+      <div>
+        <span>Multi-timeframe confluence</span>
+        <strong>${score}/100</strong>
+        <span class="alignment-badge ${getAlignmentClass(badge)}">${escapeHtml(badge || "Partial Alignment")}</span>
+      </div>
+      <p class="reasoning">${escapeHtml(explanation || "Higher-timeframe evidence was included in confidence and quality scoring.")}</p>
+    </section>
+  `;
+}
+
+function getAlignmentClass(badge) {
+  if (badge === "Full Alignment") return "full";
+  if (badge === "Countertrend") return "countertrend";
+  return "partial";
 }
 
 function renderPaperTradeAction(signal) {

@@ -1,5 +1,6 @@
 import { listSignalsByUser, saveUnlockedSignal } from "../../db/repositories.js";
-import { getOhlcv, listActivePairs } from "../market-data/marketDataService.js";
+import { listActivePairs } from "../market-data/marketDataService.js";
+import { getMultiTimeframeMarketData } from "../market-data/multiTimeframeService.js";
 import { canGenerateSignal, getSubscriptionSummary, recordSignalUsage } from "../subscriptions/subscriptionService.js";
 import { generateMarketDataSetup } from "./signalGenerator.js";
 import { calculateSignalStats, updateSignalsForUser } from "./signalOutcomeService.js";
@@ -15,7 +16,7 @@ export async function createSignal(user, { symbol, timeframe }) {
     throw error;
   }
 
-  const marketData = await getOhlcv(symbol, timeframe);
+  const marketData = await getMultiTimeframeMarketData(symbol, timeframe);
   const result = generateMarketDataSetup(marketData, timeframe);
 
   if (!result.valid) {
@@ -49,7 +50,7 @@ export async function scanMarketSetup({ symbol, timeframe }) {
 }
 
 export async function scanMarketSetupDetailed({ symbol, timeframe }) {
-  const marketData = await getOhlcv(symbol, timeframe);
+  const marketData = await getMultiTimeframeMarketData(symbol, timeframe);
   const result = generateMarketDataSetup(marketData, timeframe);
 
   return {
@@ -137,6 +138,8 @@ function toScanPreview(signal) {
     timeframe: signal.timeframe,
     direction: signal.direction,
     setupType: signal.setupType,
+    confluenceScore: signal.confluenceScore,
+    alignmentBadge: signal.alignmentBadge,
     riskRewardRatio: signal.riskRewardRatio,
     confidenceScore: signal.confidenceScore,
     qualityScore: signal.qualityScore,

@@ -24,6 +24,10 @@ export function buildPerformanceAnalytics(signals, filters = {}) {
   const bestTimeframe = findBestPerformer(signals, (signal) => signal.timeframe);
   const regimePerformance = aggregateRegimePerformance(signals);
   const bestRegime = findBestPerformer(signals, getSignalRegime);
+  const confluencePerformance = aggregateConfluencePerformance(signals);
+  const bestConfluenceRange = confluencePerformance
+    .filter((item) => item.label !== "Unknown" && item.hitTpCount + item.hitSlCount > 0)
+    .sort(rankPerformanceGroup)[0] || null;
 
   return {
     filters,
@@ -32,11 +36,13 @@ export function buildPerformanceAnalytics(signals, filters = {}) {
       averageRiskReward,
       bestMarket,
       bestTimeframe,
-      bestRegime
+      bestRegime,
+      bestConfluenceRange
     },
     signalsByMarket: byMarket,
     signalsByTimeframe: byTimeframe,
     regimePerformance,
+    confluencePerformance,
     monthlyPerformance: monthly,
     charts: {
       winRateOverTime: monthly.map((item) => ({
@@ -51,6 +57,42 @@ export function buildPerformanceAnalytics(signals, filters = {}) {
       marketDistribution: byMarket
     }
   };
+}
+
+function aggregateConfluencePerformance(signals) {
+  const groups = new Map();
+
+  for (const signal of signals) {
+    const label = getConfluenceRange(signal);
+    const group = groups.get(label) || {
+      label,
+      totalSignals: 0,
+      hitTpCount: 0,
+      hitSlCount: 0,
+      expiredCount: 0,
+      netR: 0
+    };
+    group.totalSignals += 1;
+    if (signal.status === "Hit TP") {
+      group.hitTpCount += 1;
+      group.netR += signal.riskRewardRatio;
+    }
+    if (signal.status === "Hit SL") {
+      group.hitSlCount += 1;
+      group.netR -= 1;
+    }
+    if (signal.status === "Expired") group.expiredCount += 1;
+    groups.set(label, group);
+  }
+
+  return [...groups.values()].map((group) => {
+    const resolved = group.hitTpCount + group.hitSlCount;
+    return {
+      ...group,
+      netR: round(group.netR),
+      winRate: resolved ? Math.round((group.hitTpCount / resolved) * 100) : 0
+    };
+  }).sort(rankPerformanceGroup);
 }
 
 function aggregateRegimePerformance(signals) {
@@ -93,6 +135,22 @@ function aggregateRegimePerformance(signals) {
 
 function getSignalRegime(signal) {
   return signal.indicators?.regime || "Unknown";
+}
+
+function getConfluenceRange(signal) {
+  const score = Number(signal.confluenceScore ?? signal.indicators?.confluenceScore);
+  if (!Number.isFinite(score)) return "Unknown";
+  if (score < 40) return "0-39";
+  if (score < 60) return "40-59";
+  if (score < 80) return "60-79";
+  return "80-100";
+}
+
+function rankPerformanceGroup(a, b) {
+  return b.winRate - a.winRate ||
+    b.netR - a.netR ||
+    b.totalSignals - a.totalSignals ||
+    a.label.localeCompare(b.label);
 }
 
 function normalizeFilters(input) {

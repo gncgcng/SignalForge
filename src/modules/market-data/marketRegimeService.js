@@ -111,6 +111,7 @@ export function analyzeMarketRegime(candles) {
       atrRatio: round(atrRatio),
       adx14: round(adx14),
       rsi14: round(rsi14),
+      latestPrice: round(latest.close),
       support: round(levels.support),
       resistance: round(levels.resistance),
       structure: structureUp ? "Higher highs / higher lows" : structureDown ? "Lower highs / lower lows" : "Mixed"

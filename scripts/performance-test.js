@@ -26,6 +26,8 @@ const result = {
   timeframeBreakdownCorrect: analytics.signalsByTimeframe.find((item) => item.label === "1h")?.value === 3,
   regimePerformanceCorrect: analytics.regimePerformance.find((item) => item.label === "Trend Up")?.winRate === 100 &&
     analytics.summary.bestRegime?.label === "Trend Up",
+  confluencePerformanceCorrect: analytics.confluencePerformance.find((item) => item.label === "80-100")?.winRate === 100 &&
+    analytics.summary.bestConfluenceRange?.label === "80-100",
   monthlyPerformanceCorrect: analytics.monthlyPerformance[0].netR === 1 &&
     analytics.monthlyPerformance[1].netR === 2.5,
   chartsPresent: analytics.charts.winRateOverTime.length === 2 &&
@@ -52,12 +54,20 @@ if (Object.values(result).some((value) => value !== true)) {
 }
 
 function signal(symbol, timeframe, status, riskRewardRatio, generatedAt, regime) {
+  const confluenceScores = {
+    "Trend Up": 86,
+    Range: 48,
+    "High Volatility": 68
+  };
   return {
     symbol,
     timeframe,
     status,
     riskRewardRatio,
     generatedAt,
-    indicators: { regime }
+    indicators: {
+      regime,
+      confluenceScore: confluenceScores[regime] || 55
+    }
   };
 }

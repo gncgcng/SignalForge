@@ -927,6 +927,8 @@ function mapSignal(row) {
     confidenceScore: Number(row.confidence_score),
     qualityScore: Number(row.quality_score || 0),
     setupType: row.setup_type || "Qualified setup",
+    confluenceScore: Number(row.indicators?.confluenceScore || 0),
+    alignmentBadge: row.indicators?.alignmentBadge || "Partial Alignment",
     reasoning: row.reasoning,
     confirmations: row.confirmations || [],
     indicators: row.indicators || {},

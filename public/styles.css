@@ -1681,6 +1681,88 @@ polyline {
   background: #0d1119;
 }
 
+.confluence-intelligence {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  border-top: 1px solid var(--line);
+  background: var(--line);
+}
+
+.confluence-intelligence > article {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+  padding: 16px 18px;
+  background: var(--surface);
+}
+
+.confluence-intelligence p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.alignment-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.timeframe-alignment,
+.alignment-badge {
+  display: inline-flex;
+  width: fit-content;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.timeframe-alignment.unavailable {
+  opacity: 0.64;
+}
+
+.alignment-badge.full {
+  border-color: rgba(74, 222, 128, 0.42);
+  color: var(--green);
+}
+
+.alignment-badge.partial {
+  border-color: rgba(248, 193, 74, 0.42);
+  color: var(--amber);
+}
+
+.alignment-badge.countertrend {
+  border-color: rgba(251, 113, 133, 0.42);
+  color: var(--red);
+}
+
+.signal-confluence {
+  display: grid;
+  gap: 9px;
+  margin-top: 14px;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #0d1119;
+}
+
+.signal-confluence > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 9px;
+}
+
+.signal-confluence > div > span:first-child {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
 .market-regime-card > div {
   display: grid;
   gap: 5px;
@@ -1710,6 +1792,10 @@ polyline {
 
   .market-regime-card p {
     grid-column: 1 / -1;
+  }
+
+  .confluence-intelligence {
+    grid-template-columns: 1fr;
   }
 }
 
