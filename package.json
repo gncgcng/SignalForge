@@ -27,6 +27,7 @@
     "test:telegram-onboarding": "node scripts/telegram-onboarding-test.js",
     "test:tester-access": "node scripts/tester-access-test.js",
     "test:performance": "node scripts/performance-test.js",
+    "test:paper-trading": "node scripts/paper-trading-test.js",
     "test:backtesting": "node scripts/backtest-test.js"
   },
   "dependencies": {

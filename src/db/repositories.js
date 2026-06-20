@@ -212,6 +212,37 @@ export async function updateSignalOutcome(signal) {
   ]);
 }
 
+export async function createPaperTrade(userId, signalId) {
+  const result = await query(`
+    INSERT INTO paper_trades (id, user_id, saved_signal_id)
+    SELECT $1, $2, s.id
+    FROM saved_signals s
+    JOIN unlocked_signals u
+      ON u.saved_signal_id = s.id AND u.user_id = $2
+    WHERE s.id = $3 AND s.user_id = $2
+    ON CONFLICT (user_id, saved_signal_id) DO NOTHING
+    RETURNING id
+  `, [createId("paper"), userId, signalId]);
+
+  return result.rows[0] || null;
+}
+
+export async function listPaperTradesByUser(userId) {
+  const result = await query(`
+    SELECT p.id AS paper_trade_id, p.entered_at,
+      s.*, o.status, o.status_reason, o.resolved_at,
+      o.updated_at AS status_updated_at
+    FROM paper_trades p
+    JOIN saved_signals s ON s.id = p.saved_signal_id
+    LEFT JOIN signal_outcomes o ON o.saved_signal_id = s.id
+    WHERE p.user_id = $1 AND s.user_id = $1
+    ORDER BY p.entered_at DESC
+    LIMIT 100
+  `, [userId]);
+
+  return result.rows.map(mapPaperTrade);
+}
+
 export async function listWatchlistByUser(userId) {
   const result = await query(`
     SELECT w.symbol, w.created_at, p.id AS preference_id, p.timeframe,
@@ -721,6 +752,36 @@ function mapTesterRequest(row) {
     requestedAt: row.requested_at,
     reviewedBy: row.reviewed_by,
     reviewedAt: row.reviewed_at
+  };
+}
+
+function mapPaperTrade(row) {
+  const signal = mapSignal(row);
+  const status = signal.status === "Active" ? "Open" : signal.status;
+  const realizedR = status === "Hit TP"
+    ? signal.riskRewardRatio
+    : status === "Hit SL"
+      ? -1
+      : 0;
+
+  return {
+    id: row.paper_trade_id,
+    signalId: signal.id,
+    symbol: signal.symbol,
+    timeframe: signal.timeframe,
+    direction: signal.direction,
+    setupType: signal.setupType,
+    entryPrice: signal.entryPrice,
+    stopLoss: signal.stopLoss,
+    takeProfit: signal.takeProfit,
+    riskRewardRatio: signal.riskRewardRatio,
+    confidenceScore: signal.confidenceScore,
+    qualityScore: signal.qualityScore,
+    status,
+    realizedR,
+    enteredAt: row.entered_at,
+    resolvedAt: signal.resolvedAt,
+    statusReason: signal.statusReason
   };
 }
 

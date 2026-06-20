@@ -32,7 +32,17 @@ const state = {
   },
   testerAccess: null,
   adminRequests: [],
-  performance: null
+  performance: null,
+  paperPortfolio: {
+    trades: [],
+    stats: {
+      totalPaperTrades: 0,
+      winRate: 0,
+      averageR: 0,
+      bestMarket: null,
+      bestTimeframe: null
+    }
+  }
 };
 
 const authScreen = document.querySelector("#auth-screen");
@@ -52,6 +62,8 @@ const scanProgressCount = document.querySelector("#scan-progress-count");
 const scanProgressBar = document.querySelector("#scan-progress-bar");
 const statusLine = document.querySelector("#status-line");
 const signalsGrid = document.querySelector("#signals-grid");
+const paperPortfolioGrid = document.querySelector("#paper-portfolio-grid");
+const paperTradeCount = document.querySelector("#paper-trade-count");
 const historyCount = document.querySelector("#history-count");
 const signalsHistory = document.querySelector("#signals-history");
 const historyPairFilter = document.querySelector("#history-pair-filter");
@@ -520,6 +532,13 @@ performanceClear.addEventListener("click", async () => {
 });
 
 signalsGrid.addEventListener("click", async (event) => {
+  const paperButton = event.target.closest("[data-paper-signal-id]");
+
+  if (paperButton) {
+    await enterPaperTrade(paperButton);
+    return;
+  }
+
   const button = event.target.closest("[data-unlock-symbol]");
 
   if (!button) {
@@ -558,6 +577,14 @@ signalsGrid.addEventListener("click", async (event) => {
   }
 });
 
+signalsHistory.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-paper-signal-id]");
+
+  if (button) {
+    await enterPaperTrade(button);
+  }
+});
+
 async function unlockSignal(button, symbol, timeframe) {
   try {
     button.disabled = true;
@@ -582,6 +609,29 @@ async function unlockSignal(button, symbol, timeframe) {
     statusLine.textContent = error.message;
   } finally {
     button.disabled = false;
+  }
+}
+
+async function enterPaperTrade(button) {
+  try {
+    button.disabled = true;
+    button.textContent = "Adding...";
+    state.paperPortfolio = await api.request("/api/paper-trades", {
+      method: "POST",
+      body: JSON.stringify({ signalId: button.dataset.paperSignalId })
+    });
+    renderPaperPortfolio();
+    renderSignals();
+    renderSignalsHistory();
+    statusLine.textContent = "Signal added to Paper Portfolio. No real order was placed.";
+  } catch (error) {
+    statusLine.textContent = error.message;
+    if (error.message.includes("already in your Paper Portfolio")) {
+      await loadPaperPortfolio();
+      return;
+    }
+    button.disabled = false;
+    button.textContent = "Add to Paper Portfolio";
   }
 }
 
@@ -635,6 +685,16 @@ function clearClientAuthState() {
   state.testerAccess = null;
   state.adminRequests = [];
   state.performance = null;
+  state.paperPortfolio = {
+    trades: [],
+    stats: {
+      totalPaperTrades: 0,
+      winRate: 0,
+      averageR: 0,
+      bestMarket: null,
+      bestTimeframe: null
+    }
+  };
   state.signalStats = {
     totalSignals: 0,
     winRate: 0,
@@ -680,7 +740,7 @@ async function bootDashboard() {
   }
   renderTimeframes();
   const requestedView = location.hash?.replace("#", "");
-  const allowedInitialViews = ["signals", "performance", "watchlist", "alerts", "notifications", "settings"];
+  const allowedInitialViews = ["signals", "paper-portfolio", "performance", "watchlist", "alerts", "notifications", "settings"];
   if (state.user.isAdmin) allowedInitialViews.push("admin");
   showView(allowedInitialViews.includes(requestedView) ? requestedView : "scanner");
   startSignalHistoryRefresh();
@@ -808,6 +868,13 @@ async function loadSignals() {
   renderPerformanceStats();
 }
 
+async function loadPaperPortfolio() {
+  state.paperPortfolio = await api.request("/api/paper-trades");
+  renderPaperPortfolio();
+  renderSignals();
+  renderSignalsHistory();
+}
+
 async function loadPerformance() {
   const params = new URLSearchParams();
   if (performanceFrom.value) params.set("from", performanceFrom.value);
@@ -881,12 +948,16 @@ function startSignalHistoryRefresh() {
   }
 
   signalRefreshTimer = setInterval(async () => {
-    if (!state.user || state.activeView !== "signals") {
+    if (!state.user || !["signals", "paper-portfolio"].includes(state.activeView)) {
       return;
     }
 
     try {
-      await loadSignals();
+      if (state.activeView === "paper-portfolio") {
+        await loadPaperPortfolio();
+      } else {
+        await loadSignals();
+      }
     } catch {
       // Keep the current table visible if a demo refresh fails.
     }
@@ -894,7 +965,7 @@ function startSignalHistoryRefresh() {
 }
 
 function showView(view) {
-  const allowedViews = ["scanner", "watchlist", "alerts", "notifications", "signals", "performance", "settings", "billing"];
+  const allowedViews = ["scanner", "watchlist", "alerts", "notifications", "signals", "paper-portfolio", "performance", "settings", "billing"];
   if (state.user?.isAdmin) allowedViews.push("admin");
   const normalizedView = allowedViews.includes(view) ? view : "scanner";
   state.activeView = normalizedView;
@@ -913,6 +984,7 @@ function showView(view) {
     alerts: ["Detected setups", "In-app alerts"],
     notifications: ["Delivery channels", "Notifications"],
     signals: ["Signals history", "Saved signal desk"],
+    "paper-portfolio": ["Simulated execution", "Paper Portfolio"],
     performance: ["Outcome analytics", "Performance"],
     settings: ["Account", "Settings"],
     admin: ["Administration", "Tester access requests"],
@@ -937,6 +1009,17 @@ function showView(view) {
   if (normalizedView === "performance") {
     loadPerformance().catch((error) => {
       document.querySelector("#performance-filter-label").textContent = error.message;
+    });
+  }
+
+  if (normalizedView === "paper-portfolio") {
+    loadPaperPortfolio().catch((error) => {
+      paperPortfolioGrid.innerHTML = `
+        <div class="empty-state">
+          <strong>Paper Portfolio unavailable</strong>
+          <p class="reasoning">${escapeHtml(error.message)}</p>
+        </div>
+      `;
     });
   }
 }
@@ -1177,7 +1260,10 @@ function renderSignalsHistory() {
       <tbody>${filtered.map((signal) => `
         ${renderSignalHistoryRow(signal)}
         <tr class="history-transparency">
-          <td colspan="10">${renderSignalTransparency(signal)}</td>
+          <td colspan="10">
+            ${renderSignalTransparency(signal)}
+            ${renderPaperTradeAction(signal)}
+          </td>
         </tr>
       `).join("")}</tbody>
     </table>
@@ -1190,6 +1276,51 @@ function renderPerformanceStats() {
   statHitTp.textContent = `${state.signalStats.hitTpCount || 0}`;
   statHitSl.textContent = `${state.signalStats.hitSlCount || 0}`;
   statExpired.textContent = `${state.signalStats.expiredCount || 0}`;
+}
+
+function renderPaperPortfolio() {
+  const { trades, stats } = state.paperPortfolio;
+  paperTradeCount.textContent = `${trades.length} trade${trades.length === 1 ? "" : "s"}`;
+  document.querySelector("#paper-stat-total").textContent = `${stats.totalPaperTrades || 0}`;
+  document.querySelector("#paper-stat-win-rate").textContent = `${stats.winRate || 0}%`;
+  document.querySelector("#paper-stat-average-r").textContent = `${formatR(stats.averageR || 0)}`;
+  document.querySelector("#paper-stat-best-market").textContent = stats.bestMarket
+    ? `${stats.bestMarket.label} · ${formatR(stats.bestMarket.netR)}`
+    : "--";
+  document.querySelector("#paper-stat-best-timeframe").textContent = stats.bestTimeframe
+    ? `${stats.bestTimeframe.label} · ${formatR(stats.bestTimeframe.netR)}`
+    : "--";
+
+  if (!trades.length) {
+    paperPortfolioGrid.innerHTML = `
+      <div class="empty-state">
+        <strong>No paper trades yet</strong>
+        <p class="reasoning">Open an active unlocked signal from the Scanner or Signals page, then add it to your Paper Portfolio.</p>
+      </div>
+    `;
+    return;
+  }
+
+  paperPortfolioGrid.innerHTML = trades.map((trade) => `
+    <article class="paper-trade-card">
+      <div class="paper-trade-header">
+        <div>
+          <strong>${escapeHtml(trade.symbol)} · ${escapeHtml(trade.timeframe)}</strong>
+          <span>${escapeHtml(trade.setupType || "Qualified setup")}</span>
+        </div>
+        <span class="status-pill ${getPaperStatusClass(trade.status)}">${escapeHtml(trade.status)}</span>
+      </div>
+      <div class="signal-metrics">
+        <div><span>Direction</span><strong class="direction ${trade.direction}">${trade.direction.toUpperCase()}</strong></div>
+        <div><span>Entry</span><strong>${formatCurrency(trade.entryPrice)}</strong></div>
+        <div><span>Stop</span><strong>${formatCurrency(trade.stopLoss)}</strong></div>
+        <div><span>Target</span><strong>${formatCurrency(trade.takeProfit)}</strong></div>
+        <div><span>Planned R/R</span><strong>${trade.riskRewardRatio}:1</strong></div>
+        <div><span>Paper P/L</span><strong class="${trade.realizedR > 0 ? "positive" : trade.realizedR < 0 ? "negative" : ""}">${formatR(trade.realizedR)}</strong></div>
+      </div>
+      <p class="reasoning">Entered ${formatDateTime(trade.enteredAt)}${trade.resolvedAt ? ` · Resolved ${formatDateTime(trade.resolvedAt)}` : ""}.</p>
+    </article>
+  `).join("");
 }
 
 function renderPerformance() {
@@ -1467,8 +1598,23 @@ function renderSignalCard(signal) {
       </div>
       <p class="reasoning">${signal.reasoning}</p>
       ${renderSignalTransparency(signal)}
+      ${renderPaperTradeAction(signal)}
     </article>
   `;
+}
+
+function renderPaperTradeAction(signal) {
+  const existingTrade = state.paperPortfolio.trades.find((trade) => trade.signalId === signal.id);
+
+  if (existingTrade) {
+    return `<button class="secondary-action paper-trade-action" type="button" disabled>In Paper Portfolio · ${existingTrade.status}</button>`;
+  }
+
+  if (signal.status !== "Active") {
+    return `<button class="secondary-action paper-trade-action" type="button" disabled>Signal ${signal.status}</button>`;
+  }
+
+  return `<button class="secondary-action paper-trade-action" data-paper-signal-id="${signal.id}" type="button">Add to Paper Portfolio</button>`;
 }
 
 function renderSignalTransparency(signal) {
@@ -1925,6 +2071,18 @@ function formatCurrency(value) {
     currency: "USD",
     maximumFractionDigits: value > 1000 ? 2 : 4
   }).format(value);
+}
+
+function formatR(value) {
+  const numeric = Number(value || 0);
+  return `${numeric > 0 ? "+" : ""}${numeric.toFixed(2)}R`;
+}
+
+function getPaperStatusClass(status) {
+  if (status === "Hit TP") return "status-hit-tp";
+  if (status === "Hit SL") return "status-hit-sl";
+  if (status === "Expired") return "status-expired";
+  return "status-active";
 }
 
 function formatPercent(value) {

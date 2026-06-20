@@ -161,6 +161,7 @@
             <a href="#alerts" data-view-link="alerts">Alerts <span class="nav-count hidden" id="unread-alert-count">0</span></a>
             <a href="#notifications" data-view-link="notifications">Notifications</a>
             <a href="#signals" data-view-link="signals">Signals</a>
+            <a href="#paper-portfolio" data-view-link="paper-portfolio">Paper Portfolio</a>
             <a href="#performance" data-view-link="performance">Performance</a>
             <a href="#settings" data-view-link="settings">Settings</a>
             <a href="#billing" data-view-link="billing">Billing</a>
@@ -427,6 +428,28 @@
               <span>Past signal outcomes do not predict future results.</span>
             </div>
             <div class="signals-table-wrap" id="signals-history"></div>
+          </section>
+
+          <section class="page-view hidden" id="paper-portfolio-view" data-view="paper-portfolio">
+            <div class="section-title">
+              <div>
+                <span class="eyebrow">Simulated execution</span>
+                <h3>Paper Portfolio</h3>
+              </div>
+              <span id="paper-trade-count">0 trades</span>
+            </div>
+            <div class="paper-stats-grid">
+              <div><span>Total paper trades</span><strong id="paper-stat-total">0</strong></div>
+              <div><span>Win rate</span><strong id="paper-stat-win-rate">0%</strong></div>
+              <div><span>Average R</span><strong id="paper-stat-average-r">0R</strong></div>
+              <div><span>Best market</span><strong id="paper-stat-best-market">--</strong></div>
+              <div><span>Best timeframe</span><strong id="paper-stat-best-timeframe">--</strong></div>
+            </div>
+            <div class="signal-disclaimer paper-disclaimer">
+              <strong>Paper trading only. No real orders are placed.</strong>
+              <span>Results are simulated from SignalForge outcome tracking and shown in R-multiples, not dollars.</span>
+            </div>
+            <div class="paper-portfolio-grid" id="paper-portfolio-grid"></div>
           </section>
 
           <section class="page-view hidden" id="performance-view" data-view="performance">

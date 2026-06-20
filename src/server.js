@@ -11,6 +11,7 @@ import { handleBacktestRoutes } from "./modules/backtesting/backtestController.j
 import { handleAlertRoutes } from "./modules/alerts/alertController.js";
 import { handleMarketDataRoutes } from "./modules/market-data/marketDataController.js";
 import { handleNotificationRoutes } from "./modules/notifications/notificationController.js";
+import { handlePaperTradingRoutes } from "./modules/paper-trading/paperTradingController.js";
 import { handlePerformanceRoutes } from "./modules/performance/performanceController.js";
 import { startTelegramNotificationQueue } from "./modules/notifications/notificationQueue.js";
 import { startTelegramConnectionPoller } from "./modules/notifications/telegramConnectionService.js";
@@ -40,6 +41,7 @@ const server = createServer(async (req, res) => {
       (await handleAuthRoutes(req, res, url.pathname)) ||
       (await handleAlertRoutes(req, res, url.pathname, url)) ||
       (await handleNotificationRoutes(req, res, url.pathname)) ||
+      (await handlePaperTradingRoutes(req, res, url.pathname)) ||
       (await handleSubscriptionRoutes(req, res, url.pathname)) ||
       (await handleTesterAccessRoutes(req, res, url.pathname)) ||
       (await handleMarketDataRoutes(req, res, url.pathname, url)) ||
