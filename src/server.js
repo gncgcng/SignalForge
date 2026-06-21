@@ -31,7 +31,9 @@ const mimeTypes = {
   ".css": "text/css; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".json": "application/json; charset=utf-8",
-  ".svg": "image/svg+xml"
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".webmanifest": "application/manifest+json"
 };
 
 const server = createServer(async (req, res) => {
@@ -77,11 +79,21 @@ async function serveStatic(pathname, res) {
 
   try {
     const file = await readFile(filePath);
-    res.writeHead(200, {
+    const headers = {
       "content-type": mimeTypes[extname(filePath)] || "application/octet-stream"
+    };
+    if (pathname === "/service-worker.js") {
+      headers["cache-control"] = "no-cache, no-store, must-revalidate";
+      headers["service-worker-allowed"] = "/";
+    }
+    res.writeHead(200, {
+      ...headers
     });
     res.end(file);
   } catch {
+    if (extname(pathname)) {
+      return sendError(res, 404, "Static asset not found.");
+    }
     const index = await readFile(join(publicDir, "index.html"));
     res.writeHead(200, { "content-type": mimeTypes[".html"] });
     res.end(index);

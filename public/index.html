@@ -3,10 +3,26 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#10141d" />
+    <meta name="application-name" content="SignalForge" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="SignalForge" />
     <title>SignalForge</title>
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" href="/icons/icon-192.png" type="image/png" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
+    <div class="app-splash" id="app-splash" role="status" aria-label="Loading SignalForge">
+      <img src="/icons/icon-192.png" alt="" />
+      <strong>SignalForge</strong>
+      <span>Preparing your market desk</span>
+    </div>
+    <button class="install-app-button hidden" id="install-app-button" type="button">
+      Install SignalForge
+    </button>
     <main class="app-shell">
       <section class="landing-page" id="landing-page">
         <header class="landing-nav">

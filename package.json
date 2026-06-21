@@ -10,6 +10,7 @@
     "db:seed": "node scripts/db-seed.js",
     "test:auth-security": "node scripts/auth-security-test.js",
     "test:google-oauth": "node scripts/google-oauth-test.js",
+    "test:pwa": "node scripts/pwa-test.js",
     "test:anti-abuse": "node scripts/anti-abuse-test.js",
     "test:stripe-billing": "node scripts/stripe-billing-test.js",
     "test:stripe-config": "node scripts/stripe-config-test.js",

@@ -64,6 +64,8 @@ const state = {
 const authScreen = document.querySelector("#auth-screen");
 const landingPage = document.querySelector("#landing-page");
 const dashboard = document.querySelector("#dashboard");
+const appSplash = document.querySelector("#app-splash");
+const installAppButton = document.querySelector("#install-app-button");
 const authForm = document.querySelector("#auth-form");
 const authNote = document.querySelector("#auth-note");
 const googleAuthButton = document.querySelector("#google-auth-button");
@@ -158,6 +160,7 @@ let signalRefreshTimer = null;
 let marketLoadTimer = null;
 let telegramConnectionTimer = null;
 let billingRefreshTimer = null;
+let deferredInstallPrompt = null;
 
 const api = {
   async request(path, options = {}) {
@@ -181,6 +184,27 @@ const api = {
     return payload;
   }
 };
+
+window.addEventListener("beforeinstallprompt", (event) => {
+  event.preventDefault();
+  deferredInstallPrompt = event;
+  installAppButton.classList.remove("hidden");
+});
+
+window.addEventListener("appinstalled", () => {
+  deferredInstallPrompt = null;
+  installAppButton.classList.add("hidden");
+});
+
+installAppButton.addEventListener("click", async () => {
+  if (!deferredInstallPrompt) return;
+  installAppButton.disabled = true;
+  await deferredInstallPrompt.prompt();
+  await deferredInstallPrompt.userChoice;
+  deferredInstallPrompt = null;
+  installAppButton.classList.add("hidden");
+  installAppButton.disabled = false;
+});
 
 document.querySelector("#start-free-button").addEventListener("click", () => {
   showAuth();
@@ -3349,8 +3373,30 @@ function formatDateTime(value) {
   }).format(new Date(value));
 }
 
-init().catch(() => {
-  landingPage.classList.remove("hidden");
-  authScreen.classList.add("hidden");
-  dashboard.classList.add("hidden");
-});
+registerPwa();
+init()
+  .catch(() => {
+    landingPage.classList.remove("hidden");
+    authScreen.classList.add("hidden");
+    dashboard.classList.add("hidden");
+  })
+  .finally(hideSplash);
+
+async function registerPwa() {
+  if (!("serviceWorker" in navigator)) return;
+  try {
+    const registration = await navigator.serviceWorker.register("/service-worker.js", {
+      scope: "/"
+    });
+    window.signalForgePushRegistration = registration;
+  } catch (error) {
+    console.warn(`[pwa] Service worker registration failed: ${error.message}`);
+  }
+}
+
+function hideSplash() {
+  requestAnimationFrame(() => {
+    appSplash.classList.add("hidden");
+    setTimeout(() => appSplash.remove(), 220);
+  });
+}
