@@ -11,6 +11,7 @@
     "test:auth-security": "node scripts/auth-security-test.js",
     "test:anti-abuse": "node scripts/anti-abuse-test.js",
     "test:stripe-billing": "node scripts/stripe-billing-test.js",
+    "test:stripe-config": "node scripts/stripe-config-test.js",
     "test:billing-migration": "node scripts/billing-migration-test.js",
     "test:database-config": "node scripts/database-config-test.js",
     "test:commodities-enabled": "node scripts/commodities-enabled-test.js",

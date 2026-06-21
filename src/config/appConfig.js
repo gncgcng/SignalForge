@@ -41,6 +41,16 @@ const adminEmails = new Set(
     .filter(Boolean)
 );
 
+export const stripeEnvironmentKeys = [
+  "STRIPE_SECRET_KEY",
+  "STRIPE_WEBHOOK_SECRET",
+  "STRIPE_PRO_PRICE_ID",
+  "STRIPE_ELITE_PRICE_ID",
+  "STRIPE_CREDITS_10_PRICE_ID",
+  "STRIPE_CREDITS_50_PRICE_ID",
+  "STRIPE_CREDITS_100_PRICE_ID"
+];
+
 export const appConfig = {
   appName: "SignalForge",
   nodeEnv: process.env.NODE_ENV || "development",
@@ -110,9 +120,48 @@ export const appConfig = {
     prices: {
       pro: process.env.STRIPE_PRO_PRICE_ID || "",
       elite: process.env.STRIPE_ELITE_PRICE_ID || "",
-      pack25: process.env.STRIPE_CREDIT_PACK_25_PRICE_ID || "",
-      pack100: process.env.STRIPE_CREDIT_PACK_100_PRICE_ID || "",
-      pack300: process.env.STRIPE_CREDIT_PACK_300_PRICE_ID || ""
+      pack10: process.env.STRIPE_CREDITS_10_PRICE_ID || "",
+      pack50: process.env.STRIPE_CREDITS_50_PRICE_ID || "",
+      pack100: process.env.STRIPE_CREDITS_100_PRICE_ID || ""
+    },
+    priceEnvironmentKeys: {
+      pro: "STRIPE_PRO_PRICE_ID",
+      elite: "STRIPE_ELITE_PRICE_ID",
+      pack10: "STRIPE_CREDITS_10_PRICE_ID",
+      pack50: "STRIPE_CREDITS_50_PRICE_ID",
+      pack100: "STRIPE_CREDITS_100_PRICE_ID"
     }
   }
 };
+
+export function getStripeConfigurationStatus() {
+  const presence = Object.fromEntries(
+    stripeEnvironmentKeys.map((key) => [key, Boolean(process.env[key]?.trim())])
+  );
+  const present = stripeEnvironmentKeys.filter((key) => presence[key]);
+  const missing = stripeEnvironmentKeys.filter((key) => !presence[key]);
+  const secretKey = process.env.STRIPE_SECRET_KEY || "";
+
+  return {
+    presence,
+    present,
+    missing,
+    checkoutConfigured: presence.STRIPE_SECRET_KEY,
+    webhookConfigured: presence.STRIPE_WEBHOOK_SECRET,
+    mode: secretKey.startsWith("sk_test_")
+      ? "test"
+      : secretKey.startsWith("sk_live_")
+        ? "live"
+        : secretKey
+          ? "unknown"
+          : "unconfigured"
+  };
+}
+
+export function logStripeConfiguration() {
+  const status = getStripeConfigurationStatus();
+  console.info(
+    `[stripe] mode=${status.mode} present=${status.present.join(",") || "none"} ` +
+    `missing=${status.missing.join(",") || "none"}`
+  );
+}

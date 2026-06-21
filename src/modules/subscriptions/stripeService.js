@@ -14,7 +14,7 @@ import { BILLING_PLANS, CREDIT_PACKS, normalizePlan } from "./subscriptionServic
 const stripeApiBase = "https://api.stripe.com/v1";
 
 export async function createCheckout(user, { plan, pack }) {
-  assertStripeConfigured();
+  assertStripeCheckoutConfigured(user);
   const planConfig = plan ? BILLING_PLANS[plan] : null;
   const packConfig = pack ? CREDIT_PACKS[pack] : null;
 
@@ -34,9 +34,10 @@ export async function createCheckout(user, { plan, pack }) {
     : appConfig.stripe.prices[pack];
 
   if (!priceId) {
-    const error = new Error("This Stripe price is not configured.");
-    error.statusCode = 503;
-    throw error;
+    throw missingStripeConfiguration(
+      appConfig.stripe.priceEnvironmentKeys[plan || pack],
+      user
+    );
   }
 
   const kind = planConfig ? "subscription" : "credit_pack";
@@ -62,7 +63,7 @@ export async function createCheckout(user, { plan, pack }) {
 }
 
 export async function createCustomerPortal(user) {
-  assertStripeConfigured();
+  assertStripeCheckoutConfigured(user);
   const customerId = user.subscription?.providerCustomerId;
   if (!customerId) {
     throw validationError("No Stripe billing account is connected yet.");
@@ -76,9 +77,7 @@ export async function createCustomerPortal(user) {
 
 export function verifyStripeSignature(rawBody, signatureHeader) {
   if (!appConfig.stripe.webhookSecret) {
-    const error = new Error("Stripe webhook secret is not configured.");
-    error.statusCode = 503;
-    throw error;
+    throw missingStripeConfiguration("STRIPE_WEBHOOK_SECRET");
   }
 
   const parts = String(signatureHeader || "").split(",").map((part) => part.trim());
@@ -224,12 +223,22 @@ async function stripeRequest(path, params) {
   return payload;
 }
 
-function assertStripeConfigured() {
+function assertStripeCheckoutConfigured(user) {
   if (!appConfig.stripe.secretKey) {
-    const error = new Error("Stripe billing is not configured.");
-    error.statusCode = 503;
-    throw error;
+    throw missingStripeConfiguration("STRIPE_SECRET_KEY", user);
   }
+}
+
+function missingStripeConfiguration(key, user = null) {
+  console.warn(`[stripe] Missing configuration key: ${key}`);
+  const canSeeKey = !appConfig.isProduction ||
+    appConfig.adminEmails.has(String(user?.email || "").toLowerCase());
+  const error = new Error(canSeeKey
+    ? `Stripe billing is not configured: missing ${key}.`
+    : "Stripe billing is not configured.");
+  error.statusCode = 503;
+  error.missingConfigurationKey = key;
+  return error;
 }
 
 function validationError(message) {

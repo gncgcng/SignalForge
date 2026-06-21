@@ -1,4 +1,4 @@
-import { appConfig } from "../../config/appConfig.js";
+import { appConfig, getStripeConfigurationStatus } from "../../config/appConfig.js";
 import { consumeDiscoveryCredits } from "../../db/repositories.js";
 
 export const BILLING_PLANS = {
@@ -29,9 +29,9 @@ export const BILLING_PLANS = {
 };
 
 export const CREDIT_PACKS = {
-  pack25: { id: "pack25", name: "25 unlocks", quantity: 25 },
+  pack10: { id: "pack10", name: "10 unlocks", quantity: 10 },
+  pack50: { id: "pack50", name: "50 unlocks", quantity: 50 },
   pack100: { id: "pack100", name: "100 unlocks", quantity: 100 },
-  pack300: { id: "pack300", name: "300 unlocks", quantity: 300 }
 };
 
 export function ensureTrialSubscription(user) {
@@ -61,6 +61,8 @@ export function getSubscriptionSummary(user) {
     ? Number(user.discoveriesToday || 0)
     : Number(user.discoveriesPeriod || 0);
   const unlockBalance = getUnlockBalance(user);
+  const showStripeDiagnostics = !appConfig.isProduction ||
+    appConfig.adminEmails.has(String(user.email || "").toLowerCase());
 
   return {
     plan: planId,
@@ -92,6 +94,7 @@ export function getSubscriptionSummary(user) {
     customerPortalAvailable: Boolean(
       appConfig.stripe.secretKey && user.subscription.providerCustomerId
     ),
+    stripeConfiguration: showStripeDiagnostics ? getStripeConfigurationStatus() : null,
     plans: Object.values(BILLING_PLANS),
     creditPacks: Object.values(CREDIT_PACKS)
   };

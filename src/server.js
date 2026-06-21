@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
-import { appConfig } from "./config/appConfig.js";
+import { appConfig, logStripeConfiguration } from "./config/appConfig.js";
 import { verifyDatabaseConnection } from "./db/client.js";
 import { runPendingMigrations, verifySessionSchema } from "./db/migrations.js";
 import { attachAuth } from "./middleware/authMiddleware.js";
@@ -88,6 +88,7 @@ async function serveStatic(pathname, res) {
   }
 }
 
+logStripeConfiguration();
 await verifyDatabaseConnection();
 await runPendingMigrations();
 await verifySessionSchema();

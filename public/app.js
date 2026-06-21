@@ -1590,6 +1590,15 @@ function renderBilling() {
     ? "Unlimited"
     : String(subscription.unlockCreditsRemaining);
   manageSubscriptionButton.classList.toggle("hidden", !subscription.customerPortalAvailable);
+  if (subscription.stripeConfiguration) {
+    const config = subscription.stripeConfiguration;
+    const checkoutMissing = config.missing.filter((key) => key !== "STRIPE_WEBHOOK_SECRET");
+    billingStatus.textContent = checkoutMissing.length
+      ? `Missing Stripe configuration: ${checkoutMissing.join(", ")}`
+      : config.webhookConfigured
+        ? `Stripe ${config.mode} mode is configured.`
+        : `Checkout is configured. Webhooks are missing STRIPE_WEBHOOK_SECRET.`;
+  }
 
   billingPlanGrid.innerHTML = subscription.plans.map((plan) => {
     const current = subscription.plan === plan.id;
