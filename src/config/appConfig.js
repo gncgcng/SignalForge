@@ -58,6 +58,7 @@ export const stripeEnvironmentKeys = [
 
 export const appConfig = {
   appName: "SignalForge",
+  appUrl,
   nodeEnv: process.env.NODE_ENV || "development",
   isProduction: process.env.NODE_ENV === "production",
   port: Number(process.env.PORT || 4173),
@@ -68,6 +69,18 @@ export const appConfig = {
   freeSignalAllowance: 3,
   adminEmails,
   testerCreditAllowance: 1000000,
+  googleOAuth: {
+    clientId: process.env.GOOGLE_CLIENT_ID || "",
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET || "",
+    redirectUri: process.env.GOOGLE_REDIRECT_URI || (
+      process.env.NODE_ENV === "production"
+        ? "https://signalforge-app.xyz/api/auth/google/callback"
+        : `http://localhost:${Number(process.env.PORT || 4173)}/api/auth/google/callback`
+    ),
+    authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+    tokenUrl: "https://oauth2.googleapis.com/token",
+    jwksUrl: "https://www.googleapis.com/oauth2/v3/certs"
+  },
   abuseProtection: {
     hashSecret: process.env.ABUSE_HASH_SECRET || process.env.DATABASE_URL || "signalforge-local",
     signupAttemptsPerHour: Number(process.env.SIGNUP_ATTEMPTS_PER_HOUR || 10),

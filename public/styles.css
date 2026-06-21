@@ -187,6 +187,33 @@ button {
   font-size: 26px;
 }
 
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+
+.google-auth-button {
+  border-color: rgba(255, 255, 255, 0.22);
+  background: #f8fafc;
+  color: #111827;
+}
+
+.google-auth-button:hover {
+  background: #ffffff;
+}
+
 .featured-price {
   border-color: rgba(34, 211, 238, 0.6) !important;
   background: #071a22 !important;

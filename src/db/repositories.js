@@ -275,6 +275,148 @@ export async function verifyEmailToken(tokenHash) {
   });
 }
 
+export async function createOAuthLoginState({
+  stateHash,
+  provider,
+  nonce,
+  signupIpHash,
+  deviceFingerprintHash,
+  expiresAt
+}) {
+  await query(`
+    INSERT INTO oauth_login_states (
+      state_hash, provider, nonce, signup_ip_hash,
+      device_fingerprint_hash, expires_at
+    )
+    VALUES ($1, $2, $3, $4, $5, $6)
+  `, [
+    stateHash,
+    provider,
+    nonce,
+    signupIpHash,
+    deviceFingerprintHash,
+    expiresAt
+  ]);
+}
+
+export async function consumeOAuthLoginState(stateHash, provider) {
+  return transaction(async (client) => {
+    const result = await client.query(`
+      SELECT *
+      FROM oauth_login_states
+      WHERE state_hash = $1 AND provider = $2
+      FOR UPDATE
+    `, [stateHash, provider]);
+    const state = result.rows[0];
+
+    if (
+      !state ||
+      state.used_at ||
+      new Date(state.expires_at).getTime() <= Date.now()
+    ) {
+      return null;
+    }
+
+    await client.query(`
+      UPDATE oauth_login_states SET used_at = now() WHERE state_hash = $1
+    `, [stateHash]);
+    return {
+      nonce: state.nonce,
+      signupIpHash: state.signup_ip_hash,
+      deviceFingerprintHash: state.device_fingerprint_hash
+    };
+  });
+}
+
+export async function findUserByOAuthIdentity(provider, providerSubject) {
+  const result = await query(`
+    SELECT user_id
+    FROM oauth_accounts
+    WHERE provider = $1 AND provider_subject = $2
+  `, [provider, providerSubject]);
+  return result.rows[0] ? findUserById(result.rows[0].user_id) : null;
+}
+
+export async function linkOAuthIdentity({
+  provider,
+  providerSubject,
+  userId,
+  providerEmail
+}) {
+  return transaction(async (client) => {
+    const existing = await client.query(`
+      SELECT user_id
+      FROM oauth_accounts
+      WHERE provider = $1 AND provider_subject = $2
+      FOR UPDATE
+    `, [provider, providerSubject]);
+
+    if (existing.rows[0] && existing.rows[0].user_id !== userId) {
+      const error = new Error("This Google identity is already linked to another account.");
+      error.statusCode = 409;
+      throw error;
+    }
+
+    await client.query(`
+      INSERT INTO oauth_accounts (
+        provider, provider_subject, user_id, provider_email
+      )
+      VALUES ($1, $2, $3, $4)
+      ON CONFLICT (provider, provider_subject) DO UPDATE
+      SET provider_email = EXCLUDED.provider_email, updated_at = now()
+    `, [provider, providerSubject, userId, providerEmail]);
+    await client.query(`
+      UPDATE users
+      SET email_verified_at = COALESCE(email_verified_at, now()), updated_at = now()
+      WHERE id = $1
+    `, [userId]);
+  });
+
+  return findUserById(userId);
+}
+
+export async function grantOAuthFreeTrial(userId, deviceFingerprintHash) {
+  return transaction(async (client) => {
+    let trialGranted = !deviceFingerprintHash;
+
+    if (deviceFingerprintHash) {
+      const reservation = await client.query(`
+        INSERT INTO device_trial_history (device_fingerprint_hash, first_user_id)
+        VALUES ($1, $2)
+        ON CONFLICT (device_fingerprint_hash) DO NOTHING
+        RETURNING device_fingerprint_hash
+      `, [deviceFingerprintHash, userId]);
+      trialGranted = Boolean(reservation.rows[0]);
+    }
+
+    if (trialGranted) {
+      await client.query(`
+        UPDATE credit_balances
+        SET free_signal_allowance = $2,
+          unlock_credits_balance = GREATEST(unlock_credits_balance, $2),
+          updated_at = now()
+        WHERE user_id = $1
+      `, [userId, appConfig.freeSignalAllowance]);
+    } else {
+      await client.query(`
+        UPDATE users
+        SET abuse_score = LEAST(100, abuse_score + 50),
+          abuse_flags = (
+            SELECT jsonb_agg(DISTINCT value)
+            FROM jsonb_array_elements(
+              abuse_flags || '["repeated_trial_device"]'::jsonb
+            )
+          ),
+          abuse_review_status = 'flagged',
+          updated_at = now()
+        WHERE id = $1
+      `, [userId]);
+    }
+
+    return trialGranted;
+  });
+}
+
 export async function getCachedScanResult(userId, scanKey) {
   const result = await query(`
     SELECT result_json

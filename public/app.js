@@ -66,6 +66,7 @@ const landingPage = document.querySelector("#landing-page");
 const dashboard = document.querySelector("#dashboard");
 const authForm = document.querySelector("#auth-form");
 const authNote = document.querySelector("#auth-note");
+const googleAuthButton = document.querySelector("#google-auth-button");
 const viewDemoButton = document.querySelector("#view-demo-button");
 const pairSearch = document.querySelector("#pair-search");
 const pairList = document.querySelector("#pair-list");
@@ -219,6 +220,20 @@ authForm.addEventListener("submit", async (event) => {
     await bootDashboard();
   } catch (error) {
     authNote.textContent = error.message;
+  }
+});
+
+googleAuthButton.addEventListener("click", async () => {
+  try {
+    googleAuthButton.disabled = true;
+    authNote.textContent = "Opening Google sign-in...";
+    const { authorizationUrl } = await api.request("/api/auth/google/start", {
+      method: "POST"
+    });
+    location.assign(authorizationUrl);
+  } catch (error) {
+    authNote.textContent = error.message;
+    googleAuthButton.disabled = false;
   }
 });
 
@@ -839,6 +854,8 @@ async function enterPaperTrade(button) {
 }
 
 async function init() {
+  const oauthError = new URLSearchParams(location.search).get("oauth_error");
+  const oauthSuccess = new URLSearchParams(location.search).get("oauth") === "success";
   const verificationToken = new URLSearchParams(location.search).get("verify");
   if (verificationToken) {
     try {
@@ -859,14 +876,22 @@ async function init() {
     api.request("/api/auth/config")
   ]);
   viewDemoButton.classList.toggle("hidden", !authConfig.demoEnabled);
+  googleAuthButton.classList.toggle("hidden", !authConfig.googleEnabled);
   state.user = user;
 
   if (user) {
+    if (oauthSuccess) {
+      history.replaceState({}, "", `${location.pathname}${location.hash}`);
+    }
     await bootDashboard();
   } else {
     landingPage.classList.remove("hidden");
-    authScreen.classList.add("hidden");
+    authScreen.classList.toggle("hidden", !oauthError);
     dashboard.classList.add("hidden");
+    if (oauthError) {
+      authNote.textContent = googleOAuthErrorMessage(oauthError);
+      history.replaceState({}, "", `${location.pathname}${location.hash}`);
+    }
   }
 }
 
@@ -3181,6 +3206,22 @@ function getDeviceFingerprint() {
     `${screen.width}x${screen.height}`,
     `${screen.colorDepth}`
   ].join("|").slice(0, 200);
+}
+
+function googleOAuthErrorMessage(code) {
+  const messages = {
+    google_denied: "Google sign-in was cancelled.",
+    invalid_state: "Google sign-in expired. Please try again.",
+    invalid_callback: "Google returned an incomplete sign-in response.",
+    token_exchange_failed: "Google sign-in could not be verified.",
+    invalid_token: "Google identity verification failed.",
+    expired_token: "Google sign-in expired. Please try again.",
+    unverified_email: "Your Google account email must be verified.",
+    disposable_email: "Temporary or disposable email addresses are not supported.",
+    account_blocked: "Google sign-in is unavailable for this account.",
+    not_configured: "Google sign-in is not configured."
+  };
+  return messages[code] || "Google sign-in failed. Please try again.";
 }
 
 function getSelectedTelegramTimeframes() {
