@@ -102,6 +102,17 @@ export const appConfig = {
   },
   stripe: {
     publishableKey: process.env.STRIPE_PUBLISHABLE_KEY || "",
-    priceId: process.env.STRIPE_PRICE_ID || ""
+    secretKey: process.env.STRIPE_SECRET_KEY || "",
+    webhookSecret: process.env.STRIPE_WEBHOOK_SECRET || "",
+    successUrl: process.env.STRIPE_SUCCESS_URL || "http://localhost:4173/#billing",
+    cancelUrl: process.env.STRIPE_CANCEL_URL || "http://localhost:4173/#billing",
+    portalReturnUrl: process.env.STRIPE_PORTAL_RETURN_URL || "http://localhost:4173/#billing",
+    prices: {
+      pro: process.env.STRIPE_PRO_PRICE_ID || "",
+      elite: process.env.STRIPE_ELITE_PRICE_ID || "",
+      pack25: process.env.STRIPE_CREDIT_PACK_25_PRICE_ID || "",
+      pack100: process.env.STRIPE_CREDIT_PACK_100_PRICE_ID || "",
+      pack300: process.env.STRIPE_CREDIT_PACK_300_PRICE_ID || ""
+    }
   }
 };

@@ -1,7 +1,18 @@
-import { listSignalsByUser, saveUnlockedSignal } from "../../db/repositories.js";
+import {
+  cacheScanResult,
+  getCachedScanResult,
+  listSignalsByUser,
+  saveUnlockedSignal
+} from "../../db/repositories.js";
+import { createId } from "../../shared/ids.js";
 import { listActivePairs } from "../market-data/marketDataService.js";
 import { getMultiTimeframeMarketData } from "../market-data/multiTimeframeService.js";
-import { canGenerateSignal, getSubscriptionSummary, recordSignalUsage } from "../subscriptions/subscriptionService.js";
+import {
+  canDiscoverSetups,
+  canGenerateSignal,
+  getSubscriptionSummary,
+  recordDiscoveryUsage
+} from "../subscriptions/subscriptionService.js";
 import { generateMarketDataSetup } from "./signalGenerator.js";
 import { calculateSignalStats, updateSignalsForUser } from "./signalOutcomeService.js";
 import { buildAnalystProfile } from "../analyst/signalAnalystService.js";
@@ -20,27 +31,40 @@ export async function createSignal(user, { symbol, timeframe }) {
     throw error;
   }
 
-  const marketData = await getMultiTimeframeMarketData(symbol, timeframe);
-  const analystProfile = await getUserAnalystProfile(user);
-  const result = generateMarketDataSetup(marketData, timeframe, { analystProfile });
+  const scanKey = `single:${symbol}:${timeframe}`;
+  const cached = await getCachedScanResult(user.id, scanKey);
+  let result = cached;
 
-  if (!result.valid) {
+  if (!result) {
+    assertDiscoveryAvailable(user);
+    result = await scanMarketSetupDetailed(user, { symbol, timeframe });
+    await recordDiscoveryUsage(user, result.publicResult.valid ? 1 : 0, scanKey);
+    await cacheScanResult(user.id, scanKey, result);
+  }
+
+  if (!result.publicResult.valid) {
     return {
       signal: null,
-      analysis: result.analysis,
+      analysis: result.publicResult.analysis,
       subscription: getSubscriptionSummary(user)
     };
   }
 
   const signal = {
-    ...result.signal,
+    ...result.fullSetup,
+    id: createId("sig"),
     userId: user.id,
     status: "Active",
     statusUpdatedAt: new Date().toISOString()
   };
 
   const savedSignal = await saveUnlockedSignal(user.id, signal);
-  await recordSignalUsage(user);
+  if (user.role !== "tester") {
+    user.unlockCreditsBalance = Math.max(0, Number(user.unlockCreditsBalance || 0) - 1);
+    user.lifetimeUnlocksUsed = Number(user.lifetimeUnlocksUsed || 0) + 1;
+    user.trialSignalsUsed = Number(user.trialSignalsUsed || 0) +
+      (user.plan === "free" || user.plan === "trial" ? 1 : 0);
+  }
 
   return {
     signal: savedSignal,
@@ -50,8 +74,25 @@ export async function createSignal(user, { symbol, timeframe }) {
 }
 
 export async function scanMarketSetup(user, { symbol, timeframe }) {
+  const scanKey = `single:${symbol}:${timeframe}`;
+  const cached = await getCachedScanResult(user.id, scanKey);
+  if (cached) {
+    return {
+      ...cached.publicResult,
+      cached: true,
+      subscription: getSubscriptionSummary(user)
+    };
+  }
+  assertDiscoveryAvailable(user);
   const result = await scanMarketSetupDetailed(user, { symbol, timeframe });
-  return result.publicResult;
+  const quantity = result.publicResult.valid ? 1 : 0;
+  const subscription = await recordDiscoveryUsage(user, quantity, scanKey);
+  await cacheScanResult(user.id, scanKey, result);
+  return {
+    ...result.publicResult,
+    cached: false,
+    subscription
+  };
 }
 
 export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analystProfile = null) {
@@ -72,8 +113,44 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
 }
 
 export async function scanAllMarkets(user) {
+  const scanKey = "scan-all:active-markets:5m-15m-1h-4h";
+  const cached = await getCachedScanResult(user.id, scanKey);
+  if (cached) {
+    return {
+      ...cached.publicResult,
+      fullSetups: cached.fullSetups,
+      cached: true,
+      subscription: getSubscriptionSummary(user)
+    };
+  }
+  assertDiscoveryAvailable(user);
   const result = await scanAllMarketsDetailed(user);
-  return result.publicResult;
+  const summary = getSubscriptionSummary(user);
+  const remaining = user.role === "tester"
+    ? result.publicResult.setups.length
+    : summary.setupDiscoveries.remaining;
+  const allowedSetups = result.publicResult.setups.slice(0, remaining);
+  const allowedIds = new Set(allowedSetups.map((setup) => setup.id));
+  const meteredResult = {
+    publicResult: {
+      ...result.publicResult,
+      setups: allowedSetups,
+      limitedByCredits: allowedSetups.length < result.publicResult.setups.length
+    },
+    fullSetups: result.fullSetups.filter((setup) => allowedIds.has(setup.id))
+  };
+  const subscription = await recordDiscoveryUsage(
+    user,
+    allowedSetups.length,
+    scanKey
+  );
+  await cacheScanResult(user.id, scanKey, meteredResult);
+  return {
+    ...meteredResult.publicResult,
+    fullSetups: meteredResult.fullSetups,
+    cached: false,
+    subscription
+  };
 }
 
 export async function scanAllMarketsDetailed(user) {
@@ -173,4 +250,18 @@ async function getUserAnalystProfile(user) {
   if (!user?.id) return buildAnalystProfile([]);
   const signals = await listSignalsByUser(user.id);
   return buildAnalystProfile(signals);
+}
+
+function assertDiscoveryAvailable(user) {
+  if (canDiscoverSetups(user)) return;
+  const verificationRequired = !user.emailVerifiedAt &&
+    (user.plan === "free" || user.plan === "trial") &&
+    Number(user.paidCredits || 0) <= 0;
+  const error = new Error(verificationRequired
+    ? "Verify your email to activate free setup discoveries."
+    : "Setup discovery credit limit reached.");
+  error.code = verificationRequired ? "EMAIL_VERIFICATION_REQUIRED" : "DISCOVERY_LIMIT";
+  error.statusCode = 402;
+  error.subscription = getSubscriptionSummary(user);
+  throw error;
 }

@@ -146,9 +146,12 @@ button {
   margin-top: 18px;
 }
 
-.landing-cards.three,
-.pricing-grid {
+.landing-cards.three {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.pricing-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .landing-cards.five {
@@ -1060,6 +1063,46 @@ polyline {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.45;
+}
+
+.billing-summary-grid,
+.billing-plan-grid,
+.billing-pack-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.billing-summary-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.billing-plan-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.billing-pack-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.billing-summary-grid .panel,
+.billing-plan,
+.billing-pack {
+  display: grid;
+  gap: 10px;
+}
+
+.billing-summary-grid span,
+.billing-plan > span,
+.billing-pack > span {
+  color: var(--muted);
+}
+
+.billing-summary-grid strong {
+  font-size: 24px;
+}
+
+.billing-plan.current {
+  border-color: rgba(56, 189, 248, 0.55);
 }
 
 .line-chart {
@@ -2287,7 +2330,10 @@ polyline {
 
 @media (max-width: 900px) {
   .advanced-structure-intelligence,
-  .admin-abuse-grid {
+  .admin-abuse-grid,
+  .billing-summary-grid,
+  .billing-plan-grid,
+  .billing-pack-grid {
     grid-template-columns: 1fr;
   }
 }

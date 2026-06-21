@@ -4,8 +4,19 @@ import { query, transaction } from "./client.js";
 
 export async function findUserByEmail(email) {
   const result = await query(`
-    SELECT u.*, s.status AS subscription_status, s.provider, s.provider_customer_id, s.current_period_end,
-      c.free_signal_allowance, c.paid_credits
+    SELECT u.*, s.status AS subscription_status, s.provider, s.provider_customer_id,
+      s.provider_subscription_id, s.price_id, s.current_period_start, s.current_period_end,
+      s.cancel_at_period_end, c.free_signal_allowance, c.paid_credits,
+      c.unlock_credits_balance, c.lifetime_unlocks_used,
+      COALESCE((
+        SELECT SUM(d.quantity) FROM setup_discovery_usage d
+        WHERE d.user_id = u.id AND d.created_at >= date_trunc('day', now())
+      ), 0) AS discoveries_today,
+      COALESCE((
+        SELECT SUM(d.quantity) FROM setup_discovery_usage d
+        WHERE d.user_id = u.id
+          AND d.created_at >= COALESCE(s.current_period_start, date_trunc('month', now()))
+      ), 0) AS discoveries_period
     FROM users u
     LEFT JOIN subscriptions s ON s.user_id = u.id
     LEFT JOIN credit_balances c ON c.user_id = u.id
@@ -17,8 +28,19 @@ export async function findUserByEmail(email) {
 
 export async function findUserById(id) {
   const result = await query(`
-    SELECT u.*, s.status AS subscription_status, s.provider, s.provider_customer_id, s.current_period_end,
-      c.free_signal_allowance, c.paid_credits
+    SELECT u.*, s.status AS subscription_status, s.provider, s.provider_customer_id,
+      s.provider_subscription_id, s.price_id, s.current_period_start, s.current_period_end,
+      s.cancel_at_period_end, c.free_signal_allowance, c.paid_credits,
+      c.unlock_credits_balance, c.lifetime_unlocks_used,
+      COALESCE((
+        SELECT SUM(d.quantity) FROM setup_discovery_usage d
+        WHERE d.user_id = u.id AND d.created_at >= date_trunc('day', now())
+      ), 0) AS discoveries_today,
+      COALESCE((
+        SELECT SUM(d.quantity) FROM setup_discovery_usage d
+        WHERE d.user_id = u.id
+          AND d.created_at >= COALESCE(s.current_period_start, date_trunc('month', now()))
+      ), 0) AS discoveries_period
     FROM users u
     LEFT JOIN subscriptions s ON s.user_id = u.id
     LEFT JOIN credit_balances c ON c.user_id = u.id
@@ -48,7 +70,7 @@ export async function createUser({
         signup_ip_hash, device_fingerprint_hash, abuse_score, abuse_flags,
         abuse_review_status
       )
-      VALUES ($1,$2,$3,$4,$5,'trial',$6,$7,$8,$9,$10,$11)
+      VALUES ($1,$2,$3,$4,$5,'free',$6,$7,$8,$9,$10,$11)
     `, [
       id,
       name,
@@ -69,14 +91,12 @@ export async function createUser({
     `, [createId("sub"), id]);
 
     await client.query(`
-      INSERT INTO credit_balances (user_id, trial_signals_used, free_signal_allowance, paid_credits)
-      VALUES ($1, 0, $2, 0)
-    `, [id, appConfig.freeSignalAllowance]);
-    await client.query(`
-      UPDATE credit_balances
-      SET free_signal_allowance = $2
-      WHERE user_id = $1
-    `, [id, freeSignalAllowance]);
+      INSERT INTO credit_balances (
+        user_id, trial_signals_used, free_signal_allowance, paid_credits,
+        unlock_credits_balance
+      )
+      VALUES ($1, 0, $2, 0, $3)
+    `, [id, freeSignalAllowance, freeSignalAllowance]);
   });
 
   return findUserById(id);
@@ -231,7 +251,10 @@ export async function verifyEmailToken(tokenHash) {
 
     if (trialGranted) {
       await client.query(`
-        UPDATE credit_balances SET free_signal_allowance = $2, updated_at = now()
+        UPDATE credit_balances
+        SET free_signal_allowance = $2,
+          unlock_credits_balance = GREATEST(unlock_credits_balance, $2),
+          updated_at = now()
         WHERE user_id = $1
       `, [token.user_id, appConfig.freeSignalAllowance]);
     } else {
@@ -250,6 +273,166 @@ export async function verifyEmailToken(tokenHash) {
 
     return { userId: token.user_id, trialGranted };
   });
+}
+
+export async function getCachedScanResult(userId, scanKey) {
+  const result = await query(`
+    SELECT result_json
+    FROM scan_result_cache
+    WHERE user_id = $1 AND scan_key = $2 AND expires_at > now()
+  `, [userId, scanKey]);
+  return result.rows[0]?.result_json || null;
+}
+
+export async function cacheScanResult(userId, scanKey, result, ttlSeconds = 300) {
+  await query(`
+    INSERT INTO scan_result_cache (user_id, scan_key, result_json, expires_at)
+    VALUES ($1, $2, $3, now() + ($4 * interval '1 second'))
+    ON CONFLICT (user_id, scan_key) DO UPDATE
+    SET result_json = EXCLUDED.result_json,
+      expires_at = EXCLUDED.expires_at,
+      created_at = now()
+  `, [userId, scanKey, JSON.stringify(result), ttlSeconds]);
+}
+
+export async function consumeDiscoveryCredits(userId, {
+  quantity,
+  limit,
+  periodStart,
+  scanKey
+}) {
+  if (quantity <= 0) return { used: 0, remaining: limit };
+
+  return transaction(async (client) => {
+    const account = await client.query(`
+      SELECT u.role
+      FROM users u
+      JOIN credit_balances c ON c.user_id = u.id
+      WHERE u.id = $1
+      FOR UPDATE OF c
+    `, [userId]);
+
+    if (account.rows[0]?.role === "tester") {
+      return { used: 0, remaining: null };
+    }
+
+    const usage = await client.query(`
+      SELECT COALESCE(SUM(quantity), 0) AS used
+      FROM setup_discovery_usage
+      WHERE user_id = $1 AND created_at >= $2
+    `, [userId, periodStart]);
+    const used = Number(usage.rows[0].used || 0);
+
+    if (used + quantity > limit) {
+      const error = new Error("Setup discovery credit limit reached.");
+      error.code = "DISCOVERY_LIMIT";
+      error.statusCode = 402;
+      error.remaining = Math.max(0, limit - used);
+      throw error;
+    }
+
+    await client.query(`
+      INSERT INTO setup_discovery_usage (id, user_id, scan_key, quantity)
+      VALUES ($1, $2, $3, $4)
+    `, [createId("disc"), userId, scanKey, quantity]);
+
+    return { used: used + quantity, remaining: Math.max(0, limit - used - quantity) };
+  });
+}
+
+export async function updateStripeCustomer(userId, customerId) {
+  await query(`
+    UPDATE subscriptions
+    SET provider_customer_id = $2, updated_at = now()
+    WHERE user_id = $1
+  `, [userId, customerId]);
+}
+
+export async function findUserByStripeCustomer(customerId) {
+  const result = await query(`
+    SELECT user_id FROM subscriptions WHERE provider_customer_id = $1
+  `, [customerId]);
+  return result.rows[0] ? findUserById(result.rows[0].user_id) : null;
+}
+
+export async function updateStripeSubscription({
+  userId,
+  customerId,
+  subscriptionId,
+  status,
+  plan,
+  priceId,
+  periodStart,
+  periodEnd,
+  cancelAtPeriodEnd = false
+}) {
+  await transaction(async (client) => {
+    await client.query(`
+      UPDATE users SET plan = $2, updated_at = now() WHERE id = $1
+    `, [userId, plan]);
+    await client.query(`
+      UPDATE subscriptions
+      SET provider_customer_id = COALESCE($2, provider_customer_id),
+        provider_subscription_id = $3,
+        status = $4,
+        price_id = $5,
+        current_period_start = $6,
+        current_period_end = $7,
+        cancel_at_period_end = $8,
+        updated_at = now()
+      WHERE user_id = $1
+    `, [
+      userId,
+      customerId,
+      subscriptionId,
+      status,
+      priceId,
+      periodStart,
+      periodEnd,
+      cancelAtPeriodEnd
+    ]);
+  });
+}
+
+export async function grantUnlockCredits(userId, quantity, externalReference, source) {
+  return transaction(async (client) => {
+    const grant = await client.query(`
+      INSERT INTO billing_credit_grants (
+        id, user_id, external_reference, source, quantity
+      )
+      VALUES ($1, $2, $3, $4, $5)
+      ON CONFLICT (external_reference) DO NOTHING
+      RETURNING id
+    `, [createId("grant"), userId, externalReference, source, quantity]);
+
+    if (!grant.rows[0]) return false;
+
+    await client.query(`
+      UPDATE credit_balances
+      SET unlock_credits_balance = unlock_credits_balance + $2,
+        paid_credits = paid_credits + CASE WHEN $3 = 'credit_pack' THEN $2 ELSE 0 END,
+        updated_at = now()
+      WHERE user_id = $1
+    `, [userId, quantity, source]);
+    return true;
+  });
+}
+
+export async function recordStripeWebhookEvent(eventId, eventType) {
+  const result = await query(`
+    INSERT INTO stripe_webhook_events (event_id, event_type)
+    VALUES ($1, $2)
+    ON CONFLICT (event_id) DO NOTHING
+    RETURNING event_id
+  `, [eventId, eventType]);
+  return Boolean(result.rows[0]);
+}
+
+export async function hasStripeWebhookEvent(eventId) {
+  const result = await query(`
+    SELECT 1 FROM stripe_webhook_events WHERE event_id = $1
+  `, [eventId]);
+  return Boolean(result.rows[0]);
 }
 
 export async function listAbuseReviewDashboard() {
@@ -326,6 +509,22 @@ export async function listAbuseReviewDashboard() {
 
 export async function saveUnlockedSignal(userId, signal) {
   return transaction(async (client) => {
+    const account = await client.query(`
+      SELECT u.role, c.unlock_credits_balance
+      FROM users u
+      JOIN credit_balances c ON c.user_id = u.id
+      WHERE u.id = $1
+      FOR UPDATE OF c
+    `, [userId]);
+    const billing = account.rows[0];
+
+    if (billing?.role !== "tester" && Number(billing?.unlock_credits_balance || 0) <= 0) {
+      const error = new Error("Unlock credit limit reached.");
+      error.code = "UNLOCK_LIMIT";
+      error.statusCode = 402;
+      throw error;
+    }
+
     await client.query(`
       INSERT INTO saved_signals (
         id, user_id, symbol, timeframe, direction, entry_price, stop_loss, take_profit,
@@ -362,6 +561,35 @@ export async function saveUnlockedSignal(userId, signal) {
       INSERT INTO signal_outcomes (saved_signal_id, status, updated_at)
       VALUES ($1, 'Active', now())
     `, [signal.id]);
+
+    if (billing.role !== "tester") {
+      await client.query(`
+        UPDATE credit_balances
+        SET unlock_credits_balance = unlock_credits_balance - 1,
+          lifetime_unlocks_used = lifetime_unlocks_used + 1,
+          trial_signals_used = trial_signals_used + CASE
+            WHEN (SELECT plan FROM users WHERE id = $1) = 'free' THEN 1 ELSE 0
+          END,
+          updated_at = now()
+        WHERE user_id = $1
+      `, [userId]);
+      await client.query(`
+        UPDATE users
+        SET trial_signals_used = trial_signals_used + CASE WHEN plan = 'free' THEN 1 ELSE 0 END,
+          trial_used = true,
+          updated_at = now()
+        WHERE id = $1
+      `, [userId]);
+      await client.query(`
+        UPDATE device_trial_history d
+        SET trial_used = true,
+          trial_used_at = COALESCE(trial_used_at, now()),
+          updated_at = now()
+        FROM users u
+        WHERE u.id = $1
+          AND u.device_fingerprint_hash = d.device_fingerprint_hash
+      `, [userId]);
+    }
   });
 
   return findSignalById(signal.id, userId);
@@ -1048,7 +1276,9 @@ export async function reviewTesterAccessRequest(requestId, adminUserId, decision
       `, [request.user_id]);
       await client.query(`
         UPDATE credit_balances
-        SET paid_credits = GREATEST(paid_credits, $2), updated_at = now()
+        SET paid_credits = GREATEST(paid_credits, $2),
+          unlock_credits_balance = GREATEST(unlock_credits_balance, $2),
+          updated_at = now()
         WHERE user_id = $1
       `, [request.user_id, appConfig.testerCreditAllowance]);
     }
@@ -1186,11 +1416,19 @@ function mapUser(row) {
       ? appConfig.freeSignalAllowance
       : Number(row.free_signal_allowance),
     paidCredits: Number(row.paid_credits || 0),
+    unlockCreditsBalance: Number(row.unlock_credits_balance || 0),
+    lifetimeUnlocksUsed: Number(row.lifetime_unlocks_used || 0),
+    discoveriesToday: Number(row.discoveries_today || 0),
+    discoveriesPeriod: Number(row.discoveries_period || 0),
     subscription: {
       status: row.subscription_status || "trialing",
       provider: row.provider || "stripe",
       providerCustomerId: row.provider_customer_id,
+      providerSubscriptionId: row.provider_subscription_id,
+      priceId: row.price_id,
+      currentPeriodStart: row.current_period_start,
       currentPeriodEnd: row.current_period_end,
+      cancelAtPeriodEnd: Boolean(row.cancel_at_period_end),
       createdAt: row.created_at
     },
     createdAt: row.created_at

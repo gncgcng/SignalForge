@@ -1,4 +1,4 @@
-export async function readJson(req) {
+export async function readBody(req) {
   const chunks = [];
 
   for await (const chunk of req) {
@@ -6,10 +6,14 @@ export async function readJson(req) {
   }
 
   if (chunks.length === 0) {
-    return {};
+    return "";
   }
 
-  const body = Buffer.concat(chunks).toString("utf8");
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+export async function readJson(req) {
+  const body = await readBody(req);
   return body ? JSON.parse(body) : {};
 }
 

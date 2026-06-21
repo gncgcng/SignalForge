@@ -25,7 +25,7 @@ await transaction(async (client) => {
     INSERT INTO users (
       id, name, email, password_salt, password_hash, plan, email_verified_at
     )
-    VALUES ($1, 'Demo Trader', $2, $3, $4, 'trial', now())
+    VALUES ($1, 'Demo Trader', $2, $3, $4, 'free', now())
   `, [userId, email, salt, hash]);
 
   await client.query(`
@@ -34,8 +34,11 @@ await transaction(async (client) => {
   `, [createId("sub"), userId]);
 
   await client.query(`
-    INSERT INTO credit_balances (user_id, trial_signals_used, free_signal_allowance, paid_credits)
-    VALUES ($1, 0, $2, 0)
+    INSERT INTO credit_balances (
+      user_id, trial_signals_used, free_signal_allowance, paid_credits,
+      unlock_credits_balance
+    )
+    VALUES ($1, 0, $2, 0, $2)
   `, [userId, appConfig.freeSignalAllowance]);
 });
 

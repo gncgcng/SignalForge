@@ -133,6 +133,13 @@ const adminRequestList = document.querySelector("#admin-request-list");
 const adminRequestCount = document.querySelector("#admin-request-count");
 const verificationNote = document.querySelector("#verification-note");
 const resendVerificationButton = document.querySelector("#resend-verification");
+const billingCurrentPlan = document.querySelector("#billing-current-plan");
+const billingDiscoveryCredits = document.querySelector("#billing-discovery-credits");
+const billingUnlockCredits = document.querySelector("#billing-unlock-credits");
+const billingPlanGrid = document.querySelector("#billing-plan-grid");
+const billingPackGrid = document.querySelector("#billing-pack-grid");
+const billingStatus = document.querySelector("#billing-status");
+const manageSubscriptionButton = document.querySelector("#manage-subscription-button");
 const backtestForm = document.querySelector("#backtest-form");
 const backtestSymbol = document.querySelector("#backtest-symbol");
 const backtestTimeframe = document.querySelector("#backtest-timeframe");
@@ -164,7 +171,9 @@ const api = {
     const payload = await response.json();
 
     if (!response.ok) {
-      throw new Error(payload.error?.message || "Request failed.");
+      const error = new Error(payload.error?.message || "Request failed.");
+      error.details = payload.error?.details;
+      throw error;
     }
 
     return payload;
@@ -238,8 +247,29 @@ document.querySelector("#logout-button").addEventListener("click", async () => {
 });
 
 document.querySelector("#upgrade-button").addEventListener("click", async () => {
-  const { checkout } = await api.request("/api/subscriptions/checkout", { method: "POST" });
-  statusLine.textContent = checkout.message;
+  showView("billing");
+});
+
+billingPlanGrid.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-billing-plan]");
+  if (button) await startCheckout(button, { plan: button.dataset.billingPlan });
+});
+
+billingPackGrid.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-billing-pack]");
+  if (button) await startCheckout(button, { pack: button.dataset.billingPack });
+});
+
+manageSubscriptionButton.addEventListener("click", async () => {
+  try {
+    manageSubscriptionButton.disabled = true;
+    billingStatus.textContent = "Opening Stripe billing portal...";
+    const { portal } = await api.request("/api/subscriptions/portal", { method: "POST" });
+    location.assign(portal.url);
+  } catch (error) {
+    billingStatus.textContent = error.message;
+    manageSubscriptionButton.disabled = false;
+  }
 });
 
 document.querySelectorAll("[data-view-link]").forEach((link) => {
@@ -277,6 +307,8 @@ scanAllButton.addEventListener("click", async () => {
 
   try {
     const result = await api.request("/api/signals/scan-all", { method: "POST" });
+    state.subscription = result.subscription || state.subscription;
+    renderSubscription();
     updateScanProgress(total, total, "Market scan complete");
     await loadAlerts();
     renderScanResults(result.setups, result.errors);
@@ -310,7 +342,7 @@ generateButton.addEventListener("click", async () => {
 
     if (!signal) {
       renderNoSetup(analysis);
-      statusLine.textContent = "No valid setup found. Trial credit was not used.";
+      statusLine.textContent = "No valid setup found. No unlock credit was used.";
       return;
     }
 
@@ -716,7 +748,7 @@ signalsGrid.addEventListener("click", async (event) => {
 
     if (!signal) {
       renderNoSetup(analysis);
-      statusLine.textContent = "Setup no longer qualifies. Trial credit was not used.";
+      statusLine.textContent = "Setup no longer qualifies. No unlock credit was used.";
       return;
     }
 
@@ -764,7 +796,7 @@ async function unlockSignal(button, symbol, timeframe) {
 
     if (!signal) {
       renderNoSetup(analysis);
-      statusLine.textContent = "Setup no longer qualifies. Trial credit was not used.";
+      statusLine.textContent = "Setup no longer qualifies. No unlock credit was used.";
       return;
     }
 
@@ -941,7 +973,7 @@ async function bootDashboard() {
   }
   renderTimeframes();
   const requestedView = location.hash?.replace("#", "");
-  const allowedInitialViews = ["signals", "paper-portfolio", "journal", "backtesting", "performance", "watchlist", "alerts", "notifications", "settings"];
+  const allowedInitialViews = ["signals", "paper-portfolio", "journal", "backtesting", "performance", "watchlist", "alerts", "notifications", "settings", "billing"];
   if (state.user.isAdmin) allowedInitialViews.push("admin");
   showView(allowedInitialViews.includes(requestedView) ? requestedView : "scanner");
   startSignalHistoryRefresh();
@@ -1537,12 +1569,65 @@ function renderMultiTimeframeConfluence(confluence) {
 function renderSubscription() {
   if (!state.subscription) return;
   document.querySelector("#trial-count").textContent = state.subscription.unlimitedSignals
-    ? "Unlimited signals"
-    : `${state.subscription.trialSignalsRemaining} signals left`;
+    ? "Unlimited access"
+    : `${state.subscription.unlockCreditsRemaining} unlocks left`;
   verificationNote.classList.toggle("hidden", state.subscription.emailVerified);
   resendVerificationButton.classList.toggle("hidden", state.subscription.emailVerified);
   if (!state.subscription.emailVerified) {
     verificationNote.textContent = "Verify email to activate free signals.";
+  }
+  renderBilling();
+}
+
+function renderBilling() {
+  if (!state.subscription) return;
+  const subscription = state.subscription;
+  billingCurrentPlan.textContent = subscription.planName;
+  billingDiscoveryCredits.textContent = subscription.unlimitedSignals
+    ? "Unlimited"
+    : `${subscription.setupDiscoveries.remaining} / ${subscription.setupDiscoveries.limit} ${subscription.setupDiscoveries.period}`;
+  billingUnlockCredits.textContent = subscription.unlimitedSignals
+    ? "Unlimited"
+    : String(subscription.unlockCreditsRemaining);
+  manageSubscriptionButton.classList.toggle("hidden", !subscription.customerPortalAvailable);
+
+  billingPlanGrid.innerHTML = subscription.plans.map((plan) => {
+    const current = subscription.plan === plan.id;
+    return `
+      <article class="panel billing-plan ${current ? "current" : ""}">
+        <div><span class="eyebrow">${current ? "Current plan" : "Subscription"}</span><h3>${escapeHtml(plan.name)}</h3></div>
+        <strong>${plan.discoveryLimit} setup discoveries / ${plan.discoveryPeriod}</strong>
+        <span>${plan.id === "free" ? "3 lifetime unlocks" : `${plan.monthlyUnlockGrant} unlocks / month`}</span>
+        <span>${plan.id === "free" ? "Lifetime unlock limit" : "Unused unlocks roll over"}</span>
+        ${plan.id === "free"
+          ? `<button class="secondary-action" type="button" disabled>${current ? "Current plan" : "Free"}</button>`
+          : `<button data-billing-plan="${plan.id}" type="button" ${current ? "disabled" : ""}>${current ? "Current plan" : `Upgrade to ${plan.name}`}</button>`}
+      </article>
+    `;
+  }).join("");
+
+  billingPackGrid.innerHTML = subscription.creditPacks.map((pack) => `
+    <article class="panel billing-pack">
+      <span class="eyebrow">Credit pack</span>
+      <h3>${escapeHtml(pack.name)}</h3>
+      <span>One-time purchase</span>
+      <button data-billing-pack="${pack.id}" type="button">Buy credits</button>
+    </article>
+  `).join("");
+}
+
+async function startCheckout(button, payload) {
+  try {
+    button.disabled = true;
+    billingStatus.textContent = "Creating secure Stripe checkout...";
+    const { checkout } = await api.request("/api/subscriptions/checkout", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    location.assign(checkout.url);
+  } catch (error) {
+    billingStatus.textContent = error.message;
+    button.disabled = false;
   }
 }
 

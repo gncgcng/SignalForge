@@ -1,0 +1,243 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
+import { appConfig } from "../../config/appConfig.js";
+import {
+  findUserById,
+  findUserByStripeCustomer,
+  grantUnlockCredits,
+  hasStripeWebhookEvent,
+  recordStripeWebhookEvent,
+  updateStripeCustomer,
+  updateStripeSubscription
+} from "../../db/repositories.js";
+import { BILLING_PLANS, CREDIT_PACKS, normalizePlan } from "./subscriptionService.js";
+
+const stripeApiBase = "https://api.stripe.com/v1";
+
+export async function createCheckout(user, { plan, pack }) {
+  assertStripeConfigured();
+  const planConfig = plan ? BILLING_PLANS[plan] : null;
+  const packConfig = pack ? CREDIT_PACKS[pack] : null;
+
+  if ((!planConfig || plan === "free") && !packConfig) {
+    throw validationError("Choose a valid subscription plan or credit pack.");
+  }
+  if (planConfig && user.subscription?.providerSubscriptionId) {
+    return {
+      ...(await createCustomerPortal(user)),
+      mode: "portal"
+    };
+  }
+
+  const customerId = await ensureStripeCustomer(user);
+  const priceId = planConfig
+    ? appConfig.stripe.prices[plan]
+    : appConfig.stripe.prices[pack];
+
+  if (!priceId) {
+    const error = new Error("This Stripe price is not configured.");
+    error.statusCode = 503;
+    throw error;
+  }
+
+  const kind = planConfig ? "subscription" : "credit_pack";
+  const session = await stripeRequest("/checkout/sessions", {
+    mode: planConfig ? "subscription" : "payment",
+    customer: customerId,
+    "line_items[0][price]": priceId,
+    "line_items[0][quantity]": "1",
+    success_url: appConfig.stripe.successUrl,
+    cancel_url: appConfig.stripe.cancelUrl,
+    "metadata[user_id]": user.id,
+    "metadata[kind]": kind,
+    "metadata[plan]": planConfig?.id || "",
+    "metadata[pack]": packConfig?.id || "",
+    "metadata[unlock_quantity]": String(packConfig?.quantity || 0),
+    ...(planConfig ? {
+      "subscription_data[metadata][user_id]": user.id,
+      "subscription_data[metadata][plan]": planConfig.id
+    } : {})
+  });
+
+  return { url: session.url, id: session.id, mode: kind };
+}
+
+export async function createCustomerPortal(user) {
+  assertStripeConfigured();
+  const customerId = user.subscription?.providerCustomerId;
+  if (!customerId) {
+    throw validationError("No Stripe billing account is connected yet.");
+  }
+  const session = await stripeRequest("/billing_portal/sessions", {
+    customer: customerId,
+    return_url: appConfig.stripe.portalReturnUrl
+  });
+  return { url: session.url };
+}
+
+export function verifyStripeSignature(rawBody, signatureHeader) {
+  if (!appConfig.stripe.webhookSecret) {
+    const error = new Error("Stripe webhook secret is not configured.");
+    error.statusCode = 503;
+    throw error;
+  }
+
+  const parts = String(signatureHeader || "").split(",").map((part) => part.trim());
+  const timestamp = parts.find((part) => part.startsWith("t="))?.slice(2);
+  const signatures = parts
+    .filter((part) => part.startsWith("v1="))
+    .map((part) => part.slice(3));
+
+  if (!timestamp || signatures.length === 0) {
+    throw validationError("Invalid Stripe signature.");
+  }
+  if (Math.abs(Date.now() / 1000 - Number(timestamp)) > 300) {
+    throw validationError("Expired Stripe signature.");
+  }
+
+  const expected = createHmac("sha256", appConfig.stripe.webhookSecret)
+    .update(`${timestamp}.${rawBody}`)
+    .digest("hex");
+  const valid = signatures.some((signature) => {
+    if (signature.length !== expected.length) return false;
+    return timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
+  });
+
+  if (!valid) throw validationError("Invalid Stripe signature.");
+  return JSON.parse(rawBody);
+}
+
+export async function processStripeEvent(event) {
+  if (await hasStripeWebhookEvent(event.id)) {
+    return { duplicate: true };
+  }
+
+  const object = event.data?.object || {};
+  if (event.type === "checkout.session.completed") {
+    await processCheckoutCompleted(object);
+  } else if (event.type === "invoice.paid") {
+    await processInvoicePaid(object);
+  } else if (event.type.startsWith("customer.subscription.")) {
+    await processSubscriptionChanged(object, event.type);
+  }
+
+  await recordStripeWebhookEvent(event.id, event.type);
+  return { duplicate: false };
+}
+
+async function ensureStripeCustomer(user) {
+  if (user.subscription?.providerCustomerId) {
+    return user.subscription.providerCustomerId;
+  }
+  const customer = await stripeRequest("/customers", {
+    email: user.email,
+    name: user.name,
+    "metadata[user_id]": user.id
+  });
+  await updateStripeCustomer(user.id, customer.id);
+  user.subscription.providerCustomerId = customer.id;
+  return customer.id;
+}
+
+async function processCheckoutCompleted(session) {
+  const userId = session.metadata?.user_id;
+  if (!userId) return;
+
+  if (session.customer) {
+    await updateStripeCustomer(userId, session.customer);
+  }
+  if (session.metadata?.kind === "credit_pack") {
+    const quantity = CREDIT_PACKS[session.metadata.pack]?.quantity || 0;
+    if (quantity > 0) {
+      await grantUnlockCredits(userId, quantity, `checkout:${session.id}`, "credit_pack");
+    }
+  }
+}
+
+async function processInvoicePaid(invoice) {
+  const user = await findUserByStripeCustomer(invoice.customer);
+  if (!user) return;
+  const priceId = invoice.lines?.data?.[0]?.price?.id;
+  const planId = planFromPrice(priceId);
+  const plan = BILLING_PLANS[planId];
+  if (!plan || plan.monthlyUnlockGrant <= 0) return;
+
+  const periodStart = invoice.lines?.data?.find((line) => line.price?.id === priceId)
+    ?.period?.start;
+  const grantReference = invoice.subscription && periodStart
+    ? `subscription:${invoice.subscription}:${planId}:${periodStart}`
+    : `invoice:${invoice.id}`;
+  await grantUnlockCredits(
+    user.id,
+    plan.monthlyUnlockGrant,
+    grantReference,
+    "subscription_renewal"
+  );
+}
+
+async function processSubscriptionChanged(subscription, eventType) {
+  const user = subscription.metadata?.user_id
+    ? await findUserById(subscription.metadata.user_id)
+    : await findUserByStripeCustomer(subscription.customer);
+  if (!user) return;
+
+  const priceId = subscription.items?.data?.[0]?.price?.id || null;
+  const active = !eventType.endsWith(".deleted") &&
+    ["active", "trialing", "past_due"].includes(subscription.status);
+  const plan = active ? planFromPrice(priceId) : "free";
+
+  await updateStripeSubscription({
+    userId: user.id,
+    customerId: subscription.customer,
+    subscriptionId: eventType.endsWith(".deleted") ? null : subscription.id,
+    status: eventType.endsWith(".deleted") ? "canceled" : subscription.status,
+    plan: normalizePlan(plan),
+    priceId: active ? priceId : null,
+    periodStart: fromUnix(subscription.current_period_start),
+    periodEnd: fromUnix(subscription.current_period_end),
+    cancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end)
+  });
+}
+
+function planFromPrice(priceId) {
+  if (priceId === appConfig.stripe.prices.elite) return "elite";
+  if (priceId === appConfig.stripe.prices.pro) return "pro";
+  return "free";
+}
+
+async function stripeRequest(path, params) {
+  const response = await fetch(`${stripeApiBase}${path}`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${appConfig.stripe.secretKey}`,
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    body: new URLSearchParams(
+      Object.entries(params).filter(([, value]) => value !== undefined)
+    )
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    const error = new Error(payload.error?.message || "Stripe request failed.");
+    error.statusCode = response.status >= 500 ? 502 : 400;
+    throw error;
+  }
+  return payload;
+}
+
+function assertStripeConfigured() {
+  if (!appConfig.stripe.secretKey) {
+    const error = new Error("Stripe billing is not configured.");
+    error.statusCode = 503;
+    throw error;
+  }
+}
+
+function validationError(message) {
+  const error = new Error(message);
+  error.statusCode = 400;
+  return error;
+}
+
+function fromUnix(value) {
+  return value ? new Date(Number(value) * 1000) : null;
+}

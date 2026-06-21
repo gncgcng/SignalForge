@@ -30,7 +30,7 @@
             <h1>Find crypto trading setups in seconds</h1>
             <p>Scan major crypto, altcoins, and commodities across multiple timeframes with rule-based signals, stop loss, take profit, and risk/reward.</p>
             <div class="hero-actions">
-              <button id="start-free-button" type="button">Start with 3 free signals</button>
+              <button id="start-free-button" type="button">Start with 3 free unlocks</button>
               <button class="secondary-action hidden" id="view-demo-button" type="button">View demo</button>
             </div>
           </div>
@@ -87,14 +87,19 @@
           </div>
           <div class="pricing-grid">
             <article>
-              <span>Free trial</span>
-              <strong>3 signals</strong>
-              <p>Try the scanner, unlock full setups, and review history.</p>
+              <span>Free</span>
+              <strong>10 / day</strong>
+              <p>Ten setup discoveries each day and three lifetime signal unlocks.</p>
             </article>
             <article class="featured-price">
-              <span>Pro monthly</span>
-              <strong>$29/mo</strong>
-              <p>Unlimited scanning, saved signal history, and outcome tracking.</p>
+              <span>Pro</span>
+              <strong>300 / month</strong>
+              <p>One hundred monthly unlocks with unused unlock credits rolling over.</p>
+            </article>
+            <article>
+              <span>Elite</span>
+              <strong>1,000 / month</strong>
+              <p>Five hundred monthly unlocks with unused unlock credits rolling over.</p>
             </article>
             <article>
               <span>Credit packs</span>
@@ -170,7 +175,7 @@
             <a class="hidden" href="#admin" data-view-link="admin" id="admin-nav-link">Admin</a>
           </nav>
           <div class="trial-card">
-            <span>Free trial</span>
+            <span>Plan capacity</span>
             <strong id="trial-count">3 signals left</strong>
             <span class="verification-note hidden" id="verification-note">Verify email to activate free signals.</span>
             <button class="secondary-action hidden" id="resend-verification" type="button">Resend verification</button>
@@ -408,7 +413,7 @@
                     Enabled
                   </label>
                 </div>
-                <p class="reasoning">Telegram alerts apply to markets in your Watchlist. Scan All remains free; credits are used only when you unlock a signal.</p>
+                <p class="reasoning">Telegram alerts apply to markets in your Watchlist. Valid Scan All discoveries use setup credits; full signal levels use unlock credits.</p>
                 <label class="switch-row">
                   <input type="checkbox" checked disabled />
                   Favorite markets
@@ -876,7 +881,32 @@
           </section>
 
           <section class="page-view hidden" id="billing-view" data-view="billing">
-            <article class="panel"><p class="reasoning">Billing controls are ready for the Stripe integration step.</p></article>
+            <div class="section-title">
+              <div>
+                <span class="eyebrow">Subscription and credits</span>
+                <h3>Billing</h3>
+              </div>
+              <button class="secondary-action" id="manage-subscription-button" type="button">Manage subscription</button>
+            </div>
+            <div class="billing-summary-grid">
+              <article class="panel"><span>Current plan</span><strong id="billing-current-plan">Free</strong></article>
+              <article class="panel"><span>Setup discoveries</span><strong id="billing-discovery-credits">10 / day</strong></article>
+              <article class="panel"><span>Unlock credits</span><strong id="billing-unlock-credits">3</strong></article>
+            </div>
+            <p class="status-line" id="billing-status"></p>
+            <section>
+              <div class="section-title">
+                <div><span class="eyebrow">Plans</span><h3>Choose your capacity</h3></div>
+              </div>
+              <div class="billing-plan-grid" id="billing-plan-grid"></div>
+            </section>
+            <section>
+              <div class="section-title">
+                <div><span class="eyebrow">One-time purchase</span><h3>Unlock credit packs</h3></div>
+                <span>Purchased unlocks do not expire</span>
+              </div>
+              <div class="billing-pack-grid" id="billing-pack-grid"></div>
+            </section>
           </section>
         </div>
       </section>

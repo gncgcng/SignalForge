@@ -4,9 +4,12 @@ import { enqueueMatchingTelegramNotifications } from "../notifications/notificat
 import {
   createSignal,
   listUserSignals,
-  scanAllMarketsDetailed,
-  scanMarketSetupDetailed
+  scanAllMarkets,
+  scanMarketSetup
 } from "./signalService.js";
+
+// scanMarketSetupDetailed stays service-private so Telegram receives full setups
+// without exposing locked price levels in scan responses.
 
 export async function handleSignalRoutes(req, res, pathname) {
   if (!pathname.startsWith("/api/signals")) {
@@ -24,22 +27,33 @@ export async function handleSignalRoutes(req, res, pathname) {
   if (pathname === "/api/signals/scan" && req.method === "POST") {
     try {
       const body = await readJson(req);
-      const result = await scanMarketSetupDetailed(req.user, body);
-      return sendJson(res, 200, result.publicResult);
+      return sendJson(res, 200, await scanMarketSetup(req.user, body));
     } catch (error) {
-      return sendError(res, error.statusCode || 400, error.message);
+      return sendError(res, error.statusCode || 400, error.message, {
+        subscription: error.subscription
+      });
     }
   }
 
   if (pathname === "/api/signals/scan-all" && req.method === "POST") {
-    const result = await scanAllMarketsDetailed(req.user);
-    const detectedAlerts = await detectMatchingAlerts(req.user, result.publicResult.setups);
-    const queuedTelegramAlerts = await enqueueMatchingTelegramNotifications(req.user, result.fullSetups);
-    return sendJson(res, 200, {
-      ...result.publicResult,
-      detectedAlerts,
-      queuedTelegramAlerts: queuedTelegramAlerts.length
-    });
+    try {
+      const result = await scanAllMarkets(req.user);
+      const detectedAlerts = await detectMatchingAlerts(req.user, result.setups);
+      const queuedTelegramAlerts = await enqueueMatchingTelegramNotifications(
+        req.user,
+        result.fullSetups
+      );
+      const { fullSetups, ...publicResult } = result;
+      return sendJson(res, 200, {
+        ...publicResult,
+        detectedAlerts,
+        queuedTelegramAlerts: queuedTelegramAlerts.length
+      });
+    } catch (error) {
+      return sendError(res, error.statusCode || 400, error.message, {
+        subscription: error.subscription
+      });
+    }
   }
 
   if (pathname === "/api/signals/generate" && req.method === "POST") {
@@ -48,7 +62,7 @@ export async function handleSignalRoutes(req, res, pathname) {
       const result = await createSignal(req.user, body);
       return sendJson(res, result.signal ? 201 : 200, result);
     } catch (error) {
-      return sendError(res, error.code === "TRIAL_LIMIT" ? 402 : error.statusCode || 400, error.message, {
+      return sendError(res, error.statusCode || 400, error.message, {
         subscription: error.subscription
       });
     }

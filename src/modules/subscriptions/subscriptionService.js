@@ -1,57 +1,172 @@
 import { appConfig } from "../../config/appConfig.js";
-import { incrementTrialSignalsUsed } from "../../db/repositories.js";
+import { consumeDiscoveryCredits } from "../../db/repositories.js";
+
+export const BILLING_PLANS = {
+  free: {
+    id: "free",
+    name: "Free",
+    discoveryLimit: 10,
+    discoveryPeriod: "day",
+    monthlyUnlockGrant: 0,
+    lifetimeUnlockGrant: 3
+  },
+  pro: {
+    id: "pro",
+    name: "Pro",
+    discoveryLimit: 300,
+    discoveryPeriod: "month",
+    monthlyUnlockGrant: 100,
+    lifetimeUnlockGrant: 0
+  },
+  elite: {
+    id: "elite",
+    name: "Elite",
+    discoveryLimit: 1000,
+    discoveryPeriod: "month",
+    monthlyUnlockGrant: 500,
+    lifetimeUnlockGrant: 0
+  }
+};
+
+export const CREDIT_PACKS = {
+  pack25: { id: "pack25", name: "25 unlocks", quantity: 25 },
+  pack100: { id: "pack100", name: "100 unlocks", quantity: 100 },
+  pack300: { id: "pack300", name: "300 unlocks", quantity: 300 }
+};
 
 export function ensureTrialSubscription(user) {
   user.subscription = user.subscription || {
     status: "trialing",
     provider: "stripe",
     providerCustomerId: null,
+    providerSubscriptionId: null,
+    currentPeriodStart: null,
     currentPeriodEnd: null,
+    cancelAtPeriodEnd: false,
     createdAt: new Date().toISOString()
   };
+}
+
+export function normalizePlan(plan) {
+  if (plan === "trial") return "free";
+  return BILLING_PLANS[plan] ? plan : "free";
 }
 
 export function getSubscriptionSummary(user) {
   ensureTrialSubscription(user);
   const isTester = user.role === "tester";
-  const allowance = user.freeSignalAllowance ?? appConfig.freeSignalAllowance;
-  const remaining = Math.max(0, allowance - user.trialSignalsUsed);
+  const planId = isTester ? "tester" : normalizePlan(user.plan);
+  const plan = BILLING_PLANS[planId] || null;
+  const discoveriesUsed = plan?.discoveryPeriod === "day"
+    ? Number(user.discoveriesToday || 0)
+    : Number(user.discoveriesPeriod || 0);
+  const unlockBalance = getUnlockBalance(user);
 
   return {
-    plan: user.plan,
+    plan: planId,
+    planName: isTester ? "Tester" : plan.name,
     role: user.role || "user",
     unlimitedSignals: isTester,
     status: user.subscription.status,
-    trialSignalsUsed: user.trialSignalsUsed,
-    trialSignalsRemaining: isTester ? null : remaining,
-    freeSignalAllowance: allowance,
-    paidCredits: user.paidCredits || 0,
+    setupDiscoveries: {
+      limit: isTester ? null : plan.discoveryLimit,
+      used: isTester ? 0 : discoveriesUsed,
+      remaining: isTester ? null : Math.max(0, plan.discoveryLimit - discoveriesUsed),
+      period: isTester ? "unlimited" : plan.discoveryPeriod
+    },
+    unlockCreditsRemaining: isTester ? null : unlockBalance,
+    unlockCreditsRollover: !isTester && planId !== "free",
+    monthlyUnlockGrant: isTester ? null : plan.monthlyUnlockGrant,
+    lifetimeUnlocksUsed: Number(user.lifetimeUnlocksUsed || user.trialSignalsUsed || 0),
+    trialSignalsUsed: Number(user.trialSignalsUsed || 0),
+    trialSignalsRemaining: isTester ? null : unlockBalance,
+    freeSignalAllowance: appConfig.freeSignalAllowance,
+    paidCredits: Number(user.paidCredits || 0),
     emailVerified: Boolean(user.emailVerifiedAt),
     trialUsed: Boolean(user.trialUsed),
+    currentPeriodStart: user.subscription.currentPeriodStart,
+    currentPeriodEnd: user.subscription.currentPeriodEnd,
+    cancelAtPeriodEnd: Boolean(user.subscription.cancelAtPeriodEnd),
     stripeReady: true,
-    checkoutConfigured: Boolean(appConfig.stripe.publishableKey && appConfig.stripe.priceId)
+    checkoutConfigured: Boolean(appConfig.stripe.secretKey),
+    customerPortalAvailable: Boolean(
+      appConfig.stripe.secretKey && user.subscription.providerCustomerId
+    ),
+    plans: Object.values(BILLING_PLANS),
+    creditPacks: Object.values(CREDIT_PACKS)
   };
 }
 
 export function canGenerateSignal(user) {
-  if (user.role === "tester") {
-    return true;
-  }
-
-  if (user.plan !== "trial") {
-    return true;
-  }
-
-  if (!user.emailVerifiedAt && (user.paidCredits || 0) <= 0) {
-    return false;
-  }
-
-  return user.trialSignalsUsed < (user.freeSignalAllowance ?? appConfig.freeSignalAllowance) || (user.paidCredits || 0) > 0;
+  if (user.role === "tester") return true;
+  if (!user.emailVerifiedAt && Number(user.paidCredits || 0) <= 0) return false;
+  return getUnlockBalance(user) > 0;
 }
 
-export async function recordSignalUsage(user) {
-  if (user.role !== "tester" && user.plan === "trial") {
-    await incrementTrialSignalsUsed(user.id);
-    user.trialSignalsUsed += 1;
+export function canDiscoverSetups(user) {
+  if (user.role === "tester") return true;
+  if (
+    normalizePlan(user.plan) === "free" &&
+    !user.emailVerifiedAt &&
+    Number(user.paidCredits || 0) <= 0
+  ) {
+    return false;
   }
+  const summary = getSubscriptionSummary(user);
+  return summary.setupDiscoveries.remaining > 0;
+}
+
+export async function recordDiscoveryUsage(user, quantity, scanKey) {
+  if (user.role === "tester" || quantity <= 0) {
+    return getSubscriptionSummary(user);
+  }
+
+  const plan = BILLING_PLANS[normalizePlan(user.plan)];
+  const periodStart = plan.discoveryPeriod === "day"
+    ? startOfUtcDay()
+    : user.subscription?.currentPeriodStart || startOfUtcMonth();
+
+  await consumeDiscoveryCredits(user.id, {
+    quantity,
+    limit: plan.discoveryLimit,
+    periodStart,
+    scanKey
+  });
+
+  if (plan.discoveryPeriod === "day") {
+    user.discoveriesToday = Number(user.discoveriesToday || 0) + quantity;
+  } else {
+    user.discoveriesPeriod = Number(user.discoveriesPeriod || 0) + quantity;
+  }
+  return getSubscriptionSummary(user);
+}
+
+// Kept for older callers and tester regression coverage. Unlock debit is now atomic
+// with saving the signal in the repository.
+export async function recordSignalUsage() {
+  return undefined;
+}
+
+function startOfUtcDay() {
+  const date = new Date();
+  date.setUTCHours(0, 0, 0, 0);
+  return date;
+}
+
+function startOfUtcMonth() {
+  const date = new Date();
+  date.setUTCDate(1);
+  date.setUTCHours(0, 0, 0, 0);
+  return date;
+}
+
+function getUnlockBalance(user) {
+  if (user.unlockCreditsBalance !== undefined && user.unlockCreditsBalance !== null) {
+    return Number(user.unlockCreditsBalance);
+  }
+  return Math.max(
+    0,
+    Number(user.freeSignalAllowance ?? appConfig.freeSignalAllowance) -
+      Number(user.trialSignalsUsed || 0)
+  ) + Number(user.paidCredits || 0);
 }
