@@ -40,6 +40,11 @@ const adminEmails = new Set(
     .map((email) => email.trim().toLowerCase())
     .filter(Boolean)
 );
+const appUrl = resolveAppUrl(
+  process.env.APP_URL,
+  process.env.NODE_ENV || "development",
+  Number(process.env.PORT || 4173)
+);
 
 export const stripeEnvironmentKeys = [
   "STRIPE_SECRET_KEY",
@@ -114,9 +119,10 @@ export const appConfig = {
     publishableKey: process.env.STRIPE_PUBLISHABLE_KEY || "",
     secretKey: process.env.STRIPE_SECRET_KEY || "",
     webhookSecret: process.env.STRIPE_WEBHOOK_SECRET || "",
-    successUrl: process.env.STRIPE_SUCCESS_URL || "http://localhost:4173/#billing",
-    cancelUrl: process.env.STRIPE_CANCEL_URL || "http://localhost:4173/#billing",
-    portalReturnUrl: process.env.STRIPE_PORTAL_RETURN_URL || "http://localhost:4173/#billing",
+    appUrl,
+    successUrl: appUrl ? `${appUrl}/#billing?checkout=success` : "",
+    cancelUrl: appUrl ? `${appUrl}/#billing?checkout=cancelled` : "",
+    portalReturnUrl: appUrl ? `${appUrl}/#billing` : "",
     prices: {
       pro: process.env.STRIPE_PRO_PRICE_ID || "",
       elite: process.env.STRIPE_ELITE_PRICE_ID || "",
@@ -146,10 +152,30 @@ export function getStripeConfigurationStatus() {
     presence,
     present,
     missing,
-    checkoutConfigured: presence.STRIPE_SECRET_KEY,
+    checkoutConfigured: presence.STRIPE_SECRET_KEY && Boolean(appConfig.stripe.appUrl),
     webhookConfigured: presence.STRIPE_WEBHOOK_SECRET,
+    appUrlConfigured: Boolean(appConfig.stripe.appUrl),
+    checkoutMissing: [
+      ...(!presence.STRIPE_SECRET_KEY ? ["STRIPE_SECRET_KEY"] : []),
+      ...(!appConfig.stripe.appUrl ? ["APP_URL"] : [])
+    ],
     mode: getStripeMode(secretKey)
   };
+}
+
+export function resolveAppUrl(rawAppUrl, nodeEnv = "development", port = 4173) {
+  const value = String(rawAppUrl || "").trim();
+  if (!value) {
+    return nodeEnv === "production" ? "" : `http://localhost:${port}`;
+  }
+
+  try {
+    const url = new URL(value);
+    if (!["http:", "https:"].includes(url.protocol)) return "";
+    return url.href.replace(/\/+$/, "");
+  } catch {
+    return "";
+  }
 }
 
 export function getStripeMode(secretKey = appConfig.stripe.secretKey) {
@@ -162,6 +188,7 @@ export function logStripeConfiguration() {
   const status = getStripeConfigurationStatus();
   console.info(
     `[stripe] mode=${status.mode} present=${status.present.join(",") || "none"} ` +
-    `missing=${status.missing.join(",") || "none"}`
+    `missing=${status.missing.join(",") || "none"} ` +
+    `app_url=${status.appUrlConfigured ? "configured" : "missing"}`
   );
 }

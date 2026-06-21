@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 process.env.NODE_ENV = "development";
+delete process.env.APP_URL;
 process.env.STRIPE_SECRET_KEY = "sk_test_configuration_check";
 delete process.env.STRIPE_WEBHOOK_SECRET;
 process.env.STRIPE_PRO_PRICE_ID = "price_test_pro";
@@ -14,6 +15,7 @@ const {
   appConfig,
   getStripeConfigurationStatus,
   logStripeConfiguration,
+  resolveAppUrl,
   stripeEnvironmentKeys
 } = await import("../src/config/appConfig.js");
 const { CREDIT_PACKS } = await import("../src/modules/subscriptions/subscriptionService.js");
@@ -115,6 +117,22 @@ const result = {
     startupLog.includes("STRIPE_WEBHOOK_SECRET") &&
     !startupLog.includes(process.env.STRIPE_SECRET_KEY) &&
     !startupLog.includes(process.env.STRIPE_PRO_PRICE_ID),
+  appUrlRedirects:
+    appConfig.stripe.successUrl === "http://localhost:4173/#billing?checkout=success" &&
+    appConfig.stripe.cancelUrl === "http://localhost:4173/#billing?checkout=cancelled" &&
+    checkoutRequest.body.success_url === appConfig.stripe.successUrl &&
+    checkoutRequest.body.cancel_url === appConfig.stripe.cancelUrl,
+  productionDoesNotFallbackToLocalhost:
+    resolveAppUrl("", "production", 4173) === "" &&
+    resolveAppUrl("", "development", 4173) === "http://localhost:4173" &&
+    resolveAppUrl("https://signalforge.example.com///", "production") ===
+      "https://signalforge.example.com",
+  legacyRedirectVariablesRemoved:
+    !configSource.includes("process.env.STRIPE_SUCCESS_URL") &&
+    !configSource.includes("process.env.STRIPE_CANCEL_URL") &&
+    !envExample.includes("STRIPE_SUCCESS_URL=") &&
+    !envExample.includes("STRIPE_CANCEL_URL=") &&
+    envExample.includes("APP_URL=http://localhost:4173"),
   developmentDiagnostics: stripeSource.includes("missing ${key}") &&
     frontend.includes("Missing Stripe configuration:") &&
     frontend.includes("STRIPE_WEBHOOK_SECRET"),

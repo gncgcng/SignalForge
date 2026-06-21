@@ -15,6 +15,7 @@ const stripeApiBase = "https://api.stripe.com/v1";
 
 export async function createCheckout(user, { plan, pack }) {
   assertStripeCheckoutConfigured(user);
+  assertStripeRedirectsConfigured(user);
   const planConfig = plan ? BILLING_PLANS[plan] : null;
   const packConfig = pack ? CREDIT_PACKS[pack] : null;
 
@@ -68,6 +69,7 @@ export async function createCheckout(user, { plan, pack }) {
 
 export async function createCustomerPortal(user) {
   assertStripeCheckoutConfigured(user);
+  assertStripeRedirectsConfigured(user);
   const customerId = await ensureStripeCustomer(user);
   const session = await stripeRequest("/billing_portal/sessions", {
     customer: customerId,
@@ -257,6 +259,12 @@ async function stripeRequest(path, params) {
 function assertStripeCheckoutConfigured(user) {
   if (!appConfig.stripe.secretKey) {
     throw missingStripeConfiguration("STRIPE_SECRET_KEY", user);
+  }
+}
+
+function assertStripeRedirectsConfigured(user) {
+  if (!appConfig.stripe.appUrl) {
+    throw missingStripeConfiguration("APP_URL", user);
   }
 }
 

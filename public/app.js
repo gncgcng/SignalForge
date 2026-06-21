@@ -972,10 +972,11 @@ async function bootDashboard() {
     await loadAdminRequests();
   }
   renderTimeframes();
-  const requestedView = location.hash?.replace("#", "");
+  const requestedView = location.hash?.replace("#", "").split("?")[0];
   const allowedInitialViews = ["signals", "paper-portfolio", "journal", "backtesting", "performance", "watchlist", "alerts", "notifications", "settings", "billing"];
   if (state.user.isAdmin) allowedInitialViews.push("admin");
   showView(allowedInitialViews.includes(requestedView) ? requestedView : "scanner");
+  renderCheckoutReturnStatus();
   startSignalHistoryRefresh();
   await loadMarketData();
 }
@@ -1592,7 +1593,13 @@ function renderBilling() {
   manageSubscriptionButton.classList.toggle("hidden", !subscription.customerPortalAvailable);
   if (subscription.stripeConfiguration) {
     const config = subscription.stripeConfiguration;
-    const checkoutMissing = config.missing.filter((key) => key !== "STRIPE_WEBHOOK_SECRET");
+    const checkoutMissing = [
+      ...(config.checkoutMissing || []),
+      ...config.missing.filter((key) =>
+        key !== "STRIPE_WEBHOOK_SECRET" &&
+        key !== "STRIPE_SECRET_KEY"
+      )
+    ];
     billingStatus.textContent = config.customerModeWarning
       ? config.customerModeWarning
       : checkoutMissing.length
@@ -1625,6 +1632,16 @@ function renderBilling() {
       <button data-billing-pack="${pack.id}" type="button">Buy credits</button>
     </article>
   `).join("");
+}
+
+function renderCheckoutReturnStatus() {
+  const hashQuery = location.hash.split("?")[1] || "";
+  const checkoutStatus = new URLSearchParams(hashQuery).get("checkout");
+  if (checkoutStatus === "success") {
+    billingStatus.textContent = "Purchase completed. Billing updates may take a moment.";
+  } else if (checkoutStatus === "cancelled") {
+    billingStatus.textContent = "Checkout was cancelled. No charge was made.";
+  }
 }
 
 async function startCheckout(button, payload) {
