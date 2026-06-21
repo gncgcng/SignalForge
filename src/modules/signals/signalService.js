@@ -22,9 +22,9 @@ const scanTimeframes = ["1h", "4h", "15m", "5m"];
 export async function createSignal(user, { symbol, timeframe }) {
   if (!canGenerateSignal(user)) {
     const summary = getSubscriptionSummary(user);
-    const verificationRequired = !summary.emailVerified && summary.paidCredits <= 0;
+    const verificationRequired = !summary.emailVerified && user.role !== "tester";
     const error = new Error(verificationRequired
-      ? "Verify your email to activate your three free signals."
+      ? "Verify your email before using signal unlock credits."
       : "Free trial limit reached. Connect Stripe checkout to unlock more signals.");
     error.code = verificationRequired ? "EMAIL_VERIFICATION_REQUIRED" : "TRIAL_LIMIT";
     error.subscription = summary;
@@ -254,11 +254,9 @@ async function getUserAnalystProfile(user) {
 
 function assertDiscoveryAvailable(user) {
   if (canDiscoverSetups(user)) return;
-  const verificationRequired = !user.emailVerifiedAt &&
-    (user.plan === "free" || user.plan === "trial") &&
-    Number(user.paidCredits || 0) <= 0;
+  const verificationRequired = !user.emailVerifiedAt && user.role !== "tester";
   const error = new Error(verificationRequired
-    ? "Verify your email to activate free setup discoveries."
+    ? "Verify your email before using setup discovery credits."
     : "Setup discovery credit limit reached.");
   error.code = verificationRequired ? "EMAIL_VERIFICATION_REQUIRED" : "DISCOVERY_LIMIT";
   error.statusCode = 402;

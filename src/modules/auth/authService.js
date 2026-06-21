@@ -182,7 +182,7 @@ export async function resendVerification(user) {
   }
   return {
     verificationRequired: true,
-    verification: await issueVerification(user)
+    verification: await issueVerification(user, { enforceCooldown: true })
   };
 }
 
@@ -210,8 +210,13 @@ export function isAdminUser(user) {
   return Boolean(user?.email && appConfig.adminEmails.has(user.email.toLowerCase()));
 }
 
-async function issueVerification(user) {
+async function issueVerification(user, { enforceCooldown = false } = {}) {
   const token = createVerificationToken();
-  await createEmailVerificationToken(user.id, token.tokenHash, token.expiresAt);
+  await createEmailVerificationToken(
+    user.id,
+    token.tokenHash,
+    token.expiresAt,
+    enforceCooldown ? appConfig.abuseProtection.verificationResendSeconds : 0
+  );
   return sendVerificationEmail(user, token.token);
 }

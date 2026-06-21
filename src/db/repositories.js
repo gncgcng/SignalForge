@@ -200,8 +200,40 @@ export async function getDeviceTrialHistory(deviceHash) {
   return result.rows[0] || null;
 }
 
-export async function createEmailVerificationToken(userId, tokenHash, expiresAt) {
+export async function createEmailVerificationToken(
+  userId,
+  tokenHash,
+  expiresAt,
+  cooldownSeconds = 0
+) {
   await transaction(async (client) => {
+    if (cooldownSeconds > 0) {
+      const latest = await client.query(`
+        SELECT created_at
+        FROM email_verification_tokens
+        WHERE user_id = $1
+        ORDER BY created_at DESC
+        LIMIT 1
+        FOR UPDATE
+      `, [userId]);
+      const createdAt = latest.rows[0]?.created_at
+        ? new Date(latest.rows[0].created_at).getTime()
+        : 0;
+      const retryAfterSeconds = Math.ceil(
+        (createdAt + cooldownSeconds * 1000 - Date.now()) / 1000
+      );
+
+      if (retryAfterSeconds > 0) {
+        const error = new Error(
+          `Please wait ${retryAfterSeconds} seconds before requesting another verification email.`
+        );
+        error.code = "VERIFICATION_RESEND_LIMIT";
+        error.statusCode = 429;
+        error.retryAfterSeconds = retryAfterSeconds;
+        throw error;
+      }
+    }
+
     await client.query(`
       DELETE FROM email_verification_tokens
       WHERE user_id = $1 AND used_at IS NULL
@@ -447,7 +479,7 @@ export async function consumeDiscoveryCredits(userId, {
 
   return transaction(async (client) => {
     const account = await client.query(`
-      SELECT u.role
+      SELECT u.role, u.email_verified_at
       FROM users u
       JOIN credit_balances c ON c.user_id = u.id
       WHERE u.id = $1
@@ -456,6 +488,12 @@ export async function consumeDiscoveryCredits(userId, {
 
     if (account.rows[0]?.role === "tester") {
       return { used: 0, remaining: null };
+    }
+    if (!account.rows[0]?.email_verified_at) {
+      const error = new Error("Verify your email before using setup discovery credits.");
+      error.code = "EMAIL_VERIFICATION_REQUIRED";
+      error.statusCode = 403;
+      throw error;
     }
 
     const usage = await client.query(`
@@ -716,13 +754,20 @@ export async function listAbuseReviewDashboard() {
 export async function saveUnlockedSignal(userId, signal) {
   return transaction(async (client) => {
     const account = await client.query(`
-      SELECT u.role, c.unlock_credits_balance
+      SELECT u.role, u.email_verified_at, c.unlock_credits_balance
       FROM users u
       JOIN credit_balances c ON c.user_id = u.id
       WHERE u.id = $1
       FOR UPDATE OF c
     `, [userId]);
     const billing = account.rows[0];
+
+    if (billing?.role !== "tester" && !billing?.email_verified_at) {
+      const error = new Error("Verify your email before using signal unlock credits.");
+      error.code = "EMAIL_VERIFICATION_REQUIRED";
+      error.statusCode = 403;
+      throw error;
+    }
 
     if (billing?.role !== "tester" && Number(billing?.unlock_credits_balance || 0) <= 0) {
       const error = new Error("Unlock credit limit reached.");

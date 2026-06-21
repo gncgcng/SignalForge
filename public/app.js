@@ -887,6 +887,7 @@ async function init() {
   const oauthError = new URLSearchParams(location.search).get("oauth_error");
   const oauthSuccess = new URLSearchParams(location.search).get("oauth") === "success";
   const verificationToken = new URLSearchParams(location.search).get("verify");
+  let verificationMessage = "";
   if (verificationToken) {
     try {
       const result = await api.request("/api/auth/verify-email", {
@@ -894,12 +895,13 @@ async function init() {
         body: JSON.stringify({ token: verificationToken })
       });
       history.replaceState({}, "", `${location.pathname}${location.hash}`);
-      authNote.textContent = result.trialGranted
+      verificationMessage = result.trialGranted
         ? "Email verified. Your free signals are active."
         : "Email verified. This device has already received a free trial.";
     } catch (error) {
-      authNote.textContent = error.message;
+      verificationMessage = error.message;
     }
+    authNote.textContent = verificationMessage;
   }
   const [{ user }, authConfig] = await Promise.all([
     api.request("/api/auth/session"),
@@ -915,8 +917,9 @@ async function init() {
     }
     await bootDashboard();
   } else {
-    landingPage.classList.remove("hidden");
-    authScreen.classList.toggle("hidden", !oauthError);
+    const showAuthCallback = Boolean(oauthError || verificationToken);
+    landingPage.classList.toggle("hidden", showAuthCallback);
+    authScreen.classList.toggle("hidden", !showAuthCallback);
     dashboard.classList.add("hidden");
     if (oauthError) {
       authNote.textContent = googleOAuthErrorMessage(oauthError);
@@ -1636,7 +1639,7 @@ function renderSubscription() {
   verificationNote.classList.toggle("hidden", state.subscription.emailVerified);
   resendVerificationButton.classList.toggle("hidden", state.subscription.emailVerified);
   if (!state.subscription.emailVerified) {
-    verificationNote.textContent = "Verify email to activate free signals.";
+    verificationNote.textContent = "Verify your email before using setup or unlock credits.";
   }
   renderBilling();
 }

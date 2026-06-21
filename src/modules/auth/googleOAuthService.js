@@ -94,17 +94,32 @@ export async function completeGoogleOAuth({ code, state, oauthError }) {
 
   let user = await findUserByOAuthIdentity(provider, claims.sub);
   if (user) {
+    if (!user.emailVerifiedAt) {
+      user = await linkOAuthIdentity({
+        provider,
+        providerSubject: claims.sub,
+        userId: user.id,
+        providerEmail: normalizedEmail
+      });
+      await grantOAuthFreeTrial(user.id, loginState.deviceFingerprintHash);
+      user = await findUserByEmail(normalizedEmail);
+    }
     return createSession(user);
   }
 
   user = await findUserByEmail(normalizedEmail);
   if (user) {
+    const verificationWasRequired = !user.emailVerifiedAt;
     user = await linkOAuthIdentity({
       provider,
       providerSubject: claims.sub,
       userId: user.id,
       providerEmail: normalizedEmail
     });
+    if (verificationWasRequired) {
+      await grantOAuthFreeTrial(user.id, loginState.deviceFingerprintHash);
+      user = await findUserByEmail(normalizedEmail);
+    }
     return createSession(user);
   }
 

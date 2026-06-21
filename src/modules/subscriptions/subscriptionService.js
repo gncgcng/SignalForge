@@ -123,19 +123,13 @@ export function getSubscriptionSummary(user) {
 
 export function canGenerateSignal(user) {
   if (user.role === "tester") return true;
-  if (!user.emailVerifiedAt && Number(user.paidCredits || 0) <= 0) return false;
+  if (!user.emailVerifiedAt) return false;
   return getUnlockBalance(user) > 0;
 }
 
 export function canDiscoverSetups(user) {
   if (user.role === "tester") return true;
-  if (
-    normalizePlan(user.plan) === "free" &&
-    !user.emailVerifiedAt &&
-    Number(user.paidCredits || 0) <= 0
-  ) {
-    return false;
-  }
+  if (!user.emailVerifiedAt) return false;
   const summary = getSubscriptionSummary(user);
   return summary.setupDiscoveries.remaining > 0;
 }

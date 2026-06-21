@@ -87,7 +87,9 @@ export const appConfig = {
     accountsPerDay: Number(process.env.ACCOUNTS_PER_IP_PER_DAY || 3),
     accountsPerWeek: Number(process.env.ACCOUNTS_PER_IP_PER_WEEK || 5),
     verificationTokenHours: Number(process.env.EMAIL_VERIFICATION_TOKEN_HOURS || 24),
-    publicAppUrl: process.env.PUBLIC_APP_URL || `http://localhost:${Number(process.env.PORT || 4173)}`,
+    verificationResendSeconds: Number(process.env.EMAIL_VERIFICATION_RESEND_SECONDS || 60),
+    publicAppUrl: appUrl || process.env.PUBLIC_APP_URL ||
+      `http://localhost:${Number(process.env.PORT || 4173)}`,
     resendApiKey: process.env.RESEND_API_KEY || "",
     emailFrom: process.env.EMAIL_FROM || "SignalForge <onboarding@resend.dev>",
     disposableEmailDomains: new Set(
