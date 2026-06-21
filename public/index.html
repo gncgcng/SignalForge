@@ -28,10 +28,13 @@
       <section class="landing-page" id="landing-page">
         <header class="landing-nav">
           <div class="logo-row">
-            <div class="brand-mark small">SF</div>
+            <img class="brand-logo small" src="/icons/android-chrome-192x192.png" alt="" />
             <strong>SignalForge</strong>
           </div>
-          <button class="secondary-action" id="landing-login-button" type="button">Sign in</button>
+          <div class="landing-nav-actions">
+            <a href="#pricing">Pricing</a>
+            <button class="secondary-action" id="landing-login-button" type="button">Sign in</button>
+          </div>
         </header>
 
         <section class="landing-hero">
@@ -43,32 +46,40 @@
             </svg>
           </div>
           <div class="hero-content">
-            <span class="eyebrow">Crypto signal scanner</span>
+            <div class="hero-brand">
+              <img class="brand-logo hero-logo" src="/icons/android-chrome-192x192.png" alt="" />
+              <span class="eyebrow">Rule-based market intelligence</span>
+            </div>
             <h1>Find crypto trading setups in seconds</h1>
             <p>Scan major crypto, altcoins, and commodities across multiple timeframes with rule-based signals, stop loss, take profit, and risk/reward.</p>
             <div class="hero-actions">
               <button id="start-free-button" type="button">Start with 3 free unlocks</button>
               <button class="secondary-action hidden" id="view-demo-button" type="button">View demo</button>
             </div>
+            <div class="hero-assurance" aria-label="Product highlights">
+              <span>Live market data</span>
+              <span>Transparent signal logic</span>
+              <span>No broker connection</span>
+            </div>
           </div>
         </section>
 
-        <section class="landing-band">
+        <section class="landing-band how-it-works">
           <div class="section-title">
             <div>
               <span class="eyebrow">How it works</span>
-              <h3>Scan markets → Unlock signal → Track outcome</h3>
+              <h3>A disciplined workflow from scan to outcome</h3>
             </div>
           </div>
           <div class="landing-cards three">
             <article>
               <span>01</span>
               <strong>Scan markets</strong>
-              <p>Run a multi-timeframe sweep across nine Coinbase crypto markets and supported commodities.</p>
+              <p>Run a multi-timeframe sweep across supported crypto and commodity markets.</p>
             </article>
             <article>
               <span>02</span>
-              <strong>Unlock signal</strong>
+              <strong>Unlock setup</strong>
               <p>Review qualifying setups, then unlock the full entry, stop loss, take profit, and risk/reward.</p>
             </article>
             <article>
@@ -79,11 +90,19 @@
           </div>
         </section>
 
+        <section class="landing-proof">
+          <div>
+            <span class="eyebrow">Built for disciplined traders</span>
+            <h2>Less noise. More context before every decision.</h2>
+          </div>
+          <p>SignalForge brings market structure, risk levels, confidence factors, and tracked outcomes into one focused workspace.</p>
+        </section>
+
         <section class="landing-band">
           <div class="section-title">
             <div>
-              <span class="eyebrow">Features</span>
-              <h3>Built for fast, disciplined scanning</h3>
+              <span class="eyebrow">Inside SignalForge</span>
+              <h3>Everything needed to review a setup clearly</h3>
             </div>
           </div>
           <div class="landing-cards five">
@@ -95,52 +114,86 @@
           </div>
         </section>
 
-        <section class="landing-band">
+        <section class="landing-band pricing-section" id="pricing">
           <div class="section-title">
             <div>
               <span class="eyebrow">Pricing</span>
-              <h3>Start small, scale when SignalForge earns the workflow</h3>
+              <h3>Choose the scanning capacity that fits your workflow</h3>
             </div>
+            <span>Secure checkout and subscription management by Stripe</span>
           </div>
           <div class="pricing-grid">
-            <article>
-              <span>Free</span>
-              <strong>10 / day</strong>
-              <p>Ten setup discoveries each day and three lifetime signal unlocks.</p>
+            <article class="pricing-plan">
+              <div class="pricing-heading">
+                <span>Free</span>
+                <strong>Start exploring</strong>
+              </div>
+              <p>For learning the workflow and reviewing occasional setups.</p>
+              <ul>
+                <li>10 setup discoveries per day</li>
+                <li>3 lifetime signal unlocks</li>
+                <li>Signal history and outcome tracking</li>
+              </ul>
+              <button class="secondary-action launch-auth-button" type="button">Start free</button>
             </article>
-            <article class="featured-price">
-              <span>Pro</span>
-              <strong>300 / month</strong>
-              <p>One hundred monthly unlocks with unused unlock credits rolling over.</p>
+            <article class="pricing-plan featured-price">
+              <div class="pricing-heading">
+                <span>Pro</span>
+                <strong>Active scanning</strong>
+              </div>
+              <p>For traders who scan multiple markets throughout the month.</p>
+              <ul>
+                <li>300 setup discoveries per month</li>
+                <li>100 signal unlocks per month</li>
+                <li>Unused unlock credits roll over</li>
+              </ul>
+              <button class="launch-auth-button" type="button">Choose Pro</button>
             </article>
-            <article>
-              <span>Elite</span>
-              <strong>1,000 / month</strong>
-              <p>Five hundred monthly unlocks with unused unlock credits rolling over.</p>
+            <article class="pricing-plan">
+              <div class="pricing-heading">
+                <span>Elite</span>
+                <strong>High-volume research</strong>
+              </div>
+              <p>For deeper market coverage, alerts, and frequent setup review.</p>
+              <ul>
+                <li>1,000 setup discoveries per month</li>
+                <li>500 signal unlocks per month</li>
+                <li>Unused unlock credits roll over</li>
+              </ul>
+              <button class="secondary-action launch-auth-button" type="button">Choose Elite</button>
             </article>
-            <article>
-              <span>Credit packs</span>
-              <strong>Pay as you go</strong>
-              <p>Top up unlock credits without a recurring subscription.</p>
-            </article>
+          </div>
+          <div class="credit-pack-note">
+            <div>
+              <strong>Need extra unlocks?</strong>
+              <span>One-time packs of 10, 50, or 100 unlock credits are available from Billing.</span>
+            </div>
+            <button class="secondary-action launch-auth-button" type="button">View credit packs</button>
           </div>
         </section>
 
         <section class="disclaimer-band">
-          <strong>Educational tool only. Not financial advice.</strong>
+          <div>
+            <span class="eyebrow">Risk disclosure</span>
+            <strong>Educational tool only, not financial advice.</strong>
+          </div>
+          <p>SignalForge does not provide personalized investment recommendations or guarantee outcomes. Trading involves risk, and past or simulated performance does not predict future results.</p>
         </section>
 
         <footer class="landing-footer">
-          <span>SignalForge</span>
-          <span>Live Coinbase candles · Rule-based signals · Demo MVP</span>
+          <div class="logo-row">
+            <img class="brand-logo small" src="/icons/android-chrome-192x192.png" alt="" />
+            <strong>SignalForge</strong>
+          </div>
+          <span>Live market data · Rule-based signals · Outcome tracking</span>
         </footer>
       </section>
 
       <section class="auth-screen hidden" id="auth-screen">
         <div class="brand-panel">
-          <div class="brand-mark">SF</div>
+          <img class="brand-logo auth-logo" src="/icons/android-chrome-192x192.png" alt="SignalForge" />
           <h1>SignalForge</h1>
-          <p>AI-ready market scanning for crypto and equities, built around clean signal workflows.</p>
+          <p>Rule-based market scanning for crypto and commodities, built around transparent setup and risk workflows.</p>
           <div class="market-ribbon">
             <span>BTC-USD</span>
             <strong>+2.4%</strong>
@@ -178,7 +231,7 @@
       <section class="dashboard hidden" id="dashboard">
         <aside class="sidebar">
           <div class="logo-row">
-            <div class="brand-mark small">SF</div>
+            <img class="brand-logo small" src="/icons/android-chrome-192x192.png" alt="" />
             <strong>SignalForge</strong>
           </div>
           <nav>

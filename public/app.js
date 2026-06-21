@@ -214,6 +214,12 @@ document.querySelector("#landing-login-button").addEventListener("click", () => 
   showAuth();
 });
 
+document.querySelectorAll(".launch-auth-button").forEach((button) => {
+  button.addEventListener("click", () => {
+    showAuth();
+  });
+});
+
 viewDemoButton.addEventListener("click", async () => {
   try {
     const { user } = await api.request("/api/auth/demo", { method: "POST" });
