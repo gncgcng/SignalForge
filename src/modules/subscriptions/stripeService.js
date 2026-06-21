@@ -1,11 +1,13 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { appConfig, getStripeMode } from "../../config/appConfig.js";
 import {
+  claimStripeWebhookEvent,
+  completeStripeWebhookEvent,
+  failStripeWebhookEvent,
   findUserById,
   findUserByStripeCustomer,
+  grantSubscriptionEntitlements,
   grantUnlockCredits,
-  hasStripeWebhookEvent,
-  recordStripeWebhookEvent,
   updateStripeCustomer,
   updateStripeSubscription
 } from "../../db/repositories.js";
@@ -109,21 +111,34 @@ export function verifyStripeSignature(rawBody, signatureHeader) {
 }
 
 export async function processStripeEvent(event) {
-  if (await hasStripeWebhookEvent(event.id)) {
+  if (!await claimStripeWebhookEvent(event.id, event.type)) {
     return { duplicate: true };
   }
 
-  const object = event.data?.object || {};
-  if (event.type === "checkout.session.completed") {
-    await processCheckoutCompleted(object);
-  } else if (event.type === "invoice.paid") {
-    await processInvoicePaid(object);
-  } else if (event.type.startsWith("customer.subscription.")) {
-    await processSubscriptionChanged(object, event.type);
-  }
+  try {
+    const object = event.data?.object || {};
+    if (event.type === "checkout.session.completed") {
+      await processCheckoutCompleted(object);
+    } else if (
+      event.type === "invoice.payment_succeeded" ||
+      event.type === "invoice.paid"
+    ) {
+      await processInvoicePaymentSucceeded(object);
+    } else if (event.type === "customer.subscription.deleted") {
+      await processSubscriptionChanged(object, event.type);
+    }
 
-  await recordStripeWebhookEvent(event.id, event.type);
-  return { duplicate: false };
+    await completeStripeWebhookEvent(event.id);
+    return { duplicate: false };
+  } catch (error) {
+    const safeError = sanitizeStripeError(error);
+    await failStripeWebhookEvent(event.id, safeError);
+    console.error(
+      `[stripe] Webhook processing failed event=${safeLogValue(event.id)} ` +
+      `type=${safeLogValue(event.type)} error=${safeError}`
+    );
+    throw error;
+  }
 }
 
 async function ensureStripeCustomer(user) {
@@ -174,35 +189,70 @@ async function processCheckoutCompleted(session) {
   if (!userId) return;
 
   if (session.customer) {
-    await updateStripeCustomer(userId, session.customer, getStripeMode());
+    await updateStripeCustomer(userId, stripeId(session.customer), getStripeMode());
   }
   if (session.metadata?.kind === "credit_pack") {
     const quantity = CREDIT_PACKS[session.metadata.pack]?.quantity || 0;
     if (quantity > 0) {
       await grantUnlockCredits(userId, quantity, `checkout:${session.id}`, "credit_pack");
     }
+    return;
+  }
+
+  const subscriptionId = stripeId(session.subscription);
+  if (session.metadata?.kind === "subscription" && subscriptionId) {
+    const subscription = await stripeGet(`/subscriptions/${encodeURIComponent(subscriptionId)}`);
+    await processSubscriptionChanged(subscription, "customer.subscription.created");
   }
 }
 
-async function processInvoicePaid(invoice) {
-  const user = await findUserByStripeCustomer(invoice.customer, getStripeMode());
+async function processInvoicePaymentSucceeded(invoice) {
+  const customerId = stripeId(invoice.customer);
+  const subscriptionId = getInvoiceSubscriptionId(invoice);
+  let subscription = null;
+
+  if (subscriptionId) {
+    subscription = await stripeGet(`/subscriptions/${encodeURIComponent(subscriptionId)}`);
+  }
+
+  const userId = subscription?.metadata?.user_id || invoice.metadata?.user_id;
+  const user = userId
+    ? await findUserById(userId)
+    : await findUserByStripeCustomer(customerId, getStripeMode());
   if (!user) return;
-  const priceId = invoice.lines?.data?.[0]?.price?.id;
+
+  const priceId = getInvoicePriceId(invoice) ||
+    subscription?.items?.data?.[0]?.price?.id;
   const planId = planFromPrice(priceId);
   const plan = BILLING_PLANS[planId];
   if (!plan || plan.monthlyUnlockGrant <= 0) return;
 
-  const periodStart = invoice.lines?.data?.find((line) => line.price?.id === priceId)
-    ?.period?.start;
-  const grantReference = invoice.subscription && periodStart
-    ? `subscription:${invoice.subscription}:${planId}:${periodStart}`
+  const period = getInvoicePeriod(invoice, priceId);
+  const subscriptionPeriod = getSubscriptionPeriod(subscription);
+  await updateStripeSubscription({
+    userId: user.id,
+    customerId,
+    subscriptionId,
+    status: subscription?.status || "active",
+    plan: planId,
+    priceId,
+    periodStart: fromUnix(period.start || subscriptionPeriod.start),
+    periodEnd: fromUnix(period.end || subscriptionPeriod.end),
+    stripeMode: getStripeMode(),
+    cancelAtPeriodEnd: Boolean(subscription?.cancel_at_period_end)
+  });
+
+  const periodStart = period.start || subscriptionPeriod.start;
+  const grantReference = subscriptionId && periodStart
+    ? `subscription:${subscriptionId}:${planId}:${periodStart}`
     : `invoice:${invoice.id}`;
-  await grantUnlockCredits(
-    user.id,
-    plan.monthlyUnlockGrant,
-    grantReference,
-    "subscription_renewal"
-  );
+  await grantSubscriptionEntitlements({
+    userId: user.id,
+    plan: planId,
+    scanCredits: plan.discoveryLimit,
+    unlockCredits: plan.monthlyUnlockGrant,
+    externalReference: grantReference
+  });
 }
 
 async function processSubscriptionChanged(subscription, eventType) {
@@ -215,16 +265,17 @@ async function processSubscriptionChanged(subscription, eventType) {
   const active = !eventType.endsWith(".deleted") &&
     ["active", "trialing", "past_due"].includes(subscription.status);
   const plan = active ? planFromPrice(priceId) : "free";
+  const period = getSubscriptionPeriod(subscription);
 
   await updateStripeSubscription({
     userId: user.id,
-    customerId: subscription.customer,
+    customerId: stripeId(subscription.customer),
     subscriptionId: eventType.endsWith(".deleted") ? null : subscription.id,
     status: eventType.endsWith(".deleted") ? "canceled" : subscription.status,
     plan: normalizePlan(plan),
     priceId: active ? priceId : null,
-    periodStart: fromUnix(subscription.current_period_start),
-    periodEnd: fromUnix(subscription.current_period_end),
+    periodStart: fromUnix(period.start),
+    periodEnd: fromUnix(period.end),
     stripeMode: getStripeMode(),
     cancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end)
   });
@@ -234,6 +285,17 @@ function planFromPrice(priceId) {
   if (priceId === appConfig.stripe.prices.elite) return "elite";
   if (priceId === appConfig.stripe.prices.pro) return "pro";
   return "free";
+}
+
+export function getPlanEntitlementsForPrice(priceId) {
+  const planId = planFromPrice(priceId);
+  const plan = BILLING_PLANS[planId];
+  if (!plan || planId === "free") return null;
+  return {
+    plan: planId,
+    scanCredits: plan.discoveryLimit,
+    unlockCredits: plan.monthlyUnlockGrant
+  };
 }
 
 async function stripeRequest(path, params) {
@@ -246,6 +308,21 @@ async function stripeRequest(path, params) {
     body: new URLSearchParams(
       Object.entries(params).filter(([, value]) => value !== undefined)
     )
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    const error = new Error(payload.error?.message || "Stripe request failed.");
+    error.statusCode = response.status >= 500 ? 502 : 400;
+    throw error;
+  }
+  return payload;
+}
+
+async function stripeGet(path) {
+  const response = await fetch(`${stripeApiBase}${path}`, {
+    headers: {
+      authorization: `Bearer ${appConfig.stripe.secretKey}`
+    }
   });
   const payload = await response.json();
   if (!response.ok) {
@@ -288,4 +365,50 @@ function validationError(message) {
 
 function fromUnix(value) {
   return value ? new Date(Number(value) * 1000) : null;
+}
+
+function getInvoiceSubscriptionId(invoice) {
+  return stripeId(
+    invoice.subscription ||
+    invoice.parent?.subscription_details?.subscription
+  );
+}
+
+function getInvoicePriceId(invoice) {
+  const line = invoice.lines?.data?.find((item) =>
+    item.price?.id || item.pricing?.price_details?.price
+  );
+  return stripeId(line?.price) || stripeId(line?.pricing?.price_details?.price);
+}
+
+function getInvoicePeriod(invoice, priceId) {
+  const line = invoice.lines?.data?.find((item) => {
+    const itemPrice = stripeId(item.price) || stripeId(item.pricing?.price_details?.price);
+    return !priceId || itemPrice === priceId;
+  });
+  return line?.period || {};
+}
+
+function getSubscriptionPeriod(subscription) {
+  const item = subscription?.items?.data?.[0];
+  return {
+    start: subscription?.current_period_start || item?.current_period_start,
+    end: subscription?.current_period_end || item?.current_period_end
+  };
+}
+
+function stripeId(value) {
+  if (!value) return null;
+  return typeof value === "string" ? value : value.id || null;
+}
+
+function sanitizeStripeError(error) {
+  return String(error?.message || "Stripe webhook processing failed.")
+    .replace(/\b(?:sk|rk)_(?:test|live)_[A-Za-z0-9_]+\b/g, "[redacted-key]")
+    .replace(/\bwhsec_[A-Za-z0-9_]+\b/g, "[redacted-webhook-secret]")
+    .slice(0, 500);
+}
+
+function safeLogValue(value) {
+  return String(value || "unknown").replace(/[^A-Za-z0-9_.:-]/g, "").slice(0, 120);
 }

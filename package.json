@@ -13,6 +13,7 @@
     "test:stripe-billing": "node scripts/stripe-billing-test.js",
     "test:stripe-config": "node scripts/stripe-config-test.js",
     "test:stripe-mode": "node scripts/stripe-mode-test.js",
+    "test:stripe-webhooks": "node scripts/stripe-webhook-test.js",
     "test:billing-migration": "node scripts/billing-migration-test.js",
     "test:database-config": "node scripts/database-config-test.js",
     "test:commodities-enabled": "node scripts/commodities-enabled-test.js",

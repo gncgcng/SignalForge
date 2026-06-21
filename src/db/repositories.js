@@ -430,21 +430,73 @@ export async function grantUnlockCredits(userId, quantity, externalReference, so
   });
 }
 
-export async function recordStripeWebhookEvent(eventId, eventType) {
+export async function grantSubscriptionEntitlements({
+  userId,
+  plan,
+  scanCredits,
+  unlockCredits,
+  externalReference
+}) {
+  return transaction(async (client) => {
+    const grant = await client.query(`
+      INSERT INTO billing_entitlement_grants (
+        id, user_id, external_reference, plan, scan_credits, unlock_credits
+      )
+      VALUES ($1, $2, $3, $4, $5, $6)
+      ON CONFLICT (external_reference) DO NOTHING
+      RETURNING id
+    `, [
+      createId("ent"),
+      userId,
+      externalReference,
+      plan,
+      scanCredits,
+      unlockCredits
+    ]);
+
+    if (!grant.rows[0]) return false;
+
+    await client.query(`
+      UPDATE credit_balances
+      SET unlock_credits_balance = unlock_credits_balance + $2,
+        updated_at = now()
+      WHERE user_id = $1
+    `, [userId, unlockCredits]);
+    return true;
+  });
+}
+
+export async function claimStripeWebhookEvent(eventId, eventType) {
   const result = await query(`
-    INSERT INTO stripe_webhook_events (event_id, event_type)
-    VALUES ($1, $2)
-    ON CONFLICT (event_id) DO NOTHING
+    INSERT INTO stripe_webhook_events (
+      event_id, event_type, status, attempts, processed_at
+    )
+    VALUES ($1, $2, 'processing', 1, now())
+    ON CONFLICT (event_id) DO UPDATE
+    SET status = 'processing',
+      attempts = stripe_webhook_events.attempts + 1,
+      last_error = NULL,
+      processed_at = now()
+    WHERE stripe_webhook_events.status = 'failed'
     RETURNING event_id
   `, [eventId, eventType]);
   return Boolean(result.rows[0]);
 }
 
-export async function hasStripeWebhookEvent(eventId) {
-  const result = await query(`
-    SELECT 1 FROM stripe_webhook_events WHERE event_id = $1
+export async function completeStripeWebhookEvent(eventId) {
+  await query(`
+    UPDATE stripe_webhook_events
+    SET status = 'processed', last_error = NULL, processed_at = now()
+    WHERE event_id = $1
   `, [eventId]);
-  return Boolean(result.rows[0]);
+}
+
+export async function failStripeWebhookEvent(eventId, safeError) {
+  await query(`
+    UPDATE stripe_webhook_events
+    SET status = 'failed', last_error = $2, processed_at = now()
+    WHERE event_id = $1
+  `, [eventId, safeError]);
 }
 
 export async function listAbuseReviewDashboard() {

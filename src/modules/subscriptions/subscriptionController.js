@@ -17,7 +17,17 @@ export async function handleSubscriptionRoutes(req, res, pathname) {
         ...(await processStripeEvent(event))
       });
     } catch (error) {
-      return sendError(res, error.statusCode || 400, error.message);
+      console.error(
+        `[stripe] Webhook request failed status=${Number(error.statusCode || 400)}`
+      );
+      const statusCode = error.statusCode || 400;
+      return sendError(
+        res,
+        statusCode,
+        statusCode >= 500
+          ? "Stripe webhook processing failed."
+          : "Stripe webhook rejected."
+      );
     }
   }
 

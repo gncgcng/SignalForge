@@ -62,7 +62,7 @@ const result = {
     stripeService.includes("user.subscription.providerSubscriptionId = null"),
   webhookLookupIsModeScoped:
     repositories.includes("provider_customer_id = $1 AND stripe_mode = $2") &&
-    stripeService.includes("findUserByStripeCustomer(invoice.customer, getStripeMode())"),
+    stripeService.includes("findUserByStripeCustomer(customerId, getStripeMode())"),
   mismatchCreatesNewCustomer:
     stripeService.includes("storedMode !== currentMode") &&
     stripeService.includes("creating a new customer") &&

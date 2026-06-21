@@ -156,6 +156,7 @@ let marketRequestId = 0;
 let signalRefreshTimer = null;
 let marketLoadTimer = null;
 let telegramConnectionTimer = null;
+let billingRefreshTimer = null;
 
 const api = {
   async request(path, options = {}) {
@@ -950,6 +951,11 @@ function clearClientAuthState() {
     clearInterval(telegramConnectionTimer);
     telegramConnectionTimer = null;
   }
+
+  if (billingRefreshTimer) {
+    clearTimeout(billingRefreshTimer);
+    billingRefreshTimer = null;
+  }
 }
 
 async function bootDashboard() {
@@ -1639,9 +1645,51 @@ function renderCheckoutReturnStatus() {
   const checkoutStatus = new URLSearchParams(hashQuery).get("checkout");
   if (checkoutStatus === "success") {
     billingStatus.textContent = "Purchase completed. Billing updates may take a moment.";
+    refreshBillingAfterCheckout();
   } else if (checkoutStatus === "cancelled") {
     billingStatus.textContent = "Checkout was cancelled. No charge was made.";
   }
+}
+
+async function refreshBillingAfterCheckout() {
+  const baseline = billingSnapshot();
+
+  for (let attempt = 1; attempt <= 8; attempt += 1) {
+    await waitForBillingRefresh(1500);
+
+    try {
+      await loadSubscription();
+      if (billingSnapshot() !== baseline) {
+        billingStatus.textContent = "Purchase confirmed. Billing credits are updated.";
+        history.replaceState({}, "", `${location.pathname}#billing`);
+        return;
+      }
+      billingStatus.textContent = `Purchase received. Waiting for Stripe confirmation (${attempt}/8)...`;
+    } catch {
+      billingStatus.textContent = "Purchase received. Retrying billing refresh...";
+    }
+  }
+
+  billingStatus.textContent = "Purchase received. Billing will update when Stripe confirms payment.";
+  history.replaceState({}, "", `${location.pathname}#billing`);
+}
+
+function billingSnapshot() {
+  return JSON.stringify({
+    plan: state.subscription?.plan,
+    status: state.subscription?.status,
+    unlocks: state.subscription?.unlockCreditsRemaining,
+    periodStart: state.subscription?.currentPeriodStart
+  });
+}
+
+function waitForBillingRefresh(delayMs) {
+  return new Promise((resolve) => {
+    billingRefreshTimer = setTimeout(() => {
+      billingRefreshTimer = null;
+      resolve();
+    }, delayMs);
+  });
 }
 
 async function startCheckout(button, payload) {

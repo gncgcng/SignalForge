@@ -70,7 +70,7 @@ const result = {
     "unlock_credits_balance = unlock_credits_balance + $2"
   ),
   webhookIdempotency: migration.includes("external_reference text NOT NULL UNIQUE") &&
-    stripe.includes("hasStripeWebhookEvent") &&
+    stripe.includes("claimStripeWebhookEvent") &&
     stripe.includes("invoice:${invoice.id}"),
   signedWebhooks: stripe.includes("createHmac(\"sha256\"") &&
     stripe.includes("timingSafeEqual") &&
