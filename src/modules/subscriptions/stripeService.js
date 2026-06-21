@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { appConfig } from "../../config/appConfig.js";
+import { appConfig, getStripeMode } from "../../config/appConfig.js";
 import {
   findUserById,
   findUserByStripeCustomer,
@@ -21,14 +21,18 @@ export async function createCheckout(user, { plan, pack }) {
   if ((!planConfig || plan === "free") && !packConfig) {
     throw validationError("Choose a valid subscription plan or credit pack.");
   }
-  if (planConfig && user.subscription?.providerSubscriptionId) {
+  const customerId = await ensureStripeCustomer(user);
+  if (
+    planConfig &&
+    user.subscription?.providerSubscriptionId &&
+    user.subscription?.stripeMode === getStripeMode()
+  ) {
     return {
       ...(await createCustomerPortal(user)),
       mode: "portal"
     };
   }
 
-  const customerId = await ensureStripeCustomer(user);
   const priceId = planConfig
     ? appConfig.stripe.prices[plan]
     : appConfig.stripe.prices[pack];
@@ -64,10 +68,7 @@ export async function createCheckout(user, { plan, pack }) {
 
 export async function createCustomerPortal(user) {
   assertStripeCheckoutConfigured(user);
-  const customerId = user.subscription?.providerCustomerId;
-  if (!customerId) {
-    throw validationError("No Stripe billing account is connected yet.");
-  }
+  const customerId = await ensureStripeCustomer(user);
   const session = await stripeRequest("/billing_portal/sessions", {
     customer: customerId,
     return_url: appConfig.stripe.portalReturnUrl
@@ -124,17 +125,46 @@ export async function processStripeEvent(event) {
 }
 
 async function ensureStripeCustomer(user) {
-  if (user.subscription?.providerCustomerId) {
+  const currentMode = getStripeMode();
+  const storedMode = user.subscription?.stripeMode || null;
+  const storedCustomerId = user.subscription?.providerCustomerId || null;
+
+  if (shouldReuseStripeCustomer(storedCustomerId, storedMode, currentMode)) {
     return user.subscription.providerCustomerId;
   }
+  const modeMismatch = Boolean(storedCustomerId && storedMode !== currentMode);
+  if (modeMismatch) {
+    console.warn(
+      `[stripe] Customer mode mismatch for user ${user.id}: ` +
+      `stored=${storedMode || "unknown"} current=${currentMode}; creating a new customer.`
+    );
+  }
+
   const customer = await stripeRequest("/customers", {
     email: user.email,
     name: user.name,
-    "metadata[user_id]": user.id
+    "metadata[user_id]": user.id,
+    "metadata[stripe_mode]": currentMode
   });
-  await updateStripeCustomer(user.id, customer.id);
+  await updateStripeCustomer(user.id, customer.id, currentMode, modeMismatch);
   user.subscription.providerCustomerId = customer.id;
+  user.subscription.stripeMode = currentMode;
+  if (modeMismatch) {
+    user.subscription.providerSubscriptionId = null;
+    user.subscription.priceId = null;
+    user.subscription.currentPeriodStart = null;
+    user.subscription.currentPeriodEnd = null;
+    user.subscription.cancelAtPeriodEnd = false;
+  }
   return customer.id;
+}
+
+export function shouldReuseStripeCustomer(customerId, storedMode, currentMode) {
+  return Boolean(
+    customerId &&
+    (currentMode === "test" || currentMode === "live") &&
+    storedMode === currentMode
+  );
 }
 
 async function processCheckoutCompleted(session) {
@@ -142,7 +172,7 @@ async function processCheckoutCompleted(session) {
   if (!userId) return;
 
   if (session.customer) {
-    await updateStripeCustomer(userId, session.customer);
+    await updateStripeCustomer(userId, session.customer, getStripeMode());
   }
   if (session.metadata?.kind === "credit_pack") {
     const quantity = CREDIT_PACKS[session.metadata.pack]?.quantity || 0;
@@ -153,7 +183,7 @@ async function processCheckoutCompleted(session) {
 }
 
 async function processInvoicePaid(invoice) {
-  const user = await findUserByStripeCustomer(invoice.customer);
+  const user = await findUserByStripeCustomer(invoice.customer, getStripeMode());
   if (!user) return;
   const priceId = invoice.lines?.data?.[0]?.price?.id;
   const planId = planFromPrice(priceId);
@@ -176,7 +206,7 @@ async function processInvoicePaid(invoice) {
 async function processSubscriptionChanged(subscription, eventType) {
   const user = subscription.metadata?.user_id
     ? await findUserById(subscription.metadata.user_id)
-    : await findUserByStripeCustomer(subscription.customer);
+    : await findUserByStripeCustomer(subscription.customer, getStripeMode());
   if (!user) return;
 
   const priceId = subscription.items?.data?.[0]?.price?.id || null;
@@ -193,6 +223,7 @@ async function processSubscriptionChanged(subscription, eventType) {
     priceId: active ? priceId : null,
     periodStart: fromUnix(subscription.current_period_start),
     periodEnd: fromUnix(subscription.current_period_end),
+    stripeMode: getStripeMode(),
     cancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end)
   });
 }

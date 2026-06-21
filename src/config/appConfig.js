@@ -148,14 +148,14 @@ export function getStripeConfigurationStatus() {
     missing,
     checkoutConfigured: presence.STRIPE_SECRET_KEY,
     webhookConfigured: presence.STRIPE_WEBHOOK_SECRET,
-    mode: secretKey.startsWith("sk_test_")
-      ? "test"
-      : secretKey.startsWith("sk_live_")
-        ? "live"
-        : secretKey
-          ? "unknown"
-          : "unconfigured"
+    mode: getStripeMode(secretKey)
   };
+}
+
+export function getStripeMode(secretKey = appConfig.stripe.secretKey) {
+  if (secretKey.startsWith("sk_test_")) return "test";
+  if (secretKey.startsWith("sk_live_")) return "live";
+  return secretKey ? "unknown" : "unconfigured";
 }
 
 export function logStripeConfiguration() {

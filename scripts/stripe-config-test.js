@@ -55,6 +55,7 @@ try {
     name: "Test User",
     subscription: {
       providerCustomerId: "cus_test_signalforge",
+      stripeMode: "test",
       providerSubscriptionId: null
     }
   }, { pack: "pack10" });

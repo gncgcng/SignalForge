@@ -1,4 +1,8 @@
-import { appConfig, getStripeConfigurationStatus } from "../../config/appConfig.js";
+import {
+  appConfig,
+  getStripeConfigurationStatus,
+  getStripeMode
+} from "../../config/appConfig.js";
 import { consumeDiscoveryCredits } from "../../db/repositories.js";
 
 export const BILLING_PLANS = {
@@ -39,6 +43,7 @@ export function ensureTrialSubscription(user) {
     status: "trialing",
     provider: "stripe",
     providerCustomerId: null,
+    stripeMode: null,
     providerSubscriptionId: null,
     currentPeriodStart: null,
     currentPeriodEnd: null,
@@ -63,6 +68,20 @@ export function getSubscriptionSummary(user) {
   const unlockBalance = getUnlockBalance(user);
   const showStripeDiagnostics = !appConfig.isProduction ||
     appConfig.adminEmails.has(String(user.email || "").toLowerCase());
+  const currentStripeMode = getStripeMode();
+  const customerModeMismatch = Boolean(
+    user.subscription.providerCustomerId &&
+    user.subscription.stripeMode !== currentStripeMode
+  );
+  const stripeConfiguration = showStripeDiagnostics
+    ? {
+      ...getStripeConfigurationStatus(),
+      customerModeWarning: customerModeMismatch
+        ? `Stored Stripe customer mode is ${user.subscription.stripeMode || "unknown"}; ` +
+          `current key mode is ${currentStripeMode}. A new customer will be created automatically.`
+        : null
+    }
+    : null;
 
   return {
     plan: planId,
@@ -92,9 +111,11 @@ export function getSubscriptionSummary(user) {
     stripeReady: true,
     checkoutConfigured: Boolean(appConfig.stripe.secretKey),
     customerPortalAvailable: Boolean(
-      appConfig.stripe.secretKey && user.subscription.providerCustomerId
+      appConfig.stripe.secretKey &&
+      user.subscription.providerCustomerId &&
+      !customerModeMismatch
     ),
-    stripeConfiguration: showStripeDiagnostics ? getStripeConfigurationStatus() : null,
+    stripeConfiguration,
     plans: Object.values(BILLING_PLANS),
     creditPacks: Object.values(CREDIT_PACKS)
   };

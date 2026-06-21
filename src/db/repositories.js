@@ -6,7 +6,7 @@ export async function findUserByEmail(email) {
   const result = await query(`
     SELECT u.*, s.status AS subscription_status, s.provider, s.provider_customer_id,
       s.provider_subscription_id, s.price_id, s.current_period_start, s.current_period_end,
-      s.cancel_at_period_end, c.free_signal_allowance, c.paid_credits,
+      s.cancel_at_period_end, s.stripe_mode, c.free_signal_allowance, c.paid_credits,
       c.unlock_credits_balance, c.lifetime_unlocks_used,
       COALESCE((
         SELECT SUM(d.quantity) FROM setup_discovery_usage d
@@ -30,7 +30,7 @@ export async function findUserById(id) {
   const result = await query(`
     SELECT u.*, s.status AS subscription_status, s.provider, s.provider_customer_id,
       s.provider_subscription_id, s.price_id, s.current_period_start, s.current_period_end,
-      s.cancel_at_period_end, c.free_signal_allowance, c.paid_credits,
+      s.cancel_at_period_end, s.stripe_mode, c.free_signal_allowance, c.paid_credits,
       c.unlock_credits_balance, c.lifetime_unlocks_used,
       COALESCE((
         SELECT SUM(d.quantity) FROM setup_discovery_usage d
@@ -340,18 +340,27 @@ export async function consumeDiscoveryCredits(userId, {
   });
 }
 
-export async function updateStripeCustomer(userId, customerId) {
+export async function updateStripeCustomer(userId, customerId, stripeMode, resetModeBoundData = false) {
   await query(`
     UPDATE subscriptions
-    SET provider_customer_id = $2, updated_at = now()
+    SET provider_customer_id = $2,
+      stripe_mode = $3,
+      provider_subscription_id = CASE WHEN $4 THEN NULL ELSE provider_subscription_id END,
+      price_id = CASE WHEN $4 THEN NULL ELSE price_id END,
+      current_period_start = CASE WHEN $4 THEN NULL ELSE current_period_start END,
+      current_period_end = CASE WHEN $4 THEN NULL ELSE current_period_end END,
+      cancel_at_period_end = CASE WHEN $4 THEN false ELSE cancel_at_period_end END,
+      updated_at = now()
     WHERE user_id = $1
-  `, [userId, customerId]);
+  `, [userId, customerId, stripeMode, resetModeBoundData]);
 }
 
-export async function findUserByStripeCustomer(customerId) {
+export async function findUserByStripeCustomer(customerId, stripeMode) {
   const result = await query(`
-    SELECT user_id FROM subscriptions WHERE provider_customer_id = $1
-  `, [customerId]);
+    SELECT user_id
+    FROM subscriptions
+    WHERE provider_customer_id = $1 AND stripe_mode = $2
+  `, [customerId, stripeMode]);
   return result.rows[0] ? findUserById(result.rows[0].user_id) : null;
 }
 
@@ -364,6 +373,7 @@ export async function updateStripeSubscription({
   priceId,
   periodStart,
   periodEnd,
+  stripeMode,
   cancelAtPeriodEnd = false
 }) {
   await transaction(async (client) => {
@@ -379,6 +389,7 @@ export async function updateStripeSubscription({
         current_period_start = $6,
         current_period_end = $7,
         cancel_at_period_end = $8,
+        stripe_mode = $9,
         updated_at = now()
       WHERE user_id = $1
     `, [
@@ -389,7 +400,8 @@ export async function updateStripeSubscription({
       priceId,
       periodStart,
       periodEnd,
-      cancelAtPeriodEnd
+      cancelAtPeriodEnd,
+      stripeMode
     ]);
   });
 }
@@ -1424,6 +1436,7 @@ function mapUser(row) {
       status: row.subscription_status || "trialing",
       provider: row.provider || "stripe",
       providerCustomerId: row.provider_customer_id,
+      stripeMode: row.stripe_mode,
       providerSubscriptionId: row.provider_subscription_id,
       priceId: row.price_id,
       currentPeriodStart: row.current_period_start,

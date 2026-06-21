@@ -1593,7 +1593,9 @@ function renderBilling() {
   if (subscription.stripeConfiguration) {
     const config = subscription.stripeConfiguration;
     const checkoutMissing = config.missing.filter((key) => key !== "STRIPE_WEBHOOK_SECRET");
-    billingStatus.textContent = checkoutMissing.length
+    billingStatus.textContent = config.customerModeWarning
+      ? config.customerModeWarning
+      : checkoutMissing.length
       ? `Missing Stripe configuration: ${checkoutMissing.join(", ")}`
       : config.webhookConfigured
         ? `Stripe ${config.mode} mode is configured.`
