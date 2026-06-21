@@ -14,8 +14,11 @@ WHERE plan = 'trial';
 
 UPDATE credit_balances c
 SET unlock_credits_balance = GREATEST(
-  unlock_credits_balance,
-  paid_credits + GREATEST(0, free_signal_allowance - trial_signals_used)
+  c.unlock_credits_balance,
+  c.paid_credits + GREATEST(
+    0,
+    c.free_signal_allowance - c.trial_signals_used
+  )
 )
 FROM users u
 WHERE u.id = c.user_id
