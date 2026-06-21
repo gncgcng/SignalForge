@@ -1,4 +1,4 @@
-const CACHE_VERSION = "signalforge-static-v1";
+const CACHE_VERSION = "signalforge-static-v3";
 const OFFLINE_URL = "/offline.html";
 const STATIC_ASSETS = [
   "/",
@@ -7,9 +7,11 @@ const STATIC_ASSETS = [
   "/app.js",
   "/manifest.json",
   OFFLINE_URL,
-  "/icons/icon-192.png",
-  "/icons/icon-512.png",
-  "/icons/icon-maskable-512.png",
+  "/icons/favicon-16x16.png",
+  "/icons/favicon-32x32.png",
+  "/icons/android-chrome-192x192.png",
+  "/icons/android-chrome-512x512.png",
+  "/icons/maskable-icon-512x512.png",
   "/icons/apple-touch-icon.png"
 ];
 
@@ -76,8 +78,8 @@ self.addEventListener("push", (event) => {
     payload.title || "SignalForge",
     {
       body: payload.body || "A new market alert is available.",
-      icon: "/icons/icon-192.png",
-      badge: "/icons/icon-192.png",
+      icon: "/icons/android-chrome-192x192.png",
+      badge: "/icons/android-chrome-192x192.png",
       data: { url: payload.url || "/#alerts" },
       tag: payload.tag || "signalforge-alert"
     }

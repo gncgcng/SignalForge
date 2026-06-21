@@ -14,9 +14,11 @@ const app = readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
 const styles = readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
 const server = readFileSync(new URL("../src/server.js", import.meta.url), "utf8");
 
-const icon192 = readPng("../public/icons/icon-192.png");
-const icon512 = readPng("../public/icons/icon-512.png");
-const maskable512 = readPng("../public/icons/icon-maskable-512.png");
+const favicon16 = readPng("../public/icons/favicon-16x16.png");
+const favicon32 = readPng("../public/icons/favicon-32x32.png");
+const icon192 = readPng("../public/icons/android-chrome-192x192.png");
+const icon512 = readPng("../public/icons/android-chrome-512x512.png");
+const maskable512 = readPng("../public/icons/maskable-icon-512x512.png");
 const apple180 = readPng("../public/icons/apple-touch-icon.png");
 
 const result = {
@@ -25,6 +27,11 @@ const result = {
     manifest.start_url === "/?source=pwa" &&
     manifest.scope === "/" &&
     manifest.display === "standalone" &&
+    manifest.theme_color === "#000000" &&
+    manifest.background_color === "#000000" &&
+    manifest.icons.some((icon) => icon.sizes === "16x16") &&
+    manifest.icons.some((icon) => icon.sizes === "32x32") &&
+    manifest.icons.some((icon) => icon.sizes === "180x180") &&
     manifest.icons.some((icon) => icon.sizes === "192x192") &&
     manifest.icons.some((icon) => icon.sizes === "512x512") &&
     manifest.icons.some((icon) => icon.purpose === "maskable"),
@@ -34,6 +41,8 @@ const result = {
     html.includes('apple-mobile-web-app-capable') &&
     html.includes('name="theme-color"'),
   validRasterIcons:
+    favicon16.width === 16 && favicon16.height === 16 &&
+    favicon32.width === 32 && favicon32.height === 32 &&
     icon192.width === 192 && icon192.height === 192 &&
     icon512.width === 512 && icon512.height === 512 &&
     maskable512.width === 512 && maskable512.height === 512 &&
