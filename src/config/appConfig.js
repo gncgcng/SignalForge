@@ -53,6 +53,22 @@ export const appConfig = {
   freeSignalAllowance: 3,
   adminEmails,
   testerCreditAllowance: 1000000,
+  abuseProtection: {
+    hashSecret: process.env.ABUSE_HASH_SECRET || process.env.DATABASE_URL || "signalforge-local",
+    signupAttemptsPerHour: Number(process.env.SIGNUP_ATTEMPTS_PER_HOUR || 10),
+    accountsPerDay: Number(process.env.ACCOUNTS_PER_IP_PER_DAY || 3),
+    accountsPerWeek: Number(process.env.ACCOUNTS_PER_IP_PER_WEEK || 5),
+    verificationTokenHours: Number(process.env.EMAIL_VERIFICATION_TOKEN_HOURS || 24),
+    publicAppUrl: process.env.PUBLIC_APP_URL || `http://localhost:${Number(process.env.PORT || 4173)}`,
+    resendApiKey: process.env.RESEND_API_KEY || "",
+    emailFrom: process.env.EMAIL_FROM || "SignalForge <onboarding@resend.dev>",
+    disposableEmailDomains: new Set(
+      (process.env.DISPOSABLE_EMAIL_DOMAINS || "")
+        .split(",")
+        .map((domain) => domain.trim().toLowerCase())
+        .filter(Boolean)
+    )
+  },
   supportedTimeframes: ["5m", "15m", "1h", "4h"],
   marketData: {
     provider: "coinbase-exchange",

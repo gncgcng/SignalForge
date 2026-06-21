@@ -28,12 +28,40 @@ export async function findUserById(id) {
   return result.rows[0] ? mapUser(result.rows[0]) : null;
 }
 
-export async function createUser({ id, name, email, password }) {
+export async function createUser({
+  id,
+  name,
+  email,
+  password,
+  emailVerifiedAt = null,
+  freeSignalAllowance = 0,
+  signupIpHash = null,
+  deviceFingerprintHash = null,
+  abuseScore = 0,
+  abuseFlags = [],
+  abuseReviewStatus = "clear"
+}) {
   await transaction(async (client) => {
     await client.query(`
-      INSERT INTO users (id, name, email, password_salt, password_hash, plan)
-      VALUES ($1, $2, $3, $4, $5, 'trial')
-    `, [id, name, email, password.salt, password.hash]);
+      INSERT INTO users (
+        id, name, email, password_salt, password_hash, plan, email_verified_at,
+        signup_ip_hash, device_fingerprint_hash, abuse_score, abuse_flags,
+        abuse_review_status
+      )
+      VALUES ($1,$2,$3,$4,$5,'trial',$6,$7,$8,$9,$10,$11)
+    `, [
+      id,
+      name,
+      email,
+      password.salt,
+      password.hash,
+      emailVerifiedAt,
+      signupIpHash,
+      deviceFingerprintHash,
+      abuseScore,
+      JSON.stringify(abuseFlags),
+      abuseReviewStatus
+    ]);
 
     await client.query(`
       INSERT INTO subscriptions (id, user_id, status, provider)
@@ -44,6 +72,11 @@ export async function createUser({ id, name, email, password }) {
       INSERT INTO credit_balances (user_id, trial_signals_used, free_signal_allowance, paid_credits)
       VALUES ($1, 0, $2, 0)
     `, [id, appConfig.freeSignalAllowance]);
+    await client.query(`
+      UPDATE credit_balances
+      SET free_signal_allowance = $2
+      WHERE user_id = $1
+    `, [id, freeSignalAllowance]);
   });
 
   return findUserById(id);
@@ -77,14 +110,218 @@ export async function deleteExpiredSessions() {
 export async function incrementTrialSignalsUsed(userId) {
   await transaction(async (client) => {
     await client.query(`
-      UPDATE users SET trial_signals_used = trial_signals_used + 1, updated_at = now()
+      UPDATE users
+      SET trial_signals_used = trial_signals_used + 1,
+        trial_used = true,
+        updated_at = now()
       WHERE id = $1
     `, [userId]);
     await client.query(`
       UPDATE credit_balances SET trial_signals_used = trial_signals_used + 1, updated_at = now()
       WHERE user_id = $1
     `, [userId]);
+    await client.query(`
+      UPDATE device_trial_history d
+      SET trial_used = true, trial_used_at = COALESCE(trial_used_at, now()), updated_at = now()
+      FROM users u
+      WHERE u.id = $1
+        AND u.device_fingerprint_hash = d.device_fingerprint_hash
+    `, [userId]);
   });
+}
+
+export async function recordSignupAttempt(attempt) {
+  await query(`
+    INSERT INTO signup_attempts (
+      id, ip_hash, device_fingerprint_hash, email_domain,
+      disposable_email, successful, reason
+    )
+    VALUES ($1,$2,$3,$4,$5,$6,$7)
+  `, [
+    createId("signup"),
+    attempt.ipHash,
+    attempt.deviceHash,
+    attempt.emailDomain,
+    attempt.disposableEmail,
+    attempt.successful,
+    attempt.reason || null
+  ]);
+}
+
+export async function getSignupVelocity(ipHash) {
+  const result = await query(`
+    SELECT
+      COUNT(*) FILTER (WHERE created_at >= now() - interval '1 hour') AS attempts_last_hour,
+      COUNT(*) FILTER (
+        WHERE successful = true AND created_at >= now() - interval '1 day'
+      ) AS accounts_last_day,
+      COUNT(*) FILTER (
+        WHERE successful = true AND created_at >= now() - interval '7 days'
+      ) AS accounts_last_week
+    FROM signup_attempts
+    WHERE ip_hash = $1
+      AND created_at >= now() - interval '7 days'
+  `, [ipHash]);
+  const row = result.rows[0] || {};
+  return {
+    attemptsLastHour: Number(row.attempts_last_hour || 0),
+    accountsLastDay: Number(row.accounts_last_day || 0),
+    accountsLastWeek: Number(row.accounts_last_week || 0)
+  };
+}
+
+export async function getDeviceTrialHistory(deviceHash) {
+  if (!deviceHash) return null;
+  const result = await query(`
+    SELECT *
+    FROM device_trial_history
+    WHERE device_fingerprint_hash = $1
+  `, [deviceHash]);
+  return result.rows[0] || null;
+}
+
+export async function createEmailVerificationToken(userId, tokenHash, expiresAt) {
+  await transaction(async (client) => {
+    await client.query(`
+      DELETE FROM email_verification_tokens
+      WHERE user_id = $1 AND used_at IS NULL
+    `, [userId]);
+    await client.query(`
+      INSERT INTO email_verification_tokens (token_hash, user_id, expires_at)
+      VALUES ($1, $2, $3)
+    `, [tokenHash, userId, expiresAt]);
+  });
+}
+
+export async function verifyEmailToken(tokenHash) {
+  return transaction(async (client) => {
+    const result = await client.query(`
+      SELECT t.*, u.device_fingerprint_hash, u.trial_used, u.email_verified_at
+      FROM email_verification_tokens t
+      JOIN users u ON u.id = t.user_id
+      WHERE t.token_hash = $1
+      FOR UPDATE OF t, u
+    `, [tokenHash]);
+    const token = result.rows[0];
+
+    if (!token || token.used_at || new Date(token.expires_at).getTime() <= Date.now()) {
+      return null;
+    }
+
+    await client.query(`
+      UPDATE email_verification_tokens SET used_at = now() WHERE token_hash = $1
+    `, [tokenHash]);
+    await client.query(`
+      UPDATE users SET email_verified_at = COALESCE(email_verified_at, now()), updated_at = now()
+      WHERE id = $1
+    `, [token.user_id]);
+
+    let trialGranted = false;
+    if (!token.trial_used && token.device_fingerprint_hash) {
+      const reservation = await client.query(`
+        INSERT INTO device_trial_history (device_fingerprint_hash, first_user_id)
+        VALUES ($1, $2)
+        ON CONFLICT (device_fingerprint_hash) DO NOTHING
+        RETURNING device_fingerprint_hash
+      `, [token.device_fingerprint_hash, token.user_id]);
+      trialGranted = Boolean(reservation.rows[0]);
+    } else if (!token.trial_used && !token.device_fingerprint_hash) {
+      trialGranted = true;
+    }
+
+    if (trialGranted) {
+      await client.query(`
+        UPDATE credit_balances SET free_signal_allowance = $2, updated_at = now()
+        WHERE user_id = $1
+      `, [token.user_id, appConfig.freeSignalAllowance]);
+    } else {
+      await client.query(`
+        UPDATE users
+        SET abuse_score = LEAST(100, abuse_score + 50),
+          abuse_flags = (
+            SELECT jsonb_agg(DISTINCT value)
+            FROM jsonb_array_elements(abuse_flags || '["repeated_trial_device"]'::jsonb)
+          ),
+          abuse_review_status = 'flagged',
+          updated_at = now()
+        WHERE id = $1
+      `, [token.user_id]);
+    }
+
+    return { userId: token.user_id, trialGranted };
+  });
+}
+
+export async function listAbuseReviewDashboard() {
+  const [flagged, ips, devices, disposable] = await Promise.all([
+    query(`
+      SELECT id, name, email, abuse_score, abuse_flags, abuse_review_status,
+        email_verified_at, trial_used, created_at
+      FROM users
+      WHERE abuse_review_status = 'flagged' OR abuse_score > 0
+      ORDER BY abuse_score DESC, created_at DESC
+      LIMIT 100
+    `),
+    query(`
+      SELECT ip_hash, COUNT(*) FILTER (WHERE successful) AS accounts,
+        COUNT(*) AS attempts, MAX(created_at) AS last_seen
+      FROM signup_attempts
+      WHERE created_at >= now() - interval '7 days'
+      GROUP BY ip_hash
+      HAVING COUNT(*) FILTER (WHERE successful) > 1
+      ORDER BY accounts DESC, attempts DESC
+      LIMIT 50
+    `),
+    query(`
+      SELECT device_fingerprint_hash, COUNT(DISTINCT user_id) AS accounts,
+        BOOL_OR(trial_used) AS trial_used, MAX(created_at) AS last_seen
+      FROM users
+      WHERE device_fingerprint_hash IS NOT NULL
+      GROUP BY device_fingerprint_hash
+      HAVING COUNT(DISTINCT user_id) > 1
+      ORDER BY accounts DESC
+      LIMIT 50
+    `),
+    query(`
+      SELECT email_domain, COUNT(*) AS attempts, MAX(created_at) AS last_seen
+      FROM signup_attempts
+      WHERE disposable_email = true
+      GROUP BY email_domain
+      ORDER BY attempts DESC
+      LIMIT 50
+    `)
+  ]);
+
+  return {
+    flaggedAccounts: flagged.rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      email: row.email,
+      abuseScore: Number(row.abuse_score),
+      abuseFlags: row.abuse_flags || [],
+      reviewStatus: row.abuse_review_status,
+      emailVerified: Boolean(row.email_verified_at),
+      trialUsed: row.trial_used,
+      createdAt: row.created_at
+    })),
+    accountsPerIp: ips.rows.map((row) => ({
+      ipHash: row.ip_hash.slice(0, 12),
+      accounts: Number(row.accounts),
+      attempts: Number(row.attempts),
+      lastSeen: row.last_seen
+    })),
+    repeatedDevices: devices.rows.map((row) => ({
+      deviceHash: row.device_fingerprint_hash.slice(0, 12),
+      accounts: Number(row.accounts),
+      trialUsed: row.trial_used,
+      lastSeen: row.last_seen
+    })),
+    disposableEmails: disposable.rows.map((row) => ({
+      domain: row.email_domain,
+      attempts: Number(row.attempts),
+      lastSeen: row.last_seen
+    }))
+  };
 }
 
 export async function saveUnlockedSignal(userId, signal) {
@@ -937,8 +1174,17 @@ function mapUser(row) {
       hash: row.password_hash
     },
     plan: row.plan,
+    emailVerifiedAt: row.email_verified_at,
+    trialUsed: Boolean(row.trial_used),
+    signupIpHash: row.signup_ip_hash,
+    deviceFingerprintHash: row.device_fingerprint_hash,
+    abuseScore: Number(row.abuse_score || 0),
+    abuseFlags: row.abuse_flags || [],
+    abuseReviewStatus: row.abuse_review_status || "clear",
     trialSignalsUsed: Number(row.trial_signals_used || 0),
-    freeSignalAllowance: Number(row.free_signal_allowance || appConfig.freeSignalAllowance),
+    freeSignalAllowance: row.free_signal_allowance === null || row.free_signal_allowance === undefined
+      ? appConfig.freeSignalAllowance
+      : Number(row.free_signal_allowance),
     paidCredits: Number(row.paid_credits || 0),
     subscription: {
       status: row.subscription_status || "trialing",

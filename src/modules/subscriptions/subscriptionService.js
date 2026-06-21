@@ -14,7 +14,7 @@ export function ensureTrialSubscription(user) {
 export function getSubscriptionSummary(user) {
   ensureTrialSubscription(user);
   const isTester = user.role === "tester";
-  const allowance = user.freeSignalAllowance || appConfig.freeSignalAllowance;
+  const allowance = user.freeSignalAllowance ?? appConfig.freeSignalAllowance;
   const remaining = Math.max(0, allowance - user.trialSignalsUsed);
 
   return {
@@ -26,6 +26,8 @@ export function getSubscriptionSummary(user) {
     trialSignalsRemaining: isTester ? null : remaining,
     freeSignalAllowance: allowance,
     paidCredits: user.paidCredits || 0,
+    emailVerified: Boolean(user.emailVerifiedAt),
+    trialUsed: Boolean(user.trialUsed),
     stripeReady: true,
     checkoutConfigured: Boolean(appConfig.stripe.publishableKey && appConfig.stripe.priceId)
   };
@@ -40,7 +42,11 @@ export function canGenerateSignal(user) {
     return true;
   }
 
-  return user.trialSignalsUsed < (user.freeSignalAllowance || appConfig.freeSignalAllowance) || (user.paidCredits || 0) > 0;
+  if (!user.emailVerifiedAt && (user.paidCredits || 0) <= 0) {
+    return false;
+  }
+
+  return user.trialSignalsUsed < (user.freeSignalAllowance ?? appConfig.freeSignalAllowance) || (user.paidCredits || 0) > 0;
 }
 
 export async function recordSignalUsage(user) {

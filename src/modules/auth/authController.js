@@ -1,6 +1,13 @@
 import { appConfig } from "../../config/appConfig.js";
 import { readJson, sendError, sendJson, parseCookies } from "../../shared/http.js";
-import { createDemoSession, destroySession, registerOrLogin, toPublicUser } from "./authService.js";
+import {
+  createDemoSession,
+  destroySession,
+  registerOrLogin,
+  resendVerification,
+  toPublicUser,
+  verifyEmail
+} from "./authService.js";
 
 export async function handleAuthRoutes(req, res, pathname) {
   if (pathname === "/api/auth/session" && req.method === "GET") {
@@ -28,13 +35,42 @@ export async function handleAuthRoutes(req, res, pathname) {
   if (pathname === "/api/auth/login" && req.method === "POST") {
     try {
       const body = await readJson(req);
-      const result = await registerOrLogin(body);
-      return sendJson(res, 200, { user: result.user }, {
+      const result = await registerOrLogin({
+        ...body,
+        deviceFingerprint: req.headers["x-device-fingerprint"] || body.deviceFingerprint
+      }, req);
+      return sendJson(res, 200, {
+        user: result.user,
+        verificationRequired: result.verificationRequired,
+        developmentVerificationUrl: result.verification?.developmentUrl || null
+      }, {
         ...authResponseHeaders(),
         "set-cookie": buildSessionCookie(result.sessionId)
       });
     } catch (error) {
-      return sendError(res, 400, error.message);
+      return sendError(res, error.statusCode || 400, error.message);
+    }
+  }
+
+  if (pathname === "/api/auth/verify-email" && req.method === "POST") {
+    try {
+      const body = await readJson(req);
+      return sendJson(res, 200, await verifyEmail(body.token), authResponseHeaders());
+    } catch (error) {
+      return sendError(res, error.statusCode || 400, error.message);
+    }
+  }
+
+  if (pathname === "/api/auth/resend-verification" && req.method === "POST") {
+    if (!req.user) return sendError(res, 401, "Authentication required.");
+    try {
+      const result = await resendVerification(req.user);
+      return sendJson(res, 200, {
+        verificationRequired: result.verificationRequired,
+        developmentVerificationUrl: result.verification?.developmentUrl || null
+      }, authResponseHeaders());
+    } catch (error) {
+      return sendError(res, error.statusCode || 400, error.message);
     }
   }
 

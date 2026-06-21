@@ -32,6 +32,12 @@ const state = {
   },
   testerAccess: null,
   adminRequests: [],
+  abuseDashboard: {
+    flaggedAccounts: [],
+    accountsPerIp: [],
+    repeatedDevices: [],
+    disposableEmails: []
+  },
   performance: null,
   paperPortfolio: {
     trades: [],
@@ -125,6 +131,8 @@ const testerAccessMessage = document.querySelector("#tester-access-message");
 const adminNavLink = document.querySelector("#admin-nav-link");
 const adminRequestList = document.querySelector("#admin-request-list");
 const adminRequestCount = document.querySelector("#admin-request-count");
+const verificationNote = document.querySelector("#verification-note");
+const resendVerificationButton = document.querySelector("#resend-verification");
 const backtestForm = document.querySelector("#backtest-form");
 const backtestSymbol = document.querySelector("#backtest-symbol");
 const backtestTimeframe = document.querySelector("#backtest-timeframe");
@@ -144,9 +152,14 @@ let telegramConnectionTimer = null;
 
 const api = {
   async request(path, options = {}) {
+    const optionHeaders = options.headers || {};
     const response = await fetch(path, {
-      headers: { "content-type": "application/json" },
-      ...options
+      ...options,
+      headers: {
+        "content-type": "application/json",
+        "x-device-fingerprint": getDeviceFingerprint(),
+        ...optionHeaders
+      }
     });
     const payload = await response.json();
 
@@ -183,14 +196,33 @@ authForm.addEventListener("submit", async (event) => {
 
   try {
     authNote.textContent = "Authenticating...";
-    const { user } = await api.request("/api/auth/login", {
+    const result = await api.request("/api/auth/login", {
       method: "POST",
       body: JSON.stringify(Object.fromEntries(form))
     });
-    state.user = user;
+    state.user = result.user;
+    if (result.verificationRequired) {
+      authNote.textContent = result.developmentVerificationUrl
+        ? `Verify your email to activate free signals. Development link: ${result.developmentVerificationUrl}`
+        : "Check your email to activate your free signals.";
+    }
     await bootDashboard();
   } catch (error) {
     authNote.textContent = error.message;
+  }
+});
+
+resendVerificationButton.addEventListener("click", async () => {
+  try {
+    resendVerificationButton.disabled = true;
+    const result = await api.request("/api/auth/resend-verification", { method: "POST" });
+    verificationNote.textContent = result.developmentVerificationUrl
+      ? `Development verification link: ${result.developmentVerificationUrl}`
+      : "Verification email sent.";
+  } catch (error) {
+    verificationNote.textContent = error.message;
+  } finally {
+    resendVerificationButton.disabled = false;
   }
 });
 
@@ -774,6 +806,21 @@ async function enterPaperTrade(button) {
 }
 
 async function init() {
+  const verificationToken = new URLSearchParams(location.search).get("verify");
+  if (verificationToken) {
+    try {
+      const result = await api.request("/api/auth/verify-email", {
+        method: "POST",
+        body: JSON.stringify({ token: verificationToken })
+      });
+      history.replaceState({}, "", `${location.pathname}${location.hash}`);
+      authNote.textContent = result.trialGranted
+        ? "Email verified. Your free signals are active."
+        : "Email verified. This device has already received a free trial.";
+    } catch (error) {
+      authNote.textContent = error.message;
+    }
+  }
   const [{ user }, authConfig] = await Promise.all([
     api.request("/api/auth/session"),
     api.request("/api/auth/config")
@@ -822,6 +869,12 @@ function clearClientAuthState() {
   };
   state.testerAccess = null;
   state.adminRequests = [];
+  state.abuseDashboard = {
+    flaggedAccounts: [],
+    accountsPerIp: [],
+    repeatedDevices: [],
+    disposableEmails: []
+  };
   state.performance = null;
   state.paperPortfolio = {
     trades: [],
@@ -1110,9 +1163,14 @@ async function loadTesterAccess() {
 
 async function loadAdminRequests() {
   if (!state.user.isAdmin) return;
-  const { requests } = await api.request("/api/admin/tester-access");
+  const [{ requests }, { abuse }] = await Promise.all([
+    api.request("/api/admin/tester-access"),
+    api.request("/api/admin/abuse")
+  ]);
   state.adminRequests = requests;
+  state.abuseDashboard = abuse;
   renderAdminRequests();
+  renderAbuseDashboard();
 }
 
 function applyAlerts({ alerts, unreadCount }) {
@@ -1186,6 +1244,7 @@ function showView(view) {
 
   if (normalizedView === "admin") {
     renderAdminRequests();
+    renderAbuseDashboard();
   }
 
   if (normalizedView === "performance") {
@@ -1480,6 +1539,11 @@ function renderSubscription() {
   document.querySelector("#trial-count").textContent = state.subscription.unlimitedSignals
     ? "Unlimited signals"
     : `${state.subscription.trialSignalsRemaining} signals left`;
+  verificationNote.classList.toggle("hidden", state.subscription.emailVerified);
+  resendVerificationButton.classList.toggle("hidden", state.subscription.emailVerified);
+  if (!state.subscription.emailVerified) {
+    verificationNote.textContent = "Verify email to activate free signals.";
+  }
 }
 
 function renderSignals() {
@@ -2678,6 +2742,33 @@ function renderAdminRequests() {
   `).join("");
 }
 
+function renderAbuseDashboard() {
+  if (!state.user?.isAdmin) return;
+  const abuse = state.abuseDashboard;
+  document.querySelector("#flagged-account-count").textContent =
+    `${abuse.flaggedAccounts.length} flagged`;
+  renderAdminRows("#flagged-accounts", abuse.flaggedAccounts, (item) => `
+    <div><strong>${escapeHtml(item.email)}</strong><span>Score ${item.abuseScore} · ${(item.abuseFlags || []).join(", ") || "review"}</span></div>
+  `);
+  renderAdminRows("#accounts-per-ip", abuse.accountsPerIp, (item) => `
+    <div><strong>${escapeHtml(item.ipHash)}</strong><span>${item.accounts} accounts · ${item.attempts} attempts</span></div>
+  `);
+  renderAdminRows("#repeated-devices", abuse.repeatedDevices, (item) => `
+    <div><strong>${escapeHtml(item.deviceHash)}</strong><span>${item.accounts} accounts · Trial used ${item.trialUsed ? "yes" : "no"}</span></div>
+  `);
+  renderAdminRows("#disposable-emails", abuse.disposableEmails, (item) => `
+    <div><strong>${escapeHtml(item.domain)}</strong><span>${item.attempts} blocked attempts</span></div>
+  `);
+}
+
+function renderAdminRows(selector, items, rowRenderer) {
+  const container = document.querySelector(selector);
+  container.classList.add("admin-abuse-list");
+  container.innerHTML = items.length
+    ? items.map(rowRenderer).join("")
+    : `<div class="empty-state"><span>No matching records.</span></div>`;
+}
+
 function renderBacktest(backtest) {
   const { metrics, ruleSetEvaluation } = backtest;
   const statusLabels = {
@@ -2918,6 +3009,17 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+function getDeviceFingerprint() {
+  return [
+    navigator.userAgent,
+    navigator.language,
+    navigator.platform,
+    Intl.DateTimeFormat().resolvedOptions().timeZone,
+    `${screen.width}x${screen.height}`,
+    `${screen.colorDepth}`
+  ].join("|").slice(0, 200);
 }
 
 function getSelectedTelegramTimeframes() {

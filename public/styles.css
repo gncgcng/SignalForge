@@ -1019,6 +1019,49 @@ polyline {
   margin: 0;
 }
 
+.verification-note {
+  color: #f5c66b;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.admin-abuse-section {
+  display: grid;
+  gap: 14px;
+  margin-top: 24px;
+}
+
+.admin-abuse-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.admin-abuse-list {
+  display: grid;
+  gap: 8px;
+}
+
+.admin-abuse-list > div {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.admin-abuse-list strong,
+.admin-abuse-list span {
+  overflow-wrap: anywhere;
+}
+
+.admin-abuse-list span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .line-chart {
   min-height: 220px;
 }
@@ -2243,7 +2286,8 @@ polyline {
 }
 
 @media (max-width: 900px) {
-  .advanced-structure-intelligence {
+  .advanced-structure-intelligence,
+  .admin-abuse-grid {
     grid-template-columns: 1fr;
   }
 }

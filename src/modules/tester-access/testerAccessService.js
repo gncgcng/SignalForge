@@ -2,6 +2,7 @@ import {
   createTesterAccessRequest,
   getLatestTesterAccessRequest,
   listPendingTesterAccessRequests,
+  listAbuseReviewDashboard,
   reviewTesterAccessRequest
 } from "../../db/repositories.js";
 import { isAdminUser } from "../auth/authService.js";
@@ -30,6 +31,13 @@ export async function getPendingTesterRequests(admin) {
   assertAdmin(admin);
   return {
     requests: await listPendingTesterAccessRequests()
+  };
+}
+
+export async function getAbuseDashboard(admin) {
+  assertAdmin(admin);
+  return {
+    abuse: await listAbuseReviewDashboard()
   };
 }
 

@@ -172,6 +172,8 @@
           <div class="trial-card">
             <span>Free trial</span>
             <strong id="trial-count">3 signals left</strong>
+            <span class="verification-note hidden" id="verification-note">Verify email to activate free signals.</span>
+            <button class="secondary-action hidden" id="resend-verification" type="button">Resend verification</button>
             <button id="upgrade-button">Upgrade</button>
           </div>
         </aside>
@@ -823,6 +825,18 @@
               <span id="admin-request-count">0 pending</span>
             </div>
             <div class="admin-request-list" id="admin-request-list"></div>
+            <section class="admin-abuse-section">
+              <div class="section-title">
+                <div><span class="eyebrow">Anti-abuse review</span><h3>Fraud signals</h3></div>
+                <span id="flagged-account-count">0 flagged</span>
+              </div>
+              <div class="admin-abuse-grid">
+                <article class="analytics-panel"><h3>Flagged accounts</h3><div id="flagged-accounts"></div></article>
+                <article class="analytics-panel"><h3>Accounts per IP</h3><div id="accounts-per-ip"></div></article>
+                <article class="analytics-panel"><h3>Repeated devices</h3><div id="repeated-devices"></div></article>
+                <article class="analytics-panel"><h3>Disposable emails</h3><div id="disposable-emails"></div></article>
+              </div>
+            </section>
             <section class="panel backtest-panel">
               <div class="panel-header">
                 <div>

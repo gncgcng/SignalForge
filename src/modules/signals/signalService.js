@@ -11,8 +11,11 @@ const scanTimeframes = ["1h", "4h", "15m", "5m"];
 export async function createSignal(user, { symbol, timeframe }) {
   if (!canGenerateSignal(user)) {
     const summary = getSubscriptionSummary(user);
-    const error = new Error("Free trial limit reached. Connect Stripe checkout to unlock more signals.");
-    error.code = "TRIAL_LIMIT";
+    const verificationRequired = !summary.emailVerified && summary.paidCredits <= 0;
+    const error = new Error(verificationRequired
+      ? "Verify your email to activate your three free signals."
+      : "Free trial limit reached. Connect Stripe checkout to unlock more signals.");
+    error.code = verificationRequired ? "EMAIL_VERIFICATION_REQUIRED" : "TRIAL_LIMIT";
     error.subscription = summary;
     throw error;
   }

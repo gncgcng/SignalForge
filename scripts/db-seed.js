@@ -22,8 +22,10 @@ await transaction(async (client) => {
   }
 
   await client.query(`
-    INSERT INTO users (id, name, email, password_salt, password_hash, plan)
-    VALUES ($1, 'Demo Trader', $2, $3, $4, 'trial')
+    INSERT INTO users (
+      id, name, email, password_salt, password_hash, plan, email_verified_at
+    )
+    VALUES ($1, 'Demo Trader', $2, $3, $4, 'trial', now())
   `, [userId, email, salt, hash]);
 
   await client.query(`
