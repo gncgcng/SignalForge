@@ -28,12 +28,13 @@ import {
 } from "./abuseProtectionService.js";
 import { createSession } from "./authService.js";
 import { isDemoOrTesterIdentity } from "./authPolicy.js";
+import { attributeAffiliateReferral } from "../affiliates/affiliateRepository.js";
 
 const provider = "google";
 const stateTtlMs = 10 * 60 * 1000;
 let jwksCache = { expiresAt: 0, keys: [] };
 
-export async function startGoogleOAuth(req, deviceFingerprint) {
+export async function startGoogleOAuth(req, deviceFingerprint, affiliateCode) {
   assertGoogleConfigured();
   const state = randomBytes(32).toString("base64url");
   const nonce = randomBytes(32).toString("base64url");
@@ -45,6 +46,7 @@ export async function startGoogleOAuth(req, deviceFingerprint) {
     nonce,
     signupIpHash: signupContext.ipHash,
     deviceFingerprintHash: signupContext.deviceHash,
+    affiliateCode: sanitizeAffiliateCode(affiliateCode),
     expiresAt: new Date(Date.now() + stateTtlMs)
   });
 
@@ -197,6 +199,7 @@ async function createGoogleUser(claims, loginState) {
     abuseReviewStatus: abuse.reviewStatus
   });
   await grantOAuthFreeTrial(user.id, loginState.deviceFingerprintHash);
+  await attributeAffiliateReferral(user.id, loginState.affiliateCode);
   user = await linkOAuthIdentity({
     provider,
     providerSubject: claims.sub,
@@ -291,6 +294,10 @@ function parseJwtPart(value) {
 
 function hashState(state) {
   return createHash("sha256").update(String(state)).digest("hex");
+}
+
+function sanitizeAffiliateCode(value) {
+  return String(value || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 64);
 }
 
 function randomPasswordRecord() {

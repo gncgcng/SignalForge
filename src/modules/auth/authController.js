@@ -37,7 +37,8 @@ export async function handleAuthRoutes(req, res, pathname) {
       const body = await readJson(req);
       const result = await startGoogleOAuth(
         req,
-        req.headers["x-device-fingerprint"] || body.deviceFingerprint
+        req.headers["x-device-fingerprint"] || body.deviceFingerprint,
+        body.affiliateCode
       );
       return sendJson(res, 200, {
         authorizationUrl: result.authorizationUrl

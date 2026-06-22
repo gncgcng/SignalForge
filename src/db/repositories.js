@@ -313,20 +313,22 @@ export async function createOAuthLoginState({
   nonce,
   signupIpHash,
   deviceFingerprintHash,
+  affiliateCode,
   expiresAt
 }) {
   await query(`
     INSERT INTO oauth_login_states (
       state_hash, provider, nonce, signup_ip_hash,
-      device_fingerprint_hash, expires_at
+      device_fingerprint_hash, affiliate_code, expires_at
     )
-    VALUES ($1, $2, $3, $4, $5, $6)
+    VALUES ($1, $2, $3, $4, $5, $6, $7)
   `, [
     stateHash,
     provider,
     nonce,
     signupIpHash,
     deviceFingerprintHash,
+    affiliateCode,
     expiresAt
   ]);
 }
@@ -355,7 +357,8 @@ export async function consumeOAuthLoginState(stateHash, provider) {
     return {
       nonce: state.nonce,
       signupIpHash: state.signup_ip_hash,
-      deviceFingerprintHash: state.device_fingerprint_hash
+      deviceFingerprintHash: state.device_fingerprint_hash,
+      affiliateCode: state.affiliate_code
     };
   });
 }

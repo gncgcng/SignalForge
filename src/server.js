@@ -9,6 +9,7 @@ import { attachAuth } from "./middleware/authMiddleware.js";
 import { handleAuthRoutes } from "./modules/auth/authController.js";
 import { handleBacktestRoutes } from "./modules/backtesting/backtestController.js";
 import { handleAlertRoutes } from "./modules/alerts/alertController.js";
+import { handleAffiliateRoutes } from "./modules/affiliates/affiliateController.js";
 import { handleMarketDataRoutes } from "./modules/market-data/marketDataController.js";
 import { handleJournalRoutes } from "./modules/journal/journalController.js";
 import { handleIntelligenceRoutes } from "./modules/intelligence/intelligenceController.js";
@@ -43,6 +44,7 @@ const server = createServer(async (req, res) => {
   try {
     const handled =
       (await handleAuthRoutes(req, res, url.pathname)) ||
+      (await handleAffiliateRoutes(req, res, url.pathname)) ||
       (await handleAlertRoutes(req, res, url.pathname, url)) ||
       (await handleNotificationRoutes(req, res, url.pathname)) ||
       (await handlePaperTradingRoutes(req, res, url.pathname)) ||

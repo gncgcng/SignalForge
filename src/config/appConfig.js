@@ -69,6 +69,11 @@ export const appConfig = {
   freeSignalAllowance: 3,
   adminEmails,
   testerCreditAllowance: 1000000,
+  affiliate: {
+    commissionRate: 0.2,
+    minimumPayoutCents: 2500,
+    publicAppUrl: appUrl || "https://signalforge-app.xyz"
+  },
   googleOAuth: {
     clientId: process.env.GOOGLE_CLIENT_ID || "",
     clientSecret: process.env.GOOGLE_CLIENT_SECRET || "",

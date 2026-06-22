@@ -25,6 +25,7 @@ import {
   hashVerificationToken,
   sendVerificationEmail
 } from "./emailVerificationService.js";
+import { attributeAffiliateReferral } from "../affiliates/affiliateRepository.js";
 
 function hashPassword(password, salt = randomBytes(16).toString("hex")) {
   const hash = createHash("sha256").update(`${salt}:${password}`).digest("hex");
@@ -52,7 +53,13 @@ function publicUser(user) {
   };
 }
 
-export async function registerOrLogin({ name, email, password, deviceFingerprint }, req, options = {}) {
+export async function registerOrLogin({
+  name,
+  email,
+  password,
+  deviceFingerprint,
+  affiliateCode
+}, req, options = {}) {
   if (!email || !password || password.length < 6) {
     throw new Error("Use a valid email and a password with at least 6 characters.");
   }
@@ -130,6 +137,9 @@ export async function registerOrLogin({ name, email, password, deviceFingerprint
     abuseFlags: abuse.flags,
     abuseReviewStatus: abuse.reviewStatus
   });
+  if (!options.bypassVerification) {
+    await attributeAffiliateReferral(user.id, affiliateCode);
+  }
   await recordSignupAttempt({
     ...signupContext,
     emailDomain,
