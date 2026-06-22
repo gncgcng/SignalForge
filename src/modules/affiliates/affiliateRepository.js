@@ -241,6 +241,23 @@ export async function recordRecurringAffiliateCommission({
   });
 }
 
+export async function activateAffiliateReferral(referredUserId, plan) {
+  if (!["pro", "elite"].includes(plan)) return null;
+  const result = await query(`
+    UPDATE affiliate_referrals r
+    SET subscription_plan = $2, active = true, updated_at = now()
+    FROM users affiliate, users referred
+    WHERE r.referred_user_id = $1
+      AND affiliate.id = r.affiliate_user_id
+      AND referred.id = r.referred_user_id
+      AND affiliate.affiliate_disabled = false
+      AND affiliate.role <> 'tester'
+      AND referred.role <> 'tester'
+    RETURNING r.*
+  `, [referredUserId, plan]);
+  return result.rows[0] || null;
+}
+
 export function calculateAffiliateCommissionCents(grossAmountCents) {
   return Math.round(
     Math.max(0, Number(grossAmountCents || 0)) * appConfig.affiliate.commissionRate

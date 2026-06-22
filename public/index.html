@@ -249,6 +249,7 @@
             <a href="#billing" data-view-link="billing">Billing</a>
             <a class="hidden" href="#admin" data-view-link="admin" id="admin-nav-link">Admin</a>
             <a class="hidden" href="#affiliate-admin" data-view-link="affiliate-admin" id="affiliate-admin-nav-link">Affiliate Admin</a>
+            <a class="hidden" href="#webhook-events" data-view-link="webhook-events" id="webhook-events-nav-link">Webhook Events</a>
           </nav>
           <div class="trial-card">
             <span>Plan capacity</span>
@@ -1036,6 +1037,19 @@
             <article class="analytics-panel">
               <h3>Payout requests</h3>
               <div class="affiliate-admin-list" id="affiliate-admin-payouts"></div>
+            </article>
+          </section>
+
+          <section class="page-view hidden" id="webhook-events-view" data-view="webhook-events">
+            <div class="section-title">
+              <div>
+                <span class="eyebrow">Stripe operations</span>
+                <h3>Webhook event history</h3>
+              </div>
+              <span id="webhook-event-summary">0 events</span>
+            </div>
+            <article class="analytics-panel">
+              <div class="webhook-event-list" id="webhook-event-list"></div>
             </article>
           </section>
 

@@ -3,9 +3,12 @@ import { getSubscriptionSummary } from "./subscriptionService.js";
 import {
   createCheckout,
   createCustomerPortal,
+  getStripeWebhookHistory,
   processStripeEvent,
+  retryStripeWebhookEvent,
   verifyStripeSignature
 } from "./stripeService.js";
+import { isAdminUser } from "../auth/authService.js";
 
 export async function handleSubscriptionRoutes(req, res, pathname) {
   if (pathname === "/api/subscriptions/webhook" && req.method === "POST") {
@@ -28,6 +31,32 @@ export async function handleSubscriptionRoutes(req, res, pathname) {
           ? "Stripe webhook processing failed."
           : "Stripe webhook rejected."
       );
+    }
+  }
+
+  if (pathname === "/api/admin/stripe/webhooks" && req.method === "GET") {
+    if (!req.user) return sendError(res, 401, "Authentication required.");
+    if (!isAdminUser(req.user)) return sendError(res, 403, "Admin access required.");
+    try {
+      return sendJson(res, 200, {
+        events: await getStripeWebhookHistory()
+      });
+    } catch (error) {
+      return sendError(res, error.statusCode || 400, error.message);
+    }
+  }
+
+  const retryMatch = pathname.match(/^\/api\/admin\/stripe\/webhooks\/([^/]+)\/retry$/);
+  if (retryMatch && req.method === "POST") {
+    if (!req.user) return sendError(res, 401, "Authentication required.");
+    if (!isAdminUser(req.user)) return sendError(res, 403, "Admin access required.");
+    try {
+      return sendJson(res, 200, {
+        retry: await retryStripeWebhookEvent(retryMatch[1]),
+        events: await getStripeWebhookHistory()
+      });
+    } catch (error) {
+      return sendError(res, error.statusCode || 400, error.message);
     }
   }
 

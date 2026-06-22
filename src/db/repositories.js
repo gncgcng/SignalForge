@@ -649,37 +649,82 @@ export async function grantSubscriptionEntitlements({
   });
 }
 
-export async function claimStripeWebhookEvent(eventId, eventType) {
+export async function claimStripeWebhookEvent({
+  eventId,
+  eventType,
+  stripeObjectId = null,
+  payload = null
+}) {
   const result = await query(`
     INSERT INTO stripe_webhook_events (
-      event_id, event_type, status, attempts, processed_at
+      event_id, event_type, stripe_object_id, payload_json, status, attempts,
+      received_at, processing_started_at, processed_at
     )
-    VALUES ($1, $2, 'processing', 1, now())
+    VALUES ($1, $2, $3, $4, 'processing', 1, now(), now(), now())
     ON CONFLICT (event_id) DO UPDATE
     SET status = 'processing',
       attempts = stripe_webhook_events.attempts + 1,
       last_error = NULL,
+      event_type = EXCLUDED.event_type,
+      stripe_object_id = COALESCE(EXCLUDED.stripe_object_id, stripe_webhook_events.stripe_object_id),
+      payload_json = COALESCE(EXCLUDED.payload_json, stripe_webhook_events.payload_json),
+      result_json = NULL,
+      processing_started_at = now(),
+      completed_at = NULL,
       processed_at = now()
     WHERE stripe_webhook_events.status = 'failed'
+      OR (
+        stripe_webhook_events.status = 'processing'
+        AND stripe_webhook_events.processing_started_at < now() - interval '10 minutes'
+      )
     RETURNING event_id
-  `, [eventId, eventType]);
+  `, [eventId, eventType, stripeObjectId, payload ? JSON.stringify(payload) : null]);
   return Boolean(result.rows[0]);
 }
 
-export async function completeStripeWebhookEvent(eventId) {
+export async function completeStripeWebhookEvent(eventId, {
+  userId = null,
+  result = null
+} = {}) {
   await query(`
     UPDATE stripe_webhook_events
-    SET status = 'processed', last_error = NULL, processed_at = now()
+    SET status = 'processed',
+      user_id = COALESCE($2, user_id),
+      result_json = $3,
+      last_error = NULL,
+      completed_at = now(),
+      processed_at = now()
     WHERE event_id = $1
-  `, [eventId]);
+  `, [eventId, userId, result ? JSON.stringify(result) : null]);
 }
 
 export async function failStripeWebhookEvent(eventId, safeError) {
   await query(`
     UPDATE stripe_webhook_events
-    SET status = 'failed', last_error = $2, processed_at = now()
+    SET status = 'failed', last_error = $2, completed_at = now(), processed_at = now()
     WHERE event_id = $1
   `, [eventId, safeError]);
+}
+
+export async function listStripeWebhookEvents({ status = null, limit = 100 } = {}) {
+  const result = await query(`
+    SELECT event_id, event_type, stripe_object_id, user_id, status, attempts,
+      last_error, result_json, received_at, processing_started_at, completed_at
+    FROM stripe_webhook_events
+    WHERE ($1::text IS NULL OR status = $1)
+    ORDER BY received_at DESC
+    LIMIT $2
+  `, [status, Math.min(200, Math.max(1, Number(limit) || 100))]);
+  return result.rows;
+}
+
+export async function getRetryableStripeWebhookEvent(eventId) {
+  const result = await query(`
+    SELECT event_id, event_type, payload_json, status
+    FROM stripe_webhook_events
+    WHERE event_id = $1 AND status = 'failed'
+  `, [eventId]);
+  return result.rows[0] || null;
 }
 
 export async function listAbuseReviewDashboard() {

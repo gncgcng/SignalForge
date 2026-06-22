@@ -37,6 +37,7 @@ const state = {
     referrals: [],
     payouts: []
   },
+  webhookEvents: [],
   referralCode: getStoredAffiliateCode(),
   adminRequests: [],
   abuseDashboard: {
@@ -140,6 +141,7 @@ const requestTesterAccessButton = document.querySelector("#request-tester-access
 const testerAccessMessage = document.querySelector("#tester-access-message");
 const adminNavLink = document.querySelector("#admin-nav-link");
 const affiliateAdminNavLink = document.querySelector("#affiliate-admin-nav-link");
+const webhookEventsNavLink = document.querySelector("#webhook-events-nav-link");
 const adminRequestList = document.querySelector("#admin-request-list");
 const adminRequestCount = document.querySelector("#admin-request-count");
 const verificationNote = document.querySelector("#verification-note");
@@ -160,6 +162,8 @@ const affiliatePayouts = document.querySelector("#affiliate-payouts");
 const affiliateAdminAccounts = document.querySelector("#affiliate-admin-accounts");
 const affiliateAdminReferrals = document.querySelector("#affiliate-admin-referrals");
 const affiliateAdminPayouts = document.querySelector("#affiliate-admin-payouts");
+const webhookEventList = document.querySelector("#webhook-event-list");
+const webhookEventSummary = document.querySelector("#webhook-event-summary");
 const backtestForm = document.querySelector("#backtest-form");
 const backtestSymbol = document.querySelector("#backtest-symbol");
 const backtestTimeframe = document.querySelector("#backtest-timeframe");
@@ -399,6 +403,25 @@ document.querySelector("#affiliate-admin-view").addEventListener("click", async 
   } catch (error) {
     button.disabled = false;
     alert(error.message);
+  }
+});
+
+document.querySelector("#webhook-events-view").addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-webhook-retry]");
+  if (!button) return;
+
+  try {
+    button.disabled = true;
+    button.textContent = "Retrying...";
+    const result = await api.request(
+      `/api/admin/stripe/webhooks/${encodeURIComponent(button.dataset.webhookRetry)}/retry`,
+      { method: "POST", body: "{}" }
+    );
+    state.webhookEvents = result.events || [];
+    renderWebhookEvents();
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = error.message;
   }
 });
 
@@ -1045,6 +1068,7 @@ function clearClientAuthState() {
   };
   state.affiliate = null;
   state.affiliateAdmin = { affiliates: [], referrals: [], payouts: [] };
+  state.webhookEvents = [];
   state.testerAccess = null;
   state.adminRequests = [];
   state.abuseDashboard = {
@@ -1110,6 +1134,7 @@ async function bootDashboard() {
   document.querySelector("#user-name").textContent = state.user.name;
   adminNavLink.classList.toggle("hidden", !state.user.isAdmin);
   affiliateAdminNavLink.classList.toggle("hidden", !state.user.isAdmin);
+  webhookEventsNavLink.classList.toggle("hidden", !state.user.isAdmin);
   testerAccountBadge.classList.toggle("hidden", state.user.role !== "tester");
   await Promise.all([
     loadPairs(),
@@ -1126,7 +1151,9 @@ async function bootDashboard() {
   renderTimeframes();
   const requestedView = location.hash?.replace("#", "").split("?")[0];
   const allowedInitialViews = ["signals", "paper-portfolio", "journal", "backtesting", "performance", "watchlist", "alerts", "notifications", "affiliate", "settings", "billing"];
-  if (state.user.isAdmin) allowedInitialViews.push("admin", "affiliate-admin");
+  if (state.user.isAdmin) {
+    allowedInitialViews.push("admin", "affiliate-admin", "webhook-events");
+  }
   showView(allowedInitialViews.includes(requestedView) ? requestedView : "scanner");
   renderCheckoutReturnStatus();
   startSignalHistoryRefresh();
@@ -1359,6 +1386,13 @@ async function loadAffiliateAdmin() {
   renderAffiliateAdmin();
 }
 
+async function loadWebhookEvents() {
+  if (!state.user?.isAdmin) return;
+  const { events } = await api.request("/api/admin/stripe/webhooks");
+  state.webhookEvents = events || [];
+  renderWebhookEvents();
+}
+
 async function loadAdminRequests() {
   if (!state.user.isAdmin) return;
   const [{ requests }, { abuse }, { affiliateAdmin }] = await Promise.all([
@@ -1405,7 +1439,9 @@ function startSignalHistoryRefresh() {
 
 function showView(view) {
   const allowedViews = ["scanner", "watchlist", "alerts", "notifications", "signals", "paper-portfolio", "journal", "backtesting", "performance", "affiliate", "settings", "billing"];
-  if (state.user?.isAdmin) allowedViews.push("admin", "affiliate-admin");
+  if (state.user?.isAdmin) {
+    allowedViews.push("admin", "affiliate-admin", "webhook-events");
+  }
   const normalizedView = allowedViews.includes(view) ? view : "scanner";
   state.activeView = normalizedView;
 
@@ -1431,6 +1467,7 @@ function showView(view) {
     settings: ["Account", "Settings"],
     admin: ["Administration", "Tester access requests"],
     "affiliate-admin": ["Administration", "Affiliate Program"],
+    "webhook-events": ["Stripe operations", "Webhook Events"],
     billing: ["Subscription", "Billing"]
   };
   const [eyebrow, title] = titles[normalizedView];
@@ -1459,6 +1496,12 @@ function showView(view) {
   if (normalizedView === "affiliate-admin") {
     loadAffiliateAdmin().catch((error) => {
       document.querySelector("#affiliate-admin-summary").textContent = error.message;
+    });
+  }
+
+  if (normalizedView === "webhook-events") {
+    loadWebhookEvents().catch((error) => {
+      webhookEventSummary.textContent = error.message;
     });
   }
 
@@ -1830,8 +1873,8 @@ function renderCheckoutReturnStatus() {
 async function refreshBillingAfterCheckout() {
   const baseline = billingSnapshot();
 
-  for (let attempt = 1; attempt <= 8; attempt += 1) {
-    await waitForBillingRefresh(1500);
+  for (let attempt = 1; attempt <= 20; attempt += 1) {
+    await waitForBillingRefresh(2000);
 
     try {
       await loadSubscription();
@@ -1840,7 +1883,7 @@ async function refreshBillingAfterCheckout() {
         history.replaceState({}, "", `${location.pathname}#billing`);
         return;
       }
-      billingStatus.textContent = `Purchase received. Waiting for Stripe confirmation (${attempt}/8)...`;
+      billingStatus.textContent = `Purchase received. Waiting for Stripe confirmation (${attempt}/20)...`;
     } catch {
       billingStatus.textContent = "Purchase received. Retrying billing refresh...";
     }
@@ -3166,6 +3209,47 @@ function renderAffiliateAdmin() {
       </article>
     `).join("")
     : `<div class="empty-state"><span>No payout requests yet.</span></div>`;
+}
+
+function renderWebhookEvents() {
+  if (!state.user?.isAdmin) {
+    webhookEventsNavLink.classList.add("hidden");
+    return;
+  }
+
+  const events = state.webhookEvents || [];
+  const failedCount = events.filter((event) => event.status === "failed").length;
+  webhookEventSummary.textContent = `${events.length} events · ${failedCount} failed`;
+  webhookEventList.innerHTML = events.length
+    ? events.map((event) => {
+      const result = event.result_json || {};
+      const statusClass = event.status === "processed"
+        ? "status-hit-tp"
+        : event.status === "failed"
+          ? "status-hit-sl"
+          : "status-expired";
+      return `
+        <article class="webhook-event-row">
+          <div class="webhook-event-main">
+            <div>
+              <strong>${escapeHtml(event.event_type)}</strong>
+              <span>${escapeHtml(event.event_id)} · ${formatDateTime(event.received_at)}</span>
+            </div>
+            <span class="status-pill ${statusClass}">${escapeHtml(event.status)}</span>
+          </div>
+          <div class="webhook-event-meta">
+            <span>Object ${escapeHtml(event.stripe_object_id || "unknown")}</span>
+            <span>Attempts ${Number(event.attempts || 0)}</span>
+            <span>${escapeHtml(result.action || "No result recorded")}</span>
+          </div>
+          ${event.last_error ? `<p class="webhook-event-error">${escapeHtml(event.last_error)}</p>` : ""}
+          ${event.status === "failed"
+            ? `<button class="secondary-action" data-webhook-retry="${escapeHtml(event.event_id)}" type="button">Retry event</button>`
+            : ""}
+        </article>
+      `;
+    }).join("")
+    : `<div class="empty-state"><strong>No Stripe webhook events yet</strong><p class="reasoning">Verified Stripe deliveries will appear here.</p></div>`;
 }
 
 function renderAdminRequests() {

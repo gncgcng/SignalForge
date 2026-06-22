@@ -14,6 +14,10 @@ const migration = readFileSync(
   new URL("../migrations/015_stripe_webhook_processing.sql", import.meta.url),
   "utf8"
 );
+const historyMigration = readFileSync(
+  new URL("../migrations/018_stripe_webhook_history.sql", import.meta.url),
+  "utf8"
+);
 const repositories = readFileSync(new URL("../src/db/repositories.js", import.meta.url), "utf8");
 const stripe = readFileSync(
   new URL("../src/modules/subscriptions/stripeService.js", import.meta.url),
@@ -24,6 +28,7 @@ const controller = readFileSync(
   "utf8"
 );
 const frontend = readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
 
 assert.deepEqual(getPlanEntitlementsForPrice("price_pro_webhook"), {
   plan: "pro",
@@ -69,7 +74,29 @@ const result = {
   failedEventsRetryable:
     migration.includes("status IN ('processing', 'processed', 'failed')") &&
     repositories.includes("failStripeWebhookEvent") &&
-    repositories.includes("status = 'failed'"),
+    repositories.includes("status = 'failed'") &&
+    repositories.includes("processing_started_at < now() - interval '10 minutes'") &&
+    stripe.includes("retryStripeWebhookEvent"),
+  paidEventsCannotSilentlySucceed:
+    stripe.includes('throw retryableWebhookError("Unable to resolve the checkout user.")') &&
+    stripe.includes('throw retryableWebhookError("Unable to resolve the invoice user.")') &&
+    stripe.includes('throw retryableWebhookError("Unable to resolve the subscription user.")'),
+  checkoutUpgradesImmediately:
+    stripe.includes('status: "active"') &&
+    stripe.includes("plan: planId") &&
+    stripe.includes("activateAffiliateReferral(userId, planId)"),
+  durableEventHistory:
+    historyMigration.includes("ADD COLUMN IF NOT EXISTS payload_json jsonb") &&
+    historyMigration.includes("ADD COLUMN IF NOT EXISTS result_json jsonb") &&
+    historyMigration.includes("ADD COLUMN IF NOT EXISTS completed_at timestamptz") &&
+    repositories.includes("listStripeWebhookEvents") &&
+    repositories.includes("getRetryableStripeWebhookEvent"),
+  adminEventHistory:
+    controller.includes("/api/admin/stripe/webhooks") &&
+    controller.includes("isAdminUser(req.user)") &&
+    html.includes('data-view="webhook-events"') &&
+    frontend.includes("renderWebhookEvents") &&
+    frontend.includes("data-webhook-retry"),
   safeFailureLogging:
     stripe.includes("sanitizeStripeError") &&
     stripe.includes("[redacted-key]") &&

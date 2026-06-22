@@ -1444,6 +1444,50 @@ polyline {
   overflow-wrap: anywhere;
 }
 
+.webhook-event-list {
+  display: grid;
+  gap: 10px;
+}
+
+.webhook-event-row {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.webhook-event-main,
+.webhook-event-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.webhook-event-main > div,
+.webhook-event-meta {
+  min-width: 0;
+}
+
+.webhook-event-main span,
+.webhook-event-meta span {
+  color: var(--muted);
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+
+.webhook-event-error {
+  margin: 0;
+  color: #ff9b9b;
+  overflow-wrap: anywhere;
+}
+
+.webhook-event-row button {
+  justify-self: start;
+}
+
 .billing-summary-grid .panel,
 .billing-plan,
 .billing-pack {
@@ -2794,5 +2838,11 @@ polyline {
   .affiliate-link-panel button,
   .affiliate-admin-row button {
     width: 100%;
+  }
+
+  .webhook-event-main,
+  .webhook-event-meta {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }

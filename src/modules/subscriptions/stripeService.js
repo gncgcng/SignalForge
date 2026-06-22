@@ -6,12 +6,15 @@ import {
   failStripeWebhookEvent,
   findUserById,
   findUserByStripeCustomer,
+  getRetryableStripeWebhookEvent,
   grantSubscriptionEntitlements,
   grantUnlockCredits,
+  listStripeWebhookEvents,
   updateStripeCustomer,
   updateStripeSubscription
 } from "../../db/repositories.js";
 import {
+  activateAffiliateReferral,
   deactivateAffiliateReferral,
   reconcileAffiliateRefund,
   recordRecurringAffiliateCommission
@@ -116,31 +119,52 @@ export function verifyStripeSignature(rawBody, signatureHeader) {
 }
 
 export async function processStripeEvent(event) {
-  if (!await claimStripeWebhookEvent(event.id, event.type)) {
+  const object = event.data?.object || {};
+  console.log(
+    `[stripe] Webhook received event=${safeLogValue(event.id)} ` +
+    `type=${safeLogValue(event.type)} object=${safeLogValue(object.id)}`
+  );
+  if (!await claimStripeWebhookEvent({
+    eventId: event.id,
+    eventType: event.type,
+    stripeObjectId: object.id,
+    payload: event
+  })) {
+    console.log(
+      `[stripe] Webhook duplicate event=${safeLogValue(event.id)} ` +
+      `type=${safeLogValue(event.type)}`
+    );
     return { duplicate: true };
   }
 
   try {
-    const object = event.data?.object || {};
+    let result = { action: "ignored", userId: null };
     if (event.type === "checkout.session.completed") {
-      await processCheckoutCompleted(object);
+      result = await processCheckoutCompleted(object);
     } else if (
       event.type === "invoice.payment_succeeded" ||
       event.type === "invoice.paid"
     ) {
-      await processInvoicePaymentSucceeded(object, event.id);
+      result = await processInvoicePaymentSucceeded(object, event.id);
     } else if (
       event.type === "customer.subscription.created" ||
       event.type === "customer.subscription.updated" ||
       event.type === "customer.subscription.deleted"
     ) {
-      await processSubscriptionChanged(object, event.type);
+      result = await processSubscriptionChanged(object, event.type);
     } else if (event.type === "charge.refunded") {
-      await processChargeRefunded(object);
+      result = await processChargeRefunded(object);
     }
 
-    await completeStripeWebhookEvent(event.id);
-    return { duplicate: false };
+    await completeStripeWebhookEvent(event.id, {
+      userId: result?.userId || null,
+      result
+    });
+    console.log(
+      `[stripe] Webhook processed event=${safeLogValue(event.id)} ` +
+      `type=${safeLogValue(event.type)} action=${safeLogValue(result?.action)}`
+    );
+    return { duplicate: false, action: result?.action || "ignored" };
   } catch (error) {
     const safeError = sanitizeStripeError(error);
     await failStripeWebhookEvent(event.id, safeError);
@@ -150,6 +174,21 @@ export async function processStripeEvent(event) {
     );
     throw error;
   }
+}
+
+export async function getStripeWebhookHistory({ status, limit } = {}) {
+  const allowedStatus = ["processing", "processed", "failed"].includes(status)
+    ? status
+    : null;
+  return listStripeWebhookEvents({ status: allowedStatus, limit });
+}
+
+export async function retryStripeWebhookEvent(eventId) {
+  const stored = await getRetryableStripeWebhookEvent(eventId);
+  if (!stored?.payload_json) {
+    throw validationError("Failed Stripe webhook event not found or has no retry payload.");
+  }
+  return processStripeEvent(stored.payload_json);
 }
 
 async function ensureStripeCustomer(user) {
@@ -196,25 +235,59 @@ export function shouldReuseStripeCustomer(customerId, storedMode, currentMode) {
 }
 
 async function processCheckoutCompleted(session) {
-  const userId = session.metadata?.user_id;
-  if (!userId) return;
+  const customerId = stripeId(session.customer);
+  const userId = session.metadata?.user_id ||
+    (await findUserByStripeCustomer(customerId, getStripeMode()))?.id;
+  const kind = session.metadata?.kind;
+  if (!userId && ["subscription", "credit_pack"].includes(kind)) {
+    throw retryableWebhookError("Unable to resolve the checkout user.");
+  }
+  if (!userId) return { action: "checkout_ignored", userId: null };
 
-  if (session.customer) {
-    await updateStripeCustomer(userId, stripeId(session.customer), getStripeMode());
+  if (customerId) {
+    await updateStripeCustomer(userId, customerId, getStripeMode());
   }
   if (session.metadata?.kind === "credit_pack") {
     const quantity = CREDIT_PACKS[session.metadata.pack]?.quantity || 0;
-    if (quantity > 0) {
-      await grantUnlockCredits(userId, quantity, `checkout:${session.id}`, "credit_pack");
-    }
-    return;
+    if (quantity <= 0) throw retryableWebhookError("Unknown Stripe credit pack.");
+    await grantUnlockCredits(userId, quantity, `checkout:${session.id}`, "credit_pack");
+    return { action: "credit_pack_granted", userId };
   }
 
   const subscriptionId = stripeId(session.subscription);
-  if (session.metadata?.kind === "subscription" && subscriptionId) {
-    const subscription = await stripeGet(`/subscriptions/${encodeURIComponent(subscriptionId)}`);
-    await processSubscriptionChanged(subscription, "customer.subscription.created");
+  if (kind === "subscription") {
+    const planId = normalizePlan(session.metadata?.plan);
+    if (planId === "free" || !subscriptionId) {
+      throw retryableWebhookError("Checkout subscription metadata is incomplete.");
+    }
+
+    await updateStripeSubscription({
+      userId,
+      customerId,
+      subscriptionId,
+      status: "active",
+      plan: planId,
+      priceId: appConfig.stripe.prices[planId],
+      periodStart: null,
+      periodEnd: null,
+      stripeMode: getStripeMode(),
+      cancelAtPeriodEnd: false
+    });
+    await activateAffiliateReferral(userId, planId);
+
+    try {
+      const subscription = await stripeGet(`/subscriptions/${encodeURIComponent(subscriptionId)}`);
+      await processSubscriptionChanged(subscription, "customer.subscription.created");
+    } catch (error) {
+      console.warn(
+        `[stripe] Checkout upgraded user=${safeLogValue(userId)} plan=${safeLogValue(planId)} ` +
+        `but subscription enrichment will retry: ${sanitizeStripeError(error)}`
+      );
+      throw error;
+    }
+    return { action: "subscription_activated", userId, plan: planId };
   }
+  return { action: "checkout_ignored", userId };
 }
 
 async function processInvoicePaymentSucceeded(invoice, stripeEventId) {
@@ -230,13 +303,18 @@ async function processInvoicePaymentSucceeded(invoice, stripeEventId) {
   const user = userId
     ? await findUserById(userId)
     : await findUserByStripeCustomer(customerId, getStripeMode());
-  if (!user) return;
+  if (!user) throw retryableWebhookError("Unable to resolve the invoice user.");
 
   const priceId = getInvoicePriceId(invoice) ||
     subscription?.items?.data?.[0]?.price?.id;
   const planId = planFromPrice(priceId);
   const plan = BILLING_PLANS[planId];
-  if (!plan || plan.monthlyUnlockGrant <= 0) return;
+  if (!plan || plan.monthlyUnlockGrant <= 0) {
+    if (isCreditPackPrice(priceId)) {
+      return { action: "credit_pack_invoice_ignored", userId: user.id };
+    }
+    throw retryableWebhookError(`Unknown subscription price ${safeLogValue(priceId)}.`);
+  }
 
   const period = getInvoicePeriod(invoice, priceId);
   const subscriptionPeriod = getSubscriptionPeriod(subscription);
@@ -264,7 +342,7 @@ async function processInvoicePaymentSucceeded(invoice, stripeEventId) {
     unlockCredits: plan.monthlyUnlockGrant,
     externalReference: grantReference
   });
-  await recordRecurringAffiliateCommission({
+  const commission = await recordRecurringAffiliateCommission({
     referredUserId: user.id,
     plan: planId,
     grossAmountCents: Number(invoice.amount_paid || 0),
@@ -272,13 +350,19 @@ async function processInvoicePaymentSucceeded(invoice, stripeEventId) {
     stripeEventId,
     periodStart: fromUnix(periodStart)
   });
+  return {
+    action: "subscription_payment_applied",
+    userId: user.id,
+    plan: planId,
+    affiliateCommissionCreated: Boolean(commission)
+  };
 }
 
 async function processSubscriptionChanged(subscription, eventType) {
   const user = subscription.metadata?.user_id
     ? await findUserById(subscription.metadata.user_id)
-    : await findUserByStripeCustomer(subscription.customer, getStripeMode());
-  if (!user) return;
+    : await findUserByStripeCustomer(stripeId(subscription.customer), getStripeMode());
+  if (!user) throw retryableWebhookError("Unable to resolve the subscription user.");
 
   const priceId = subscription.items?.data?.[0]?.price?.id || null;
   const active = !eventType.endsWith(".deleted") &&
@@ -301,18 +385,29 @@ async function processSubscriptionChanged(subscription, eventType) {
   if (!active) {
     await deactivateAffiliateReferral(user.id);
   }
+  return {
+    action: active ? "subscription_synced" : "subscription_cancelled",
+    userId: user.id,
+    plan: normalizePlan(plan)
+  };
 }
 
 async function processChargeRefunded(charge) {
   const invoiceId = stripeId(charge.invoice);
-  if (!invoiceId) return;
-  await reconcileAffiliateRefund(invoiceId, Number(charge.amount_refunded || 0));
+  if (!invoiceId) return { action: "refund_ignored", userId: null };
+  const refund = await reconcileAffiliateRefund(invoiceId, Number(charge.amount_refunded || 0));
+  return { action: refund ? "affiliate_refund_reconciled" : "refund_ignored", userId: null };
 }
 
 function planFromPrice(priceId) {
   if (priceId === appConfig.stripe.prices.elite) return "elite";
   if (priceId === appConfig.stripe.prices.pro) return "pro";
   return "free";
+}
+
+function isCreditPackPrice(priceId) {
+  return ["pack10", "pack50", "pack100"]
+    .some((pack) => appConfig.stripe.prices[pack] === priceId);
 }
 
 export function getPlanEntitlementsForPrice(priceId) {
@@ -388,6 +483,12 @@ function missingStripeConfiguration(key, user = null) {
 function validationError(message) {
   const error = new Error(message);
   error.statusCode = 400;
+  return error;
+}
+
+function retryableWebhookError(message) {
+  const error = new Error(message);
+  error.statusCode = 500;
   return error;
 }
 
