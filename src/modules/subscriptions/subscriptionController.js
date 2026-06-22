@@ -11,7 +11,10 @@ import {
 import { isAdminUser } from "../auth/authService.js";
 
 export async function handleSubscriptionRoutes(req, res, pathname) {
-  if (pathname === "/api/subscriptions/webhook" && req.method === "POST") {
+  if (
+    (pathname === "/api/stripe/webhook" || pathname === "/api/subscriptions/webhook") &&
+    req.method === "POST"
+  ) {
     try {
       const rawBody = await readBody(req);
       const event = verifyStripeSignature(rawBody, req.headers["stripe-signature"]);

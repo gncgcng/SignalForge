@@ -46,6 +46,13 @@ const result = {
     stripe.includes('event.type === "checkout.session.completed"') &&
     stripe.includes('event.type === "invoice.payment_succeeded"') &&
     stripe.includes('event.type === "customer.subscription.deleted"'),
+  productionWebhookRoute:
+    controller.includes('pathname === "/api/stripe/webhook"') &&
+    controller.includes('pathname === "/api/subscriptions/webhook"') &&
+    controller.indexOf('pathname === "/api/stripe/webhook"') <
+      controller.indexOf('if (!pathname.startsWith("/api/subscriptions"))') &&
+    controller.includes("verifyStripeSignature(rawBody, req.headers[\"stripe-signature\"]") &&
+    controller.includes("processStripeEvent(event)"),
   checkoutSyncsSubscription:
     stripe.includes('stripeGet(`/subscriptions/${encodeURIComponent(subscriptionId)}`)') &&
     stripe.includes('processSubscriptionChanged(subscription, "customer.subscription.created")'),
