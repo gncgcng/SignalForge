@@ -60,6 +60,11 @@ export async function attributeAffiliateReferral(referredUserId, affiliateCode) 
       AND affiliate.affiliate_disabled = false
       AND affiliate.role <> 'tester'
       AND referred.role <> 'tester'
+      AND (
+        affiliate.device_fingerprint_hash IS NULL OR
+        referred.device_fingerprint_hash IS NULL OR
+        affiliate.device_fingerprint_hash <> referred.device_fingerprint_hash
+      )
     ON CONFLICT (referred_user_id) DO NOTHING
     RETURNING *
   `, [createId("afref"), referredUserId, affiliateCode]);
@@ -114,7 +119,9 @@ export async function getAffiliateDashboard(userId) {
     monthlyCommissionCents: Number(row.monthly_commission_cents || 0),
     lifetimeEarningsCents: lifetime,
     pendingPayoutCents: Math.max(0, lifetime - reserved),
-    conversionRate: clicks > 0 ? Math.round((referred / clicks) * 1000) / 10 : 0,
+    conversionRate: clicks > 0
+      ? Math.min(100, Math.round((referred / clicks) * 1000) / 10)
+      : 0,
     minimumPayoutCents: appConfig.affiliate.minimumPayoutCents,
     disabled: await isAffiliateDisabled(userId),
     referrals: referrals.rows,
@@ -181,7 +188,7 @@ export async function recordRecurringAffiliateCommission({
   periodStart
 }) {
   if (!["pro", "elite"].includes(plan) || grossAmountCents <= 0) return null;
-  const commissionCents = Math.round(grossAmountCents * appConfig.affiliate.commissionRate);
+  const commissionCents = calculateAffiliateCommissionCents(grossAmountCents);
 
   return transaction(async (client) => {
     const referralResult = await client.query(`
@@ -234,6 +241,12 @@ export async function recordRecurringAffiliateCommission({
   });
 }
 
+export function calculateAffiliateCommissionCents(grossAmountCents) {
+  return Math.round(
+    Math.max(0, Number(grossAmountCents || 0)) * appConfig.affiliate.commissionRate
+  );
+}
+
 export async function reconcileAffiliateRefund(stripeInvoiceId, refundedGrossCents) {
   if (!stripeInvoiceId || refundedGrossCents <= 0) return null;
 
@@ -250,11 +263,15 @@ export async function reconcileAffiliateRefund(stripeInvoiceId, refundedGrossCen
 
     const newReversal = Math.min(
       Number(commission.commission_amount_cents),
-      Math.round(refundedGrossCents * appConfig.affiliate.commissionRate)
+      calculateAffiliateCommissionCents(refundedGrossCents)
     );
     const previousReversal = Number(commission.reversed_commission_cents || 0);
     const delta = Math.max(0, newReversal - previousReversal);
     if (delta <= 0) return commission;
+    const commissionDate = new Date(commission.period_start || commission.created_at);
+    const now = new Date();
+    const currentMonth = commissionDate.getUTCFullYear() === now.getUTCFullYear() &&
+      commissionDate.getUTCMonth() === now.getUTCMonth();
 
     await client.query(`
       UPDATE affiliate_commissions
@@ -270,10 +287,13 @@ export async function reconcileAffiliateRefund(stripeInvoiceId, refundedGrossCen
     await client.query(`
       UPDATE affiliate_referrals
       SET lifetime_commission_cents = GREATEST(0, lifetime_commission_cents - $2),
-        monthly_commission_cents = GREATEST(0, monthly_commission_cents - $2),
+        monthly_commission_cents = GREATEST(
+          0,
+          monthly_commission_cents - CASE WHEN $3 THEN $2 ELSE 0 END
+        ),
         updated_at = now()
       WHERE id = $1
-    `, [commission.affiliate_referral_id, delta]);
+    `, [commission.affiliate_referral_id, delta, currentMonth]);
     return { ...commission, reversedCommissionCents: newReversal };
   });
 }
@@ -296,7 +316,7 @@ export async function getAffiliateAdminDashboard() {
         COALESCE(SUM(r.lifetime_commission_cents), 0)::integer AS lifetime_earnings_cents
       FROM users u
       LEFT JOIN affiliate_referrals r ON r.affiliate_user_id = u.id
-      WHERE u.affiliate_code IS NOT NULL
+      WHERE u.affiliate_code IS NOT NULL AND u.role <> 'tester'
       GROUP BY u.id
       ORDER BY lifetime_earnings_cents DESC, u.created_at DESC
     `),
@@ -341,21 +361,28 @@ export async function setAffiliateReferralSuspicious(referralId, suspicious, rea
   return result.rows[0] || null;
 }
 
-export async function setAffiliateDisabled(userId, disabled) {
-  const result = await query(`
-    UPDATE users
-    SET affiliate_disabled = $2, updated_at = now()
-    WHERE id = $1
-    RETURNING id, affiliate_disabled
-  `, [userId, disabled]);
-  if (disabled) {
-    await query(`
-      UPDATE affiliate_referrals
-      SET active = false, monthly_commission_cents = 0, updated_at = now()
-      WHERE affiliate_user_id = $1
-    `, [userId]);
-  }
-  return result.rows[0] || null;
+export async function setAffiliateDisabled(userId, disabled, adminUserId) {
+  return transaction(async (client) => {
+    const result = await client.query(`
+      UPDATE users
+      SET affiliate_disabled = $2, updated_at = now()
+      WHERE id = $1
+      RETURNING id, affiliate_disabled
+    `, [userId, disabled]);
+    if (disabled) {
+      await client.query(`
+        UPDATE affiliate_referrals
+        SET active = false, monthly_commission_cents = 0, updated_at = now()
+        WHERE affiliate_user_id = $1
+      `, [userId]);
+      await client.query(`
+        UPDATE affiliate_payout_requests
+        SET status = 'rejected', reviewed_by = $2, reviewed_at = now(), updated_at = now()
+        WHERE affiliate_user_id = $1 AND status = 'pending'
+      `, [userId, adminUserId]);
+    }
+    return result.rows[0] || null;
+  });
 }
 
 async function isAffiliateDisabled(userId) {

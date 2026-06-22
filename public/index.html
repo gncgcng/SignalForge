@@ -244,9 +244,11 @@
             <a href="#journal" data-view-link="journal">Journal</a>
             <a href="#backtesting" data-view-link="backtesting">Backtesting</a>
             <a href="#performance" data-view-link="performance">Performance</a>
+            <a href="#affiliate" data-view-link="affiliate">Affiliate</a>
             <a href="#settings" data-view-link="settings">Settings</a>
             <a href="#billing" data-view-link="billing">Billing</a>
             <a class="hidden" href="#admin" data-view-link="admin" id="admin-nav-link">Admin</a>
+            <a class="hidden" href="#affiliate-admin" data-view-link="affiliate-admin" id="affiliate-admin-nav-link">Affiliate Admin</a>
           </nav>
           <div class="trial-card">
             <span>Plan capacity</span>
@@ -895,6 +897,67 @@
             </article>
           </section>
 
+          <section class="page-view hidden" id="affiliate-view" data-view="affiliate">
+            <div class="section-title">
+              <div>
+                <span class="eyebrow">20% recurring commission</span>
+                <h3>Affiliate Program</h3>
+              </div>
+              <span>Pro and Elite subscriptions only</span>
+            </div>
+            <article class="panel affiliate-link-panel">
+              <div>
+                <span class="eyebrow">Your referral link</span>
+                <strong id="affiliate-link">Loading...</strong>
+              </div>
+              <button id="copy-affiliate-link" type="button">Copy link</button>
+            </article>
+            <p class="status-line" id="affiliate-status"></p>
+            <div class="affiliate-stats-grid">
+              <article class="panel"><span>Active subscribers</span><strong id="affiliate-active-subscribers">0</strong></article>
+              <article class="panel"><span>Monthly recurring</span><strong id="affiliate-monthly-commission">$0.00</strong></article>
+              <article class="panel"><span>Lifetime earnings</span><strong id="affiliate-lifetime-earnings">$0.00</strong></article>
+              <article class="panel"><span>Pending payout</span><strong id="affiliate-pending-payout">$0.00</strong></article>
+              <article class="panel"><span>Conversion rate</span><strong id="affiliate-conversion-rate">0%</strong></article>
+            </div>
+            <article class="panel">
+              <div class="panel-header">
+                <div>
+                  <span class="eyebrow">Minimum $25</span>
+                  <h3>Request payout</h3>
+                </div>
+                <span>Admin approval required</span>
+              </div>
+              <form class="affiliate-payout-form" id="affiliate-payout-form">
+                <label>
+                  Payout method
+                  <select name="payoutMethod" id="affiliate-payout-method">
+                    <option value="paypal">PayPal</option>
+                    <option value="wise">Wise</option>
+                    <option value="usdt">USDT</option>
+                  </select>
+                </label>
+                <label>
+                  Account, email, or wallet
+                  <input name="payoutDestination" id="affiliate-payout-destination" maxlength="240" placeholder="PayPal email, Wise account, or USDT wallet" required />
+                </label>
+                <button id="affiliate-payout-button" type="submit">Request payout</button>
+              </form>
+            </article>
+            <article class="analytics-panel">
+              <div class="panel-header">
+                <div><span class="eyebrow">Attribution</span><h3>Referred subscribers</h3></div>
+              </div>
+              <div class="responsive-table" id="affiliate-referrals"></div>
+            </article>
+            <article class="analytics-panel">
+              <div class="panel-header">
+                <div><span class="eyebrow">Payout history</span><h3>Requests</h3></div>
+              </div>
+              <div class="responsive-table" id="affiliate-payouts"></div>
+            </article>
+          </section>
+
           <section class="page-view hidden" id="admin-view" data-view="admin">
             <div class="section-title">
               <div>
@@ -952,6 +1015,28 @@
                 </div>
               </div>
             </section>
+          </section>
+
+          <section class="page-view hidden" id="affiliate-admin-view" data-view="affiliate-admin">
+            <div class="section-title">
+              <div>
+                <span class="eyebrow">Administration</span>
+                <h3>Affiliate Program</h3>
+              </div>
+              <span id="affiliate-admin-summary">0 active referrals</span>
+            </div>
+            <article class="analytics-panel">
+              <h3>Affiliates</h3>
+              <div class="affiliate-admin-list" id="affiliate-admin-accounts"></div>
+            </article>
+            <article class="analytics-panel">
+              <h3>Active referrals</h3>
+              <div class="affiliate-admin-list" id="affiliate-admin-referrals"></div>
+            </article>
+            <article class="analytics-panel">
+              <h3>Payout requests</h3>
+              <div class="affiliate-admin-list" id="affiliate-admin-payouts"></div>
+            </article>
           </section>
 
           <section class="page-view hidden" id="billing-view" data-view="billing">

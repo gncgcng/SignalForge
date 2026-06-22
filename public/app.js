@@ -31,6 +31,13 @@ const state = {
     settings: null
   },
   testerAccess: null,
+  affiliate: null,
+  affiliateAdmin: {
+    affiliates: [],
+    referrals: [],
+    payouts: []
+  },
+  referralCode: getStoredAffiliateCode(),
   adminRequests: [],
   abuseDashboard: {
     flaggedAccounts: [],
@@ -132,6 +139,7 @@ const testerRequestStatus = document.querySelector("#tester-request-status");
 const requestTesterAccessButton = document.querySelector("#request-tester-access");
 const testerAccessMessage = document.querySelector("#tester-access-message");
 const adminNavLink = document.querySelector("#admin-nav-link");
+const affiliateAdminNavLink = document.querySelector("#affiliate-admin-nav-link");
 const adminRequestList = document.querySelector("#admin-request-list");
 const adminRequestCount = document.querySelector("#admin-request-count");
 const verificationNote = document.querySelector("#verification-note");
@@ -143,6 +151,15 @@ const billingPlanGrid = document.querySelector("#billing-plan-grid");
 const billingPackGrid = document.querySelector("#billing-pack-grid");
 const billingStatus = document.querySelector("#billing-status");
 const manageSubscriptionButton = document.querySelector("#manage-subscription-button");
+const affiliateLink = document.querySelector("#affiliate-link");
+const affiliateStatus = document.querySelector("#affiliate-status");
+const affiliatePayoutForm = document.querySelector("#affiliate-payout-form");
+const affiliatePayoutButton = document.querySelector("#affiliate-payout-button");
+const affiliateReferrals = document.querySelector("#affiliate-referrals");
+const affiliatePayouts = document.querySelector("#affiliate-payouts");
+const affiliateAdminAccounts = document.querySelector("#affiliate-admin-accounts");
+const affiliateAdminReferrals = document.querySelector("#affiliate-admin-referrals");
+const affiliateAdminPayouts = document.querySelector("#affiliate-admin-payouts");
 const backtestForm = document.querySelector("#backtest-form");
 const backtestSymbol = document.querySelector("#backtest-symbol");
 const backtestTimeframe = document.querySelector("#backtest-timeframe");
@@ -234,12 +251,14 @@ viewDemoButton.addEventListener("click", async () => {
 authForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = new FormData(authForm);
+  const credentials = Object.fromEntries(form);
+  credentials.affiliateCode = state.referralCode;
 
   try {
     authNote.textContent = "Authenticating...";
     const result = await api.request("/api/auth/login", {
       method: "POST",
-      body: JSON.stringify(Object.fromEntries(form))
+      body: JSON.stringify(credentials)
     });
     state.user = result.user;
     if (result.verificationRequired) {
@@ -258,7 +277,8 @@ googleAuthButton.addEventListener("click", async () => {
     googleAuthButton.disabled = true;
     authNote.textContent = "Opening Google sign-in...";
     const { authorizationUrl } = await api.request("/api/auth/google/start", {
-      method: "POST"
+      method: "POST",
+      body: JSON.stringify({ affiliateCode: state.referralCode })
     });
     location.assign(authorizationUrl);
   } catch (error) {
@@ -315,6 +335,70 @@ manageSubscriptionButton.addEventListener("click", async () => {
   } catch (error) {
     billingStatus.textContent = error.message;
     manageSubscriptionButton.disabled = false;
+  }
+});
+
+document.querySelector("#copy-affiliate-link").addEventListener("click", async () => {
+  try {
+    await copyText(state.affiliate?.affiliateLink || "");
+    affiliateStatus.textContent = "Affiliate link copied.";
+  } catch (error) {
+    affiliateStatus.textContent = error.message;
+  }
+});
+
+affiliatePayoutForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = new FormData(affiliatePayoutForm);
+  try {
+    affiliatePayoutButton.disabled = true;
+    affiliateStatus.textContent = "Submitting payout request...";
+    const result = await api.request("/api/affiliates/payouts", {
+      method: "POST",
+      body: JSON.stringify(Object.fromEntries(form))
+    });
+    state.affiliate = result.affiliate;
+    affiliatePayoutForm.reset();
+    renderAffiliate();
+    affiliateStatus.textContent = "Payout request submitted for admin approval.";
+  } catch (error) {
+    affiliateStatus.textContent = error.message;
+  } finally {
+    affiliatePayoutButton.disabled = Boolean(state.affiliate?.disabled);
+  }
+});
+
+document.querySelector("#affiliate-admin-view").addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-affiliate-admin-action]");
+  if (!button) return;
+
+  try {
+    button.disabled = true;
+    const action = button.dataset.affiliateAdminAction;
+    let path;
+    let body;
+    if (action === "approve-payout" || action === "reject-payout") {
+      path = `/api/admin/affiliates/payouts/${button.dataset.payoutId}`;
+      body = { decision: action === "approve-payout" ? "approved" : "rejected" };
+    } else if (action === "flag-referral" || action === "clear-referral") {
+      path = `/api/admin/affiliates/referrals/${button.dataset.referralId}`;
+      body = {
+        suspicious: action === "flag-referral",
+        reason: action === "flag-referral" ? "Flagged for manual review by admin" : ""
+      };
+    } else {
+      path = `/api/admin/affiliates/accounts/${button.dataset.affiliateUserId}`;
+      body = { disabled: action === "disable-affiliate" };
+    }
+    const result = await api.request(path, {
+      method: "POST",
+      body: JSON.stringify(body)
+    });
+    state.affiliateAdmin = result.affiliateAdmin;
+    renderAffiliateAdmin();
+  } catch (error) {
+    button.disabled = false;
+    alert(error.message);
   }
 });
 
@@ -884,6 +968,7 @@ async function enterPaperTrade(button) {
 }
 
 async function init() {
+  await captureAffiliateReferral();
   const oauthError = new URLSearchParams(location.search).get("oauth_error");
   const oauthSuccess = new URLSearchParams(location.search).get("oauth") === "success";
   const verificationToken = new URLSearchParams(location.search).get("verify");
@@ -958,6 +1043,8 @@ function clearClientAuthState() {
     botUsername: "",
     settings: null
   };
+  state.affiliate = null;
+  state.affiliateAdmin = { affiliates: [], referrals: [], payouts: [] };
   state.testerAccess = null;
   state.adminRequests = [];
   state.abuseDashboard = {
@@ -1022,6 +1109,7 @@ async function bootDashboard() {
   dashboard.classList.remove("hidden");
   document.querySelector("#user-name").textContent = state.user.name;
   adminNavLink.classList.toggle("hidden", !state.user.isAdmin);
+  affiliateAdminNavLink.classList.toggle("hidden", !state.user.isAdmin);
   testerAccountBadge.classList.toggle("hidden", state.user.role !== "tester");
   await Promise.all([
     loadPairs(),
@@ -1037,8 +1125,8 @@ async function bootDashboard() {
   }
   renderTimeframes();
   const requestedView = location.hash?.replace("#", "").split("?")[0];
-  const allowedInitialViews = ["signals", "paper-portfolio", "journal", "backtesting", "performance", "watchlist", "alerts", "notifications", "settings", "billing"];
-  if (state.user.isAdmin) allowedInitialViews.push("admin");
+  const allowedInitialViews = ["signals", "paper-portfolio", "journal", "backtesting", "performance", "watchlist", "alerts", "notifications", "affiliate", "settings", "billing"];
+  if (state.user.isAdmin) allowedInitialViews.push("admin", "affiliate-admin");
   showView(allowedInitialViews.includes(requestedView) ? requestedView : "scanner");
   renderCheckoutReturnStatus();
   startSignalHistoryRefresh();
@@ -1258,16 +1346,32 @@ async function loadTesterAccess() {
   renderTesterAccess();
 }
 
+async function loadAffiliate() {
+  const { affiliate } = await api.request("/api/affiliates/me");
+  state.affiliate = affiliate;
+  renderAffiliate();
+}
+
+async function loadAffiliateAdmin() {
+  if (!state.user?.isAdmin) return;
+  const { affiliateAdmin } = await api.request("/api/admin/affiliates");
+  state.affiliateAdmin = affiliateAdmin;
+  renderAffiliateAdmin();
+}
+
 async function loadAdminRequests() {
   if (!state.user.isAdmin) return;
-  const [{ requests }, { abuse }] = await Promise.all([
+  const [{ requests }, { abuse }, { affiliateAdmin }] = await Promise.all([
     api.request("/api/admin/tester-access"),
-    api.request("/api/admin/abuse")
+    api.request("/api/admin/abuse"),
+    api.request("/api/admin/affiliates")
   ]);
   state.adminRequests = requests;
   state.abuseDashboard = abuse;
+  state.affiliateAdmin = affiliateAdmin;
   renderAdminRequests();
   renderAbuseDashboard();
+  renderAffiliateAdmin();
 }
 
 function applyAlerts({ alerts, unreadCount }) {
@@ -1300,8 +1404,8 @@ function startSignalHistoryRefresh() {
 }
 
 function showView(view) {
-  const allowedViews = ["scanner", "watchlist", "alerts", "notifications", "signals", "paper-portfolio", "journal", "backtesting", "performance", "settings", "billing"];
-  if (state.user?.isAdmin) allowedViews.push("admin");
+  const allowedViews = ["scanner", "watchlist", "alerts", "notifications", "signals", "paper-portfolio", "journal", "backtesting", "performance", "affiliate", "settings", "billing"];
+  if (state.user?.isAdmin) allowedViews.push("admin", "affiliate-admin");
   const normalizedView = allowedViews.includes(view) ? view : "scanner";
   state.activeView = normalizedView;
 
@@ -1323,8 +1427,10 @@ function showView(view) {
     journal: ["Review and discipline", "Trade Journal"],
     backtesting: ["Historical strategy research", "Backtesting Lab"],
     performance: ["Outcome analytics", "Performance"],
+    affiliate: ["Recurring commissions", "Affiliate Program"],
     settings: ["Account", "Settings"],
     admin: ["Administration", "Tester access requests"],
+    "affiliate-admin": ["Administration", "Affiliate Program"],
     billing: ["Subscription", "Billing"]
   };
   const [eyebrow, title] = titles[normalizedView];
@@ -1342,6 +1448,18 @@ function showView(view) {
   if (normalizedView === "admin") {
     renderAdminRequests();
     renderAbuseDashboard();
+  }
+
+  if (normalizedView === "affiliate") {
+    loadAffiliate().catch((error) => {
+      affiliateStatus.textContent = error.message;
+    });
+  }
+
+  if (normalizedView === "affiliate-admin") {
+    loadAffiliateAdmin().catch((error) => {
+      document.querySelector("#affiliate-admin-summary").textContent = error.message;
+    });
   }
 
   if (normalizedView === "performance") {
@@ -2926,7 +3044,128 @@ function renderTesterAccess() {
       ? "Request pending"
       : status === "rejected"
         ? "Request tester access again"
-        : "Request tester access";
+      : "Request tester access";
+}
+
+function renderAffiliate() {
+  if (!state.affiliate) return;
+  const affiliate = state.affiliate;
+  affiliateLink.textContent = affiliate.affiliateLink;
+  document.querySelector("#affiliate-active-subscribers").textContent =
+    affiliate.activeSubscribers;
+  document.querySelector("#affiliate-monthly-commission").textContent =
+    formatCents(affiliate.monthlyCommissionCents);
+  document.querySelector("#affiliate-lifetime-earnings").textContent =
+    formatCents(affiliate.lifetimeEarningsCents);
+  document.querySelector("#affiliate-pending-payout").textContent =
+    formatCents(affiliate.pendingPayoutCents);
+  document.querySelector("#affiliate-conversion-rate").textContent =
+    `${Number(affiliate.conversionRate || 0).toFixed(1)}%`;
+
+  const payoutAllowed = affiliate.eligible !== false &&
+    !affiliate.disabled &&
+    affiliate.pendingPayoutCents >= affiliate.minimumPayoutCents;
+  affiliatePayoutButton.disabled = !payoutAllowed;
+  affiliateStatus.textContent = affiliate.eligible === false
+    ? "Tester accounts are not eligible for affiliate commissions."
+    : affiliate.disabled
+      ? "This affiliate account is disabled."
+      : payoutAllowed
+        ? "Your available balance meets the $25 payout minimum."
+        : `Earn ${formatCents(Math.max(0, affiliate.minimumPayoutCents - affiliate.pendingPayoutCents))} more to request a payout.`;
+
+  affiliateReferrals.innerHTML = affiliate.referrals.length
+    ? `
+      <table>
+        <thead><tr><th>Account</th><th>Plan</th><th>Monthly</th><th>Lifetime</th><th>Status</th></tr></thead>
+        <tbody>${affiliate.referrals.map((referral) => `
+          <tr>
+            <td>${escapeHtml(maskEmail(referral.email))}</td>
+            <td>${escapeHtml(String(referral.subscription_plan).toUpperCase())}</td>
+            <td>${formatCents(referral.monthly_commission_cents)}</td>
+            <td>${formatCents(referral.lifetime_commission_cents)}</td>
+            <td><span class="status-pill ${referral.active ? "status-hit-tp" : "status-expired"}">${referral.active ? "Active" : "Inactive"}</span></td>
+          </tr>
+        `).join("")}</tbody>
+      </table>
+    `
+    : `<div class="empty-state"><strong>No referrals yet</strong><p class="reasoning">Share your affiliate link to begin tracking conversions.</p></div>`;
+
+  affiliatePayouts.innerHTML = affiliate.payouts.length
+    ? `
+      <table>
+        <thead><tr><th>Amount</th><th>Method</th><th>Status</th><th>Requested</th></tr></thead>
+        <tbody>${affiliate.payouts.map((payout) => `
+          <tr>
+            <td>${formatCents(payout.amount_cents)}</td>
+            <td>${escapeHtml(String(payout.payout_method).toUpperCase())}</td>
+            <td><span class="status-pill ${payout.status === "approved" ? "status-hit-tp" : payout.status === "rejected" ? "status-hit-sl" : "status-active"}">${escapeHtml(payout.status)}</span></td>
+            <td>${formatDateTime(payout.created_at)}</td>
+          </tr>
+        `).join("")}</tbody>
+      </table>
+    `
+    : `<div class="empty-state"><span>No payout requests yet.</span></div>`;
+}
+
+function renderAffiliateAdmin() {
+  if (!state.user?.isAdmin) {
+    affiliateAdminNavLink.classList.add("hidden");
+    return;
+  }
+  const admin = state.affiliateAdmin;
+  const activeCount = admin.referrals.filter((referral) => referral.active).length;
+  document.querySelector("#affiliate-admin-summary").textContent =
+    `${activeCount} active referrals`;
+
+  affiliateAdminAccounts.innerHTML = admin.affiliates.length
+    ? admin.affiliates.map((affiliate) => `
+      <article class="affiliate-admin-row">
+        <div>
+          <strong>${escapeHtml(affiliate.email)}</strong>
+          <span>${affiliate.active_referrals} active · ${formatCents(affiliate.lifetime_earnings_cents)} lifetime</span>
+        </div>
+        <button class="${affiliate.affiliate_disabled ? "" : "reject-action"}"
+          data-affiliate-admin-action="${affiliate.affiliate_disabled ? "enable-affiliate" : "disable-affiliate"}"
+          data-affiliate-user-id="${affiliate.id}" type="button">
+          ${affiliate.affiliate_disabled ? "Enable" : "Disable"}
+        </button>
+      </article>
+    `).join("")
+    : `<div class="empty-state"><span>No affiliate accounts yet.</span></div>`;
+
+  affiliateAdminReferrals.innerHTML = admin.referrals.length
+    ? admin.referrals.map((referral) => `
+      <article class="affiliate-admin-row">
+        <div>
+          <strong>${escapeHtml(referral.affiliate_email)} to ${escapeHtml(referral.referred_email)}</strong>
+          <span>${escapeHtml(String(referral.subscription_plan).toUpperCase())} · ${formatCents(referral.monthly_commission_cents)} monthly · ${referral.active ? "Active" : "Inactive"}</span>
+        </div>
+        <button class="${referral.suspicious ? "" : "reject-action"}"
+          data-affiliate-admin-action="${referral.suspicious ? "clear-referral" : "flag-referral"}"
+          data-referral-id="${referral.id}" type="button">
+          ${referral.suspicious ? "Clear flag" : "Flag"}
+        </button>
+      </article>
+    `).join("")
+    : `<div class="empty-state"><span>No attributed referrals yet.</span></div>`;
+
+  affiliateAdminPayouts.innerHTML = admin.payouts.length
+    ? admin.payouts.map((payout) => `
+      <article class="affiliate-admin-row">
+        <div>
+          <strong>${escapeHtml(payout.email)} · ${formatCents(payout.amount_cents)}</strong>
+          <span>${escapeHtml(String(payout.payout_method).toUpperCase())} · ${escapeHtml(payout.payout_destination)} · ${escapeHtml(payout.status)}</span>
+        </div>
+        ${payout.status === "pending" ? `
+          <div class="admin-request-actions">
+            <button data-affiliate-admin-action="approve-payout" data-payout-id="${payout.id}" type="button">Approve</button>
+            <button class="reject-action" data-affiliate-admin-action="reject-payout" data-payout-id="${payout.id}" type="button">Reject</button>
+          </div>
+        ` : `<span class="status-pill ${payout.status === "approved" ? "status-hit-tp" : "status-hit-sl"}">${escapeHtml(payout.status)}</span>`}
+      </article>
+    `).join("")
+    : `<div class="empty-state"><span>No payout requests yet.</span></div>`;
 }
 
 function renderAdminRequests() {
@@ -3241,6 +3480,49 @@ function getDeviceFingerprint() {
   ].join("|").slice(0, 200);
 }
 
+function getStoredAffiliateCode() {
+  return sanitizeAffiliateCode(sessionStorage.getItem("signalforge-affiliate-code"));
+}
+
+async function captureAffiliateReferral() {
+  const code = sanitizeAffiliateCode(new URLSearchParams(location.search).get("ref"));
+  if (!code) return;
+  state.referralCode = code;
+  sessionStorage.setItem("signalforge-affiliate-code", code);
+
+  try {
+    await api.request("/api/affiliates/click", {
+      method: "POST",
+      body: JSON.stringify({
+        affiliateCode: code,
+        visitorId: getAffiliateVisitorId()
+      })
+    });
+  } catch {
+    // Attribution remains available for signup even if click analytics are unavailable.
+  }
+}
+
+function sanitizeAffiliateCode(value) {
+  return String(value || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 64);
+}
+
+function getAffiliateVisitorId() {
+  const source = getDeviceFingerprint();
+  let hash = 2166136261;
+  for (let index = 0; index < source.length; index += 1) {
+    hash ^= source.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `visitor-${(hash >>> 0).toString(16)}`;
+}
+
+function maskEmail(value) {
+  const [name, domain] = String(value || "").split("@");
+  if (!domain) return "Referred account";
+  return `${name.slice(0, 2)}***@${domain}`;
+}
+
 function googleOAuthErrorMessage(code) {
   const messages = {
     google_denied: "Google sign-in was cancelled.",
@@ -3348,6 +3630,13 @@ function formatCurrency(value) {
     currency: "USD",
     maximumFractionDigits: value > 1000 ? 2 : 4
   }).format(value);
+}
+
+function formatCents(value) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD"
+  }).format(Number(value || 0) / 100);
 }
 
 function formatR(value) {

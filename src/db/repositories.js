@@ -68,9 +68,9 @@ export async function createUser({
       INSERT INTO users (
         id, name, email, password_salt, password_hash, plan, email_verified_at,
         signup_ip_hash, device_fingerprint_hash, abuse_score, abuse_flags,
-        abuse_review_status
+        abuse_review_status, affiliate_code
       )
-      VALUES ($1,$2,$3,$4,$5,'free',$6,$7,$8,$9,$10,$11)
+      VALUES ($1,$2,$3,$4,$5,'free',$6,$7,$8,$9,$10,$11,lower(substr(md5($1),1,12)))
     `, [
       id,
       name,
@@ -1535,6 +1535,16 @@ export async function reviewTesterAccessRequest(requestId, adminUserId, decision
           updated_at = now()
         WHERE user_id = $1
       `, [request.user_id, appConfig.testerCreditAllowance]);
+      await client.query(`
+        UPDATE affiliate_referrals
+        SET active = false, monthly_commission_cents = 0, updated_at = now()
+        WHERE affiliate_user_id = $1 OR referred_user_id = $1
+      `, [request.user_id]);
+      await client.query(`
+        UPDATE affiliate_payout_requests
+        SET status = 'rejected', reviewed_by = $2, reviewed_at = now(), updated_at = now()
+        WHERE affiliate_user_id = $1 AND status = 'pending'
+      `, [request.user_id, adminUserId]);
     }
 
     return {

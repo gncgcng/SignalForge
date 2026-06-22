@@ -2,6 +2,10 @@ ALTER TABLE users
   ADD COLUMN IF NOT EXISTS affiliate_code text,
   ADD COLUMN IF NOT EXISTS affiliate_disabled boolean NOT NULL DEFAULT false;
 
+UPDATE users
+SET affiliate_code = lower(substr(md5(id), 1, 12))
+WHERE affiliate_code IS NULL;
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_affiliate_code
   ON users(affiliate_code)
   WHERE affiliate_code IS NOT NULL;

@@ -12,7 +12,14 @@ import {
 const payoutMethods = new Set(["paypal", "wise", "usdt"]);
 
 export async function getMyAffiliateDashboard(user) {
-  return { affiliate: await getAffiliateDashboard(user.id) };
+  const affiliate = await getAffiliateDashboard(user.id);
+  return {
+    affiliate: {
+      ...affiliate,
+      eligible: user.role !== "tester",
+      disabled: affiliate.disabled || user.role === "tester"
+    }
+  };
 }
 
 export async function trackAffiliateClick({ affiliateCode, visitorId }) {
@@ -70,7 +77,7 @@ export async function flagAffiliateReferral(user, referralId, body) {
 
 export async function disableAffiliate(user, affiliateUserId, disabled) {
   assertAdmin(user);
-  const account = await setAffiliateDisabled(affiliateUserId, disabled);
+  const account = await setAffiliateDisabled(affiliateUserId, disabled, user.id);
   if (!account) throw affiliateError("Affiliate account not found.", 404);
   return { account, affiliateAdmin: await getAffiliateAdminDashboard() };
 }

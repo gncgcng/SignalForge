@@ -1368,6 +1368,82 @@ polyline {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.affiliate-link-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.affiliate-link-panel > div {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.affiliate-link-panel strong {
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.9rem;
+}
+
+.affiliate-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.affiliate-stats-grid .panel {
+  display: grid;
+  gap: 7px;
+}
+
+.affiliate-stats-grid span {
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.affiliate-stats-grid strong {
+  overflow-wrap: anywhere;
+  font-size: 1.35rem;
+}
+
+.affiliate-payout-form {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.55fr) minmax(260px, 1.45fr) auto;
+  gap: 12px;
+  align-items: end;
+  margin-top: 18px;
+}
+
+.affiliate-admin-list {
+  display: grid;
+  gap: 9px;
+}
+
+.affiliate-admin-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.affiliate-admin-row > div:first-child {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.affiliate-admin-row span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
 .billing-summary-grid .panel,
 .billing-plan,
 .billing-pack {
@@ -2698,7 +2774,25 @@ polyline {
   .admin-abuse-grid,
   .billing-summary-grid,
   .billing-plan-grid,
-  .billing-pack-grid {
+  .billing-pack-grid,
+  .affiliate-stats-grid {
     grid-template-columns: 1fr;
+  }
+
+  .affiliate-payout-form {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 620px) {
+  .affiliate-link-panel,
+  .affiliate-admin-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .affiliate-link-panel button,
+  .affiliate-admin-row button {
+    width: 100%;
   }
 }

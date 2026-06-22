@@ -11,6 +11,11 @@ import {
   updateStripeCustomer,
   updateStripeSubscription
 } from "../../db/repositories.js";
+import {
+  deactivateAffiliateReferral,
+  reconcileAffiliateRefund,
+  recordRecurringAffiliateCommission
+} from "../affiliates/affiliateRepository.js";
 import { BILLING_PLANS, CREDIT_PACKS, normalizePlan } from "./subscriptionService.js";
 
 const stripeApiBase = "https://api.stripe.com/v1";
@@ -123,9 +128,15 @@ export async function processStripeEvent(event) {
       event.type === "invoice.payment_succeeded" ||
       event.type === "invoice.paid"
     ) {
-      await processInvoicePaymentSucceeded(object);
-    } else if (event.type === "customer.subscription.deleted") {
+      await processInvoicePaymentSucceeded(object, event.id);
+    } else if (
+      event.type === "customer.subscription.created" ||
+      event.type === "customer.subscription.updated" ||
+      event.type === "customer.subscription.deleted"
+    ) {
       await processSubscriptionChanged(object, event.type);
+    } else if (event.type === "charge.refunded") {
+      await processChargeRefunded(object);
     }
 
     await completeStripeWebhookEvent(event.id);
@@ -206,7 +217,7 @@ async function processCheckoutCompleted(session) {
   }
 }
 
-async function processInvoicePaymentSucceeded(invoice) {
+async function processInvoicePaymentSucceeded(invoice, stripeEventId) {
   const customerId = stripeId(invoice.customer);
   const subscriptionId = getInvoiceSubscriptionId(invoice);
   let subscription = null;
@@ -253,6 +264,14 @@ async function processInvoicePaymentSucceeded(invoice) {
     unlockCredits: plan.monthlyUnlockGrant,
     externalReference: grantReference
   });
+  await recordRecurringAffiliateCommission({
+    referredUserId: user.id,
+    plan: planId,
+    grossAmountCents: Number(invoice.amount_paid || 0),
+    stripeInvoiceId: invoice.id,
+    stripeEventId,
+    periodStart: fromUnix(periodStart)
+  });
 }
 
 async function processSubscriptionChanged(subscription, eventType) {
@@ -279,6 +298,15 @@ async function processSubscriptionChanged(subscription, eventType) {
     stripeMode: getStripeMode(),
     cancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end)
   });
+  if (!active) {
+    await deactivateAffiliateReferral(user.id);
+  }
+}
+
+async function processChargeRefunded(charge) {
+  const invoiceId = stripeId(charge.invoice);
+  if (!invoiceId) return;
+  await reconcileAffiliateRefund(invoiceId, Number(charge.amount_refunded || 0));
 }
 
 function planFromPrice(priceId) {
