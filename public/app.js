@@ -74,6 +74,8 @@ const landingPage = document.querySelector("#landing-page");
 const dashboard = document.querySelector("#dashboard");
 const appSplash = document.querySelector("#app-splash");
 const installAppButton = document.querySelector("#install-app-button");
+const mobileMenuToggle = document.querySelector("#mobile-menu-toggle");
+const sidebar = document.querySelector(".sidebar");
 const authForm = document.querySelector("#auth-form");
 const authNote = document.querySelector("#auth-note");
 const googleAuthButton = document.querySelector("#google-auth-button");
@@ -425,10 +427,33 @@ document.querySelector("#webhook-events-view").addEventListener("click", async (
   }
 });
 
+mobileMenuToggle.addEventListener("click", () => {
+  setMobileNavigationOpen(!dashboard.classList.contains("mobile-nav-open"));
+});
+
+dashboard.addEventListener("click", (event) => {
+  const clickedBackdrop = dashboard.classList.contains("mobile-nav-open") &&
+    window.matchMedia("(max-width: 767px)").matches &&
+    !sidebar.contains(event.target) &&
+    !mobileMenuToggle.contains(event.target);
+  if (clickedBackdrop) setMobileNavigationOpen(false);
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") setMobileNavigationOpen(false);
+});
+
+window.addEventListener("resize", () => {
+  if (!window.matchMedia("(max-width: 767px)").matches) {
+    setMobileNavigationOpen(false);
+  }
+});
+
 document.querySelectorAll("[data-view-link]").forEach((link) => {
   link.addEventListener("click", (event) => {
     event.preventDefault();
     showView(link.dataset.viewLink);
+    setMobileNavigationOpen(false);
   });
 });
 
@@ -1037,6 +1062,7 @@ async function init() {
 }
 
 function clearClientAuthState() {
+  setMobileNavigationOpen(false);
   localStorage.clear();
   sessionStorage.clear();
 
@@ -1161,6 +1187,7 @@ async function bootDashboard() {
 }
 
 function showAuth() {
+  setMobileNavigationOpen(false);
   landingPage.classList.add("hidden");
   dashboard.classList.add("hidden");
   authScreen.classList.remove("hidden");
@@ -1532,6 +1559,14 @@ function showView(view) {
       `;
     });
   }
+}
+
+function setMobileNavigationOpen(open) {
+  if (!dashboard || !mobileMenuToggle) return;
+  dashboard.classList.toggle("mobile-nav-open", open);
+  document.body.classList.toggle("mobile-nav-open", open);
+  mobileMenuToggle.setAttribute("aria-expanded", String(open));
+  mobileMenuToggle.setAttribute("aria-label", open ? "Close navigation" : "Open navigation");
 }
 
 function renderPairs() {

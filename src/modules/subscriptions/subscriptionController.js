@@ -11,31 +11,36 @@ import {
 import { isAdminUser } from "../auth/authService.js";
 
 export async function handleSubscriptionRoutes(req, res, pathname) {
-  if (
-    (pathname === "/api/stripe/webhook" || pathname === "/api/subscriptions/webhook") &&
-    req.method === "POST"
-  ) {
-    try {
-      const rawBody = await readBody(req);
-      const event = verifyStripeSignature(rawBody, req.headers["stripe-signature"]);
-      return sendJson(res, 200, {
-        received: true,
-        ...(await processStripeEvent(event))
-      });
-    } catch (error) {
-      console.error(
-        `[stripe] Webhook request failed status=${Number(error.statusCode || 400)}`
-      );
-      const statusCode = error.statusCode || 400;
-      return sendError(
-        res,
-        statusCode,
-        statusCode >= 500
-          ? "Stripe webhook processing failed."
-          : "Stripe webhook rejected."
-      );
-    }
+ if (
+  (pathname === "/api/stripe/webhook" || pathname === "/api/subscriptions/webhook") &&
+  req.method === "POST"
+) {
+  try {
+    const rawBody = await readBody(req);
+    const event = verifyStripeSignature(rawBody, req.headers["stripe-signature"]);
+
+    return sendJson(res, 200, {
+      received: true,
+      ...(await processStripeEvent(event))
+    });
+  } catch (error) {
+    console.error(
+      "[stripe] Webhook error:",
+      error.message,
+      error
+    );
+
+    const statusCode = error.statusCode || 400;
+
+    return sendError(
+      res,
+      statusCode,
+      statusCode >= 500
+        ? "Stripe webhook processing failed."
+        : "Stripe webhook rejected."
+    );
   }
+}
 
   if (pathname === "/api/admin/stripe/webhooks" && req.method === "GET") {
     if (!req.user) return sendError(res, 401, "Authentication required.");
