@@ -13,6 +13,7 @@
     "test:email-verification": "node scripts/email-verification-test.js",
     "test:affiliate-program": "node scripts/affiliate-program-test.js",
     "test:pwa": "node scripts/pwa-test.js",
+    "test:mobile-nav": "node scripts/mobile-navigation-test.js",
     "test:anti-abuse": "node scripts/anti-abuse-test.js",
     "test:stripe-billing": "node scripts/stripe-billing-test.js",
     "test:stripe-config": "node scripts/stripe-config-test.js",
