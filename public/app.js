@@ -73,6 +73,7 @@ const authScreen = document.querySelector("#auth-screen");
 const landingPage = document.querySelector("#landing-page");
 const dashboard = document.querySelector("#dashboard");
 const appSplash = document.querySelector("#app-splash");
+const appSplashStatus = document.querySelector("#app-splash-status");
 const installAppButton = document.querySelector("#install-app-button");
 const mobileMenuToggle = document.querySelector("#mobile-menu-toggle");
 const sidebar = document.querySelector(".sidebar");
@@ -190,6 +191,8 @@ const api = {
     const optionHeaders = options.headers || {};
     const response = await fetch(path, {
       ...options,
+      credentials: "same-origin",
+      cache: "no-store",
       headers: {
         "content-type": "application/json",
         "x-device-fingerprint": getDeviceFingerprint(),
@@ -1016,6 +1019,7 @@ async function enterPaperTrade(button) {
 }
 
 async function init() {
+  setSplashStatus("Restoring your session");
   await captureAffiliateReferral();
   const oauthError = new URLSearchParams(location.search).get("oauth_error");
   const oauthSuccess = new URLSearchParams(location.search).get("oauth") === "success";
@@ -1045,11 +1049,13 @@ async function init() {
   state.user = user;
 
   if (user) {
+    setSplashStatus("Opening your dashboard");
     if (oauthSuccess) {
       history.replaceState({}, "", `${location.pathname}${location.hash}`);
     }
     await bootDashboard();
   } else {
+    setSplashStatus("Preparing your market desk");
     const showAuthCallback = Boolean(oauthError || verificationToken);
     landingPage.classList.toggle("hidden", showAuthCallback);
     authScreen.classList.toggle("hidden", !showAuthCallback);
@@ -1059,6 +1065,10 @@ async function init() {
       history.replaceState({}, "", `${location.pathname}${location.hash}`);
     }
   }
+}
+
+function setSplashStatus(message) {
+  if (appSplashStatus) appSplashStatus.textContent = message;
 }
 
 function clearClientAuthState() {

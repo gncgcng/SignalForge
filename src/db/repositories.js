@@ -119,6 +119,16 @@ export async function findSessionUser(sessionId) {
   return result.rows[0] ? findUserById(result.rows[0].user_id) : null;
 }
 
+export async function refreshSession(sessionId, expiresAt) {
+  const result = await query(`
+    UPDATE sessions
+    SET expires_at = $2
+    WHERE id = $1 AND expires_at > now()
+    RETURNING id
+  `, [sessionId, expiresAt]);
+  return Boolean(result.rows[0]);
+}
+
 export async function deleteSession(sessionId) {
   await query("DELETE FROM sessions WHERE id = $1", [sessionId]);
 }

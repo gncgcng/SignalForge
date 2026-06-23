@@ -64,7 +64,7 @@ export const appConfig = {
   port: Number(process.env.PORT || 4173),
   sessionCookieName: process.env.NODE_ENV === "production" ? "__Host-signalforge_session" : "signalforge_session",
   legacySessionCookieName: "signalforge_session",
-  sessionMaxAgeSeconds: 60 * 60 * 24 * 7,
+  sessionMaxAgeSeconds: resolveSessionMaxAgeSeconds(process.env.SESSION_MAX_AGE_DAYS),
   demoEnabled: process.env.NODE_ENV !== "production" && process.env.ENABLE_DEMO !== "false",
   freeSignalAllowance: 3,
   adminEmails,
@@ -196,6 +196,12 @@ export function resolveAppUrl(rawAppUrl, nodeEnv = "development", port = 4173) {
   } catch {
     return "";
   }
+}
+
+export function resolveSessionMaxAgeSeconds(rawDays) {
+  const days = Number(rawDays || 180);
+  if (!Number.isFinite(days) || days < 1) return 60 * 60 * 24 * 180;
+  return 60 * 60 * 24 * Math.min(days, 365);
 }
 
 export function getStripeMode(secretKey = appConfig.stripe.secretKey) {

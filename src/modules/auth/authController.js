@@ -5,6 +5,7 @@ import {
   destroySession,
   registerOrLogin,
   resendVerification,
+  refreshSessionExpiry,
   toPublicUser,
   verifyEmail
 } from "./authService.js";
@@ -16,7 +17,16 @@ import {
 
 export async function handleAuthRoutes(req, res, pathname) {
   if (pathname === "/api/auth/session" && req.method === "GET") {
-    return sendJson(res, 200, { user: toPublicUser(req.user) }, authResponseHeaders());
+    const refreshed = req.user && req.sessionId
+      ? await refreshSessionExpiry(req.sessionId)
+      : null;
+    return sendJson(res, 200, {
+      user: toPublicUser(req.user),
+      sessionExpiresAt: refreshed?.expiresAt || null
+    }, {
+      ...authResponseHeaders(),
+      ...(refreshed ? { "set-cookie": buildSessionCookie(req.sessionId) } : {})
+    });
   }
 
   if (pathname === "/api/auth/config" && req.method === "GET") {

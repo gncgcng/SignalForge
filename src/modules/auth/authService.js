@@ -10,6 +10,7 @@ import {
   getDeviceTrialHistory,
   getSignupVelocity,
   recordSignupAttempt,
+  refreshSession,
   verifyEmailToken
 } from "../../db/repositories.js";
 import { isDemoOrTesterIdentity } from "./authPolicy.js";
@@ -210,6 +211,13 @@ export async function destroySession(sessionId) {
   if (sessionId) {
     await deleteSession(sessionId);
   }
+}
+
+export async function refreshSessionExpiry(sessionId) {
+  if (!sessionId) return null;
+  const expiresAt = new Date(Date.now() + appConfig.sessionMaxAgeSeconds * 1000);
+  const refreshed = await refreshSession(sessionId, expiresAt);
+  return refreshed ? { expiresAt: expiresAt.toISOString() } : null;
 }
 
 export function toPublicUser(user) {
