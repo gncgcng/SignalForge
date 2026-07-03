@@ -49,6 +49,7 @@ const result = {
     cookie.includes("HttpOnly") &&
     cookie.includes("Secure") &&
     cookie.includes("SameSite=Lax") &&
+    cookie.includes("Expires=") &&
     cookie.includes(`Max-Age=${appConfig.sessionMaxAgeSeconds}`),
   noJwtOrUserStorage:
     app.includes('const RESTORE_TOKEN_KEY = "signalforge-restore-token"') &&
@@ -61,6 +62,7 @@ const result = {
     app.includes('credentials: "same-origin"') &&
     app.includes('cache: "no-store"'),
   sessionRestoreOnLaunch:
+    app.includes("async function loadStartupSession()") &&
     app.includes('api.request("/api/auth/session")') &&
     app.includes("setSplashStatus(\"Restoring your session\")") &&
     html.includes('id="app-splash-status"'),
@@ -72,10 +74,16 @@ const result = {
   pwaCookieLossFallback:
     app.includes("async function restoreSavedSession()") &&
     app.includes('api.request("/api/auth/restore"') &&
-    app.includes("if (!user)") &&
-    app.includes("clearRestoreToken()") &&
+    app.includes("No cookie session found; checking persistent restore token.") &&
+    app.includes("function isPermanentRestoreFailure(error)") &&
     authController.includes('pathname === "/api/auth/restore"') &&
     authController.includes("restoreSessionFromToken({"),
+  temporarySessionFailureDoesNotLogout:
+    app.includes("Cookie session check failed; trying persistent restore token.") &&
+    app.includes("isPermanentRestoreFailure(error)") &&
+    app.includes("[400, 401, 403, 404, 410].includes(error.statusCode)") &&
+    app.includes("error.statusCode = response.status") &&
+    !app.includes("clearRestoreToken();\n    console.warn(`[auth] Persistent restore token failed"),
   restoreTokenDeviceBoundAndHashed:
     restoreMigration.includes("CREATE TABLE IF NOT EXISTS auth_restore_tokens") &&
     restoreMigration.includes("token_hash text NOT NULL UNIQUE") &&
@@ -92,7 +100,23 @@ const result = {
     authService.includes('throw restoreError("Saved session expired. Please sign in again.")') &&
     authService.includes("statusCode = 401") &&
     app.includes("console.warn(`[auth] Persistent restore token failed: ${error.message}`)") &&
+    app.includes("clearRestoreToken();") &&
     app.includes("return null"),
+  loginSetsPersistentCookie:
+    authController.includes('pathname === "/api/auth/login"') &&
+    authController.includes("registerOrLogin({") &&
+    authController.includes('"set-cookie": buildSessionCookie(result.sessionId)'),
+  googleLoginRefreshUsesCookieSession:
+    authController.includes('pathname === "/api/auth/google/callback"') &&
+    authController.includes("completeGoogleOAuth({") &&
+    authController.includes("buildSessionCookie(result.sessionId)") &&
+    authController.includes('pathname === "/api/auth/session"') &&
+    authController.includes("user: toPublicUser(req.user)"),
+  sessionPersistedInPostgres:
+    authService.includes("createSessionRecord({ id: sessionId, userId: user.id, expiresAt })") &&
+    repositories.includes("INSERT INTO sessions") &&
+    repositories.includes("findSessionUser(sessionId)") &&
+    middleware.includes("findSessionUser(sessionId)"),
   rollingRefresh:
     authController.includes("refreshSessionExpiry(req.sessionId)") &&
     authController.includes("buildSessionCookie(req.sessionId)") &&
@@ -109,12 +133,16 @@ const result = {
     authService.includes("revokeAuthRestoreTokensForUserDevice(user.id, deviceHash)") &&
     app.includes("body: JSON.stringify({ restoreToken: getRestoreToken() })") &&
     clearCookies.some((item) => item.startsWith("__Host-signalforge_session=")) &&
-    clearCookies.some((item) => item.startsWith("signalforge_session=")),
+    clearCookies.some((item) => item.startsWith("signalforge_session=")) &&
+    clearCookies.every((item) => item.includes("Expires=Thu, 01 Jan 1970 00:00:00 GMT")) &&
+    app.includes("Expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax"),
   migrationExtendsActiveSessions:
     migration.includes("ALTER COLUMN expires_at SET DEFAULT") &&
     migration.includes("interval '180 days'") &&
     migration.includes("WHERE expires_at > now()"),
   pwaCacheBumped: serviceWorker.includes("signalforge-static-v10")
+    ? false
+    : serviceWorker.includes("signalforge-static-v11")
 };
 
 for (const [name, passed] of Object.entries(result)) {

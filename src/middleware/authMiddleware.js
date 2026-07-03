@@ -16,6 +16,10 @@ export async function attachAuth(req) {
 
   const user = await findSessionUser(sessionId);
 
+  if (!user) {
+    console.warn("[auth] Session cookie was present but no active PostgreSQL session was found.");
+  }
+
   if (appConfig.isProduction && user && isDemoOrTesterIdentity(user.email)) {
     await deleteSession(sessionId);
     req.user = null;

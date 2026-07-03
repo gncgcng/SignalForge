@@ -223,21 +223,23 @@ function authResponseHeaders() {
 
 export function buildSessionCookie(sessionId) {
   const secure = appConfig.isProduction ? "; Secure" : "";
-  return `${appConfig.sessionCookieName}=${encodeURIComponent(sessionId)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${appConfig.sessionMaxAgeSeconds}${secure}`;
+  const expires = new Date(Date.now() + appConfig.sessionMaxAgeSeconds * 1000).toUTCString();
+  return `${appConfig.sessionCookieName}=${encodeURIComponent(sessionId)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${appConfig.sessionMaxAgeSeconds}; Expires=${expires}${secure}`;
 }
 
 export function buildClearCookies() {
   const names = new Set([appConfig.sessionCookieName, appConfig.legacySessionCookieName]);
+  const expired = "Expires=Thu, 01 Jan 1970 00:00:00 GMT";
 
   return [...names].flatMap((name) => {
     const cookies = [
-      `${name}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`,
-      `${name}=; SameSite=Lax; Path=/; Max-Age=0`
+      `${name}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0; ${expired}`,
+      `${name}=; SameSite=Lax; Path=/; Max-Age=0; ${expired}`
     ];
 
     if (appConfig.isProduction) {
-      cookies.push(`${name}=; HttpOnly; SameSite=Lax; Secure; Path=/; Max-Age=0`);
-      cookies.push(`${name}=; SameSite=Lax; Secure; Path=/; Max-Age=0`);
+      cookies.push(`${name}=; HttpOnly; SameSite=Lax; Secure; Path=/; Max-Age=0; ${expired}`);
+      cookies.push(`${name}=; SameSite=Lax; Secure; Path=/; Max-Age=0; ${expired}`);
     }
 
     return cookies;

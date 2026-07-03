@@ -45,7 +45,7 @@ const result = {
     app.includes("mobileMenuToggle.setAttribute(\"aria-label\", open ? \"Close navigation\" : \"Open navigation\")"),
   pwaCacheBumped: css.includes("mobile-nav-open") &&
     readFileSync(new URL("../public/service-worker.js", import.meta.url), "utf8")
-      .includes('signalforge-static-v10')
+      .includes('signalforge-static-v11')
 };
 
 for (const [name, passed] of Object.entries(result)) {

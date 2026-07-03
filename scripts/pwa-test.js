@@ -61,6 +61,10 @@ const result = {
     offline.includes("Try again"),
   installPrompt:
     app.includes('"beforeinstallprompt"') &&
+    app.includes("event.preventDefault()") &&
+    app.includes("updateInstallButtonVisibility()") &&
+    app.includes("function updateInstallButtonVisibility()") &&
+    app.includes('window.matchMedia("(display-mode: standalone)")') &&
     app.includes("deferredInstallPrompt.prompt()") &&
     app.includes('"appinstalled"') &&
     html.includes('id="install-app-button"'),

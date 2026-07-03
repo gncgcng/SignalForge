@@ -205,6 +205,7 @@ const api = {
 
     if (!response.ok) {
       const error = new Error(payload.error?.message || "Request failed.");
+      error.statusCode = response.status;
       error.details = payload.error?.details;
       throw error;
     }
@@ -216,23 +217,37 @@ const api = {
 window.addEventListener("beforeinstallprompt", (event) => {
   event.preventDefault();
   deferredInstallPrompt = event;
-  installAppButton.classList.remove("hidden");
+  console.info("[pwa] Install prompt is available.");
+  updateInstallButtonVisibility();
 });
 
 window.addEventListener("appinstalled", () => {
   deferredInstallPrompt = null;
-  installAppButton.classList.add("hidden");
+  console.info("[pwa] App installation completed.");
+  updateInstallButtonVisibility();
 });
 
 installAppButton.addEventListener("click", async () => {
   if (!deferredInstallPrompt) return;
   installAppButton.disabled = true;
-  await deferredInstallPrompt.prompt();
-  await deferredInstallPrompt.userChoice;
-  deferredInstallPrompt = null;
-  installAppButton.classList.add("hidden");
-  installAppButton.disabled = false;
+  try {
+    await deferredInstallPrompt.prompt();
+    await deferredInstallPrompt.userChoice;
+    deferredInstallPrompt = null;
+    updateInstallButtonVisibility();
+  } finally {
+    installAppButton.disabled = false;
+  }
 });
+
+window.matchMedia("(display-mode: standalone)")
+  .addEventListener?.("change", updateInstallButtonVisibility);
+
+function updateInstallButtonVisibility() {
+  const alreadyInstalled = window.matchMedia("(display-mode: standalone)").matches ||
+    window.navigator.standalone === true;
+  installAppButton.classList.toggle("hidden", alreadyInstalled || !deferredInstallPrompt);
+}
 
 document.querySelector("#start-free-button").addEventListener("click", () => {
   showAuth();
@@ -1048,17 +1063,12 @@ async function init() {
     authNote.textContent = verificationMessage;
   }
   const [session, authConfig] = await Promise.all([
-    api.request("/api/auth/session"),
-    api.request("/api/auth/config")
+    loadStartupSession(),
+    loadAuthConfig()
   ]);
   viewDemoButton.classList.toggle("hidden", !authConfig.demoEnabled);
   googleAuthButton.classList.toggle("hidden", !authConfig.googleEnabled);
-  saveRestoreToken(session.restore);
-  let user = session.user;
-
-  if (!user) {
-    user = await restoreSavedSession();
-  }
+  const user = session.user;
 
   state.user = user;
 
@@ -1085,6 +1095,37 @@ function setSplashStatus(message) {
   if (appSplashStatus) appSplashStatus.textContent = message;
 }
 
+async function loadStartupSession() {
+  try {
+    const session = await api.request("/api/auth/session");
+    saveRestoreToken(session.restore);
+
+    if (session.user) {
+      console.info("[auth] Cookie session restored.");
+      return session;
+    }
+
+    console.info("[auth] No cookie session found; checking persistent restore token.");
+  } catch (error) {
+    console.warn(`[auth] Cookie session check failed; trying persistent restore token. ${error.message}`);
+  }
+
+  const user = await restoreSavedSession();
+  return { user };
+}
+
+async function loadAuthConfig() {
+  try {
+    return await api.request("/api/auth/config");
+  } catch (error) {
+    console.warn(`[auth] Auth config failed to load: ${error.message}`);
+    return {
+      demoEnabled: false,
+      googleEnabled: false
+    };
+  }
+}
+
 async function restoreSavedSession() {
   const restoreToken = getRestoreToken();
   if (!restoreToken) {
@@ -1102,10 +1143,16 @@ async function restoreSavedSession() {
     console.info("[auth] Persistent restore token succeeded.");
     return result.user;
   } catch (error) {
-    clearRestoreToken();
+    if (isPermanentRestoreFailure(error)) {
+      clearRestoreToken();
+    }
     console.warn(`[auth] Persistent restore token failed: ${error.message}`);
     return null;
   }
+}
+
+function isPermanentRestoreFailure(error) {
+  return [400, 401, 403, 404, 410].includes(error.statusCode);
 }
 
 function saveRestoreToken(restore) {
@@ -1130,8 +1177,8 @@ function clearClientAuthState() {
     const name = cookie.split("=")[0].trim();
 
     if (name) {
-      document.cookie = `${name}=; Path=/; Max-Age=0; SameSite=Lax`;
-      document.cookie = `${name}=; Path=/; Max-Age=0; SameSite=Lax; Secure`;
+      document.cookie = `${name}=; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax`;
+      document.cookie = `${name}=; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax; Secure`;
     }
   }
 
