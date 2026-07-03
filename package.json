@@ -35,6 +35,7 @@
     "test:scanner-ux": "node scripts/scanner-ux-test.js",
     "test:provider-routing": "node scripts/provider-routing-test.js",
     "test:session-migration": "node scripts/session-migration-test.js",
+    "test:signal-setup-key-migration": "node scripts/signal-setup-key-migration-test.js",
     "smoke": "node scripts/smoke-test.js",
     "test:signals": "node scripts/signal-rules-test.js",
     "test:signal-accuracy": "node scripts/signal-accuracy-test.js",
