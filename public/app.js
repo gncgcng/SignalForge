@@ -69,6 +69,8 @@ const state = {
   backtesting: null
 };
 
+const RESTORE_TOKEN_KEY = "signalforge-restore-token";
+
 const authScreen = document.querySelector("#auth-screen");
 const landingPage = document.querySelector("#landing-page");
 const dashboard = document.querySelector("#dashboard");
@@ -248,7 +250,8 @@ document.querySelectorAll(".launch-auth-button").forEach((button) => {
 
 viewDemoButton.addEventListener("click", async () => {
   try {
-    const { user } = await api.request("/api/auth/demo", { method: "POST" });
+    const { user, restore } = await api.request("/api/auth/demo", { method: "POST" });
+    saveRestoreToken(restore);
     state.user = user;
     await bootDashboard();
   } catch (error) {
@@ -269,6 +272,7 @@ authForm.addEventListener("submit", async (event) => {
       method: "POST",
       body: JSON.stringify(credentials)
     });
+    saveRestoreToken(result.restore);
     state.user = result.user;
     if (result.verificationRequired) {
       authNote.textContent = result.developmentVerificationUrl
@@ -312,7 +316,10 @@ resendVerificationButton.addEventListener("click", async () => {
 
 document.querySelector("#logout-button").addEventListener("click", async () => {
   try {
-    await api.request("/api/auth/logout", { method: "POST" });
+    await api.request("/api/auth/logout", {
+      method: "POST",
+      body: JSON.stringify({ restoreToken: getRestoreToken() })
+    });
   } finally {
     clearClientAuthState();
   }
@@ -1040,12 +1047,19 @@ async function init() {
     }
     authNote.textContent = verificationMessage;
   }
-  const [{ user }, authConfig] = await Promise.all([
+  const [session, authConfig] = await Promise.all([
     api.request("/api/auth/session"),
     api.request("/api/auth/config")
   ]);
   viewDemoButton.classList.toggle("hidden", !authConfig.demoEnabled);
   googleAuthButton.classList.toggle("hidden", !authConfig.googleEnabled);
+  saveRestoreToken(session.restore);
+  let user = session.user;
+
+  if (!user) {
+    user = await restoreSavedSession();
+  }
+
   state.user = user;
 
   if (user) {
@@ -1069,6 +1083,42 @@ async function init() {
 
 function setSplashStatus(message) {
   if (appSplashStatus) appSplashStatus.textContent = message;
+}
+
+async function restoreSavedSession() {
+  const restoreToken = getRestoreToken();
+  if (!restoreToken) {
+    console.info("[auth] No persistent restore token found.");
+    return null;
+  }
+
+  try {
+    setSplashStatus("Reopening your saved session");
+    const result = await api.request("/api/auth/restore", {
+      method: "POST",
+      body: JSON.stringify({ restoreToken })
+    });
+    saveRestoreToken(result.restore);
+    console.info("[auth] Persistent restore token succeeded.");
+    return result.user;
+  } catch (error) {
+    clearRestoreToken();
+    console.warn(`[auth] Persistent restore token failed: ${error.message}`);
+    return null;
+  }
+}
+
+function saveRestoreToken(restore) {
+  if (!restore?.token) return;
+  localStorage.setItem(RESTORE_TOKEN_KEY, restore.token);
+}
+
+function getRestoreToken() {
+  return localStorage.getItem(RESTORE_TOKEN_KEY) || "";
+}
+
+function clearRestoreToken() {
+  localStorage.removeItem(RESTORE_TOKEN_KEY);
 }
 
 function clearClientAuthState() {

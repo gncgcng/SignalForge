@@ -1,4 +1,4 @@
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { appConfig } from "../../config/appConfig.js";
 import { createId } from "../../shared/ids.js";
 import {
@@ -6,11 +6,17 @@ import {
   createSession as createSessionRecord,
   createUser,
   deleteSession,
+  findAuthRestoreToken,
+  findUserById,
   findUserByEmail,
   getDeviceTrialHistory,
   getSignupVelocity,
+  markAuthRestoreTokenUsed,
   recordSignupAttempt,
   refreshSession,
+  revokeAuthRestoreToken,
+  revokeAuthRestoreTokensForUserDevice,
+  storeAuthRestoreToken,
   verifyEmailToken
 } from "../../db/repositories.js";
 import { isDemoOrTesterIdentity } from "./authPolicy.js";
@@ -213,6 +219,84 @@ export async function destroySession(sessionId) {
   }
 }
 
+export async function createPersistentRestoreToken(userId, req, deviceFingerprint) {
+  const deviceHash = getSignupContext(req, deviceFingerprint).deviceHash;
+  if (!deviceHash) {
+    console.info("[auth] Restore token skipped: missing device fingerprint.");
+    return null;
+  }
+
+  const token = randomBytes(32).toString("base64url");
+  const expiresAt = new Date(Date.now() + appConfig.restoreTokenMaxAgeSeconds * 1000);
+  await storeAuthRestoreToken({
+    userId,
+    tokenHash: hashRestoreToken(token),
+    deviceFingerprintHash: deviceHash,
+    expiresAt
+  });
+  console.info(`[auth] Restore token issued user=${safeLogId(userId)}`);
+  return {
+    token,
+    expiresAt: expiresAt.toISOString()
+  };
+}
+
+export async function restoreSessionFromToken({ restoreToken, deviceFingerprint }, req) {
+  const token = sanitizeRestoreToken(restoreToken);
+  if (!token) {
+    throw restoreError("Restore token is missing.");
+  }
+
+  const deviceHash = getSignupContext(req, deviceFingerprint).deviceHash;
+  if (!deviceHash) {
+    console.warn("[auth] Restore failed: missing device fingerprint.");
+    throw restoreError("Device verification is required to restore the session.");
+  }
+
+  const stored = await findAuthRestoreToken(hashRestoreToken(token), deviceHash);
+  if (!stored) {
+    console.warn("[auth] Restore failed: token invalid or expired.");
+    throw restoreError("Saved session expired. Please sign in again.");
+  }
+
+  await markAuthRestoreTokenUsed(stored.id);
+  const user = await findUserById(stored.user_id);
+  if (!user || (appConfig.isProduction && isDemoOrTesterIdentity(user.email))) {
+    await revokeAuthRestoreToken(hashRestoreToken(token));
+    console.warn("[auth] Restore failed: user unavailable.");
+    throw restoreError("Saved session expired. Please sign in again.");
+  }
+
+  await revokeAuthRestoreToken(hashRestoreToken(token));
+  const session = await createSession(user);
+  const replacement = await createPersistentRestoreToken(user.id, req, deviceFingerprint);
+  console.info(`[auth] Restore succeeded user=${safeLogId(user.id)}`);
+  return {
+    ...session,
+    restoreToken: replacement?.token || null,
+    restoreTokenExpiresAt: replacement?.expiresAt || null
+  };
+}
+
+export async function revokePersistentRestoreToken({
+  restoreToken,
+  user,
+  deviceFingerprint
+}, req) {
+  const token = sanitizeRestoreToken(restoreToken);
+  if (token) {
+    await revokeAuthRestoreToken(hashRestoreToken(token));
+  }
+
+  if (user?.id) {
+    const deviceHash = getSignupContext(req, deviceFingerprint).deviceHash;
+    if (deviceHash) {
+      await revokeAuthRestoreTokensForUserDevice(user.id, deviceHash);
+    }
+  }
+  console.info(`[auth] Restore token revoked user=${safeLogId(user?.id || "unknown")}`);
+}
+
 export async function refreshSessionExpiry(sessionId) {
   if (!sessionId) return null;
   const expiresAt = new Date(Date.now() + appConfig.sessionMaxAgeSeconds * 1000);
@@ -237,4 +321,25 @@ async function issueVerification(user, { enforceCooldown = false } = {}) {
     enforceCooldown ? appConfig.abuseProtection.verificationResendSeconds : 0
   );
   return sendVerificationEmail(user, token.token);
+}
+
+function hashRestoreToken(token) {
+  return createHmac("sha256", appConfig.abuseProtection.hashSecret)
+    .update(`auth-restore:${token}`)
+    .digest("hex");
+}
+
+function sanitizeRestoreToken(value) {
+  const token = String(value || "").trim();
+  return /^[A-Za-z0-9_-]{32,160}$/.test(token) ? token : "";
+}
+
+function restoreError(message) {
+  const error = new Error(message);
+  error.statusCode = 401;
+  return error;
+}
+
+function safeLogId(value) {
+  return String(value || "unknown").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 80);
 }

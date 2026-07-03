@@ -129,6 +129,69 @@ export async function refreshSession(sessionId, expiresAt) {
   return Boolean(result.rows[0]);
 }
 
+export async function storeAuthRestoreToken({
+  userId,
+  tokenHash,
+  deviceFingerprintHash,
+  expiresAt
+}) {
+  return transaction(async (client) => {
+    const result = await client.query(`
+      INSERT INTO auth_restore_tokens (
+        id, user_id, token_hash, device_fingerprint_hash, expires_at
+      )
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING id, expires_at
+    `, [
+      createId("restore"),
+      userId,
+      tokenHash,
+      deviceFingerprintHash,
+      expiresAt
+    ]);
+
+    return result.rows[0];
+  });
+}
+
+export async function findAuthRestoreToken(tokenHash, deviceFingerprintHash) {
+  const result = await query(`
+    SELECT id, user_id, expires_at
+    FROM auth_restore_tokens
+    WHERE token_hash = $1
+      AND device_fingerprint_hash = $2
+      AND revoked_at IS NULL
+      AND expires_at > now()
+  `, [tokenHash, deviceFingerprintHash]);
+  return result.rows[0] || null;
+}
+
+export async function markAuthRestoreTokenUsed(id) {
+  await query(`
+    UPDATE auth_restore_tokens
+    SET last_used_at = now(), updated_at = now()
+    WHERE id = $1
+  `, [id]);
+}
+
+export async function revokeAuthRestoreToken(tokenHash) {
+  await query(`
+    UPDATE auth_restore_tokens
+    SET revoked_at = COALESCE(revoked_at, now()), updated_at = now()
+    WHERE token_hash = $1
+  `, [tokenHash]);
+}
+
+export async function revokeAuthRestoreTokensForUserDevice(userId, deviceFingerprintHash) {
+  await query(`
+    UPDATE auth_restore_tokens
+    SET revoked_at = COALESCE(revoked_at, now()), updated_at = now()
+    WHERE user_id = $1
+      AND device_fingerprint_hash = $2
+      AND revoked_at IS NULL
+  `, [userId, deviceFingerprintHash]);
+}
+
 export async function deleteSession(sessionId) {
   await query("DELETE FROM sessions WHERE id = $1", [sessionId]);
 }

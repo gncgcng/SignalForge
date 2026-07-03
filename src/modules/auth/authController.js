@@ -2,10 +2,13 @@ import { appConfig } from "../../config/appConfig.js";
 import { readJson, sendError, sendJson, parseCookies } from "../../shared/http.js";
 import {
   createDemoSession,
+  createPersistentRestoreToken,
   destroySession,
   registerOrLogin,
   resendVerification,
   refreshSessionExpiry,
+  restoreSessionFromToken,
+  revokePersistentRestoreToken,
   toPublicUser,
   verifyEmail
 } from "./authService.js";
@@ -22,7 +25,14 @@ export async function handleAuthRoutes(req, res, pathname) {
       : null;
     return sendJson(res, 200, {
       user: toPublicUser(req.user),
-      sessionExpiresAt: refreshed?.expiresAt || null
+      sessionExpiresAt: refreshed?.expiresAt || null,
+      restore: req.user
+        ? await createPersistentRestoreToken(
+          req.user.id,
+          req,
+          req.headers["x-device-fingerprint"]
+        )
+        : null
     }, {
       ...authResponseHeaders(),
       ...(refreshed ? { "set-cookie": buildSessionCookie(req.sessionId) } : {})
@@ -40,6 +50,28 @@ export async function handleAuthRoutes(req, res, pathname) {
     }, {
       "cache-control": "no-store"
     });
+  }
+
+  if (pathname === "/api/auth/restore" && req.method === "POST") {
+    try {
+      const body = await readJson(req);
+      const result = await restoreSessionFromToken({
+        restoreToken: body.restoreToken,
+        deviceFingerprint: req.headers["x-device-fingerprint"] || body.deviceFingerprint
+      }, req);
+      return sendJson(res, 200, {
+        user: result.user,
+        restore: {
+          token: result.restoreToken,
+          expiresAt: result.restoreTokenExpiresAt
+        }
+      }, {
+        ...authResponseHeaders(),
+        "set-cookie": buildSessionCookie(result.sessionId)
+      });
+    } catch (error) {
+      return sendError(res, error.statusCode || 400, error.message);
+    }
   }
 
   if (pathname === "/api/auth/google/start" && req.method === "POST") {
@@ -96,7 +128,12 @@ export async function handleAuthRoutes(req, res, pathname) {
   if (pathname === "/api/auth/demo" && req.method === "POST") {
     try {
       const result = await createDemoSession();
-      return sendJson(res, 200, { user: result.user }, {
+      const restore = await createPersistentRestoreToken(
+        result.user.id,
+        req,
+        req.headers["x-device-fingerprint"]
+      );
+      return sendJson(res, 200, { user: result.user, restore }, {
         ...authResponseHeaders(),
         "set-cookie": buildSessionCookie(result.sessionId)
       });
@@ -108,14 +145,21 @@ export async function handleAuthRoutes(req, res, pathname) {
   if (pathname === "/api/auth/login" && req.method === "POST") {
     try {
       const body = await readJson(req);
+      const deviceFingerprint = req.headers["x-device-fingerprint"] || body.deviceFingerprint;
       const result = await registerOrLogin({
         ...body,
-        deviceFingerprint: req.headers["x-device-fingerprint"] || body.deviceFingerprint
+        deviceFingerprint
       }, req);
+      const restore = await createPersistentRestoreToken(
+        result.user.id,
+        req,
+        deviceFingerprint
+      );
       return sendJson(res, 200, {
         user: result.user,
         verificationRequired: result.verificationRequired,
-        developmentVerificationUrl: result.verification?.developmentUrl || null
+        developmentVerificationUrl: result.verification?.developmentUrl || null,
+        restore
       }, {
         ...authResponseHeaders(),
         "set-cookie": buildSessionCookie(result.sessionId)
@@ -148,12 +192,18 @@ export async function handleAuthRoutes(req, res, pathname) {
   }
 
   if (pathname === "/api/auth/logout" && req.method === "POST") {
+    const body = await readJson(req);
     const cookies = parseCookies(req.headers.cookie);
     const sessionIds = new Set([
       cookies[appConfig.sessionCookieName],
       cookies[appConfig.legacySessionCookieName]
     ].filter(Boolean));
 
+    await revokePersistentRestoreToken({
+      restoreToken: body.restoreToken,
+      user: req.user,
+      deviceFingerprint: req.headers["x-device-fingerprint"] || body.deviceFingerprint
+    }, req);
     await Promise.all([...sessionIds].map((sessionId) => destroySession(sessionId)));
     return sendJson(res, 200, { ok: true }, {
       ...authResponseHeaders(),

@@ -65,6 +65,7 @@ export const appConfig = {
   sessionCookieName: process.env.NODE_ENV === "production" ? "__Host-signalforge_session" : "signalforge_session",
   legacySessionCookieName: "signalforge_session",
   sessionMaxAgeSeconds: resolveSessionMaxAgeSeconds(process.env.SESSION_MAX_AGE_DAYS),
+  restoreTokenMaxAgeSeconds: resolveSessionMaxAgeSeconds(process.env.RESTORE_TOKEN_MAX_AGE_DAYS),
   demoEnabled: process.env.NODE_ENV !== "production" && process.env.ENABLE_DEMO !== "false",
   freeSignalAllowance: 3,
   adminEmails,
