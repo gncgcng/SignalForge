@@ -7,6 +7,9 @@ const state = {
   timeframe: "15m",
   marketData: null,
   marketStatus: {},
+  scannerMode: getStoredScannerMode(),
+  expandedSignalKeys: new Set(),
+  lastScanSummary: null,
   activeView: "scanner",
   historyFilters: {
     pair: "all",
@@ -21,6 +24,7 @@ const state = {
     expiredCount: 0
   },
   signals: [],
+  scanResults: [],
   watchlist: [],
   alerts: [],
   unreadAlertCount: 0,
@@ -71,6 +75,7 @@ const state = {
 };
 
 const RESTORE_TOKEN_KEY = "signalforge-restore-token";
+const SCANNER_MODE_KEY = "signalforge-scanner-mode";
 
 const authScreen = document.querySelector("#auth-screen");
 const landingPage = document.querySelector("#landing-page");
@@ -97,6 +102,9 @@ const scanProgress = document.querySelector("#scan-progress");
 const scanProgressText = document.querySelector("#scan-progress-text");
 const scanProgressCount = document.querySelector("#scan-progress-count");
 const scanProgressBar = document.querySelector("#scan-progress-bar");
+const scanSummaryPanel = document.querySelector("#scan-summary-panel");
+const viewOpportunitiesButton = document.querySelector("#view-opportunities-button");
+const scannerModeToggle = document.querySelector("#scanner-mode-toggle");
 const statusLine = document.querySelector("#status-line");
 const signalsGrid = document.querySelector("#signals-grid");
 const paperPortfolioGrid = document.querySelector("#paper-portfolio-grid");
@@ -317,6 +325,16 @@ document.querySelectorAll("[data-legal-doc]").forEach((trigger) => {
 
 document.querySelectorAll("[data-legal-close]").forEach((trigger) => {
   trigger.addEventListener("click", closeLegalDocument);
+});
+
+scannerModeToggle.addEventListener("change", () => {
+  state.scannerMode = scannerModeToggle.checked ? "advanced" : "basic";
+  localStorage.setItem(SCANNER_MODE_KEY, state.scannerMode);
+  renderSignals();
+});
+
+viewOpportunitiesButton.addEventListener("click", () => {
+  scrollToSignalDesk();
 });
 
 viewDemoButton.addEventListener("click", async () => {
@@ -567,12 +585,27 @@ scanAllButton.addEventListener("click", async () => {
   const symbols = state.marketCatalog.filter((pair) => pair.status === "active").map((pair) => pair.symbol);
   const frames = ["1h", "4h", "15m", "5m"];
   const total = symbols.length * frames.length;
+  let progressTimer = null;
+  let progressIndex = 0;
 
   scanAllButton.disabled = true;
   generateButton.disabled = true;
   scanProgress.classList.remove("hidden");
+  scanSummaryPanel.classList.add("hidden");
+  state.scanResults = [];
   signalsGrid.innerHTML = "";
   updateScanProgress(0, total, "Scanning all active crypto and commodity markets...");
+  progressTimer = setInterval(() => {
+    if (progressIndex >= total - 1) return;
+    const symbol = symbols[Math.floor(progressIndex / frames.length)] || symbols[0] || "market";
+    const timeframe = frames[progressIndex % frames.length] || "timeframe";
+    progressIndex += 1;
+    updateScanProgress(
+      progressIndex,
+      total,
+      `Scanning ${symbol} ${timeframe} · found ${state.lastScanSummary?.opportunitiesFound || 0} opportunities so far`
+    );
+  }, 180);
 
   try {
     const result = await api.request("/api/signals/scan-all", { method: "POST" });
@@ -585,6 +618,7 @@ scanAllButton.addEventListener("click", async () => {
     updateScanProgress(0, total, "Scan All failed");
     renderScanResults([], [{ symbol: "Scan All", timeframe: "", message: error.message }]);
   } finally {
+    clearInterval(progressTimer);
     scanAllButton.disabled = false;
     generateButton.disabled = false;
   }
@@ -615,6 +649,7 @@ generateButton.addEventListener("click", async () => {
       return;
     }
 
+    state.scanResults = [];
     state.signals = [signal, ...state.signals];
     await loadSignals();
     renderSignals();
@@ -988,6 +1023,18 @@ paperPortfolioGrid.addEventListener("click", (event) => {
 });
 
 signalsGrid.addEventListener("click", async (event) => {
+  const detailsButton = event.target.closest("[data-signal-details]");
+
+  if (detailsButton) {
+    const key = detailsButton.dataset.signalDetails;
+    state.expandedSignalKeys = state.expandedSignalKeys.has(key) ? new Set() : new Set([key]);
+    renderSignals();
+    if (state.expandedSignalKeys.has(key)) {
+      scrollToSignalKey(key);
+    }
+    return;
+  }
+
   const paperButton = event.target.closest("[data-paper-signal-id]");
 
   if (paperButton) {
@@ -1022,10 +1069,12 @@ signalsGrid.addEventListener("click", async (event) => {
     }
 
     state.signals = [signal, ...state.signals];
+    state.expandedSignalKeys = new Set([getSignalKey(signal)]);
     await loadSignals();
     renderSignals();
     renderSignalsHistory();
-    statusLine.textContent = "Full signal unlocked and saved.";
+    statusLine.textContent = "Full signal unlocked and saved. Unlock credit deducted.";
+    scrollToSignalKey(getSignalKey(signal));
   } catch (error) {
     statusLine.textContent = error.message;
   } finally {
@@ -1069,8 +1118,12 @@ async function unlockSignal(button, symbol, timeframe) {
       return;
     }
 
+    state.scanResults = [];
+    state.expandedSignalKeys = new Set([getSignalKey(signal)]);
     await loadSignals();
-    statusLine.textContent = "Full signal unlocked and saved.";
+    renderSignals();
+    statusLine.textContent = "Full signal unlocked and saved. Unlock credit deducted.";
+    scrollToSignalKey(getSignalKey(signal));
   } catch (error) {
     statusLine.textContent = error.message;
   } finally {
@@ -1249,7 +1302,9 @@ function clearRestoreToken() {
 
 function clearClientAuthState() {
   setMobileNavigationOpen(false);
+  const scannerMode = getStoredScannerMode();
   localStorage.clear();
+  localStorage.setItem(SCANNER_MODE_KEY, scannerMode);
   sessionStorage.clear();
 
   for (const cookie of document.cookie.split(";")) {
@@ -1348,6 +1403,7 @@ async function bootDashboard() {
   affiliateAdminNavLink.classList.toggle("hidden", !state.user.isAdmin);
   webhookEventsNavLink.classList.toggle("hidden", !state.user.isAdmin);
   testerAccountBadge.classList.toggle("hidden", state.user.role !== "tester");
+  scannerModeToggle.checked = state.scannerMode === "advanced";
 
   const dashboardLoads = await Promise.allSettled([
     loadPairs(),
@@ -2176,6 +2232,12 @@ async function startCheckout(button, payload) {
 }
 
 function renderSignals() {
+  if (state.scanResults.length > 0) {
+    document.querySelector("#signal-count").textContent = `${state.scanResults.length} scan results`;
+    signalsGrid.innerHTML = state.scanResults.map((setup) => renderScanCard(setup)).join("");
+    return;
+  }
+
   document.querySelector("#signal-count").textContent = `${state.signals.length} setups`;
 
   if (state.signals.length === 0) {
@@ -2722,94 +2784,162 @@ function updateScanProgress(done, total, message) {
   statusLine.textContent = message;
 }
 
+function renderScanSummary(opportunitiesFound, marketsScanned, timeframesScanned, errors = []) {
+  scanSummaryPanel.classList.remove("hidden");
+  document.querySelector("#scan-summary-title").textContent = opportunitiesFound > 0
+    ? "Scan Summary"
+    : "No high-quality setups right now.";
+  document.querySelector("#scan-summary-opportunities").textContent = `${opportunitiesFound} opportunity${opportunitiesFound === 1 ? "" : "ies"} found`;
+  document.querySelector("#scan-summary-markets").textContent = `${marketsScanned} market${marketsScanned === 1 ? "" : "s"} scanned`;
+  document.querySelector("#scan-summary-timeframes").textContent = `${timeframesScanned} timeframes scanned`;
+  document.querySelector("#scan-summary-credits").textContent = opportunitiesFound > 0
+    ? "No unlock credits used yet"
+    : "No credits used";
+  document.querySelector("#scan-summary-next").textContent = `Suggested next scan: ${formatSuggestedScanTime()}`;
+  document.querySelector("#scan-summary-reason").textContent = opportunitiesFound > 0
+    ? "Open Signal Desk to unlock or inspect compact opportunities."
+    : `No setup met the confidence and risk filters.${errors.length ? ` ${errors.length} provider warning${errors.length === 1 ? "" : "s"} logged.` : ""}`;
+}
+
 function renderScanResults(setups, errors) {
+  state.scanResults = setups;
   document.querySelector("#signal-count").textContent = `${setups.length} scan results`;
-  const scannedMarkets = state.pairs
+  const activePairs = state.pairs
     .concat(state.marketCatalog)
     .filter((pair, index, pairs) => pairs.findIndex((item) => item.symbol === pair.symbol) === index)
-    .filter((pair) => pair.status === "active")
-    .map((pair) => pair.symbol)
-    .join(" · ");
+    .filter((pair) => pair.status === "active");
+  const frames = ["1h", "4h", "15m", "5m"];
+  const scannedMarkets = activePairs.map((pair) => pair.symbol);
+  state.lastScanSummary = {
+    marketsScanned: scannedMarkets.length,
+    timeframesScanned: frames.length,
+    opportunitiesFound: setups.length,
+    errors: errors.length
+  };
+  renderScanSummary(setups.length, scannedMarkets.length, frames.length, errors);
 
   if (setups.length === 0) {
     signalsGrid.innerHTML = `
-      <article class="signal-card">
+      <article class="signal-card compact-signal-card expanded">
         <div class="signal-top">
           <div>
-            <strong>No high-probability setups right now</strong>
-            <span>${scannedMarkets}</span>
+            <strong>No high-quality setups right now.</strong>
+            <span>${scannedMarkets.slice(0, 12).join(" · ")}${scannedMarkets.length > 12 ? " · ..." : ""}</span>
           </div>
         </div>
-        <p class="reasoning">${errors.length ? `${errors.length} market checks had provider errors; successful checks found no valid setups.` : "All active markets and timeframes were scanned without using trial credits."}</p>
+        <p class="reasoning">No setup met the confidence and risk filters. No credits used.</p>
+        <div class="signal-metrics">
+          <div><span>Markets scanned</span><strong>${scannedMarkets.length}</strong></div>
+          <div><span>Timeframes</span><strong>${frames.join(", ")}</strong></div>
+          <div><span>Provider errors</span><strong>${errors.length}</strong></div>
+          <div><span>Suggested next scan</span><strong>${formatSuggestedScanTime()}</strong></div>
+        </div>
       </article>
     `;
     statusLine.textContent = "No high-probability setups right now. Trial credits were not used.";
+    scanSummaryPanel.scrollIntoView({ behavior: "smooth", block: "start" });
     return;
   }
 
   signalsGrid.innerHTML = setups.map((setup) => renderScanCard(setup)).join("");
   statusLine.textContent = `Found ${setups.length} high-probability setup${setups.length === 1 ? "" : "s"}. Unlocking one will use a trial credit.`;
+  scanSummaryPanel.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function renderScanCard(setup) {
-  const passed = setup.confirmations.filter((item) => item.passed).map((item) => item.name).join(", ");
+  const key = getSignalKey(setup);
+  const expanded = state.expandedSignalKeys.has(key);
+  const passed = (setup.confirmations || []).filter((item) => item.passed).map((item) => item.name).join(", ");
 
   return `
-    <article class="signal-card">
+    <article class="signal-card compact-signal-card ${expanded ? "expanded" : ""}" data-signal-key="${key}">
       <div class="signal-top">
         <div>
           <strong>${setup.symbol}</strong>
-          <span>${setup.timeframe}</span>
+          <span>${setup.timeframe} · ${setup.marketType || getMarketType(setup.symbol)}</span>
         </div>
         <strong class="direction ${setup.direction}">${setup.direction}</strong>
       </div>
       <div class="signal-metrics">
         <div><span>Setup type</span><strong>${setup.setupType || "Qualified setup"}</strong></div>
-        <div><span>Confluence</span><strong>${setup.confluenceScore || setup.indicators?.confluenceScore || 0}/100</strong></div>
-        <div><span>Alignment</span><strong>${setup.alignmentBadge || setup.indicators?.alignmentBadge || "Partial Alignment"}</strong></div>
-        <div><span>Quality</span><strong>${setup.qualityScore || 0}/100</strong></div>
         <div><span>Confidence</span><strong>${setup.confidenceScore}%</strong></div>
         <div><span>Risk/reward</span><strong>${setup.riskRewardRatio}:1</strong></div>
-        <div><span>Passed</span><strong>${setup.confirmations.filter((item) => item.passed).length}/${setup.confirmations.length}</strong></div>
-        <div><span>Status</span><strong>Locked</strong></div>
       </div>
-      <p class="reasoning">Passed confirmations: ${passed}. Unlock the full signal to save entry, stop loss, and take profit.</p>
-      ${renderSignalTransparency(setup)}
-      ${renderSignalConfluence(setup)}
-      ${renderRiskEngineCard(setup, true)}
-      <button class="secondary-action" data-unlock-symbol="${setup.symbol}" data-unlock-timeframe="${setup.timeframe}" type="button">Unlock Signal</button>
+      <div class="compact-actions">
+        <button data-unlock-symbol="${setup.symbol}" data-unlock-timeframe="${setup.timeframe}" type="button">Unlock Signal</button>
+        <button class="secondary-action" data-signal-details="${key}" type="button">${expanded ? "Hide Details" : "View Details"}</button>
+      </div>
+      <div class="signal-details ${expanded ? "" : "hidden"}">
+        <p class="reasoning">Passed confirmations: ${passed || "No confirmation detail available."}. Unlock the full signal to save entry, stop loss, and take profit.</p>
+        ${renderModeDetails(setup, true)}
+      </div>
     </article>
   `;
 }
 
 function renderSignalCard(signal) {
+  const key = getSignalKey(signal);
+  const expanded = state.expandedSignalKeys.has(key);
   return `
-    <article class="signal-card">
+    <article class="signal-card compact-signal-card ${expanded ? "expanded" : ""}" data-signal-key="${key}">
       <div class="signal-top">
         <div>
           <strong>${signal.symbol}</strong>
-          <span>${signal.timeframe}</span>
+          <span>${signal.timeframe} · ${getMarketType(signal.symbol)}</span>
         </div>
         <strong class="direction ${signal.direction}">${signal.direction}</strong>
       </div>
       <div class="signal-metrics">
         <div><span>Setup type</span><strong>${signal.setupType || "Qualified setup"}</strong></div>
-        <div><span>Quality</span><strong>${signal.qualityScore || 0}/100</strong></div>
-        <div><span>Confluence</span><strong>${signal.confluenceScore || signal.indicators?.confluenceScore || 0}/100</strong></div>
-        <div><span>Alignment</span><strong>${signal.alignmentBadge || signal.indicators?.alignmentBadge || "Partial Alignment"}</strong></div>
         <div><span>Entry</span><strong>${formatCurrency(signal.entryPrice)}</strong></div>
         <div><span>Stop loss</span><strong>${formatCurrency(signal.stopLoss)}</strong></div>
         <div><span>Take profit</span><strong>${formatCurrency(signal.takeProfit)}</strong></div>
         <div><span>Risk/reward</span><strong>${signal.riskRewardRatio}:1</strong></div>
         <div><span>Confidence</span><strong>${signal.confidenceScore}%</strong></div>
-        <div><span>Generated</span><strong>${formatTime(signal.generatedAt)}</strong></div>
       </div>
-      <p class="reasoning">${signal.reasoning}</p>
+      <div class="compact-actions">
+        <button class="secondary-action" data-signal-details="${key}" type="button">${expanded ? "Hide Details" : "View Details"}</button>
+        ${renderPaperTradeAction(signal)}
+      </div>
+      <div class="signal-details ${expanded ? "" : "hidden"}">
+        ${renderModeDetails(signal)}
+      </div>
+    </article>
+  `;
+}
+
+function renderModeDetails(signal, locked = false) {
+  if (state.scannerMode === "basic") {
+    return `
+      <section class="basic-signal-details">
+        <div class="signal-metrics">
+          <div><span>Direction</span><strong class="direction ${signal.direction}">${String(signal.direction || "").toUpperCase()}</strong></div>
+          <div><span>Entry</span><strong>${locked ? "Unlock required" : formatCurrency(signal.entryPrice)}</strong></div>
+          <div><span>Stop loss</span><strong>${locked ? "Unlock required" : formatCurrency(signal.stopLoss)}</strong></div>
+          <div><span>Take profit</span><strong>${locked ? "Unlock required" : formatCurrency(signal.takeProfit)}</strong></div>
+          <div><span>Risk/reward</span><strong>${signal.riskRewardRatio}:1</strong></div>
+          <div><span>Confidence</span><strong>${signal.confidenceScore}%</strong></div>
+        </div>
+        <section class="signal-transparency">
+          <h4>Why this signal?</h4>
+          <p class="reasoning">${escapeHtml(getShortSignalReason(signal))}</p>
+          <div class="signal-disclaimer">
+            <strong>Educational tool only. Not financial advice.</strong>
+            <span>Review risk and market context before making any decision.</span>
+          </div>
+        </section>
+        ${locked ? "" : renderRiskEngineCard(signal)}
+      </section>
+    `;
+  }
+
+  return `
+    <section class="advanced-signal-details">
+      <p class="reasoning">${escapeHtml(signal.reasoning || "Advanced signal context is based on rule alignment.")}</p>
       ${renderSignalTransparency(signal)}
       ${renderSignalConfluence(signal)}
-      ${renderRiskEngineCard(signal)}
-      ${renderPaperTradeAction(signal)}
-    </article>
+      ${renderRiskEngineCard(signal, locked)}
+    </section>
   `;
 }
 
@@ -3856,6 +3986,51 @@ function getDeviceFingerprint() {
 
 function getStoredAffiliateCode() {
   return sanitizeAffiliateCode(sessionStorage.getItem("signalforge-affiliate-code"));
+}
+
+function getStoredScannerMode() {
+  return localStorage.getItem("signalforge-scanner-mode") === "advanced" ? "advanced" : "basic";
+}
+
+function getSignalKey(signal) {
+  if (signal?.id) return `signal:${signal.id}`;
+  return `${signal?.symbol || "market"}:${signal?.timeframe || "timeframe"}`;
+}
+
+function getMarketType(symbol) {
+  const market = state.marketCatalog.find((item) => item.symbol === symbol) ||
+    state.pairs.find((item) => item.symbol === symbol);
+  return market?.assetClass || market?.category || "Crypto";
+}
+
+function getShortSignalReason(signal) {
+  if (signal?.summary) return signal.summary;
+  if (signal?.reasoning) return String(signal.reasoning).split(".").slice(0, 2).join(". ").trim();
+
+  const confirmations = signal?.confirmations || [];
+  const passed = confirmations.filter((item) => item.passed).map((item) => item.name);
+  if (passed.length) {
+    return `Qualified because ${passed.slice(0, 4).join(", ")} aligned with the rule set.`;
+  }
+
+  return "This setup is shown only when the rule-based scanner finds enough trend, risk, and structure alignment.";
+}
+
+function formatSuggestedScanTime() {
+  return new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(new Date(Date.now() + 15 * 60 * 1000));
+}
+
+function scrollToSignalDesk() {
+  document.querySelector(".signals-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function scrollToSignalKey(key) {
+  const cards = [...document.querySelectorAll("[data-signal-key]")];
+  const card = cards.find((item) => item.dataset.signalKey === key);
+  card?.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
 async function captureAffiliateReferral() {

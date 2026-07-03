@@ -309,6 +309,23 @@
                   <div><span id="scan-progress-text">Scanning markets...</span><strong id="scan-progress-count">0/12</strong></div>
                   <progress id="scan-progress-bar" max="12" value="0"></progress>
                 </div>
+                <article class="scan-summary-panel hidden" id="scan-summary-panel">
+                  <div class="panel-header">
+                    <div>
+                      <span class="eyebrow">Scan Summary</span>
+                      <h3 id="scan-summary-title">No scan yet</h3>
+                    </div>
+                    <span id="scan-summary-opportunities">0 found</span>
+                  </div>
+                  <div class="scan-summary-grid">
+                    <div><span>Markets scanned</span><strong id="scan-summary-markets">0</strong></div>
+                    <div><span>Timeframes</span><strong id="scan-summary-timeframes">0</strong></div>
+                    <div><span>Credits</span><strong id="scan-summary-credits">No credits used</strong></div>
+                    <div><span>Next scan</span><strong id="scan-summary-next">When ready</strong></div>
+                  </div>
+                  <p class="reasoning" id="scan-summary-reason">Run Scan All to find high-quality setups.</p>
+                  <button class="secondary-action" id="view-opportunities-button" type="button">View Opportunities</button>
+                </article>
                 <p class="status-line" id="status-line">Select a market and timeframe to generate a setup.</p>
               </div>
 
@@ -406,7 +423,14 @@
                   <span class="eyebrow">Generated setups</span>
                   <h3>Signal desk</h3>
                 </div>
-                <span id="signal-count">0 setups</span>
+                <div class="signal-desk-actions">
+                  <label class="mode-toggle" aria-label="Signal detail mode">
+                    <span>Basic</span>
+                    <input id="scanner-mode-toggle" type="checkbox" />
+                    <span>Advanced</span>
+                  </label>
+                  <span id="signal-count">0 setups</span>
+                </div>
               </div>
               <div class="signal-disclaimer">
                 <strong>Educational tool only. Not financial advice.</strong>
