@@ -46,6 +46,7 @@ const state = {
     repeatedDevices: [],
     disposableEmails: []
   },
+  adminAnalytics: null,
   performance: null,
   paperPortfolio: {
     trades: [],
@@ -1632,14 +1633,17 @@ async function loadWebhookEvents() {
 
 async function loadAdminRequests() {
   if (!state.user.isAdmin) return;
-  const [{ requests }, { abuse }, { affiliateAdmin }] = await Promise.all([
+  const [{ requests }, { abuse }, { affiliateAdmin }, { analytics }] = await Promise.all([
     api.request("/api/admin/tester-access"),
     api.request("/api/admin/abuse"),
-    api.request("/api/admin/affiliates")
+    api.request("/api/admin/affiliates"),
+    api.request("/api/admin/analytics")
   ]);
   state.adminRequests = requests;
   state.abuseDashboard = abuse;
   state.affiliateAdmin = affiliateAdmin;
+  state.adminAnalytics = analytics;
+  renderAdminAnalytics();
   renderAdminRequests();
   renderAbuseDashboard();
   renderAffiliateAdmin();
@@ -3497,6 +3501,47 @@ function renderWebhookEvents() {
     : `<div class="empty-state"><strong>No Stripe webhook events yet</strong><p class="reasoning">Verified Stripe deliveries will appear here.</p></div>`;
 }
 
+function renderAdminAnalytics() {
+  if (!state.user?.isAdmin || !state.adminAnalytics) return;
+  const analytics = state.adminAnalytics;
+  document.querySelector("#admin-analytics-summary").textContent =
+    `${analytics.signups || 0} signups · ${analytics.scans || 0} scans · ${analytics.unlocks || 0} unlocks`;
+  document.querySelector("#analytics-total-users").textContent = formatInteger(analytics.totalUsers);
+  document.querySelector("#analytics-paid-users").textContent = formatInteger(analytics.paidUsers);
+  document.querySelector("#analytics-conversion-rate").textContent = `${analytics.conversionRate || 0}%`;
+  document.querySelector("#analytics-mrr").textContent = formatCents(analytics.monthlyRecurringRevenueCents);
+  document.querySelector("#analytics-affiliate-owed").textContent = formatCents(analytics.affiliateRevenueOwedCents);
+  document.querySelector("#analytics-checkout-funnel").textContent =
+    `${formatInteger(analytics.checkoutCompleted)} / ${formatInteger(analytics.checkoutStarted)}`;
+  renderMetricRows("#analytics-signups", [
+    ["Total signups", analytics.signups],
+    ["Email signups", analytics.emailSignups],
+    ["Google signups", analytics.googleSignups]
+  ]);
+  renderMetricRows("#analytics-usage", [
+    ["Scans", analytics.scans],
+    ["Unlocks", analytics.unlocks],
+    ["Subscriptions", analytics.subscriptions],
+    ["Affiliate conversions", analytics.affiliateConversions]
+  ]);
+  renderMarketMetricRows("#analytics-most-scanned", analytics.mostScannedMarkets);
+  renderMarketMetricRows("#analytics-most-unlocked", analytics.mostUnlockedMarkets);
+}
+
+function renderMetricRows(selector, rows) {
+  document.querySelector(selector).innerHTML = rows.map(([label, value]) => `
+    <div class="metric-row"><span>${escapeHtml(label)}</span><strong>${formatInteger(value)}</strong></div>
+  `).join("");
+}
+
+function renderMarketMetricRows(selector, rows = []) {
+  document.querySelector(selector).innerHTML = rows.length
+    ? rows.map((row) => `
+      <div class="metric-row"><span>${escapeHtml(row.symbol)}</span><strong>${formatInteger(row.count)}</strong></div>
+    `).join("")
+    : `<div class="empty-state"><span>No events yet.</span></div>`;
+}
+
 function renderAdminRequests() {
   if (!state.user?.isAdmin) {
     adminNavLink.classList.add("hidden");
@@ -3966,6 +4011,12 @@ function formatCents(value) {
     style: "currency",
     currency: "USD"
   }).format(Number(value || 0) / 100);
+}
+
+function formatInteger(value) {
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 0
+  }).format(Number(value || 0));
 }
 
 function formatR(value) {

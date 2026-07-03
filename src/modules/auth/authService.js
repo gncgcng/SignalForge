@@ -32,6 +32,7 @@ import {
   hashVerificationToken,
   sendVerificationEmail
 } from "./emailVerificationService.js";
+import { trackProductEvent } from "../analytics/productAnalyticsService.js";
 import { attributeAffiliateReferral } from "../affiliates/affiliateRepository.js";
 
 function hashPassword(password, salt = randomBytes(16).toString("hex")) {
@@ -154,6 +155,11 @@ export async function registerOrLogin({
   if (!options.bypassVerification) {
     await attributeAffiliateReferral(user.id, affiliateCode);
   }
+  await trackProductEvent({
+    eventType: "signup",
+    userId: user.id,
+    authProvider: "email"
+  });
   await recordSignupAttempt({
     ...signupContext,
     emailDomain,

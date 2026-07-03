@@ -16,6 +16,7 @@ import {
 import { generateMarketDataSetup } from "./signalGenerator.js";
 import { calculateSignalStats, updateSignalsForUser } from "./signalOutcomeService.js";
 import { buildAnalystProfile } from "../analyst/signalAnalystService.js";
+import { trackProductEvent } from "../analytics/productAnalyticsService.js";
 
 const scanTimeframes = ["1h", "4h", "15m", "5m"];
 
@@ -59,6 +60,12 @@ export async function createSignal(user, { symbol, timeframe }) {
   };
 
   const savedSignal = await saveUnlockedSignal(user.id, signal);
+  await trackProductEvent({
+    eventType: "unlock",
+    userId: user.id,
+    symbol,
+    timeframe
+  });
   if (user.role !== "tester") {
     user.unlockCreditsBalance = Math.max(0, Number(user.unlockCreditsBalance || 0) - 1);
     user.lifetimeUnlocksUsed = Number(user.lifetimeUnlocksUsed || 0) + 1;
@@ -77,6 +84,13 @@ export async function scanMarketSetup(user, { symbol, timeframe }) {
   const scanKey = `single:${symbol}:${timeframe}`;
   const cached = await getCachedScanResult(user.id, scanKey);
   if (cached) {
+    await trackProductEvent({
+      eventType: "scan",
+      userId: user.id,
+      symbol,
+      timeframe,
+      metadata: { cached: true, mode: "single" }
+    });
     return {
       ...cached.publicResult,
       cached: true,
@@ -88,6 +102,13 @@ export async function scanMarketSetup(user, { symbol, timeframe }) {
   const quantity = result.publicResult.valid ? 1 : 0;
   const subscription = await recordDiscoveryUsage(user, quantity, scanKey);
   await cacheScanResult(user.id, scanKey, result);
+  await trackProductEvent({
+    eventType: "scan",
+    userId: user.id,
+    symbol,
+    timeframe,
+    metadata: { cached: false, mode: "single", valid: result.publicResult.valid }
+  });
   return {
     ...result.publicResult,
     cached: false,
@@ -116,6 +137,7 @@ export async function scanAllMarkets(user) {
   const scanKey = "scan-all:active-markets:5m-15m-1h-4h";
   const cached = await getCachedScanResult(user.id, scanKey);
   if (cached) {
+    await trackScanAllAnalytics(user, cached.publicResult.scanned, true);
     return {
       ...cached.publicResult,
       fullSetups: cached.fullSetups,
@@ -145,12 +167,25 @@ export async function scanAllMarkets(user) {
     scanKey
   );
   await cacheScanResult(user.id, scanKey, meteredResult);
+  await trackScanAllAnalytics(user, meteredResult.publicResult.scanned, false);
   return {
     ...meteredResult.publicResult,
     fullSetups: meteredResult.fullSetups,
     cached: false,
     subscription
   };
+}
+
+async function trackScanAllAnalytics(user, scanned = [], cached = false) {
+  await Promise.all(
+    scanned.map((item) => trackProductEvent({
+      eventType: "scan",
+      userId: user.id,
+      symbol: item.symbol,
+      timeframe: item.timeframe,
+      metadata: { cached, mode: "scan_all", valid: Boolean(item.valid) }
+    }))
+  );
 }
 
 export async function scanAllMarketsDetailed(user) {

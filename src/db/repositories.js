@@ -200,6 +200,138 @@ export async function deleteExpiredSessions() {
   await query("DELETE FROM sessions WHERE expires_at <= now()");
 }
 
+export async function recordProductAnalyticsEvent({
+  eventType,
+  userId = null,
+  authProvider = null,
+  symbol = null,
+  timeframe = null,
+  plan = null,
+  amountCents = 0,
+  metadata = {}
+}) {
+  await query(`
+    INSERT INTO product_analytics_events (
+      id, event_type, user_id, auth_provider, symbol, timeframe, plan,
+      amount_cents, metadata
+    )
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+  `, [
+    createId("pae"),
+    eventType,
+    userId,
+    authProvider,
+    symbol,
+    timeframe,
+    plan,
+    Math.max(0, Number(amountCents || 0)),
+    JSON.stringify(metadata || {})
+  ]);
+}
+
+export async function getAdminProductAnalytics() {
+  const [
+    userSummary,
+    eventSummary,
+    mostScanned,
+    mostUnlocked,
+    affiliateSummary
+  ] = await Promise.all([
+    query(`
+      SELECT
+        COUNT(*)::integer AS total_users,
+        COUNT(*) FILTER (
+          WHERE COALESCE(s.status, '') IN ('active', 'trialing')
+            AND COALESCE(u.plan, 'free') IN ('pro', 'elite')
+        )::integer AS paid_users,
+        COALESCE(SUM(
+          CASE
+            WHEN COALESCE(s.status, '') IN ('active', 'trialing') AND u.plan = 'pro' THEN 2900
+            WHEN COALESCE(s.status, '') IN ('active', 'trialing') AND u.plan = 'elite' THEN 9900
+            ELSE 0
+          END
+        ), 0)::integer AS monthly_recurring_revenue_cents
+      FROM users u
+      LEFT JOIN subscriptions s ON s.user_id = u.id
+      WHERE u.role <> 'tester'
+    `),
+    query(`
+      SELECT
+        COUNT(*) FILTER (WHERE event_type = 'signup')::integer AS signups,
+        COUNT(*) FILTER (WHERE event_type = 'signup' AND auth_provider = 'google')::integer
+          AS google_signups,
+        COUNT(*) FILTER (WHERE event_type = 'signup' AND auth_provider = 'email')::integer
+          AS email_signups,
+        COUNT(*) FILTER (WHERE event_type = 'scan')::integer AS scans,
+        COUNT(*) FILTER (WHERE event_type = 'unlock')::integer AS unlocks,
+        COUNT(*) FILTER (WHERE event_type = 'subscription')::integer AS subscriptions,
+        COUNT(*) FILTER (WHERE event_type = 'affiliate_conversion')::integer
+          AS affiliate_conversions,
+        COUNT(*) FILTER (WHERE event_type = 'checkout_started')::integer AS checkout_started,
+        COUNT(*) FILTER (WHERE event_type = 'checkout_completed')::integer
+          AS checkout_completed
+      FROM product_analytics_events
+    `),
+    query(`
+      SELECT symbol, COUNT(*)::integer AS count
+      FROM product_analytics_events
+      WHERE event_type = 'scan'
+        AND symbol IS NOT NULL
+      GROUP BY symbol
+      ORDER BY count DESC, symbol ASC
+      LIMIT 8
+    `),
+    query(`
+      SELECT symbol, COUNT(*)::integer AS count
+      FROM product_analytics_events
+      WHERE event_type = 'unlock'
+        AND symbol IS NOT NULL
+      GROUP BY symbol
+      ORDER BY count DESC, symbol ASC
+      LIMIT 8
+    `),
+    query(`
+      SELECT
+        COALESCE((SELECT SUM(lifetime_commission_cents)
+          FROM affiliate_referrals), 0)::integer AS lifetime_commission_cents,
+        COALESCE((SELECT SUM(amount_cents)
+          FROM affiliate_payout_requests
+          WHERE status IN ('pending', 'approved')), 0)::integer AS reserved_payout_cents
+    `)
+  ]);
+  const users = userSummary.rows[0] || {};
+  const events = eventSummary.rows[0] || {};
+  const affiliate = affiliateSummary.rows[0] || {};
+  const totalUsers = Number(users.total_users || 0);
+  const paidUsers = Number(users.paid_users || 0);
+  const affiliateOwed = Math.max(
+    0,
+    Number(affiliate.lifetime_commission_cents || 0) -
+      Number(affiliate.reserved_payout_cents || 0)
+  );
+
+  return {
+    totalUsers,
+    paidUsers,
+    conversionRate: totalUsers > 0
+      ? Math.round((paidUsers / totalUsers) * 1000) / 10
+      : 0,
+    monthlyRecurringRevenueCents: Number(users.monthly_recurring_revenue_cents || 0),
+    affiliateRevenueOwedCents: affiliateOwed,
+    signups: Number(events.signups || 0),
+    googleSignups: Number(events.google_signups || 0),
+    emailSignups: Number(events.email_signups || 0),
+    scans: Number(events.scans || 0),
+    unlocks: Number(events.unlocks || 0),
+    subscriptions: Number(events.subscriptions || 0),
+    affiliateConversions: Number(events.affiliate_conversions || 0),
+    checkoutStarted: Number(events.checkout_started || 0),
+    checkoutCompleted: Number(events.checkout_completed || 0),
+    mostScannedMarkets: mostScanned.rows,
+    mostUnlockedMarkets: mostUnlocked.rows
+  };
+}
+
 export async function incrementTrialSignalsUsed(userId) {
   await transaction(async (client) => {
     await client.query(`

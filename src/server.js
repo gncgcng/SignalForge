@@ -6,6 +6,7 @@ import { appConfig, logStripeConfiguration } from "./config/appConfig.js";
 import { verifyDatabaseConnection } from "./db/client.js";
 import { runPendingMigrations, verifySessionSchema } from "./db/migrations.js";
 import { attachAuth } from "./middleware/authMiddleware.js";
+import { handleAdminAnalyticsRoutes } from "./modules/admin/analyticsController.js";
 import { handleAuthRoutes } from "./modules/auth/authController.js";
 import { handleBacktestRoutes } from "./modules/backtesting/backtestController.js";
 import { handleAlertRoutes } from "./modules/alerts/alertController.js";
@@ -44,6 +45,7 @@ const server = createServer(async (req, res) => {
   try {
     const handled =
       (await handleAuthRoutes(req, res, url.pathname)) ||
+      (await handleAdminAnalyticsRoutes(req, res, url.pathname)) ||
       (await handleAffiliateRoutes(req, res, url.pathname)) ||
       (await handleAlertRoutes(req, res, url.pathname, url)) ||
       (await handleNotificationRoutes(req, res, url.pathname)) ||

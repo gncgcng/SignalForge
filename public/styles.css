@@ -1122,6 +1122,51 @@ polyline {
   gap: 10px;
 }
 
+.admin-analytics-section {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 24px;
+}
+
+.admin-analytics-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.admin-analytics-grid.compact {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.admin-analytics-grid .panel {
+  display: grid;
+  gap: 7px;
+}
+
+.admin-analytics-grid .panel span,
+.metric-row span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.admin-analytics-grid .panel strong {
+  overflow-wrap: anywhere;
+  font-size: 24px;
+}
+
+.metric-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid rgba(40, 49, 66, 0.68);
+}
+
+.metric-row:last-child {
+  border-bottom: 0;
+}
+
 .admin-request-item {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -3048,6 +3093,7 @@ polyline {
 
 @media (max-width: 900px) {
   .advanced-structure-intelligence,
+  .admin-analytics-grid,
   .admin-abuse-grid,
   .billing-summary-grid,
   .billing-plan-grid,

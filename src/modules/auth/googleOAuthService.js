@@ -28,6 +28,7 @@ import {
 } from "./abuseProtectionService.js";
 import { createSession } from "./authService.js";
 import { isDemoOrTesterIdentity } from "./authPolicy.js";
+import { trackProductEvent } from "../analytics/productAnalyticsService.js";
 import { attributeAffiliateReferral } from "../affiliates/affiliateRepository.js";
 
 const provider = "google";
@@ -200,6 +201,11 @@ async function createGoogleUser(claims, loginState) {
   });
   await grantOAuthFreeTrial(user.id, loginState.deviceFingerprintHash);
   await attributeAffiliateReferral(user.id, loginState.affiliateCode);
+  await trackProductEvent({
+    eventType: "signup",
+    userId: user.id,
+    authProvider: "google"
+  });
   user = await linkOAuthIdentity({
     provider,
     providerSubject: claims.sub,

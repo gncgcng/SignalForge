@@ -24,13 +24,11 @@ export async function handleSubscriptionRoutes(req, res, pathname) {
       ...(await processStripeEvent(event))
     });
   } catch (error) {
-    console.error(
-      "[stripe] Webhook error:",
-      error.message,
-      error
-    );
-
     const statusCode = error.statusCode || 400;
+    console.error(
+      `[stripe] Webhook request failed status=${statusCode} ` +
+      `error=${safeWebhookError(error)}`
+    );
 
     return sendError(
       res,
@@ -95,4 +93,11 @@ export async function handleSubscriptionRoutes(req, res, pathname) {
   }
 
   return false;
+}
+
+function safeWebhookError(error) {
+  return String(error?.message || "unknown")
+    .replace(/\b(?:sk|rk)_(?:test|live)_[A-Za-z0-9_]+\b/g, "[redacted-key]")
+    .replace(/\bwhsec_[A-Za-z0-9_]+\b/g, "[redacted-webhook-secret]")
+    .slice(0, 180);
 }

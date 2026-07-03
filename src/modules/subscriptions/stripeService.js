@@ -19,6 +19,7 @@ import {
   reconcileAffiliateRefund,
   recordRecurringAffiliateCommission
 } from "../affiliates/affiliateRepository.js";
+import { trackProductEvent } from "../analytics/productAnalyticsService.js";
 import { BILLING_PLANS, CREDIT_PACKS, normalizePlan } from "./subscriptionService.js";
 
 const stripeApiBase = "https://api.stripe.com/v1";
@@ -72,6 +73,16 @@ export async function createCheckout(user, { plan, pack }) {
       "subscription_data[metadata][user_id]": user.id,
       "subscription_data[metadata][plan]": planConfig.id
     } : {})
+  });
+  await trackProductEvent({
+    eventType: "checkout_started",
+    userId: user.id,
+    plan: planConfig?.id || null,
+    amountCents: planMonthlyAmountCents(planConfig?.id),
+    metadata: {
+      kind,
+      pack: packConfig?.id || null
+    }
   });
 
   return { url: session.url, id: session.id, mode: kind };
@@ -251,6 +262,12 @@ async function processCheckoutCompleted(session) {
     const quantity = CREDIT_PACKS[session.metadata.pack]?.quantity || 0;
     if (quantity <= 0) throw retryableWebhookError("Unknown Stripe credit pack.");
     await grantUnlockCredits(userId, quantity, `checkout:${session.id}`, "credit_pack");
+    await trackProductEvent({
+      eventType: "checkout_completed",
+      userId,
+      amountCents: Number(session.amount_total || 0),
+      metadata: { kind: "credit_pack", pack: session.metadata.pack || null }
+    });
     return { action: "credit_pack_granted", userId };
   }
 
@@ -273,7 +290,29 @@ async function processCheckoutCompleted(session) {
       stripeMode: getStripeMode(),
       cancelAtPeriodEnd: false
     });
-    await activateAffiliateReferral(userId, planId);
+    const referral = await activateAffiliateReferral(userId, planId);
+    await trackProductEvent({
+      eventType: "checkout_completed",
+      userId,
+      plan: planId,
+      amountCents: Number(session.amount_total || 0),
+      metadata: { kind: "subscription" }
+    });
+    await trackProductEvent({
+      eventType: "subscription",
+      userId,
+      plan: planId,
+      amountCents: Number(session.amount_total || 0),
+      metadata: { source: "checkout" }
+    });
+    if (referral) {
+      await trackProductEvent({
+        eventType: "affiliate_conversion",
+        userId,
+        plan: planId,
+        metadata: { source: "checkout" }
+      });
+    }
 
     try {
       const subscription = await stripeGet(`/subscriptions/${encodeURIComponent(subscriptionId)}`);
@@ -350,6 +389,13 @@ async function processInvoicePaymentSucceeded(invoice, stripeEventId) {
     stripeEventId,
     periodStart: fromUnix(periodStart)
   });
+  await trackProductEvent({
+    eventType: "subscription",
+    userId: user.id,
+    plan: planId,
+    amountCents: Number(invoice.amount_paid || 0),
+    metadata: { source: "invoice" }
+  });
   return {
     action: "subscription_payment_applied",
     userId: user.id,
@@ -403,6 +449,12 @@ function planFromPrice(priceId) {
   if (priceId === appConfig.stripe.prices.elite) return "elite";
   if (priceId === appConfig.stripe.prices.pro) return "pro";
   return "free";
+}
+
+function planMonthlyAmountCents(planId) {
+  if (planId === "pro") return 2900;
+  if (planId === "elite") return 9900;
+  return 0;
 }
 
 function isCreditPackPrice(priceId) {
