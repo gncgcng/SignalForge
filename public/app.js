@@ -1282,7 +1282,8 @@ async function bootDashboard() {
   affiliateAdminNavLink.classList.toggle("hidden", !state.user.isAdmin);
   webhookEventsNavLink.classList.toggle("hidden", !state.user.isAdmin);
   testerAccountBadge.classList.toggle("hidden", state.user.role !== "tester");
-  await Promise.all([
+
+  const dashboardLoads = await Promise.allSettled([
     loadPairs(),
     loadSubscription(),
     loadSignals(),
@@ -1291,8 +1292,14 @@ async function bootDashboard() {
     loadNotifications(),
     loadTesterAccess()
   ]);
+  reportDashboardLoadFailures(dashboardLoads);
+
   if (state.user.isAdmin) {
-    await loadAdminRequests();
+    try {
+      await loadAdminRequests();
+    } catch (error) {
+      reportDashboardLoadFailures([{ status: "rejected", reason: error }]);
+    }
   }
   renderTimeframes();
   const requestedView = location.hash?.replace("#", "").split("?")[0];
@@ -1303,7 +1310,25 @@ async function bootDashboard() {
   showView(allowedInitialViews.includes(requestedView) ? requestedView : "scanner");
   renderCheckoutReturnStatus();
   startSignalHistoryRefresh();
-  await loadMarketData();
+
+  try {
+    await loadMarketData();
+  } catch (error) {
+    reportDashboardLoadFailures([{ status: "rejected", reason: error }]);
+  }
+}
+
+function reportDashboardLoadFailures(results) {
+  const failures = results.filter((result) => result.status === "rejected");
+  if (!failures.length) return;
+
+  console.warn(
+    `[auth] Dashboard restored, but ${failures.length} startup request(s) failed: ` +
+    failures.map((failure) => failure.reason?.message || "Unknown error").join("; ")
+  );
+  if (statusLine) {
+    statusLine.textContent = "Session restored. Some dashboard data could not load yet; refresh or retry in a moment.";
+  }
 }
 
 function showAuth() {
@@ -3914,6 +3939,16 @@ registerPwa();
 init()
   .catch((error) => {
     console.warn(`[auth] Startup session restore failed before login state was confirmed: ${error.message}`);
+    if (state.user) {
+      landingPage.classList.add("hidden");
+      authScreen.classList.add("hidden");
+      dashboard.classList.remove("hidden");
+      if (statusLine) {
+        statusLine.textContent = "Session restored. Some dashboard data could not load yet.";
+      }
+      return;
+    }
+
     landingPage.classList.add("hidden");
     authScreen.classList.remove("hidden");
     dashboard.classList.add("hidden");

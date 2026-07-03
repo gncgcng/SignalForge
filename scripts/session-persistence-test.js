@@ -77,6 +77,19 @@ const result = {
     app.includes('api.request("/api/auth/session")') &&
     app.includes("setSplashStatus(\"Restoring your session\")") &&
     html.includes('id="app-splash-status"'),
+  loginRefreshStillLoggedIn:
+    app.includes("if (session.user)") &&
+    app.includes("console.info(\"[auth] Cookie session restored.\")") &&
+    app.includes("state.user = user;") &&
+    app.includes("if (user)") &&
+    app.includes("await bootDashboard();"),
+  dashboardBootFailureDoesNotLogout:
+    app.includes("Promise.allSettled([") &&
+    app.includes("reportDashboardLoadFailures(dashboardLoads)") &&
+    app.includes("Dashboard restored, but") &&
+    app.includes("if (state.user)") &&
+    app.includes("dashboard.classList.remove(\"hidden\")") &&
+    !app.includes("await Promise.all([\n    loadPairs()"),
   normalCookieRestoreFirst:
     app.indexOf('api.request("/api/auth/session")') <
     app.indexOf("restoreSavedSession()") &&
