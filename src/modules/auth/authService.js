@@ -65,7 +65,8 @@ export async function registerOrLogin({
   email,
   password,
   deviceFingerprint,
-  affiliateCode
+  affiliateCode,
+  legalConsentAccepted
 }, req, options = {}) {
   if (!email || !password || password.length < 6) {
     throw new Error("Use a valid email and a password with at least 6 characters.");
@@ -85,6 +86,12 @@ export async function registerOrLogin({
     }
 
     return { ...(await createSession(existing)), verificationRequired: !existing.emailVerifiedAt };
+  }
+
+  if (!options.bypassVerification && legalConsentAccepted !== true) {
+    const error = new Error("Agree to the Terms, Privacy Policy, and Risk Disclaimer before creating an account.");
+    error.statusCode = 400;
+    throw error;
   }
 
   const signupContext = getSignupContext(req, deviceFingerprint);

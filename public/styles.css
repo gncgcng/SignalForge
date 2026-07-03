@@ -128,6 +128,27 @@ button {
   color: var(--text);
 }
 
+.text-link,
+.footer-links button,
+.consent-row button {
+  border: 0;
+  background: transparent;
+  color: var(--cyan);
+  padding: 0;
+  font-weight: 800;
+}
+
+.text-link {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.text-link:hover,
+.footer-links button:hover,
+.consent-row button:hover {
+  color: var(--text);
+}
+
 .landing-hero {
   position: relative;
   display: grid;
@@ -484,9 +505,16 @@ button {
 .landing-footer {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   gap: 16px;
   border-top: 1px solid var(--line);
   color: var(--muted);
+}
+
+.footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 18px;
 }
 
 .auth-screen {
@@ -567,6 +595,22 @@ button {
   padding: 28px;
 }
 
+.consent-row {
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  color: #b7c1d0;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.consent-row input {
+  width: 18px;
+  height: 18px;
+  margin: 1px 0 0;
+  accent-color: var(--cyan);
+}
+
 .auth-card h2,
 .topbar h2,
 .panel h3,
@@ -613,6 +657,61 @@ button {
   color: #041014;
   font-weight: 800;
   padding: 12px 14px;
+}
+
+.legal-modal {
+  position: fixed;
+  z-index: 1200;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+
+.legal-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(10px);
+}
+
+.legal-modal-panel {
+  position: relative;
+  width: min(720px, 100%);
+  max-height: min(760px, calc(100vh - 40px));
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0c1017;
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.46);
+  padding: 28px;
+}
+
+.legal-modal-panel h2 {
+  margin: 8px 0 18px;
+}
+
+.legal-modal-body {
+  display: grid;
+  gap: 14px;
+  color: #c4cedd;
+  line-height: 1.62;
+}
+
+.legal-modal-body p {
+  margin: 0;
+}
+
+.legal-modal-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--text);
 }
 
 .form-note,
@@ -2012,7 +2111,8 @@ polyline {
     gap: 10px;
   }
 
-  .landing-nav-actions a {
+  .landing-nav-actions a,
+  .landing-nav-actions .text-link {
     display: none;
   }
 
@@ -2101,6 +2201,16 @@ polyline {
 
   .landing-footer {
     flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .legal-modal {
+    padding: 12px;
+  }
+
+  .legal-modal-panel {
+    max-height: calc(100vh - 24px);
+    padding: 22px;
   }
 
   .performance-charts,

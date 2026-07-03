@@ -81,6 +81,10 @@ const mobileMenuToggle = document.querySelector("#mobile-menu-toggle");
 const sidebar = document.querySelector(".sidebar");
 const authForm = document.querySelector("#auth-form");
 const authNote = document.querySelector("#auth-note");
+const legalConsent = document.querySelector("#legal-consent");
+const legalModal = document.querySelector("#legal-modal");
+const legalModalTitle = document.querySelector("#legal-modal-title");
+const legalModalBody = document.querySelector("#legal-modal-body");
 const googleAuthButton = document.querySelector("#google-auth-button");
 const viewDemoButton = document.querySelector("#view-demo-button");
 const pairSearch = document.querySelector("#pair-search");
@@ -188,6 +192,34 @@ let telegramConnectionTimer = null;
 let billingRefreshTimer = null;
 let deferredInstallPrompt = null;
 
+const legalDocuments = {
+  terms: {
+    title: "Terms",
+    body: `
+      <p>SignalForge provides market research tools, scanners, alerts, backtesting, paper trading, and educational analytics. You are responsible for how you use the information shown in the app.</p>
+      <p>SignalForge does not place trades, connect to brokers, manage money, or provide personalized investment recommendations. You agree not to misuse the service, bypass usage limits, abuse trials, or rely on SignalForge as your sole basis for trading decisions.</p>
+      <p>Subscriptions, unlock credits, affiliate links, and notifications are provided subject to availability and may change as the product evolves.</p>
+    `
+  },
+  privacy: {
+    title: "Privacy Policy",
+    body: `
+      <p>SignalForge stores account information needed to operate the service, including your email, authentication records, credit balances, saved signals, alerts, journal entries, affiliate attribution, and subscription status.</p>
+      <p>Payment information is handled by Stripe. Telegram alerts require Telegram connection details. Google sign-in is validated on the backend before an account is created or linked.</p>
+      <p>We use security and anti-abuse signals such as IP-derived hashes and device fingerprints to protect free trials and subscriptions. We do not sell personal trading history.</p>
+    `
+  },
+  risk: {
+    title: "Risk Disclaimer",
+    body: `
+      <p><strong>Educational tool only. Not financial advice.</strong></p>
+      <p>Trading crypto, commodities, stocks, ETFs, or any other market involves substantial risk. You can lose money. SignalForge confidence scores and setup quality labels describe rule alignment, not a probability of profit.</p>
+      <p>Backtests, paper trading, alerts, and historical outcomes may exclude fees, slippage, liquidity constraints, execution quality, and future market changes. Past or simulated performance does not guarantee future results.</p>
+      <p>Affiliate disclosure: Affiliates may earn commissions from paid subscriptions.</p>
+    `
+  }
+};
+
 const api = {
   async request(path, options = {}) {
     const optionHeaders = options.headers || {};
@@ -249,6 +281,19 @@ function updateInstallButtonVisibility() {
   installAppButton.classList.toggle("hidden", alreadyInstalled || !deferredInstallPrompt);
 }
 
+function openLegalDocument(documentKey) {
+  const legalDocument = legalDocuments[documentKey];
+  if (!legalDocument) return;
+
+  legalModalTitle.textContent = legalDocument.title;
+  legalModalBody.innerHTML = legalDocument.body;
+  legalModal.classList.remove("hidden");
+}
+
+function closeLegalDocument() {
+  legalModal.classList.add("hidden");
+}
+
 document.querySelector("#start-free-button").addEventListener("click", () => {
   showAuth();
 });
@@ -261,6 +306,16 @@ document.querySelectorAll(".launch-auth-button").forEach((button) => {
   button.addEventListener("click", () => {
     showAuth();
   });
+});
+
+document.querySelectorAll("[data-legal-doc]").forEach((trigger) => {
+  trigger.addEventListener("click", () => {
+    openLegalDocument(trigger.dataset.legalDoc);
+  });
+});
+
+document.querySelectorAll("[data-legal-close]").forEach((trigger) => {
+  trigger.addEventListener("click", closeLegalDocument);
 });
 
 viewDemoButton.addEventListener("click", async () => {
@@ -280,6 +335,7 @@ authForm.addEventListener("submit", async (event) => {
   const form = new FormData(authForm);
   const credentials = Object.fromEntries(form);
   credentials.affiliateCode = state.referralCode;
+  credentials.legalConsentAccepted = legalConsent.checked;
 
   try {
     authNote.textContent = "Authenticating...";
@@ -301,12 +357,20 @@ authForm.addEventListener("submit", async (event) => {
 });
 
 googleAuthButton.addEventListener("click", async () => {
+  if (!legalConsent.checked) {
+    authNote.textContent = "Agree to the Terms, Privacy Policy, and Risk Disclaimer before creating or connecting an account.";
+    return;
+  }
+
   try {
     googleAuthButton.disabled = true;
     authNote.textContent = "Opening Google sign-in...";
     const { authorizationUrl } = await api.request("/api/auth/google/start", {
       method: "POST",
-      body: JSON.stringify({ affiliateCode: state.referralCode })
+      body: JSON.stringify({
+        affiliateCode: state.referralCode,
+        legalConsentAccepted: true
+      })
     });
     location.assign(authorizationUrl);
   } catch (error) {
@@ -466,6 +530,7 @@ dashboard.addEventListener("click", (event) => {
 
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") setMobileNavigationOpen(false);
+  if (event.key === "Escape") closeLegalDocument();
 });
 
 window.addEventListener("resize", () => {

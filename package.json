@@ -11,6 +11,7 @@
     "test:auth-security": "node scripts/auth-security-test.js",
     "test:google-oauth": "node scripts/google-oauth-test.js",
     "test:email-verification": "node scripts/email-verification-test.js",
+    "test:legal-consent": "node scripts/legal-consent-test.js",
     "test:affiliate-program": "node scripts/affiliate-program-test.js",
     "test:pwa": "node scripts/pwa-test.js",
     "test:mobile-nav": "node scripts/mobile-navigation-test.js",

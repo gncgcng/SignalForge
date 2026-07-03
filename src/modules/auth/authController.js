@@ -79,6 +79,11 @@ export async function handleAuthRoutes(req, res, pathname) {
   if (pathname === "/api/auth/google/start" && req.method === "POST") {
     try {
       const body = await readJson(req);
+      if (body.legalConsentAccepted !== true) {
+        const error = new Error("Agree to the Terms, Privacy Policy, and Risk Disclaimer before creating an account.");
+        error.statusCode = 400;
+        throw error;
+      }
       const result = await startGoogleOAuth(
         req,
         req.headers["x-device-fingerprint"] || body.deviceFingerprint,

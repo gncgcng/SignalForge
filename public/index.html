@@ -33,6 +33,7 @@
           </div>
           <div class="landing-nav-actions">
             <a href="#pricing">Pricing</a>
+            <button class="text-link" type="button" data-legal-doc="risk">Risk disclaimer</button>
             <button class="secondary-action" id="landing-login-button" type="button">Sign in</button>
           </div>
         </header>
@@ -185,7 +186,11 @@
             <img class="brand-logo small" src="/icons/android-chrome-192x192.png" alt="" />
             <strong>SignalForge</strong>
           </div>
-          <span>Live market data · Rule-based signals · Outcome tracking</span>
+          <div class="footer-links">
+            <button type="button" data-legal-doc="terms">Terms</button>
+            <button type="button" data-legal-doc="privacy">Privacy Policy</button>
+            <button type="button" data-legal-doc="risk">Risk Disclaimer</button>
+          </div>
         </footer>
       </section>
 
@@ -218,6 +223,15 @@
           <label>
             Password
             <input name="password" type="password" autocomplete="current-password" placeholder="6+ characters" required />
+          </label>
+          <label class="consent-row">
+            <input id="legal-consent" name="legalConsentAccepted" type="checkbox" />
+            <span>
+              I agree to the
+              <button type="button" data-legal-doc="terms">Terms</button>,
+              <button type="button" data-legal-doc="privacy">Privacy Policy</button>, and
+              <button type="button" data-legal-doc="risk">Risk Disclaimer</button>.
+            </span>
           </label>
           <button type="submit">Enter Dashboard</button>
           <div class="auth-divider"><span>or</span></div>
@@ -914,6 +928,10 @@
               </div>
               <button id="copy-affiliate-link" type="button">Copy link</button>
             </article>
+            <div class="signal-disclaimer">
+              <strong>Affiliate disclosure</strong>
+              <span>Affiliates may earn commissions from paid subscriptions.</span>
+            </div>
             <p class="status-line" id="affiliate-status"></p>
             <div class="affiliate-stats-grid">
               <article class="panel"><span>Active subscribers</span><strong id="affiliate-active-subscribers">0</strong></article>
@@ -1068,6 +1086,10 @@
               <article class="panel"><span>Unlock credits</span><strong id="billing-unlock-credits">3</strong></article>
             </div>
             <p class="status-line" id="billing-status"></p>
+            <div class="signal-disclaimer">
+              <strong>Educational tool only. Not financial advice.</strong>
+              <span>Subscriptions and credit packs provide access to research tools only. Affiliates may earn commissions from paid subscriptions.</span>
+            </div>
             <section>
               <div class="section-title">
                 <div><span class="eyebrow">Plans</span><h3>Choose your capacity</h3></div>
@@ -1085,6 +1107,15 @@
         </div>
       </section>
     </main>
+    <div class="legal-modal hidden" id="legal-modal" role="dialog" aria-modal="true" aria-labelledby="legal-modal-title">
+      <div class="legal-modal-backdrop" data-legal-close></div>
+      <article class="legal-modal-panel">
+        <button class="legal-modal-close" type="button" aria-label="Close legal document" data-legal-close>×</button>
+        <span class="eyebrow" id="legal-modal-eyebrow">SignalForge legal</span>
+        <h2 id="legal-modal-title">Terms</h2>
+        <div class="legal-modal-body" id="legal-modal-body"></div>
+      </article>
+    </div>
     <script src="/app.js" type="module"></script>
   </body>
 </html>
