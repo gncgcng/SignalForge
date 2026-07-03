@@ -248,22 +248,52 @@
             <img class="brand-logo small" src="/icons/android-chrome-192x192.png" alt="" />
             <strong>SignalForge</strong>
           </div>
-          <nav>
-            <a class="active" href="#scanner" data-view-link="scanner">Scanner</a>
-            <a href="#watchlist" data-view-link="watchlist">Watchlist</a>
-            <a href="#alerts" data-view-link="alerts">Alerts <span class="nav-count hidden" id="unread-alert-count">0</span></a>
-            <a href="#notifications" data-view-link="notifications">Notifications</a>
-            <a href="#signals" data-view-link="signals">Signals</a>
-            <a href="#paper-portfolio" data-view-link="paper-portfolio">Paper Portfolio</a>
-            <a href="#journal" data-view-link="journal">Journal</a>
-            <a href="#backtesting" data-view-link="backtesting">Backtesting</a>
-            <a href="#performance" data-view-link="performance">Performance</a>
-            <a href="#affiliate" data-view-link="affiliate">Affiliate</a>
-            <a href="#settings" data-view-link="settings">Settings</a>
-            <a href="#billing" data-view-link="billing">Billing</a>
-            <a class="hidden" href="#admin" data-view-link="admin" id="admin-nav-link">Admin</a>
-            <a class="hidden" href="#affiliate-admin" data-view-link="affiliate-admin" id="affiliate-admin-nav-link">Affiliate Admin</a>
-            <a class="hidden" href="#webhook-events" data-view-link="webhook-events" id="webhook-events-nav-link">Webhook Events</a>
+          <nav class="grouped-nav" id="sidebar-nav">
+            <section class="nav-section" data-nav-section="trading">
+              <button class="nav-section-toggle" type="button" data-nav-section-toggle="trading" aria-expanded="true">Trading</button>
+              <div class="nav-section-links">
+                <a class="active" href="#scanner" data-view-link="scanner">Scanner</a>
+                <a href="#signals" data-view-link="signals">Signals</a>
+              </div>
+            </section>
+            <section class="nav-section" data-nav-section="alerts">
+              <button class="nav-section-toggle" type="button" data-nav-section-toggle="alerts" aria-expanded="true">Alerts</button>
+              <div class="nav-section-links">
+                <a href="#watchlist" data-view-link="watchlist">Watchlist</a>
+                <a href="#alerts" data-view-link="alerts">Alerts <span class="nav-count hidden" id="unread-alert-count">0</span></a>
+                <a href="#notifications" data-view-link="notifications">Notifications</a>
+              </div>
+            </section>
+            <section class="nav-section" data-nav-section="research">
+              <button class="nav-section-toggle" type="button" data-nav-section-toggle="research" aria-expanded="true">Research</button>
+              <div class="nav-section-links">
+                <a href="#backtesting" data-view-link="backtesting">Backtesting</a>
+                <a href="#performance" data-view-link="performance">Performance</a>
+              </div>
+            </section>
+            <section class="nav-section" data-nav-section="portfolio">
+              <button class="nav-section-toggle" type="button" data-nav-section-toggle="portfolio" aria-expanded="true">Portfolio</button>
+              <div class="nav-section-links">
+                <a href="#paper-portfolio" data-view-link="paper-portfolio">Paper Portfolio</a>
+                <a href="#journal" data-view-link="journal">Journal</a>
+              </div>
+            </section>
+            <section class="nav-section" data-nav-section="growth">
+              <button class="nav-section-toggle" type="button" data-nav-section-toggle="growth" aria-expanded="true">Growth</button>
+              <div class="nav-section-links">
+                <a href="#affiliate" data-view-link="affiliate">Affiliate</a>
+              </div>
+            </section>
+            <section class="nav-section" data-nav-section="account">
+              <button class="nav-section-toggle" type="button" data-nav-section-toggle="account" aria-expanded="true">Account</button>
+              <div class="nav-section-links">
+                <a href="#settings" data-view-link="settings">Settings</a>
+                <a href="#billing" data-view-link="billing">Billing</a>
+                <a class="hidden" href="#admin" data-view-link="admin" id="admin-nav-link">Admin</a>
+                <a class="hidden" href="#affiliate-admin" data-view-link="affiliate-admin" id="affiliate-admin-nav-link">Affiliate Admin</a>
+                <a class="hidden" href="#webhook-events" data-view-link="webhook-events" id="webhook-events-nav-link">Webhook Events</a>
+              </div>
+            </section>
           </nav>
           <div class="trial-card">
             <span>Plan capacity</span>
@@ -765,42 +795,52 @@
               <strong>Historical OHLCV only.</strong>
               <span>Each decision uses only candles available at that timestamp. Lab settings never alter production scanner rules.</span>
             </div>
-            <div class="lab-evaluation hidden" id="lab-evaluation"></div>
-            <div class="lab-metrics-grid">
-              <div><span>Total trades</span><strong id="lab-total-trades">0</strong></div>
-              <div><span>Win rate</span><strong id="lab-win-rate">0%</strong></div>
-              <div><span>Profit factor</span><strong id="lab-profit-factor">0</strong></div>
-              <div><span>Average R</span><strong id="lab-average-r">0R</strong></div>
-              <div><span>Max drawdown</span><strong id="lab-max-drawdown">0R</strong></div>
-              <div><span>Consecutive wins</span><strong id="lab-win-streak">0</strong></div>
-              <div><span>Consecutive losses</span><strong id="lab-loss-streak">0</strong></div>
-              <div><span>Expectancy</span><strong id="lab-expectancy">0R</strong></div>
+            <div class="lab-empty-state" id="lab-empty-state">
+              <strong>No backtest run yet</strong>
+              <p class="reasoning">Choose markets, timeframes, sessions, and strategy components, then run a historical test. Results will appear here without changing production scanner rules.</p>
             </div>
-            <div class="lab-curves">
-              <article class="analytics-panel">
-                <div class="panel-header"><div><span class="eyebrow">Cumulative R</span><h3>Equity curve</h3></div></div>
-                <div class="line-chart" id="lab-equity-curve"></div>
-              </article>
-              <article class="analytics-panel">
-                <div class="panel-header"><div><span class="eyebrow">Peak-to-trough</span><h3>Drawdown curve</h3></div></div>
-                <div class="line-chart" id="lab-drawdown-curve"></div>
-              </article>
+            <div class="lab-loading-state hidden" id="lab-loading-state">
+              <strong>Running backtest...</strong>
+              <p class="reasoning">Loading historical candles and evaluating each setup without future data.</p>
             </div>
-            <div class="lab-breakdowns">
-              <article class="analytics-panel"><h3>Win rate by market</h3><div id="lab-by-market"></div></article>
-              <article class="analytics-panel"><h3>Win rate by timeframe</h3><div id="lab-by-timeframe"></div></article>
-              <article class="analytics-panel"><h3>Win rate by regime</h3><div id="lab-by-regime"></div></article>
-              <article class="analytics-panel"><h3>Win rate by confluence</h3><div id="lab-by-confluence"></div></article>
-              <article class="analytics-panel"><h3>Win rate by SMC factor</h3><div id="lab-by-smc"></div></article>
-              <article class="analytics-panel"><h3>SMC comparison</h3><div id="lab-smc-comparison"></div></article>
-              <article class="analytics-panel"><h3>Stop comparison</h3><div id="lab-stop-comparison"></div></article>
-              <article class="analytics-panel"><h3>Target comparison</h3><div id="lab-target-comparison"></div></article>
-              <article class="analytics-panel"><h3>VWAP comparison</h3><div id="lab-vwap-comparison"></div></article>
-              <article class="analytics-panel"><h3>Volume profile comparison</h3><div id="lab-profile-comparison"></div></article>
-              <article class="analytics-panel"><h3>Correlation comparison</h3><div id="lab-correlation-comparison"></div></article>
-              <article class="analytics-panel"><h3>Strategy version comparison</h3><div id="lab-version-comparison"></div></article>
+            <div class="lab-results-shell hidden" id="lab-results">
+              <div class="lab-evaluation hidden" id="lab-evaluation"></div>
+              <div class="lab-metrics-grid">
+                <div><span>Total trades</span><strong id="lab-total-trades">0</strong></div>
+                <div><span>Win rate</span><strong id="lab-win-rate">0%</strong></div>
+                <div><span>Profit factor</span><strong id="lab-profit-factor">0</strong></div>
+                <div><span>Average R</span><strong id="lab-average-r">0R</strong></div>
+                <div><span>Max drawdown</span><strong id="lab-max-drawdown">0R</strong></div>
+                <div><span>Consecutive wins</span><strong id="lab-win-streak">0</strong></div>
+                <div><span>Consecutive losses</span><strong id="lab-loss-streak">0</strong></div>
+                <div><span>Expectancy</span><strong id="lab-expectancy">0R</strong></div>
+              </div>
+              <div class="lab-curves">
+                <article class="analytics-panel">
+                  <div class="panel-header"><div><span class="eyebrow">Cumulative R</span><h3>Equity curve</h3></div></div>
+                  <div class="line-chart" id="lab-equity-curve"></div>
+                </article>
+                <article class="analytics-panel">
+                  <div class="panel-header"><div><span class="eyebrow">Peak-to-trough</span><h3>Drawdown curve</h3></div></div>
+                  <div class="line-chart" id="lab-drawdown-curve"></div>
+                </article>
+              </div>
+              <div class="lab-breakdowns">
+                <article class="analytics-panel"><h3>Win rate by market</h3><div id="lab-by-market"></div></article>
+                <article class="analytics-panel"><h3>Win rate by timeframe</h3><div id="lab-by-timeframe"></div></article>
+                <article class="analytics-panel"><h3>Win rate by regime</h3><div id="lab-by-regime"></div></article>
+                <article class="analytics-panel"><h3>Win rate by confluence</h3><div id="lab-by-confluence"></div></article>
+                <article class="analytics-panel"><h3>Win rate by SMC factor</h3><div id="lab-by-smc"></div></article>
+                <article class="analytics-panel"><h3>SMC comparison</h3><div id="lab-smc-comparison"></div></article>
+                <article class="analytics-panel"><h3>Stop comparison</h3><div id="lab-stop-comparison"></div></article>
+                <article class="analytics-panel"><h3>Target comparison</h3><div id="lab-target-comparison"></div></article>
+                <article class="analytics-panel"><h3>VWAP comparison</h3><div id="lab-vwap-comparison"></div></article>
+                <article class="analytics-panel"><h3>Volume profile comparison</h3><div id="lab-profile-comparison"></div></article>
+                <article class="analytics-panel"><h3>Correlation comparison</h3><div id="lab-correlation-comparison"></div></article>
+                <article class="analytics-panel"><h3>Strategy version comparison</h3><div id="lab-version-comparison"></div></article>
+              </div>
+              <div class="signals-table-wrap" id="lab-trades"></div>
             </div>
-            <div class="signals-table-wrap" id="lab-trades"></div>
           </section>
 
           <section class="page-view hidden" id="performance-view" data-view="performance">

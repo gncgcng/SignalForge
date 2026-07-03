@@ -752,9 +752,53 @@ button {
   justify-content: flex-start;
 }
 
-nav {
+.grouped-nav {
   display: grid;
-  gap: 8px;
+  gap: 10px;
+}
+
+.nav-section {
+  display: grid;
+  gap: 6px;
+}
+
+.nav-section-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 5px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.nav-section-toggle::after {
+  content: "⌄";
+  font-size: 13px;
+  transition: transform 160ms ease;
+}
+
+.nav-section.collapsed .nav-section-toggle::after {
+  transform: rotate(-90deg);
+}
+
+.nav-section-links {
+  display: grid;
+  gap: 6px;
+  overflow: hidden;
+  max-height: 320px;
+  transition: max-height 180ms ease, opacity 160ms ease;
+}
+
+.nav-section.collapsed .nav-section-links {
+  max-height: 0;
+  opacity: 0;
+  pointer-events: none;
 }
 
 nav a {
@@ -2486,24 +2530,37 @@ polyline {
 
 .backtesting-lab-controls {
   display: grid;
-  grid-template-columns: 2fr 0.7fr 1.5fr auto;
-  gap: 16px;
-  align-items: end;
+  grid-template-columns: minmax(280px, 1.35fr) minmax(220px, 0.8fr);
+  gap: 14px;
+  align-items: stretch;
   margin-bottom: 18px;
 }
 
 .backtesting-lab-controls fieldset {
+  display: grid;
+  align-content: start;
+  gap: 10px;
   min-width: 0;
   margin: 0;
-  padding: 14px;
+  padding: 16px;
   border: 1px solid var(--line);
   border-radius: 8px;
+  background: rgba(16, 20, 29, 0.78);
 }
 
 .backtesting-lab-controls legend {
   padding: 0 6px;
-  color: var(--muted);
-  font-size: 0.78rem;
+  color: var(--cyan);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.backtesting-lab-controls button[type="submit"] {
+  align-self: end;
+  min-height: 48px;
+  grid-column: 1 / -1;
 }
 
 .lab-option-grid {
@@ -2534,6 +2591,27 @@ polyline {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--line);
+}
+
+.lab-empty-state,
+.lab-loading-state,
+.lab-results-shell {
+  display: grid;
+  gap: 14px;
+}
+
+.lab-empty-state,
+.lab-loading-state {
+  margin-top: 16px;
+  padding: 22px;
+  border: 1px dashed rgba(94, 234, 212, 0.28);
+  border-radius: 8px;
+  background: rgba(11, 16, 24, 0.76);
+}
+
+.lab-loading-state {
+  border-style: solid;
+  border-color: rgba(248, 193, 74, 0.34);
 }
 
 .lab-metrics-grid > div {

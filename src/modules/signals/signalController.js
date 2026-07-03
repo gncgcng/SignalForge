@@ -60,7 +60,7 @@ export async function handleSignalRoutes(req, res, pathname) {
     try {
       const body = await readJson(req);
       const result = await createSignal(req.user, body);
-      return sendJson(res, result.signal ? 201 : 200, result);
+      return sendJson(res, result.signal && !result.alreadyUnlocked ? 201 : 200, result);
     } catch (error) {
       return sendError(res, error.statusCode || 400, error.message, {
         subscription: error.subscription

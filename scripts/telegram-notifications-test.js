@@ -66,7 +66,8 @@ const result = {
   duplicateQueueConstraint: migration.includes("UNIQUE (user_id, setup_key)") &&
     repositories.includes("ON CONFLICT (user_id, setup_key) DO NOTHING"),
   queueIsUserScoped: repositories.includes("user_id text NOT NULL") === false &&
-    repositories.includes("userId,\n    setup.setupKey"),
+    repositories.includes("const setupKey = setup.setupKey || setup.id") &&
+    repositories.includes("userId,\n    setupKey"),
   favoriteMarketMatches: telegramPreferenceMatchesSetup(settings, favorites, setup),
   nonFavoriteRejected: !telegramPreferenceMatchesSetup(settings, new Set(["XAU/USD"]), setup),
   timeframeRejected: !telegramPreferenceMatchesSetup(settings, favorites, { ...setup, timeframe: "15m" }),

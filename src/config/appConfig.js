@@ -141,6 +141,11 @@ export const appConfig = {
     intervalMs: Number(process.env.SIGNAL_TRACKING_INTERVAL_MS || 60000),
     expirationHours: Number(process.env.SIGNAL_EXPIRATION_HOURS || 24)
   },
+  autoScan: {
+    enabled: process.env.AUTO_SCAN_ENABLED !== "false",
+    intervalMs: Number(process.env.AUTO_SCAN_INTERVAL_MS || 900000),
+    duplicateCooldownMs: Number(process.env.AUTO_SCAN_DUPLICATE_COOLDOWN_MS || process.env.AUTO_SCAN_INTERVAL_MS || 900000)
+  },
   stripe: {
     publishableKey: process.env.STRIPE_PUBLISHABLE_KEY || "",
     secretKey: process.env.STRIPE_SECRET_KEY || "",

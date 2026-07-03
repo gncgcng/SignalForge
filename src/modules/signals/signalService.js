@@ -9,7 +9,6 @@ import { listActivePairs } from "../market-data/marketDataService.js";
 import { getMultiTimeframeMarketData } from "../market-data/multiTimeframeService.js";
 import {
   canDiscoverSetups,
-  canGenerateSignal,
   getSubscriptionSummary,
   recordDiscoveryUsage
 } from "../subscriptions/subscriptionService.js";
@@ -21,17 +20,6 @@ import { trackProductEvent } from "../analytics/productAnalyticsService.js";
 const scanTimeframes = ["1h", "4h", "15m", "5m"];
 
 export async function createSignal(user, { symbol, timeframe }) {
-  if (!canGenerateSignal(user)) {
-    const summary = getSubscriptionSummary(user);
-    const verificationRequired = !summary.emailVerified && user.role !== "tester";
-    const error = new Error(verificationRequired
-      ? "Verify your email before using signal unlock credits."
-      : "Free trial limit reached. Connect Stripe checkout to unlock more signals.");
-    error.code = verificationRequired ? "EMAIL_VERIFICATION_REQUIRED" : "TRIAL_LIMIT";
-    error.subscription = summary;
-    throw error;
-  }
-
   const scanKey = `single:${symbol}:${timeframe}`;
   const cached = await getCachedScanResult(user.id, scanKey);
   let result = cached;
@@ -60,13 +48,15 @@ export async function createSignal(user, { symbol, timeframe }) {
   };
 
   const savedSignal = await saveUnlockedSignal(user.id, signal);
-  await trackProductEvent({
-    eventType: "unlock",
-    userId: user.id,
-    symbol,
-    timeframe
-  });
-  if (user.role !== "tester") {
+  if (!savedSignal?.alreadyUnlocked) {
+    await trackProductEvent({
+      eventType: "unlock",
+      userId: user.id,
+      symbol,
+      timeframe
+    });
+  }
+  if (user.role !== "tester" && !savedSignal?.alreadyUnlocked) {
     user.unlockCreditsBalance = Math.max(0, Number(user.unlockCreditsBalance || 0) - 1);
     user.lifetimeUnlocksUsed = Number(user.lifetimeUnlocksUsed || 0) + 1;
     user.trialSignalsUsed = Number(user.trialSignalsUsed || 0) +
@@ -75,6 +65,7 @@ export async function createSignal(user, { symbol, timeframe }) {
 
   return {
     signal: savedSignal,
+    alreadyUnlocked: Boolean(savedSignal?.alreadyUnlocked),
     analysis: result.analysis,
     subscription: getSubscriptionSummary(user)
   };

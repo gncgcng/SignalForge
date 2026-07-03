@@ -8,6 +8,7 @@ const state = {
   marketData: null,
   marketStatus: {},
   scannerMode: getStoredScannerMode(),
+  navSections: getStoredNavSections(),
   expandedSignalKeys: new Set(),
   lastScanSummary: null,
   activeView: "scanner",
@@ -76,6 +77,7 @@ const state = {
 
 const RESTORE_TOKEN_KEY = "signalforge-restore-token";
 const SCANNER_MODE_KEY = "signalforge-scanner-mode";
+const NAV_SECTIONS_KEY = "signalforge-nav-sections";
 
 const authScreen = document.querySelector("#auth-screen");
 const landingPage = document.querySelector("#landing-page");
@@ -121,6 +123,9 @@ const journalEntryCount = document.querySelector("#journal-entry-count");
 const backtestingLabForm = document.querySelector("#backtesting-lab-form");
 const labStatus = document.querySelector("#lab-status");
 const labEvaluation = document.querySelector("#lab-evaluation");
+const labEmptyState = document.querySelector("#lab-empty-state");
+const labLoadingState = document.querySelector("#lab-loading-state");
+const labResults = document.querySelector("#lab-results");
 const historyCount = document.querySelector("#history-count");
 const signalsHistory = document.querySelector("#signals-history");
 const historyPairFilter = document.querySelector("#history-pair-filter");
@@ -566,6 +571,15 @@ document.querySelectorAll("[data-view-link]").forEach((link) => {
   });
 });
 
+document.querySelectorAll("[data-nav-section-toggle]").forEach((button) => {
+  button.addEventListener("click", () => {
+    const section = button.dataset.navSectionToggle;
+    state.navSections[section] = !state.navSections[section];
+    localStorage.setItem(NAV_SECTIONS_KEY, JSON.stringify(state.navSections));
+    renderNavSections();
+  });
+});
+
 [historyPairFilter, historyTimeframeFilter, historyDirectionFilter].forEach((filter) => {
   filter.addEventListener("change", () => {
     state.historyFilters = {
@@ -633,7 +647,7 @@ generateButton.addEventListener("click", async () => {
   try {
     generateButton.disabled = true;
     statusLine.textContent = "Generating setup from live OHLCV candles...";
-    const { signal, subscription, analysis } = await api.request("/api/signals/generate", {
+    const { signal, subscription, analysis, alreadyUnlocked } = await api.request("/api/signals/generate", {
       method: "POST",
       body: JSON.stringify({
         symbol: state.selectedPair.symbol,
@@ -654,7 +668,9 @@ generateButton.addEventListener("click", async () => {
     await loadSignals();
     renderSignals();
     renderSignalsHistory();
-    statusLine.textContent = "Setup generated from live OHLCV data. Rule-based only; not financial advice.";
+    statusLine.textContent = alreadyUnlocked
+      ? "Already unlocked. No additional credit was used."
+      : "Setup generated from live OHLCV data. Rule-based only; not financial advice.";
   } catch (error) {
     statusLine.textContent = error.message;
   } finally {
@@ -990,6 +1006,9 @@ backtestingLabForm.addEventListener("submit", async (event) => {
     button.textContent = "Running...";
     labStatus.textContent = "Loading historical candles";
     labStatus.className = "status-pill status-active";
+    labEmptyState.classList.add("hidden");
+    labResults.classList.add("hidden");
+    labLoadingState.classList.remove("hidden");
     const { backtest } = await api.request("/api/backtesting/run", {
       method: "POST",
       body: JSON.stringify({
@@ -1005,9 +1024,12 @@ backtestingLabForm.addEventListener("submit", async (event) => {
   } catch (error) {
     labStatus.textContent = "Failed";
     labStatus.className = "status-pill status-hit-sl";
+    labLoadingState.classList.add("hidden");
+    labResults.classList.remove("hidden");
     labEvaluation.classList.remove("hidden");
     labEvaluation.innerHTML = `<strong>Backtest unavailable</strong><span>${escapeHtml(error.message)}</span>`;
   } finally {
+    labLoadingState.classList.add("hidden");
     button.disabled = false;
     button.textContent = "Run Backtest";
   }
@@ -1051,7 +1073,7 @@ signalsGrid.addEventListener("click", async (event) => {
   try {
     button.disabled = true;
     statusLine.textContent = `Unlocking ${button.dataset.unlockSymbol} ${button.dataset.unlockTimeframe}...`;
-    const { signal, subscription, analysis } = await api.request("/api/signals/generate", {
+    const { signal, subscription, analysis, alreadyUnlocked } = await api.request("/api/signals/generate", {
       method: "POST",
       body: JSON.stringify({
         symbol: button.dataset.unlockSymbol,
@@ -1073,7 +1095,9 @@ signalsGrid.addEventListener("click", async (event) => {
     await loadSignals();
     renderSignals();
     renderSignalsHistory();
-    statusLine.textContent = "Full signal unlocked and saved. Unlock credit deducted.";
+    statusLine.textContent = alreadyUnlocked
+      ? "Already unlocked. No additional credit was used."
+      : "Full signal unlocked and saved. Unlock credit deducted.";
     scrollToSignalKey(getSignalKey(signal));
   } catch (error) {
     statusLine.textContent = error.message;
@@ -1104,7 +1128,7 @@ async function unlockSignal(button, symbol, timeframe) {
   try {
     button.disabled = true;
     statusLine.textContent = `Unlocking ${symbol} ${timeframe}...`;
-    const { signal, subscription, analysis } = await api.request("/api/signals/generate", {
+    const { signal, subscription, analysis, alreadyUnlocked } = await api.request("/api/signals/generate", {
       method: "POST",
       body: JSON.stringify({ symbol, timeframe })
     });
@@ -1122,7 +1146,9 @@ async function unlockSignal(button, symbol, timeframe) {
     state.expandedSignalKeys = new Set([getSignalKey(signal)]);
     await loadSignals();
     renderSignals();
-    statusLine.textContent = "Full signal unlocked and saved. Unlock credit deducted.";
+    statusLine.textContent = alreadyUnlocked
+      ? "Already unlocked. No additional credit was used."
+      : "Full signal unlocked and saved. Unlock credit deducted.";
     scrollToSignalKey(getSignalKey(signal));
   } catch (error) {
     statusLine.textContent = error.message;
@@ -1303,8 +1329,10 @@ function clearRestoreToken() {
 function clearClientAuthState() {
   setMobileNavigationOpen(false);
   const scannerMode = getStoredScannerMode();
+  const navSections = getStoredNavSections();
   localStorage.clear();
   localStorage.setItem(SCANNER_MODE_KEY, scannerMode);
+  localStorage.setItem(NAV_SECTIONS_KEY, JSON.stringify(navSections));
   sessionStorage.clear();
 
   for (const cookie of document.cookie.split(";")) {
@@ -1403,6 +1431,7 @@ async function bootDashboard() {
   affiliateAdminNavLink.classList.toggle("hidden", !state.user.isAdmin);
   webhookEventsNavLink.classList.toggle("hidden", !state.user.isAdmin);
   testerAccountBadge.classList.toggle("hidden", state.user.role !== "tester");
+  renderNavSections();
   scannerModeToggle.checked = state.scannerMode === "advanced";
 
   const dashboardLoads = await Promise.allSettled([
@@ -1749,6 +1778,13 @@ function showView(view) {
   document.querySelectorAll("[data-view-link]").forEach((link) => {
     link.classList.toggle("active", link.dataset.viewLink === normalizedView);
   });
+  const activeLink = document.querySelector(`[data-view-link="${normalizedView}"]`);
+  const activeSection = activeLink?.closest("[data-nav-section]");
+  if (activeSection) {
+    state.navSections[activeSection.dataset.navSection] = true;
+    localStorage.setItem(NAV_SECTIONS_KEY, JSON.stringify(state.navSections));
+    renderNavSections();
+  }
 
   const titles = {
     scanner: ["Market scanner", "High-probability setup lab"],
@@ -3780,10 +3816,18 @@ function renderBacktest(backtest) {
 
 function renderBacktestingLab() {
   const report = state.backtesting;
-  if (!report) return;
+  if (!report) {
+    labEmptyState.classList.remove("hidden");
+    labLoadingState.classList.add("hidden");
+    labResults.classList.add("hidden");
+    return;
+  }
   const { metrics, evaluation, curves, breakdowns, trades, errors } = report;
   const edgeFound = evaluation.status === "edge-detected";
 
+  labEmptyState.classList.add("hidden");
+  labLoadingState.classList.add("hidden");
+  labResults.classList.remove("hidden");
   labStatus.textContent = edgeFound ? "Edge detected" : "No edge found";
   labStatus.className = `status-pill ${edgeFound ? "status-hit-tp" : "status-expired"}`;
   labEvaluation.classList.remove("hidden");
@@ -3990,6 +4034,35 @@ function getStoredAffiliateCode() {
 
 function getStoredScannerMode() {
   return localStorage.getItem("signalforge-scanner-mode") === "advanced" ? "advanced" : "basic";
+}
+
+function getStoredNavSections() {
+  const defaults = {
+    trading: true,
+    alerts: true,
+    research: true,
+    portfolio: true,
+    growth: true,
+    account: true
+  };
+
+  try {
+    return {
+      ...defaults,
+      ...JSON.parse(localStorage.getItem("signalforge-nav-sections") || "{}")
+    };
+  } catch {
+    return defaults;
+  }
+}
+
+function renderNavSections() {
+  document.querySelectorAll("[data-nav-section]").forEach((section) => {
+    const name = section.dataset.navSection;
+    const expanded = state.navSections[name] !== false;
+    section.classList.toggle("collapsed", !expanded);
+    section.querySelector("[data-nav-section-toggle]")?.setAttribute("aria-expanded", String(expanded));
+  });
 }
 
 function getSignalKey(signal) {

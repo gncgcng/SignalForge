@@ -1006,6 +1006,20 @@ export async function listAbuseReviewDashboard() {
 
 export async function saveUnlockedSignal(userId, signal) {
   return transaction(async (client) => {
+    const setupKey = signal.setupKey ||
+      `${signal.symbol}:${signal.timeframe}:${signal.direction}:${Math.floor(new Date(signal.generatedAt).getTime() / 1000)}`;
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))", [userId, setupKey]);
+    const existing = await client.query(
+      signalSelectSql("WHERE s.user_id = $1 AND s.setup_key = $2 LIMIT 1"),
+      [userId, setupKey]
+    );
+
+    if (existing.rows[0]) {
+      const mapped = mapSignal(existing.rows[0]);
+      mapped.alreadyUnlocked = true;
+      return mapped;
+    }
+
     const account = await client.query(`
       SELECT u.role, u.email_verified_at, c.unlock_credits_balance
       FROM users u
@@ -1031,14 +1045,15 @@ export async function saveUnlockedSignal(userId, signal) {
 
     await client.query(`
       INSERT INTO saved_signals (
-        id, user_id, symbol, timeframe, direction, entry_price, stop_loss, take_profit,
+        id, user_id, setup_key, symbol, timeframe, direction, entry_price, stop_loss, take_profit,
         risk_reward_ratio, confidence_score, quality_score, setup_type, reasoning,
         confirmations, indicators, market_source, generated_at
       )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
     `, [
       signal.id,
       userId,
+      setupKey,
       signal.symbol,
       signal.timeframe,
       signal.direction,
@@ -1094,9 +1109,13 @@ export async function saveUnlockedSignal(userId, signal) {
           AND u.device_fingerprint_hash = d.device_fingerprint_hash
       `, [userId]);
     }
-  });
 
-  return findSignalById(signal.id, userId);
+    const saved = await client.query(
+      signalSelectSql("WHERE s.id = $1 AND s.user_id = $2"),
+      [signal.id, userId]
+    );
+    return saved.rows[0] ? mapSignal(saved.rows[0]) : null;
+  });
 }
 
 export async function findSignalById(signalId, userId) {
@@ -1402,7 +1421,40 @@ export async function listEnabledAlertPreferences(userId) {
   return result.rows;
 }
 
+export async function listAllEnabledAlertPreferences() {
+  const result = await query(`
+    SELECT p.*, u.role, u.email_verified_at
+    FROM alert_preferences p
+    JOIN users u ON u.id = p.user_id
+    WHERE p.enabled = true
+    ORDER BY p.user_id, p.symbol, p.timeframe
+  `);
+  return result.rows;
+}
+
+export async function hasRecentDetectedAlert(userId, setup, cooldownMs) {
+  const cooldownSeconds = Math.max(1, Math.floor(Number(cooldownMs || 0) / 1000));
+  const result = await query(`
+    SELECT id
+    FROM detected_alerts
+    WHERE user_id = $1
+      AND symbol = $2
+      AND timeframe = $3
+      AND direction = $4
+      AND detected_at >= now() - ($5::text || ' seconds')::interval
+    LIMIT 1
+  `, [
+    userId,
+    setup.symbol,
+    setup.timeframe,
+    setup.direction,
+    String(cooldownSeconds)
+  ]);
+  return Boolean(result.rows[0]);
+}
+
 export async function saveDetectedAlert(userId, preference, setup) {
+  const setupId = setup.setupKey || setup.id;
   const result = await query(`
     INSERT INTO detected_alerts (
       id, user_id, preference_id, setup_id, symbol, timeframe, direction,
@@ -1415,7 +1467,7 @@ export async function saveDetectedAlert(userId, preference, setup) {
     createId("alrt"),
     userId,
     preference.id,
-    setup.id,
+    setupId,
     setup.symbol,
     setup.timeframe,
     setup.direction,
@@ -1518,6 +1570,7 @@ export async function setTelegramNotificationsEnabled(userId, enabled) {
 }
 
 export async function enqueueTelegramNotification(userId, settings, setup) {
+  const setupKey = setup.setupKey || setup.id;
   const result = await query(`
     INSERT INTO telegram_notification_queue (
       id, user_id, setup_key, chat_id, payload
@@ -1528,7 +1581,7 @@ export async function enqueueTelegramNotification(userId, settings, setup) {
   `, [
     createId("tgq"),
     userId,
-    setup.setupKey,
+    setupKey,
     settings.chatId,
     JSON.stringify(setup)
   ]);
@@ -1954,6 +2007,7 @@ function mapSignal(row) {
   return {
     id: row.id,
     userId: row.user_id,
+    setupKey: row.setup_key,
     symbol: row.symbol,
     timeframe: row.timeframe,
     direction: row.direction,

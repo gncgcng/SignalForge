@@ -10,6 +10,7 @@ import { handleAdminAnalyticsRoutes } from "./modules/admin/analyticsController.
 import { handleAuthRoutes } from "./modules/auth/authController.js";
 import { handleBacktestRoutes } from "./modules/backtesting/backtestController.js";
 import { handleAlertRoutes } from "./modules/alerts/alertController.js";
+import { startAutoCryptoAlertScanner } from "./modules/alerts/autoScanService.js";
 import { handleAffiliateRoutes } from "./modules/affiliates/affiliateController.js";
 import { handleMarketDataRoutes } from "./modules/market-data/marketDataController.js";
 import { handleJournalRoutes } from "./modules/journal/journalController.js";
@@ -112,6 +113,7 @@ await verifySessionSchema();
 server.listen(appConfig.port, () => {
   console.log(`${appConfig.appName} running at http://localhost:${appConfig.port}`);
   startSignalOutcomeTracker();
+  startAutoCryptoAlertScanner();
   startTelegramNotificationQueue();
   startTelegramConnectionPoller();
 });
