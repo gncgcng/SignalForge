@@ -3,8 +3,13 @@ import { readFileSync } from "node:fs";
 
 process.env.NODE_ENV = "production";
 process.env.DATABASE_URL = "postgres://user:password@postgres.railway.internal:5432/railway";
+process.env.APP_URL = "https://signalforge-app.xyz";
 
-const { appConfig, resolveSessionMaxAgeSeconds } = await import("../src/config/appConfig.js");
+const {
+  appConfig,
+  resolveCookieDomain,
+  resolveSessionMaxAgeSeconds
+} = await import("../src/config/appConfig.js");
 const { buildClearCookies, buildSessionCookie } = await import("../src/modules/auth/authController.js");
 
 const authController = readFileSync(
@@ -46,14 +51,20 @@ const result = {
     appConfig.sessionMaxAgeSeconds >= 60 * 60 * 24 * 30 &&
     resolveSessionMaxAgeSeconds("bad-value") === 60 * 60 * 24 * 180 &&
     resolveSessionMaxAgeSeconds("999") === 60 * 60 * 24 * 365 &&
+    resolveCookieDomain("https://signalforge-app.xyz", "production") === "signalforge-app.xyz" &&
+    resolveCookieDomain("http://localhost:4173", "production") === "" &&
+    cookie.startsWith("__Secure-signalforge_session=") &&
     cookie.includes("HttpOnly") &&
     cookie.includes("Secure") &&
     cookie.includes("SameSite=Lax") &&
+    cookie.includes("Domain=signalforge-app.xyz") &&
+    !cookie.includes("Domain=localhost") &&
     cookie.includes("Expires=") &&
     cookie.includes(`Max-Age=${appConfig.sessionMaxAgeSeconds}`),
   noJwtOrUserStorage:
     app.includes('const RESTORE_TOKEN_KEY = "signalforge-restore-token"') &&
     app.includes("localStorage.setItem(RESTORE_TOKEN_KEY, restore.token)") &&
+    !app.includes("const RESTORE_TOKEN_COOKIE") &&
     !app.includes("localStorage.setItem(\"token") &&
     !app.includes("sessionStorage.setItem(\"token") &&
     !app.includes("localStorage.setItem(\"user") &&
@@ -83,6 +94,7 @@ const result = {
     app.includes("isPermanentRestoreFailure(error)") &&
     app.includes("[400, 401, 403, 404, 410].includes(error.statusCode)") &&
     app.includes("error.statusCode = response.status") &&
+    app.includes("Startup session restore failed before login state was confirmed") &&
     !app.includes("clearRestoreToken();\n    console.warn(`[auth] Persistent restore token failed"),
   restoreTokenDeviceBoundAndHashed:
     restoreMigration.includes("CREATE TABLE IF NOT EXISTS auth_restore_tokens") &&
@@ -106,6 +118,12 @@ const result = {
     authController.includes('pathname === "/api/auth/login"') &&
     authController.includes("registerOrLogin({") &&
     authController.includes('"set-cookie": buildSessionCookie(result.sessionId)'),
+  safeCookieLogging:
+    authController.includes("logSessionCookieIssued(\"login\")") &&
+    authController.includes("Set-Cookie issued context=") &&
+    authController.includes("httpOnly=true") &&
+    authController.includes("domain=${appConfig.sessionCookieDomain || \"host-only\"}") &&
+    !authController.includes("console.info(sessionId"),
   googleLoginRefreshUsesCookieSession:
     authController.includes('pathname === "/api/auth/google/callback"') &&
     authController.includes("completeGoogleOAuth({") &&
@@ -114,9 +132,17 @@ const result = {
     authController.includes("user: toPublicUser(req.user)"),
   sessionPersistedInPostgres:
     authService.includes("createSessionRecord({ id: sessionId, userId: user.id, expiresAt })") &&
+    authService.includes("PostgreSQL session inserted") &&
     repositories.includes("INSERT INTO sessions") &&
     repositories.includes("findSessionUser(sessionId)") &&
     middleware.includes("findSessionUser(sessionId)"),
+  cookieMissingLoggedOut:
+    middleware.includes("if (!sessionId)") &&
+    middleware.includes("req.user = null") &&
+    middleware.includes("req.sessionId = null"),
+  expiredSessionLoggedOut:
+    repositories.includes("WHERE id = $1 AND expires_at > now()") &&
+    middleware.includes("req.sessionId = user ? sessionId : null"),
   rollingRefresh:
     authController.includes("refreshSessionExpiry(req.sessionId)") &&
     authController.includes("buildSessionCookie(req.sessionId)") &&
@@ -124,16 +150,19 @@ const result = {
     repositories.includes("UPDATE sessions") &&
     repositories.includes("SET expires_at = $2"),
   legacyCookieFallback:
-    middleware.includes("cookies[appConfig.sessionCookieName] ||") &&
-    middleware.includes("cookies[appConfig.legacySessionCookieName]"),
+    middleware.includes("getSessionCookieNames()") &&
+    middleware.includes(".map((name) => cookies[name])") &&
+    middleware.includes("appConfig.legacySessionCookieNames"),
   logoutStillClearsSessions:
     authController.includes("destroySession(sessionId)") &&
     authController.includes("revokePersistentRestoreToken({") &&
     authService.includes("revokeAuthRestoreToken(hashRestoreToken(token))") &&
     authService.includes("revokeAuthRestoreTokensForUserDevice(user.id, deviceHash)") &&
     app.includes("body: JSON.stringify({ restoreToken: getRestoreToken() })") &&
+    clearCookies.some((item) => item.startsWith("__Secure-signalforge_session=")) &&
     clearCookies.some((item) => item.startsWith("__Host-signalforge_session=")) &&
     clearCookies.some((item) => item.startsWith("signalforge_session=")) &&
+    clearCookies.some((item) => item.includes("Domain=signalforge-app.xyz")) &&
     clearCookies.every((item) => item.includes("Expires=Thu, 01 Jan 1970 00:00:00 GMT")) &&
     app.includes("Expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax"),
   migrationExtendsActiveSessions:

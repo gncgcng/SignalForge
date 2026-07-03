@@ -5,8 +5,10 @@ import { parseCookies } from "../shared/http.js";
 
 export async function attachAuth(req) {
   const cookies = parseCookies(req.headers.cookie);
-  const sessionId = cookies[appConfig.sessionCookieName] ||
-    cookies[appConfig.legacySessionCookieName];
+  const sessionId = getSessionCookieNames()
+    .map((name) => cookies[name])
+    .find(Boolean);
+  req.sessionCookiePresent = Boolean(sessionId);
 
   if (!sessionId) {
     req.user = null;
@@ -29,4 +31,12 @@ export async function attachAuth(req) {
 
   req.user = user;
   req.sessionId = user ? sessionId : null;
+}
+
+function getSessionCookieNames() {
+  return [
+    appConfig.sessionCookieName,
+    appConfig.legacySessionCookieName,
+    ...(appConfig.legacySessionCookieNames || [])
+  ].filter(Boolean);
 }

@@ -1157,15 +1157,28 @@ function isPermanentRestoreFailure(error) {
 
 function saveRestoreToken(restore) {
   if (!restore?.token) return;
-  localStorage.setItem(RESTORE_TOKEN_KEY, restore.token);
+  try {
+    localStorage.setItem(RESTORE_TOKEN_KEY, restore.token);
+  } catch (error) {
+    console.warn(`[auth] Persistent restore localStorage write failed: ${error.message}`);
+  }
 }
 
 function getRestoreToken() {
-  return localStorage.getItem(RESTORE_TOKEN_KEY) || "";
+  try {
+    return localStorage.getItem(RESTORE_TOKEN_KEY) || "";
+  } catch (error) {
+    console.warn(`[auth] Persistent restore localStorage read failed: ${error.message}`);
+    return "";
+  }
 }
 
 function clearRestoreToken() {
-  localStorage.removeItem(RESTORE_TOKEN_KEY);
+  try {
+    localStorage.removeItem(RESTORE_TOKEN_KEY);
+  } catch (error) {
+    console.warn(`[auth] Persistent restore localStorage clear failed: ${error.message}`);
+  }
 }
 
 function clearClientAuthState() {
@@ -3899,10 +3912,12 @@ function formatDateTime(value) {
 
 registerPwa();
 init()
-  .catch(() => {
-    landingPage.classList.remove("hidden");
-    authScreen.classList.add("hidden");
+  .catch((error) => {
+    console.warn(`[auth] Startup session restore failed before login state was confirmed: ${error.message}`);
+    landingPage.classList.add("hidden");
+    authScreen.classList.remove("hidden");
     dashboard.classList.add("hidden");
+    authNote.textContent = "We could not confirm your session. Check your connection and refresh before signing in again.";
   })
   .finally(hideSplash);
 

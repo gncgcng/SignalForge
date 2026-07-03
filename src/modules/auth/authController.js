@@ -23,6 +23,7 @@ export async function handleAuthRoutes(req, res, pathname) {
     const refreshed = req.user && req.sessionId
       ? await refreshSessionExpiry(req.sessionId)
       : null;
+    logSessionCheck(req, Boolean(refreshed));
     return sendJson(res, 200, {
       user: toPublicUser(req.user),
       sessionExpiresAt: refreshed?.expiresAt || null,
@@ -59,6 +60,7 @@ export async function handleAuthRoutes(req, res, pathname) {
         restoreToken: body.restoreToken,
         deviceFingerprint: req.headers["x-device-fingerprint"] || body.deviceFingerprint
       }, req);
+      logSessionCookieIssued("restore");
       return sendJson(res, 200, {
         user: result.user,
         restore: {
@@ -108,6 +110,7 @@ export async function handleAuthRoutes(req, res, pathname) {
         state: queryState,
         oauthError: url.searchParams.get("error")
       });
+      logSessionCookieIssued("google");
       return sendRedirect(res, googleAppRedirect("oauth=success"), {
         "set-cookie": [
           buildSessionCookie(result.sessionId),
@@ -133,6 +136,7 @@ export async function handleAuthRoutes(req, res, pathname) {
         req,
         req.headers["x-device-fingerprint"]
       );
+      logSessionCookieIssued("demo");
       return sendJson(res, 200, { user: result.user, restore }, {
         ...authResponseHeaders(),
         "set-cookie": buildSessionCookie(result.sessionId)
@@ -155,6 +159,7 @@ export async function handleAuthRoutes(req, res, pathname) {
         req,
         deviceFingerprint
       );
+      logSessionCookieIssued("login");
       return sendJson(res, 200, {
         user: result.user,
         verificationRequired: result.verificationRequired,
@@ -194,10 +199,7 @@ export async function handleAuthRoutes(req, res, pathname) {
   if (pathname === "/api/auth/logout" && req.method === "POST") {
     const body = await readJson(req);
     const cookies = parseCookies(req.headers.cookie);
-    const sessionIds = new Set([
-      cookies[appConfig.sessionCookieName],
-      cookies[appConfig.legacySessionCookieName]
-    ].filter(Boolean));
+    const sessionIds = new Set(getSessionCookieNames().map((name) => cookies[name]).filter(Boolean));
 
     await revokePersistentRestoreToken({
       restoreToken: body.restoreToken,
@@ -223,27 +225,59 @@ function authResponseHeaders() {
 
 export function buildSessionCookie(sessionId) {
   const secure = appConfig.isProduction ? "; Secure" : "";
+  const domain = appConfig.sessionCookieDomain ? `; Domain=${appConfig.sessionCookieDomain}` : "";
   const expires = new Date(Date.now() + appConfig.sessionMaxAgeSeconds * 1000).toUTCString();
-  return `${appConfig.sessionCookieName}=${encodeURIComponent(sessionId)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${appConfig.sessionMaxAgeSeconds}; Expires=${expires}${secure}`;
+  return `${appConfig.sessionCookieName}=${encodeURIComponent(sessionId)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${appConfig.sessionMaxAgeSeconds}; Expires=${expires}${domain}${secure}`;
 }
 
 export function buildClearCookies() {
-  const names = new Set([appConfig.sessionCookieName, appConfig.legacySessionCookieName]);
+  const names = new Set(getSessionCookieNames());
   const expired = "Expires=Thu, 01 Jan 1970 00:00:00 GMT";
 
   return [...names].flatMap((name) => {
-    const cookies = [
-      `${name}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0; ${expired}`,
-      `${name}=; SameSite=Lax; Path=/; Max-Age=0; ${expired}`
-    ];
+    const domains = [...new Set(["", appConfig.sessionCookieDomain ? `; Domain=${appConfig.sessionCookieDomain}` : ""])];
+    const cookies = domains.flatMap((domain) => [
+      `${name}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0; ${expired}${domain}`,
+      `${name}=; SameSite=Lax; Path=/; Max-Age=0; ${expired}${domain}`
+    ]);
 
     if (appConfig.isProduction) {
-      cookies.push(`${name}=; HttpOnly; SameSite=Lax; Secure; Path=/; Max-Age=0; ${expired}`);
-      cookies.push(`${name}=; SameSite=Lax; Secure; Path=/; Max-Age=0; ${expired}`);
+      cookies.push(...domains.flatMap((domain) => [
+        `${name}=; HttpOnly; SameSite=Lax; Secure; Path=/; Max-Age=0; ${expired}${domain}`,
+        `${name}=; SameSite=Lax; Secure; Path=/; Max-Age=0; ${expired}${domain}`
+      ]));
     }
 
     return cookies;
   });
+}
+
+function getSessionCookieNames() {
+  return [
+    appConfig.sessionCookieName,
+    appConfig.legacySessionCookieName,
+    ...(appConfig.legacySessionCookieNames || [])
+  ].filter(Boolean);
+}
+
+function logSessionCookieIssued(context) {
+  console.info(
+    `[auth] Set-Cookie issued context=${safeLogContext(context)} ` +
+    `name=${appConfig.sessionCookieName} httpOnly=true secure=${appConfig.isProduction} ` +
+    `sameSite=Lax path=/ persistent=true maxAgeSeconds=${appConfig.sessionMaxAgeSeconds} ` +
+    `domain=${appConfig.sessionCookieDomain || "host-only"}`
+  );
+}
+
+function logSessionCheck(req, refreshed) {
+  console.info(
+    `[auth] Session check cookiePresent=${Boolean(req.sessionCookiePresent)} ` +
+    `dbSession=${req.user ? "found" : "missing"} refreshed=${Boolean(refreshed)}`
+  );
+}
+
+function safeLogContext(context) {
+  return String(context || "unknown").replace(/[^a-z0-9_-]/gi, "").slice(0, 32) || "unknown";
 }
 
 function sendRedirect(res, location, headers = {}) {

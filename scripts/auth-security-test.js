@@ -1,5 +1,6 @@
 process.env.NODE_ENV = "production";
 process.env.DATABASE_URL = "postgres://user:password@postgres.railway.internal:5432/railway";
+process.env.APP_URL = "https://signalforge-app.xyz";
 
 const { appConfig } = await import("../src/config/appConfig.js");
 const { attachAuth } = await import("../src/middleware/authMiddleware.js");
@@ -55,13 +56,15 @@ const result = {
   demoIdentityBlocked: isDemoOrTesterIdentity("demo@signalforge.app"),
   testerIdentityBlocked: isDemoOrTesterIdentity("tester@signalforge.app"),
   freshRequestLoggedOut: freshRequest.user === null,
-  secureHostCookie: sessionCookie.startsWith("__Host-signalforge_session=") &&
+  secureDomainCookie: sessionCookie.startsWith("__Secure-signalforge_session=") &&
     sessionCookie.includes("HttpOnly") &&
     sessionCookie.includes("Secure") &&
     sessionCookie.includes("Path=/") &&
-    !sessionCookie.includes("Domain="),
-  clearsCurrentCookie: clearCookies.some((cookie) => cookie.startsWith("__Host-signalforge_session=")),
-  clearsLegacyCookie: clearCookies.some((cookie) => cookie.startsWith("signalforge_session=")),
+    sessionCookie.includes("Domain=signalforge-app.xyz") &&
+    !sessionCookie.includes("Domain=localhost"),
+  clearsCurrentCookie: clearCookies.some((cookie) => cookie.startsWith("__Secure-signalforge_session=")),
+  clearsLegacyCookie: clearCookies.some((cookie) => cookie.startsWith("__Host-signalforge_session=")) &&
+    clearCookies.some((cookie) => cookie.startsWith("signalforge_session=")),
   queryScopedToUser: capturedSql.includes("WHERE s.user_id = $1") &&
     capturedParams.length === 1 &&
     capturedParams[0] === "usr_a",
@@ -77,7 +80,7 @@ if (Object.values(result).some((value) => value !== true && value !== false) ||
   !result.demoIdentityBlocked ||
   !result.testerIdentityBlocked ||
   !result.freshRequestLoggedOut ||
-  !result.secureHostCookie ||
+  !result.secureDomainCookie ||
   !result.clearsCurrentCookie ||
   !result.clearsLegacyCookie ||
   !result.queryScopedToUser ||

@@ -171,6 +171,10 @@ export async function createSession(user) {
   const sessionId = createId("sess");
   const expiresAt = new Date(Date.now() + appConfig.sessionMaxAgeSeconds * 1000);
   await createSessionRecord({ id: sessionId, userId: user.id, expiresAt });
+  console.info(
+    `[auth] PostgreSQL session inserted user=${safeLogId(user.id)} ` +
+    `expiresAt=${expiresAt.toISOString()}`
+  );
 
   return {
     sessionId,

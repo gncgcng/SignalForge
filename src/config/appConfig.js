@@ -45,6 +45,7 @@ const appUrl = resolveAppUrl(
   process.env.NODE_ENV || "development",
   Number(process.env.PORT || 4173)
 );
+const sessionCookieDomain = resolveCookieDomain(appUrl, process.env.NODE_ENV || "development");
 
 export const stripeEnvironmentKeys = [
   "STRIPE_SECRET_KEY",
@@ -62,8 +63,12 @@ export const appConfig = {
   nodeEnv: process.env.NODE_ENV || "development",
   isProduction: process.env.NODE_ENV === "production",
   port: Number(process.env.PORT || 4173),
-  sessionCookieName: process.env.NODE_ENV === "production" ? "__Host-signalforge_session" : "signalforge_session",
+  sessionCookieDomain,
+  sessionCookieName: process.env.NODE_ENV === "production" && sessionCookieDomain
+    ? "__Secure-signalforge_session"
+    : process.env.NODE_ENV === "production" ? "__Host-signalforge_session" : "signalforge_session",
   legacySessionCookieName: "signalforge_session",
+  legacySessionCookieNames: ["__Host-signalforge_session", "signalforge_session"],
   sessionMaxAgeSeconds: resolveSessionMaxAgeSeconds(process.env.SESSION_MAX_AGE_DAYS),
   restoreTokenMaxAgeSeconds: resolveSessionMaxAgeSeconds(process.env.RESTORE_TOKEN_MAX_AGE_DAYS),
   demoEnabled: process.env.NODE_ENV !== "production" && process.env.ENABLE_DEMO !== "false",
@@ -203,6 +208,21 @@ export function resolveSessionMaxAgeSeconds(rawDays) {
   const days = Number(rawDays || 180);
   if (!Number.isFinite(days) || days < 1) return 60 * 60 * 24 * 180;
   return 60 * 60 * 24 * Math.min(days, 365);
+}
+
+export function resolveCookieDomain(resolvedAppUrl, nodeEnv = "development") {
+  if (nodeEnv !== "production" || !resolvedAppUrl) return "";
+
+  try {
+    const hostname = new URL(resolvedAppUrl).hostname.toLowerCase();
+    if (!hostname || hostname === "localhost" || /^\d{1,3}(\.\d{1,3}){3}$/.test(hostname)) {
+      return "";
+    }
+
+    return hostname.startsWith("www.") ? hostname.slice(4) : hostname;
+  } catch {
+    return "";
+  }
 }
 
 export function getStripeMode(secretKey = appConfig.stripe.secretKey) {
