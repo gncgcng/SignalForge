@@ -2528,82 +2528,190 @@ polyline {
   margin-bottom: 18px;
 }
 
-.backtesting-lab-controls {
-  display: grid;
-  grid-template-columns: minmax(280px, 1.35fr) minmax(220px, 0.8fr);
-  gap: 14px;
-  align-items: stretch;
-  margin-bottom: 18px;
-}
-
-.backtesting-lab-controls fieldset {
-  display: grid;
-  align-content: start;
-  gap: 10px;
-  min-width: 0;
-  margin: 0;
-  padding: 16px;
+.backtesting-lab-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 16px;
+  padding: 18px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: rgba(16, 20, 29, 0.78);
+  background: linear-gradient(135deg, rgba(16, 20, 29, 0.96), rgba(11, 16, 24, 0.86));
 }
 
-.backtesting-lab-controls legend {
-  padding: 0 6px;
-  color: var(--cyan);
+.backtesting-lab-hero h3 {
+  margin: 4px 0 6px;
+  font-size: 1.45rem;
+}
+
+.backtesting-lab-hero p {
+  max-width: 760px;
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.backtesting-lab-controls {
+  display: grid;
+  grid-template-columns: minmax(260px, 1.1fr) minmax(220px, 0.78fr) minmax(240px, 0.95fr);
+  grid-template-areas:
+    "preset timeframe run"
+    "markets components components"
+    "sessions components components";
+  gap: 12px;
+  align-items: stretch;
+  margin-bottom: 14px;
+}
+
+.lab-card {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(16, 20, 29, 0.82);
+  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.18);
+}
+
+.lab-card-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.lab-card-header strong,
+.lab-run-card > strong {
+  display: block;
+  margin-top: 3px;
+}
+
+.lab-card-header small {
+  color: var(--muted);
   font-size: 0.72rem;
-  font-weight: 800;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  white-space: nowrap;
 }
 
-.backtesting-lab-controls button[type="submit"] {
-  align-self: end;
-  min-height: 48px;
-  grid-column: 1 / -1;
+.lab-preset-card {
+  grid-area: preset;
+}
+
+.lab-market-card {
+  grid-area: markets;
+}
+
+.lab-timeframe-card {
+  grid-area: timeframe;
+}
+
+.lab-session-card {
+  grid-area: sessions;
+}
+
+.lab-components-card {
+  grid-area: components;
+}
+
+.lab-run-card {
+  grid-area: run;
+  background: rgba(11, 16, 24, 0.92);
+}
+
+.lab-run-card button[type="submit"] {
+  min-height: 46px;
+  margin-top: 4px;
+}
+
+.lab-preset-selector {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.lab-preset-selector label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0b1018;
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.lab-preset-selector input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.lab-preset-selector label:has(input:checked) {
+  border-color: rgba(34, 211, 238, 0.65);
+  background: rgba(34, 211, 238, 0.12);
+  color: #e6fbff;
 }
 
 .lab-option-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  gap: 7px;
 }
 
 .lab-option-grid.market-options {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.lab-option-grid.component-options {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .lab-option-grid label {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   min-width: 0;
+  min-height: 36px;
+  padding: 8px 9px;
+  border: 1px solid rgba(40, 49, 66, 0.82);
+  border-radius: 8px;
+  background: #0b1018;
   color: var(--text);
-  font-size: 0.8rem;
+  font-size: 0.78rem;
+  line-height: 1.25;
+}
+
+.lab-option-grid input {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--cyan);
 }
 
 .lab-metrics-grid {
   display: grid;
   grid-template-columns: repeat(8, minmax(0, 1fr));
-  gap: 1px;
-  margin: 18px 0;
-  overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--line);
+  gap: 10px;
+  margin: 0;
 }
 
 .lab-empty-state,
 .lab-loading-state,
 .lab-results-shell {
   display: grid;
-  gap: 14px;
+  gap: 12px;
 }
 
 .lab-empty-state,
 .lab-loading-state {
-  margin-top: 16px;
-  padding: 22px;
+  margin-top: 12px;
+  padding: 18px;
   border: 1px dashed rgba(94, 234, 212, 0.28);
   border-radius: 8px;
   background: rgba(11, 16, 24, 0.76);
@@ -2618,8 +2726,10 @@ polyline {
   display: grid;
   gap: 6px;
   min-width: 0;
-  padding: 14px;
-  background: var(--surface);
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(16, 20, 29, 0.9);
 }
 
 .lab-metrics-grid span {
@@ -2636,8 +2746,8 @@ polyline {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin-top: 18px;
-  padding: 14px 16px;
+  margin-top: 0;
+  padding: 14px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface);
@@ -2659,8 +2769,8 @@ polyline {
 .lab-curves,
 .lab-breakdowns {
   display: grid;
-  gap: 14px;
-  margin-bottom: 14px;
+  gap: 12px;
+  margin-bottom: 0;
 }
 
 .lab-curves {
@@ -2674,6 +2784,11 @@ polyline {
 @media (max-width: 1180px) {
   .backtesting-lab-controls {
     grid-template-columns: 1fr 1fr;
+    grid-template-areas:
+      "preset run"
+      "markets markets"
+      "timeframe sessions"
+      "components components";
   }
 
   .lab-metrics-grid {
@@ -2686,16 +2801,31 @@ polyline {
 }
 
 @media (max-width: 760px) {
+  .backtesting-lab-hero {
+    display: grid;
+  }
+
   .backtesting-lab-controls,
   .lab-curves,
   .lab-breakdowns {
     grid-template-columns: 1fr;
   }
 
+  .backtesting-lab-controls {
+    grid-template-areas:
+      "preset"
+      "markets"
+      "timeframe"
+      "sessions"
+      "components"
+      "run";
+  }
+
+  .lab-preset-selector,
   .lab-option-grid.market-options,
   .lab-option-grid.component-options,
   .lab-metrics-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: 1fr;
   }
 
   .lab-evaluation {

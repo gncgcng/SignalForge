@@ -28,6 +28,7 @@ const controller = readFileSync(new URL("../src/modules/backtesting/backtestCont
 const generator = readFileSync(new URL("../src/modules/signals/signalGenerator.js", import.meta.url), "utf8");
 const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
 const app = readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+const css = readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
 
 const requiredSymbols = [
   "BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "ADA-USD", "DOGE-USD",
@@ -55,6 +56,19 @@ const result = {
   pagePresent: html.includes('data-view-link="backtesting"') &&
     html.includes('data-view="backtesting"') &&
     app.includes("renderBacktestingLab"),
+  redesignedUi:
+    html.includes("backtesting-lab-hero") &&
+    html.includes('name="lab-preset"') &&
+    html.includes("lab-market-card") &&
+    html.includes("lab-timeframe-card") &&
+    html.includes("lab-components-card") &&
+    html.includes("lab-run-card") &&
+    html.includes("No backtest run yet") &&
+    html.includes("lab-loading-state") &&
+    css.includes("grid-template-areas") &&
+    css.includes(".lab-preset-selector") &&
+    css.includes(".lab-option-grid input") &&
+    app.includes("applyBacktestPreset"),
   apiAuthenticated: controller.includes("Authentication required.") &&
     controller.includes("/api/backtesting/run"),
   productionIsolated: !service.includes("generateMarketDataSetup") &&

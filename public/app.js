@@ -1035,6 +1035,14 @@ backtestingLabForm.addEventListener("submit", async (event) => {
   }
 });
 
+document.querySelectorAll('input[name="lab-preset"]').forEach((input) => {
+  input.addEventListener("change", () => {
+    if (input.checked) {
+      applyBacktestPreset(input.value);
+    }
+  });
+});
+
 paperPortfolioGrid.addEventListener("click", (event) => {
   const button = event.target.closest("[data-open-journal]");
 
@@ -3867,6 +3875,45 @@ function renderBacktestingLab() {
     report.advancedStructureComparison?.correlation
   );
   renderLabTrades(trades);
+}
+
+function applyBacktestPreset(preset) {
+  const componentInputs = [...document.querySelectorAll('input[name="lab-component"]')];
+  const timeframeInputs = [...document.querySelectorAll('input[name="lab-timeframe"]')];
+  const conservativeComponents = new Set([
+    "marketRegime",
+    "multiTimeframe",
+    "ema",
+    "rsi",
+    "adx",
+    "atr",
+    "supportResistance"
+  ]);
+  const balancedComponents = new Set([
+    ...conservativeComponents,
+    "liquiditySweeps",
+    "fairValueGaps",
+    "structure",
+    "vwap",
+    "volumeProfile",
+    "correlation"
+  ]);
+
+  componentInputs.forEach((input) => {
+    input.checked = preset === "aggressive"
+      ? true
+      : preset === "conservative"
+        ? conservativeComponents.has(input.value)
+        : balancedComponents.has(input.value);
+  });
+
+  timeframeInputs.forEach((input) => {
+    input.checked = preset === "conservative"
+      ? ["1h", "4h"].includes(input.value)
+      : preset === "aggressive"
+        ? true
+        : input.value === "1h";
+  });
 }
 
 function renderComponentComparison(container, comparison) {

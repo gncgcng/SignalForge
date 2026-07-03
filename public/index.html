@@ -726,16 +726,37 @@
           </section>
 
           <section class="page-view hidden" id="backtesting-view" data-view="backtesting">
-            <div class="section-title">
+            <div class="backtesting-lab-hero">
               <div>
                 <span class="eyebrow">Historical strategy research</span>
                 <h3>Backtesting Lab</h3>
+                <p>Test SignalForge rule sets against historical OHLCV candles before trusting a setup workflow. Scanner, credits, alerts, and billing stay untouched.</p>
               </div>
               <span class="status-pill" id="lab-status">Ready</span>
             </div>
             <form class="backtesting-lab-controls" id="backtesting-lab-form">
-              <fieldset>
-                <legend>Markets</legend>
+              <section class="lab-card lab-preset-card">
+                <div class="lab-card-header">
+                  <div>
+                    <span class="eyebrow">Preset</span>
+                    <strong>Choose a rule profile</strong>
+                  </div>
+                </div>
+                <div class="lab-preset-selector" role="radiogroup" aria-label="Backtest preset">
+                  <label><input type="radio" name="lab-preset" value="conservative" /> Conservative</label>
+                  <label><input type="radio" name="lab-preset" value="balanced" checked /> Balanced</label>
+                  <label><input type="radio" name="lab-preset" value="aggressive" /> Aggressive</label>
+                </div>
+              </section>
+
+              <section class="lab-card lab-market-card">
+                <div class="lab-card-header">
+                  <div>
+                    <span class="eyebrow">Markets</span>
+                    <strong>Market selection</strong>
+                  </div>
+                  <small>Historical OHLCV</small>
+                </div>
                 <div class="lab-option-grid market-options">
                   <label><input type="checkbox" name="lab-market" value="BTC-USD" checked /> BTC-USD</label>
                   <label><input type="checkbox" name="lab-market" value="ETH-USD" /> ETH-USD</label>
@@ -751,17 +772,29 @@
                   <label><input type="checkbox" name="lab-market" value="WTI" /> WTI</label>
                   <label><input type="checkbox" name="lab-market" value="BRENT" /> BRENT</label>
                 </div>
-              </fieldset>
-              <fieldset>
-                <legend>Timeframes</legend>
+              </section>
+
+              <section class="lab-card lab-timeframe-card">
+                <div class="lab-card-header">
+                  <div>
+                    <span class="eyebrow">Timeframes</span>
+                    <strong>Test windows</strong>
+                  </div>
+                </div>
                 <div class="lab-option-grid">
                   <label><input type="checkbox" name="lab-timeframe" value="15m" /> 15m</label>
                   <label><input type="checkbox" name="lab-timeframe" value="1h" checked /> 1h</label>
                   <label><input type="checkbox" name="lab-timeframe" value="4h" /> 4h</label>
                 </div>
-              </fieldset>
-              <fieldset>
-                <legend>Sessions</legend>
+              </section>
+
+              <section class="lab-card lab-session-card">
+                <div class="lab-card-header">
+                  <div>
+                    <span class="eyebrow">Sessions</span>
+                    <strong>Liquidity filters</strong>
+                  </div>
+                </div>
                 <div class="lab-option-grid">
                   <label><input type="checkbox" name="lab-session" value="Asia" checked /> Asia</label>
                   <label><input type="checkbox" name="lab-session" value="London" checked /> London</label>
@@ -769,9 +802,16 @@
                   <label><input type="checkbox" name="lab-session" value="London/New York Overlap" checked /> Overlap</label>
                   <label><input type="checkbox" name="lab-session" value="Low Liquidity" checked /> Low liquidity</label>
                 </div>
-              </fieldset>
-              <fieldset>
-                <legend>Strategy components</legend>
+              </section>
+
+              <section class="lab-card lab-components-card">
+                <div class="lab-card-header">
+                  <div>
+                    <span class="eyebrow">Strategy</span>
+                    <strong>Components</strong>
+                  </div>
+                  <small>Toggle confluence layers</small>
+                </div>
                 <div class="lab-option-grid component-options">
                   <label><input type="checkbox" name="lab-component" value="marketRegime" checked /> Market regime</label>
                   <label><input type="checkbox" name="lab-component" value="multiTimeframe" checked /> Multi-timeframe</label>
@@ -788,10 +828,16 @@
                   <label><input type="checkbox" name="lab-component" value="volumeProfile" checked /> Volume profile</label>
                   <label><input type="checkbox" name="lab-component" value="correlation" checked /> Correlation filter</label>
                 </div>
-              </fieldset>
-              <button type="submit">Run Backtest</button>
+              </section>
+
+              <section class="lab-card lab-run-card">
+                <span class="eyebrow">Run</span>
+                <strong>Ready to test</strong>
+                <p class="reasoning">Backtests use only historical candles available at each timestamp. No production scanner rules are changed.</p>
+                <button type="submit">Run Backtest</button>
+              </section>
             </form>
-            <div class="signal-disclaimer">
+            <div class="signal-disclaimer lab-disclaimer">
               <strong>Historical OHLCV only.</strong>
               <span>Each decision uses only candles available at that timestamp. Lab settings never alter production scanner rules.</span>
             </div>
