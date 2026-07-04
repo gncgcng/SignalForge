@@ -9,6 +9,7 @@ import {
   findAuthRestoreToken,
   findUserById,
   findUserByEmail,
+  findUserByUsername,
   getDeviceTrialHistory,
   getSignupVelocity,
   markAuthRestoreTokenUsed,
@@ -50,6 +51,10 @@ function publicUser(user) {
     id: user.id,
     name: user.name,
     email: user.email,
+    username: user.username,
+    usernameRequired: !user.username,
+    publicProfileEnabled: Boolean(user.publicProfileEnabled),
+    usernameUpdatedAt: user.usernameUpdatedAt,
     role: user.role,
     isAdmin: appConfig.adminEmails.has(user.email.toLowerCase()),
     plan: user.plan,
@@ -67,7 +72,9 @@ export async function registerOrLogin({
   password,
   deviceFingerprint,
   affiliateCode,
-  legalConsentAccepted
+  legalConsentAccepted,
+  username,
+  publicProfileEnabled
 }, req, options = {}) {
   if (!email || !password || password.length < 6) {
     throw new Error("Use a valid email and a password with at least 6 characters.");
@@ -92,6 +99,14 @@ export async function registerOrLogin({
   if (!options.bypassVerification && legalConsentAccepted !== true) {
     const error = new Error("Agree to the Terms, Privacy Policy, and Risk Disclaimer before creating an account.");
     error.statusCode = 400;
+    throw error;
+  }
+
+  const normalizedUsername = assertValidSignupUsername(username, options);
+  if (normalizedUsername && await findUserByUsername(normalizedUsername)) {
+    const error = new Error("Username is already taken.");
+    error.code = "USERNAME_TAKEN";
+    error.statusCode = 409;
     throw error;
   }
 
@@ -150,7 +165,9 @@ export async function registerOrLogin({
     deviceFingerprintHash: signupContext.deviceHash,
     abuseScore: abuse.score,
     abuseFlags: abuse.flags,
-    abuseReviewStatus: abuse.reviewStatus
+    abuseReviewStatus: abuse.reviewStatus,
+    username: normalizedUsername,
+    publicProfileEnabled: Boolean(publicProfileEnabled)
   });
   if (!options.bypassVerification) {
     await attributeAffiliateReferral(user.id, affiliateCode);
@@ -355,6 +372,30 @@ function restoreError(message) {
   const error = new Error(message);
   error.statusCode = 401;
   return error;
+}
+
+function assertValidSignupUsername(username, options = {}) {
+  const value = String(username || "").trim();
+
+  if (!value && options.bypassVerification) {
+    return null;
+  }
+
+  if (!value) {
+    const error = new Error("Choose a username to create your account.");
+    error.code = "USERNAME_REQUIRED";
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (!/^[A-Za-z0-9_]{3,20}$/.test(value)) {
+    const error = new Error("Username must be 3-20 characters using only letters, numbers, and underscores.");
+    error.code = "INVALID_USERNAME";
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return value;
 }
 
 function safeLogId(value) {

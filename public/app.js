@@ -52,6 +52,8 @@ const state = {
     disposableEmails: []
   },
   adminAnalytics: null,
+  profile: null,
+  publicProfile: null,
   performance: null,
   paperPortfolio: {
     trades: [],
@@ -82,6 +84,7 @@ const TELEGRAM_UNLOCK_KEY = "signalforge-telegram-unlock";
 
 const authScreen = document.querySelector("#auth-screen");
 const landingPage = document.querySelector("#landing-page");
+const publicProfilePage = document.querySelector("#public-profile-page");
 const dashboard = document.querySelector("#dashboard");
 const appSplash = document.querySelector("#app-splash");
 const appSplashStatus = document.querySelector("#app-splash-status");
@@ -168,6 +171,16 @@ const accountRoleLabel = document.querySelector("#account-role-label");
 const testerRequestStatus = document.querySelector("#tester-request-status");
 const requestTesterAccessButton = document.querySelector("#request-tester-access");
 const testerAccessMessage = document.querySelector("#tester-access-message");
+const profileSettingsForm = document.querySelector("#profile-settings-form");
+const settingsUsername = document.querySelector("#settings-username");
+const settingsPublicProfile = document.querySelector("#settings-public-profile");
+const settingsProfilePreview = document.querySelector("#settings-profile-preview");
+const profileSettingsMessage = document.querySelector("#profile-settings-message");
+const usernameRequiredPanel = document.querySelector("#username-required-panel");
+const usernameOnboardingForm = document.querySelector("#username-onboarding-form");
+const onboardingUsername = document.querySelector("#onboarding-username");
+const onboardingPublicProfile = document.querySelector("#onboarding-public-profile");
+const usernameOnboardingMessage = document.querySelector("#username-onboarding-message");
 const adminNavLink = document.querySelector("#admin-nav-link");
 const affiliateAdminNavLink = document.querySelector("#affiliate-admin-nav-link");
 const webhookEventsNavLink = document.querySelector("#webhook-events-nav-link");
@@ -374,6 +387,7 @@ authForm.addEventListener("submit", async (event) => {
   const credentials = Object.fromEntries(form);
   credentials.affiliateCode = state.referralCode;
   credentials.legalConsentAccepted = legalConsent.checked;
+  credentials.publicProfileEnabled = Boolean(credentials.publicProfileEnabled);
 
   try {
     authNote.textContent = "Authenticating...";
@@ -443,6 +457,24 @@ document.querySelector("#logout-button").addEventListener("click", async () => {
   landingPage.classList.remove("hidden");
   dashboard.classList.add("hidden");
   authScreen.classList.add("hidden");
+});
+
+profileSettingsForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await saveProfileSettings({
+    username: settingsUsername.value,
+    publicProfileEnabled: settingsPublicProfile.checked,
+    messageElement: profileSettingsMessage
+  });
+});
+
+usernameOnboardingForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await saveProfileSettings({
+    username: onboardingUsername.value,
+    publicProfileEnabled: onboardingPublicProfile.checked,
+    messageElement: usernameOnboardingMessage
+  });
 });
 
 document.querySelector("#upgrade-button").addEventListener("click", async () => {
@@ -1244,6 +1276,11 @@ async function enterPaperTrade(button) {
 
 async function init() {
   setSplashStatus("Restoring your session");
+  if (isPublicProfileRoute()) {
+    setSplashStatus("Loading public profile");
+    await loadPublicProfileRoute();
+    return;
+  }
   await captureAffiliateReferral();
   const oauthError = new URLSearchParams(location.search).get("oauth_error");
   const oauthSuccess = new URLSearchParams(location.search).get("oauth") === "success";
@@ -1283,6 +1320,7 @@ async function init() {
   } else {
     setSplashStatus("Preparing your market desk");
     const showAuthCallback = Boolean(oauthError || verificationToken || getPendingTelegramUnlockKey());
+    publicProfilePage?.classList.add("hidden");
     landingPage.classList.toggle("hidden", showAuthCallback);
     authScreen.classList.toggle("hidden", !showAuthCallback);
     dashboard.classList.add("hidden");
@@ -1432,6 +1470,8 @@ function clearClientAuthState() {
     repeatedDevices: [],
     disposableEmails: []
   };
+  state.profile = null;
+  state.publicProfile = null;
   state.performance = null;
   state.paperPortfolio = {
     trades: [],
@@ -1483,10 +1523,11 @@ function clearClientAuthState() {
 }
 
 async function bootDashboard() {
+  publicProfilePage?.classList.add("hidden");
   landingPage.classList.add("hidden");
   authScreen.classList.add("hidden");
   dashboard.classList.remove("hidden");
-  document.querySelector("#user-name").textContent = state.user.name;
+  document.querySelector("#user-name").textContent = state.user.username || state.user.name;
   adminNavLink.classList.toggle("hidden", !state.user.isAdmin);
   affiliateAdminNavLink.classList.toggle("hidden", !state.user.isAdmin);
   webhookEventsNavLink.classList.toggle("hidden", !state.user.isAdmin);
@@ -1501,7 +1542,8 @@ async function bootDashboard() {
     loadWatchlist(),
     loadAlerts(),
     loadNotifications(),
-    loadTesterAccess()
+    loadTesterAccess(),
+    loadProfile()
   ]);
   reportDashboardLoadFailures(dashboardLoads);
 
@@ -1514,11 +1556,16 @@ async function bootDashboard() {
   }
   renderTimeframes();
   const requestedView = location.hash?.replace("#", "").split("?")[0];
-  const allowedInitialViews = ["signals", "paper-portfolio", "journal", "backtesting", "performance", "watchlist", "alerts", "notifications", "affiliate", "settings", "billing"];
+  const allowedInitialViews = ["signals", "paper-portfolio", "journal", "backtesting", "performance", "watchlist", "alerts", "notifications", "affiliate", "profile", "settings", "billing"];
   if (state.user.isAdmin) {
     allowedInitialViews.push("admin", "affiliate-admin", "webhook-events");
   }
-  showView(allowedInitialViews.includes(requestedView) ? requestedView : "scanner");
+  const initialView = state.user.usernameRequired
+    ? "profile"
+    : allowedInitialViews.includes(requestedView)
+      ? requestedView
+      : "scanner";
+  showView(initialView);
   renderCheckoutReturnStatus();
   startSignalHistoryRefresh();
 
@@ -1601,6 +1648,7 @@ function removeTelegramUnlockParam() {
 
 function showAuth() {
   setMobileNavigationOpen(false);
+  publicProfilePage?.classList.add("hidden");
   landingPage.classList.add("hidden");
   dashboard.classList.add("hidden");
   authScreen.classList.remove("hidden");
@@ -1828,6 +1876,48 @@ async function loadTesterAccess() {
   renderTesterAccess();
 }
 
+async function loadProfile() {
+  const { profile } = await api.request("/api/profile/me");
+  state.profile = profile;
+  state.user = {
+    ...state.user,
+    username: profile.username,
+    usernameRequired: profile.usernameRequired,
+    publicProfileEnabled: profile.publicProfileEnabled,
+    usernameUpdatedAt: profile.private?.usernameUpdatedAt || state.user?.usernameUpdatedAt
+  };
+  document.querySelector("#user-name").textContent = state.user.username || state.user.name;
+  renderProfile();
+  return profile;
+}
+
+async function saveProfileSettings({ username, publicProfileEnabled, messageElement }) {
+  try {
+    if (messageElement) messageElement.textContent = "Saving profile...";
+    const { profile } = await api.request("/api/profile/me", {
+      method: "PUT",
+      body: JSON.stringify({
+        username,
+        publicProfileEnabled
+      })
+    });
+    state.profile = profile;
+    state.user = {
+      ...state.user,
+      username: profile.username,
+      usernameRequired: profile.usernameRequired,
+      publicProfileEnabled: profile.publicProfileEnabled,
+      usernameUpdatedAt: profile.private?.usernameUpdatedAt || state.user?.usernameUpdatedAt
+    };
+    document.querySelector("#user-name").textContent = state.user.username || state.user.name;
+    renderProfile();
+    if (messageElement) messageElement.textContent = "Profile updated.";
+    showToast("Profile updated");
+  } catch (error) {
+    if (messageElement) messageElement.textContent = error.message;
+  }
+}
+
 async function loadAffiliate() {
   const { affiliate } = await api.request("/api/affiliates/me");
   state.affiliate = affiliate;
@@ -1896,7 +1986,7 @@ function startSignalHistoryRefresh() {
 }
 
 function showView(view) {
-  const allowedViews = ["scanner", "watchlist", "alerts", "notifications", "signals", "paper-portfolio", "journal", "backtesting", "performance", "affiliate", "settings", "billing"];
+  const allowedViews = ["scanner", "watchlist", "alerts", "notifications", "signals", "paper-portfolio", "journal", "backtesting", "performance", "affiliate", "profile", "settings", "billing"];
   if (state.user?.isAdmin) {
     allowedViews.push("admin", "affiliate-admin", "webhook-events");
   }
@@ -1929,6 +2019,7 @@ function showView(view) {
     backtesting: ["Historical strategy research", "Backtesting Lab"],
     performance: ["Outcome analytics", "Performance"],
     affiliate: ["Recurring commissions", "Affiliate Program"],
+    profile: ["Public identity", "Profile"],
     settings: ["Account", "Settings"],
     admin: ["Administration", "Tester access requests"],
     "affiliate-admin": ["Administration", "Affiliate Program"],
@@ -1955,6 +2046,12 @@ function showView(view) {
   if (normalizedView === "affiliate") {
     loadAffiliate().catch((error) => {
       affiliateStatus.textContent = error.message;
+    });
+  }
+
+  if (normalizedView === "profile") {
+    loadProfile().catch((error) => {
+      usernameOnboardingMessage.textContent = error.message;
     });
   }
 
@@ -4372,6 +4469,130 @@ function renderLabTrades(trades) {
       `).join("")}</tbody>
     </table>
   `;
+}
+
+function renderProfile() {
+  const profile = state.profile;
+  if (!profile) return;
+  const stats = profile.stats || {};
+  const username = profile.username || "";
+  const displayName = username || "Create a username";
+
+  setText("#profile-avatar", profile.avatarInitial || "SF");
+  setText("#profile-username", displayName);
+  setText("#profile-joined", `Joined ${formatProfileDate(profile.joinedAt)}`);
+  setText("#profile-plan-badge", profile.plan || "Free");
+  setText("#profile-signals-unlocked", formatInteger(stats.signalsUnlocked));
+  setText("#profile-closed-signals", formatInteger(stats.closedSignals));
+  setText("#profile-win-rate", `${Number(stats.winRate || 0).toFixed(1)}%`);
+  setText("#profile-net-r", formatR(stats.netR));
+  setText("#profile-average-r", formatR(stats.averageR));
+  setText("#profile-favorite-market", stats.favoriteMarket || "--");
+  setText("#profile-best-timeframe", stats.bestTimeframe || "--");
+  setText("#profile-current-streak", `${stats.currentStreak || 0}`);
+  setText("#profile-best-streak", `${stats.bestStreak || 0}`);
+
+  if (settingsUsername) settingsUsername.value = username;
+  if (settingsPublicProfile) settingsPublicProfile.checked = Boolean(profile.publicProfileEnabled);
+  if (onboardingUsername && !onboardingUsername.value) onboardingUsername.value = username;
+  if (onboardingPublicProfile) onboardingPublicProfile.checked = Boolean(profile.publicProfileEnabled);
+  if (settingsProfilePreview) {
+    settingsProfilePreview.href = profile.publicProfileUrl || "#";
+    settingsProfilePreview.textContent = username ? `View /u/${username}` : "Create a username first";
+    settingsProfilePreview.classList.toggle("disabled-link", !username || !profile.publicProfileEnabled);
+  }
+  usernameRequiredPanel?.classList.toggle("hidden", !profile.usernameRequired);
+}
+
+function setText(selector, value) {
+  const element = document.querySelector(selector);
+  if (element) element.textContent = value;
+}
+
+function isPublicProfileRoute() {
+  return location.pathname.startsWith("/u/") && location.pathname.length > 3;
+}
+
+async function loadPublicProfileRoute() {
+  const username = decodeURIComponent(location.pathname.replace(/^\/u\//, "").split("/")[0] || "");
+  landingPage.classList.add("hidden");
+  authScreen.classList.add("hidden");
+  dashboard.classList.add("hidden");
+  publicProfilePage?.classList.remove("hidden");
+
+  try {
+    const { profile } = await api.request(`/api/profiles/${encodeURIComponent(username)}`);
+    state.publicProfile = profile;
+    renderPublicProfile(profile);
+  } catch (error) {
+    renderPublicProfileError(error.message);
+  }
+}
+
+function renderPublicProfile(profile) {
+  const stats = profile.stats || {};
+  document.title = `${profile.username} | SignalForge Profile`;
+  document.querySelector("#public-profile-shell").innerHTML = `
+    <a class="brand-mark public-profile-brand" href="/" aria-label="SignalForge home">
+      <img src="/icons/android-chrome-192x192.png" alt="" />
+      <span>SignalForge</span>
+    </a>
+    <article class="panel profile-hero-card public">
+      <div class="profile-avatar">${escapeHtml(profile.avatarInitial || "SF")}</div>
+      <div>
+        <p class="eyebrow">Public trader profile</p>
+        <h1>@${escapeHtml(profile.username)}</h1>
+        <p class="muted">Joined ${formatProfileDate(profile.joinedAt)} · ${escapeHtml(profile.plan || "Free")} plan</p>
+      </div>
+    </article>
+    <section class="profile-stat-grid">
+      ${renderProfileStat("Signals unlocked", formatInteger(stats.signalsUnlocked))}
+      ${renderProfileStat("Closed signals", formatInteger(stats.closedSignals))}
+      ${renderProfileStat("Win rate", `${Number(stats.winRate || 0).toFixed(1)}%`)}
+      ${renderProfileStat("Net R", formatR(stats.netR))}
+      ${renderProfileStat("Average R", formatR(stats.averageR))}
+      ${renderProfileStat("Favorite market", stats.favoriteMarket || "--")}
+      ${renderProfileStat("Best timeframe", stats.bestTimeframe || "--")}
+      ${renderProfileStat("Current streak", stats.currentStreak || 0)}
+      ${renderProfileStat("Best streak", stats.bestStreak || 0)}
+    </section>
+    <p class="risk-disclaimer">Educational tool only. Not financial advice.</p>
+  `;
+}
+
+function renderPublicProfileError(message) {
+  document.querySelector("#public-profile-shell").innerHTML = `
+    <a class="brand-mark public-profile-brand" href="/" aria-label="SignalForge home">
+      <img src="/icons/android-chrome-192x192.png" alt="" />
+      <span>SignalForge</span>
+    </a>
+    <article class="panel profile-hero-card public">
+      <div class="profile-avatar">SF</div>
+      <div>
+        <p class="eyebrow">Public profile</p>
+        <h1>Profile unavailable</h1>
+        <p class="muted">${escapeHtml(message)}</p>
+      </div>
+    </article>
+  `;
+}
+
+function renderProfileStat(label, value) {
+  return `
+    <article class="profile-stat-card">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+    </article>
+  `;
+}
+
+function formatProfileDate(value) {
+  if (!value) return "recently";
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric"
+  }).format(new Date(value));
 }
 
 function escapeHtml(value) {

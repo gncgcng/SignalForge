@@ -18,6 +18,7 @@ import { handleIntelligenceRoutes } from "./modules/intelligence/intelligenceCon
 import { handleNotificationRoutes } from "./modules/notifications/notificationController.js";
 import { handlePaperTradingRoutes } from "./modules/paper-trading/paperTradingController.js";
 import { handlePerformanceRoutes } from "./modules/performance/performanceController.js";
+import { handleProfileRoutes } from "./modules/profiles/profileController.js";
 import { startTelegramNotificationQueue } from "./modules/notifications/notificationQueue.js";
 import { startTelegramConnectionPoller } from "./modules/notifications/telegramConnectionService.js";
 import { handleSignalRoutes } from "./modules/signals/signalController.js";
@@ -58,6 +59,7 @@ const server = createServer(async (req, res) => {
       (await handleJournalRoutes(req, res, url.pathname, url)) ||
       (await handleBacktestRoutes(req, res, url.pathname, url)) ||
       (await handlePerformanceRoutes(req, res, url.pathname, url)) ||
+      (await handleProfileRoutes(req, res, url.pathname)) ||
       (await handleSignalRoutes(req, res, url.pathname));
 
     if (handled !== false) {

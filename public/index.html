@@ -410,9 +410,26 @@
             <button type="button" data-legal-doc="risk">Risk Disclaimer</button>
           </div>
         </footer>
-      </section>
+  </section>
 
-      <section class="auth-screen hidden" id="auth-screen">
+  <section class="public-profile-page hidden" id="public-profile-page" aria-live="polite">
+    <div class="public-profile-shell" id="public-profile-shell">
+      <a class="brand-mark public-profile-brand" href="/" aria-label="SignalForge home">
+        <img src="/icons/android-chrome-192x192.png" alt="" />
+        <span>SignalForge</span>
+      </a>
+      <article class="panel profile-hero-card">
+        <div class="profile-avatar">SF</div>
+        <div>
+          <p class="eyebrow">Public profile</p>
+          <h1>Loading trader profile...</h1>
+          <p class="muted">Only public trading statistics are shown here.</p>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <section class="auth-screen hidden" id="auth-screen">
         <div class="brand-panel">
           <img class="brand-logo auth-logo" src="/icons/android-chrome-192x192.png" alt="SignalForge" />
           <h1>SignalForge</h1>
@@ -439,8 +456,16 @@
             <input name="email" type="email" autocomplete="email" placeholder="alex@signalforge.app" required />
           </label>
           <label>
+            Username
+            <input name="username" autocomplete="username" pattern="[A-Za-z0-9_]{3,20}" minlength="3" maxlength="20" placeholder="alex_trades" />
+          </label>
+          <label>
             Password
             <input name="password" type="password" autocomplete="current-password" placeholder="6+ characters" required />
+          </label>
+          <label class="consent-row">
+            <input name="publicProfileEnabled" type="checkbox" />
+            <span>Show my trading profile publicly. You can turn this off later.</span>
           </label>
           <label class="consent-row">
             <input id="legal-consent" name="legalConsentAccepted" type="checkbox" />
@@ -505,6 +530,7 @@
             <section class="nav-section" data-nav-section="account">
               <button class="nav-section-toggle" type="button" data-nav-section-toggle="account" aria-expanded="true">Account</button>
               <div class="nav-section-links">
+                <a href="#profile" data-view-link="profile">Profile</a>
                 <a href="#settings" data-view-link="settings">Settings</a>
                 <a href="#billing" data-view-link="billing">Billing</a>
                 <a class="hidden" href="#admin" data-view-link="admin" id="admin-nav-link">Admin</a>
@@ -1253,6 +1279,72 @@
               <button id="request-tester-access" type="button">Request tester access</button>
               <p class="status-line" id="tester-access-message"></p>
             </article>
+            <article class="panel profile-settings-panel">
+              <div class="panel-header">
+                <div>
+                  <span class="eyebrow">Public identity</span>
+                  <h3>Username and profile visibility</h3>
+                </div>
+                <a class="secondary-anchor" id="settings-profile-preview" href="#profile">Preview profile</a>
+              </div>
+              <form id="profile-settings-form" class="profile-settings-form">
+                <label>
+                  Username
+                  <input id="settings-username" name="username" pattern="[A-Za-z0-9_]{3,20}" minlength="3" maxlength="20" placeholder="your_username" />
+                </label>
+                <label class="consent-row">
+                  <input id="settings-public-profile" name="publicProfileEnabled" type="checkbox" />
+                  <span>Show my profile publicly</span>
+                </label>
+                <button type="submit">Save profile</button>
+              </form>
+              <p class="form-note" id="profile-settings-message">Usernames are unique and can be changed once every 30 days.</p>
+            </article>
+          </section>
+
+          <section class="page-view hidden profile-page" id="profile-view" data-view="profile">
+            <div class="profile-shell" id="profile-shell">
+              <article class="panel profile-hero-card">
+                <div class="profile-avatar" id="profile-avatar">S</div>
+                <div>
+                  <span class="eyebrow">SignalForge profile</span>
+                  <h3 id="profile-username">Choose a username</h3>
+                  <p id="profile-joined">Joined recently</p>
+                </div>
+                <span class="status-pill" id="profile-plan-badge">Free</span>
+              </article>
+              <article class="panel hidden" id="username-required-panel">
+                <h3>Create your public username</h3>
+                <p class="reasoning">Choose a public identity for future leaderboards and community features. Your email and real name stay private.</p>
+                <form id="username-onboarding-form" class="profile-settings-form">
+                  <label>
+                    Username
+                    <input id="onboarding-username" name="username" pattern="[A-Za-z0-9_]{3,20}" minlength="3" maxlength="20" placeholder="signal_trader" required />
+                  </label>
+                  <label class="consent-row">
+                    <input id="onboarding-public-profile" name="publicProfileEnabled" type="checkbox" />
+                    <span>Show my profile publicly</span>
+                  </label>
+                  <button type="submit">Save username</button>
+                </form>
+                <p class="form-note" id="username-onboarding-message"></p>
+              </article>
+              <div class="profile-stat-grid">
+                <article><span>Signals unlocked</span><strong id="profile-signals-unlocked">0</strong></article>
+                <article><span>Closed signals</span><strong id="profile-closed-signals">0</strong></article>
+                <article><span>Win rate</span><strong id="profile-win-rate">0%</strong></article>
+                <article><span>Net R</span><strong id="profile-net-r">0.00R</strong></article>
+                <article><span>Average R</span><strong id="profile-average-r">0.00R</strong></article>
+                <article><span>Favorite market</span><strong id="profile-favorite-market">--</strong></article>
+                <article><span>Best timeframe</span><strong id="profile-best-timeframe">--</strong></article>
+                <article><span>Current streak</span><strong id="profile-current-streak">No closed trades</strong></article>
+                <article><span>Best streak</span><strong id="profile-best-streak">No wins yet</strong></article>
+              </div>
+              <div class="signal-disclaimer">
+                <strong>Public profile privacy</strong>
+                <span>Public profiles show trading stats only. Email, billing, affiliate payout, Telegram, and private settings stay hidden.</span>
+              </div>
+            </div>
           </section>
 
           <section class="page-view hidden" id="affiliate-view" data-view="affiliate">

@@ -26,6 +26,31 @@ export async function findUserByEmail(email) {
   return result.rows[0] ? mapUser(result.rows[0]) : null;
 }
 
+export async function findUserByUsername(username) {
+  const normalized = normalizeUsernameForLookup(username);
+  if (!normalized) return null;
+  const result = await query(`
+    SELECT u.*, s.status AS subscription_status, s.provider, s.provider_customer_id,
+      s.provider_subscription_id, s.price_id, s.current_period_start, s.current_period_end,
+      s.cancel_at_period_end, s.stripe_mode, c.free_signal_allowance, c.paid_credits,
+      c.unlock_credits_balance, c.lifetime_unlocks_used,
+      COALESCE((
+        SELECT SUM(d.quantity) FROM setup_discovery_usage d
+        WHERE d.user_id = u.id AND d.created_at >= date_trunc('day', now())
+      ), 0) AS discoveries_today,
+      COALESCE((
+        SELECT SUM(d.quantity) FROM setup_discovery_usage d
+        WHERE d.user_id = u.id
+          AND d.created_at >= COALESCE(s.current_period_start, date_trunc('month', now()))
+      ), 0) AS discoveries_period
+    FROM users u
+    LEFT JOIN subscriptions s ON s.user_id = u.id
+    LEFT JOIN credit_balances c ON c.user_id = u.id
+    WHERE u.username_normalized = $1
+  `, [normalized]);
+  return result.rows[0] ? mapUser(result.rows[0]) : null;
+}
+
 export async function findUserById(id) {
   const result = await query(`
     SELECT u.*, s.status AS subscription_status, s.provider, s.provider_customer_id,
@@ -61,16 +86,20 @@ export async function createUser({
   deviceFingerprintHash = null,
   abuseScore = 0,
   abuseFlags = [],
-  abuseReviewStatus = "clear"
+  abuseReviewStatus = "clear",
+  username = null,
+  publicProfileEnabled = false
 }) {
+  const usernameNormalized = normalizeUsernameForLookup(username);
   await transaction(async (client) => {
     await client.query(`
       INSERT INTO users (
         id, name, email, password_salt, password_hash, plan, email_verified_at,
         signup_ip_hash, device_fingerprint_hash, abuse_score, abuse_flags,
-        abuse_review_status, affiliate_code
+        abuse_review_status, affiliate_code, username, username_normalized,
+        username_updated_at, public_profile_enabled
       )
-      VALUES ($1,$2,$3,$4,$5,'free',$6,$7,$8,$9,$10,$11,lower(substr(md5($1),1,12)))
+      VALUES ($1,$2,$3,$4,$5,'free',$6,$7,$8,$9,$10,$11,lower(substr(md5($1),1,12)),$12,$13,CASE WHEN $13 IS NULL THEN NULL ELSE now() END,$14)
     `, [
       id,
       name,
@@ -82,7 +111,10 @@ export async function createUser({
       deviceFingerprintHash,
       abuseScore,
       JSON.stringify(abuseFlags),
-      abuseReviewStatus
+      abuseReviewStatus,
+      usernameNormalized ? username : null,
+      usernameNormalized,
+      Boolean(publicProfileEnabled)
     ]);
 
     await client.query(`
@@ -100,6 +132,84 @@ export async function createUser({
   });
 
   return findUserById(id);
+}
+
+export async function updateUserProfileSettings(userId, {
+  username = undefined,
+  publicProfileEnabled = undefined
+}) {
+  return transaction(async (client) => {
+    const currentResult = await client.query(`
+      SELECT id, username, username_normalized, username_updated_at, public_profile_enabled
+      FROM users
+      WHERE id = $1
+      FOR UPDATE
+    `, [userId]);
+    const current = currentResult.rows[0];
+    if (!current) return null;
+
+    let nextUsername = current.username;
+    let nextNormalized = current.username_normalized;
+    let updateUsernameTimestamp = false;
+
+    if (username !== undefined) {
+      nextUsername = String(username || "").trim();
+      nextNormalized = normalizeUsernameForLookup(nextUsername);
+
+      if (!nextNormalized) {
+        const error = new Error("Username must be 3-20 characters using only letters, numbers, and underscores.");
+        error.code = "INVALID_USERNAME";
+        error.statusCode = 400;
+        throw error;
+      }
+
+      if (nextNormalized !== current.username_normalized) {
+        if (
+          current.username_updated_at &&
+          Date.now() - new Date(current.username_updated_at).getTime() < 30 * 24 * 60 * 60 * 1000
+        ) {
+          const error = new Error("You can change your username once every 30 days.");
+          error.code = "USERNAME_CHANGE_COOLDOWN";
+          error.statusCode = 429;
+          throw error;
+        }
+
+        const duplicate = await client.query(`
+          SELECT id
+          FROM users
+          WHERE username_normalized = $1 AND id <> $2
+          LIMIT 1
+        `, [nextNormalized, userId]);
+
+        if (duplicate.rows[0]) {
+          const error = new Error("Username is already taken.");
+          error.code = "USERNAME_TAKEN";
+          error.statusCode = 409;
+          throw error;
+        }
+
+        updateUsernameTimestamp = true;
+      }
+    }
+
+    await client.query(`
+      UPDATE users
+      SET username = $2,
+        username_normalized = $3,
+        username_updated_at = CASE WHEN $4 THEN now() ELSE username_updated_at END,
+        public_profile_enabled = COALESCE($5, public_profile_enabled),
+        updated_at = now()
+      WHERE id = $1
+    `, [
+      userId,
+      nextUsername,
+      nextNormalized,
+      updateUsernameTimestamp,
+      publicProfileEnabled === undefined ? null : Boolean(publicProfileEnabled)
+    ]);
+  });
+
+  return findUserById(userId);
 }
 
 export async function createSession({ id, userId, expiresAt }) {
@@ -1994,6 +2104,10 @@ function mapUser(row) {
     id: row.id,
     name: row.name,
     email: row.email,
+    username: row.username || null,
+    usernameNormalized: row.username_normalized || null,
+    usernameUpdatedAt: row.username_updated_at || null,
+    publicProfileEnabled: Boolean(row.public_profile_enabled),
     role: row.role || "user",
     password: {
       salt: row.password_salt,
@@ -2030,6 +2144,12 @@ function mapUser(row) {
     },
     createdAt: row.created_at
   };
+}
+
+function normalizeUsernameForLookup(username) {
+  const value = String(username || "").trim();
+  if (!/^[A-Za-z0-9_]{3,20}$/.test(value)) return "";
+  return value.toLowerCase();
 }
 
 function mapSignal(row) {
