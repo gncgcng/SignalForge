@@ -1606,6 +1606,17 @@ export async function enqueueTelegramNotification(userId, settings, setup) {
   return result.rows[0] || null;
 }
 
+export async function findTelegramNotificationPayload(userId, setupKey) {
+  const result = await query(`
+    SELECT payload
+    FROM telegram_notification_queue
+    WHERE user_id = $1 AND setup_key = $2
+    ORDER BY created_at DESC
+    LIMIT 1
+  `, [userId, setupKey]);
+  return result.rows[0]?.payload || null;
+}
+
 export async function claimNextTelegramNotification() {
   return transaction(async (client) => {
     const result = await client.query(`

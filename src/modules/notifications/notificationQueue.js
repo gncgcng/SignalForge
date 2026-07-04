@@ -4,7 +4,10 @@ import {
   markTelegramNotificationFailed,
   markTelegramNotificationSent
 } from "../../db/repositories.js";
-import { formatTelegramSignalMessage } from "./notificationService.js";
+import {
+  formatTelegramSignalMessage,
+  formatTelegramSignalReplyMarkup
+} from "./notificationService.js";
 import { sendTelegramMessage } from "./telegramClient.js";
 
 let queueTimer = null;
@@ -34,7 +37,8 @@ export async function processTelegramQueue() {
         console.log(`[telegram] sending alert queue_id=${delivery.id} user=${delivery.userId} chat=${maskChatId(delivery.chatId)}`);
         await sendTelegramMessage(
           delivery.chatId,
-          formatTelegramSignalMessage(delivery.payload)
+          formatTelegramSignalMessage(delivery.payload),
+          formatTelegramSignalReplyMarkup(delivery.payload)
         );
         await markTelegramNotificationSent(delivery.id);
         console.log(`[telegram] sent queue_id=${delivery.id} user=${delivery.userId}`);

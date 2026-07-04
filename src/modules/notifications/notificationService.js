@@ -118,33 +118,52 @@ export function telegramPreferenceMatchesSetup(settings, favoriteSymbols, setup)
     (!settings.favoriteMarketsOnly || favoriteSymbols.has(setup.symbol)) &&
     settings.timeframes.includes(setup.timeframe) &&
     (settings.direction === "both" || settings.direction === setup.direction) &&
-    Number(setup.confidenceScore) >= Number(settings.minimumConfidence)
+    Number(setup.confidenceScore) >= Number(settings.minimumConfidence) &&
+    Number(setup.confidenceScore) >= 70
   );
 }
 
 export function formatTelegramSignalMessage(setup) {
   const confirmations = summarizeConfirmations(setup.confirmations || []);
-  const reason = confirmations
-    .map((item) => `${item.name} ${item.passed ? "✓" : "✗"}`)
-    .join("\n");
+  const passed = confirmations.filter((item) => item.passed).map((item) => item.name);
+  const reason = passed.length
+    ? `${passed.slice(0, 4).join(", ")} aligned with the rule set.`
+    : "Rule-based confluence detected. Open SignalForge to review the full setup.";
+  const provider = getProviderLabel(setup.symbol);
+  const confidence = Number(setup.confidenceScore || 0);
 
   return [
     "🚨 SignalForge Alert",
     "",
-    `Market: ${setup.symbol}`,
+    `Market: ${getDisplaySymbol(setup.symbol)}`,
+    `Provider: ${provider}`,
     `Timeframe: ${setup.timeframe}`,
     `Direction: ${setup.direction.toUpperCase()}`,
-    `Entry: ${formatPrice(setup.entryPrice)}`,
-    `Stop Loss: ${formatPrice(setup.stopLoss)}`,
-    `Take Profit: ${formatPrice(setup.takeProfit)}`,
-    `Risk/Reward: ${setup.riskRewardRatio}:1`,
-    `Confidence: ${setup.confidenceScore}%`,
+    `Confidence: ${confidence}% (${getConfidenceTier(confidence)})`,
+    `Setup: ${setup.setupType || "Qualified setup"}`,
     "",
-    "Reason:",
+    "Preview reason:",
     reason,
     "",
+    "Preview only. Unlock to view full levels.",
     "Educational tool only. Not financial advice."
   ].join("\n");
+}
+
+export function formatTelegramSignalReplyMarkup(setup) {
+  const url = buildTelegramUnlockUrl(setup);
+  if (!url) return {};
+
+  return {
+    reply_markup: {
+      inline_keyboard: [[
+        {
+          text: "Unlock Signal",
+          url
+        }
+      ]]
+    }
+  };
 }
 
 function validateSettings(input) {
@@ -205,8 +224,36 @@ function normalizeConfirmationName(name = "") {
   return name;
 }
 
-function formatPrice(value) {
-  return Number(value).toLocaleString("en-US", { maximumFractionDigits: Number(value) > 1000 ? 2 : 4 });
+function getConfidenceTier(confidence) {
+  if (confidence >= 98) return "Rare near-perfect";
+  if (confidence >= 90) return "Excellent";
+  if (confidence >= 80) return "Strong";
+  if (confidence >= 70) return "Decent";
+  return "No alert";
+}
+
+function getDisplaySymbol(symbol = "") {
+  return symbol.includes("-") ? symbol.replace("-", "") : symbol;
+}
+
+function getProviderLabel(symbol = "") {
+  if (["XAU/USD", "XAG/USD", "WTI", "BRENT", "NATGAS"].includes(symbol)) {
+    return `Twelve Data · ${symbol}`;
+  }
+
+  return `Coinbase · ${symbol}`;
+}
+
+function buildTelegramUnlockUrl(setup) {
+  const appUrl = appConfig.appUrl || appConfig.affiliate.publicAppUrl;
+  const setupKey = setup?.setupKey || setup?.id;
+
+  if (!appUrl || !setupKey) return "";
+
+  const url = new URL(appUrl);
+  url.searchParams.set("telegramUnlock", setupKey);
+  url.hash = "signals";
+  return url.toString();
 }
 
 function assertTelegramConfigured() {

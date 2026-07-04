@@ -5,7 +5,8 @@ import {
   createSignal,
   listUserSignals,
   scanAllMarkets,
-  scanMarketSetup
+  scanMarketSetup,
+  unlockTelegramSignal
 } from "./signalService.js";
 
 // scanMarketSetupDetailed stays service-private so Telegram receives full setups
@@ -60,6 +61,18 @@ export async function handleSignalRoutes(req, res, pathname) {
     try {
       const body = await readJson(req);
       const result = await createSignal(req.user, body);
+      return sendJson(res, result.signal && !result.alreadyUnlocked ? 201 : 200, result);
+    } catch (error) {
+      return sendError(res, error.statusCode || 400, error.message, {
+        subscription: error.subscription
+      });
+    }
+  }
+
+  if (pathname === "/api/signals/telegram-unlock" && req.method === "POST") {
+    try {
+      const body = await readJson(req);
+      const result = await unlockTelegramSignal(req.user, body);
       return sendJson(res, result.signal && !result.alreadyUnlocked ? 201 : 200, result);
     } catch (error) {
       return sendError(res, error.statusCode || 400, error.message, {

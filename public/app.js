@@ -78,6 +78,7 @@ const state = {
 const RESTORE_TOKEN_KEY = "signalforge-restore-token";
 const SCANNER_MODE_KEY = "signalforge-scanner-mode";
 const NAV_SECTIONS_KEY = "signalforge-nav-sections";
+const TELEGRAM_UNLOCK_KEY = "signalforge-telegram-unlock";
 
 const authScreen = document.querySelector("#auth-screen");
 const landingPage = document.querySelector("#landing-page");
@@ -1281,10 +1282,13 @@ async function init() {
     await bootDashboard();
   } else {
     setSplashStatus("Preparing your market desk");
-    const showAuthCallback = Boolean(oauthError || verificationToken);
+    const showAuthCallback = Boolean(oauthError || verificationToken || getPendingTelegramUnlockKey());
     landingPage.classList.toggle("hidden", showAuthCallback);
     authScreen.classList.toggle("hidden", !showAuthCallback);
     dashboard.classList.add("hidden");
+    if (getPendingTelegramUnlockKey()) {
+      authNote.textContent = "Sign in to unlock this Telegram signal preview.";
+    }
     if (oauthError) {
       authNote.textContent = googleOAuthErrorMessage(oauthError);
       history.replaceState({}, "", `${location.pathname}${location.hash}`);
@@ -1523,6 +1527,8 @@ async function bootDashboard() {
   } catch (error) {
     reportDashboardLoadFailures([{ status: "rejected", reason: error }]);
   }
+
+  await processPendingTelegramUnlock();
 }
 
 function reportDashboardLoadFailures(results) {
@@ -1536,6 +1542,61 @@ function reportDashboardLoadFailures(results) {
   if (statusLine) {
     statusLine.textContent = "Session restored. Some dashboard data could not load yet; refresh or retry in a moment.";
   }
+}
+
+function getPendingTelegramUnlockKey() {
+  const fromUrl = new URLSearchParams(location.search).get("telegramUnlock") || "";
+  if (fromUrl) {
+    sessionStorage.setItem(TELEGRAM_UNLOCK_KEY, fromUrl);
+    return fromUrl;
+  }
+
+  return sessionStorage.getItem(TELEGRAM_UNLOCK_KEY) || "";
+}
+
+async function processPendingTelegramUnlock() {
+  const setupKey = getPendingTelegramUnlockKey();
+  if (!setupKey) return;
+
+  try {
+    statusLine.textContent = "Unlocking Telegram signal preview...";
+    const { signal, subscription, alreadyUnlocked } = await api.request("/api/signals/telegram-unlock", {
+      method: "POST",
+      body: JSON.stringify({ setupKey })
+    });
+
+    state.subscription = subscription;
+    renderSubscription();
+
+    if (!signal) {
+      statusLine.textContent = "Telegram signal preview could not be unlocked.";
+      return;
+    }
+
+    const unlockedKey = getSignalKey(signal);
+    state.scanResults = [];
+    state.expandedSignalKeys = new Set([unlockedKey]);
+    await loadSignals();
+    showView("signals");
+    renderSignals();
+    renderSignalsHistory();
+    statusLine.textContent = alreadyUnlocked
+      ? "Already unlocked. No additional credit was used."
+      : "Signal unlocked from Telegram. Unlock credit deducted.";
+    showToast(alreadyUnlocked ? "Already unlocked" : "Signal unlocked");
+    removeTelegramUnlockParam();
+    highlightSignalKey(unlockedKey);
+  } catch (error) {
+    statusLine.textContent = error.message;
+    showView("signals");
+  }
+}
+
+function removeTelegramUnlockParam() {
+  const url = new URL(location.href);
+  url.searchParams.delete("telegramUnlock");
+  sessionStorage.removeItem(TELEGRAM_UNLOCK_KEY);
+  history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
 function showAuth() {

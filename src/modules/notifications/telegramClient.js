@@ -1,9 +1,10 @@
 import { appConfig } from "../../config/appConfig.js";
 
-export async function sendTelegramMessage(chatId, text) {
+export async function sendTelegramMessage(chatId, text, options = {}) {
   return telegramRequest("sendMessage", {
     chat_id: chatId,
-    text
+    text,
+    ...options
   });
 }
 

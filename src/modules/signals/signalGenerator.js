@@ -449,10 +449,28 @@ function validateCandidate(
     protectiveLevel,
     opposingLevel
   });
+  const confidenceScore = calculateDisplayConfidence({
+    candidate,
+    setupType,
+    regime,
+    confluence,
+    smc,
+    marketStructure,
+    correlation,
+    session,
+    newsRisk,
+    riskPlan,
+    qualityScore,
+    opposingRoom,
+    emaAligned
+  });
   const requiredQuality = setupType === "Reversal" ? 86 : minimumQualityScore;
 
   if (qualityScore < requiredQuality) {
     rejectionReasons.push(`Quality score ${qualityScore} is below the required ${requiredQuality}.`);
+  }
+  if (confidenceScore < 70) {
+    rejectionReasons.push(`Confidence score ${confidenceScore} is below the 70% signal threshold.`);
   }
   if (!riskPlan.tradeAllowed) {
     rejectionReasons.push(
@@ -469,16 +487,7 @@ function validateCandidate(
     riskRewardRatio: riskPlan.riskRewardRatio,
     setupType,
     qualityScore,
-    confidenceScore: Math.max(0, Math.min(
-      100,
-      candidate.confidenceScore +
-        confluence.confidenceAdjustment +
-        smc.confidenceAdjustment +
-        marketStructure.confidenceAdjustment +
-        correlation.confidenceAdjustment +
-        session.confidenceAdjustment +
-        newsRisk.confidenceAdjustment
-    )),
+    confidenceScore,
     confluence,
     smc,
     marketStructure,
@@ -495,6 +504,162 @@ function validateCandidate(
       (setupType === "Reversal" && candidate.passedCount >= candidate.requiredPassCount - 1)
     ) && rejectionReasons.length === 0
   };
+}
+
+export function calculateDisplayConfidence({
+  candidate,
+  setupType,
+  regime,
+  confluence,
+  smc,
+  marketStructure,
+  correlation,
+  session,
+  newsRisk,
+  riskPlan,
+  qualityScore,
+  opposingRoom,
+  emaAligned
+}) {
+  const rawScore = Number(candidate.confidenceScore || 0) +
+    Number(confluence?.confidenceAdjustment || 0) +
+    Number(smc?.confidenceAdjustment || 0) +
+    Number(marketStructure?.confidenceAdjustment || 0) +
+    Number(correlation?.confidenceAdjustment || 0) +
+    Number(session?.confidenceAdjustment || 0) +
+    Number(newsRisk?.confidenceAdjustment || 0);
+  const confirmationRatio = candidate.confirmations?.length
+    ? candidate.passedCount / candidate.confirmations.length
+    : 0;
+  const qualityLift = Math.max(-10, Math.min(8, (Number(qualityScore || 0) - 82) * 0.25));
+  const raw = rawScore + qualityLift;
+  const nearPerfect = isNearPerfectConfluence({
+    candidate,
+    setupType,
+    regime,
+    confluence,
+    smc,
+    marketStructure,
+    correlation,
+    session,
+    newsRisk,
+    riskPlan,
+    qualityScore,
+    opposingRoom,
+    emaAligned,
+    confirmationRatio
+  });
+
+  if (nearPerfect) {
+    return Math.max(98, Math.min(100, Math.round(raw)));
+  }
+
+  const cap = getNormalConfidenceCap({
+    qualityScore,
+    confirmationRatio,
+    confluence,
+    smc,
+    marketStructure,
+    correlation,
+    session,
+    newsRisk,
+    riskPlan,
+    opposingRoom,
+    emaAligned
+  });
+
+  return Math.max(0, Math.min(cap, Math.round(raw)));
+}
+
+function getNormalConfidenceCap({
+  qualityScore,
+  confirmationRatio,
+  confluence,
+  smc,
+  marketStructure,
+  correlation,
+  session,
+  newsRisk,
+  riskPlan,
+  opposingRoom,
+  emaAligned
+}) {
+  let cap = 89;
+
+  if (
+    Number(qualityScore || 0) >= 90 &&
+    confirmationRatio >= 0.84 &&
+    Number(confluence?.score || 0) >= 75 &&
+    Number(riskPlan?.riskRewardRatio || 0) >= 2
+  ) {
+    cap = 97;
+  } else if (
+    Number(qualityScore || 0) >= 84 &&
+    confirmationRatio >= 0.75 &&
+    Number(confluence?.score || 0) >= 55
+  ) {
+    cap = 92;
+  } else if (Number(qualityScore || 0) >= minimumQualityScore && confirmationRatio >= 0.66) {
+    cap = 89;
+  } else {
+    cap = 69;
+  }
+
+  if (confluence?.badge === "Countertrend") cap = Math.min(cap, 82);
+  if (smc?.conflict) cap = Math.min(cap, 84);
+  if (correlation?.conflict) cap = Math.min(cap, 86);
+  if (newsRisk?.blockSignal || newsRisk?.level === "High") cap = Math.min(cap, 74);
+  if (session?.liquidity === "Low") cap = Math.min(cap, 84);
+  if (!emaAligned) cap = Math.min(cap, 79);
+  if (Number(opposingRoom || 0) < Number(riskPlan?.riskRewardRatio || minimumRiskReward) + 0.25) {
+    cap = Math.min(cap, 88);
+  }
+
+  return cap;
+}
+
+function isNearPerfectConfluence({
+  candidate,
+  setupType,
+  regime,
+  confluence,
+  smc,
+  marketStructure,
+  correlation,
+  session,
+  newsRisk,
+  riskPlan,
+  qualityScore,
+  opposingRoom,
+  emaAligned,
+  confirmationRatio
+}) {
+  const constructiveRegime = ["Trend Up", "Trend Down", "Breakout"].includes(regime.label) &&
+    !regime.choppy &&
+    regime.label !== "High Volatility" &&
+    regime.label !== "Low Volatility";
+  const structureAligned = marketStructure?.available === false ||
+    (marketStructure?.vwapAligned && marketStructure?.volumeProfileAligned);
+
+  return Boolean(
+    candidate.valid &&
+    setupType &&
+    constructiveRegime &&
+    emaAligned &&
+    confirmationRatio >= 0.95 &&
+    Number(qualityScore || 0) >= 96 &&
+    Number(confluence?.score || 0) >= 92 &&
+    confluence?.badge === "Full Alignment" &&
+    Number(riskPlan?.riskRewardRatio || 0) >= 2.3 &&
+    Number(opposingRoom || 0) >= Number(riskPlan?.riskRewardRatio || 0) + 0.75 &&
+    Number(smc?.score || 0) >= 22 &&
+    !smc?.conflict &&
+    structureAligned &&
+    !correlation?.conflict &&
+    session?.liquidity !== "Low" &&
+    !newsRisk?.blockSignal &&
+    newsRisk?.level !== "High"
+  );
 }
 
 function classifySetupType(direction, candles, indicators, levels, regime) {

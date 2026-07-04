@@ -1,5 +1,6 @@
 import {
   cacheScanResult,
+  findTelegramNotificationPayload,
   getCachedScanResult,
   listSignalsByUser,
   saveUnlockedSignal
@@ -67,6 +68,56 @@ export async function createSignal(user, { symbol, timeframe }) {
     signal: savedSignal,
     alreadyUnlocked: Boolean(savedSignal?.alreadyUnlocked),
     analysis: result.analysis,
+    subscription: getSubscriptionSummary(user)
+  };
+}
+
+export async function unlockTelegramSignal(user, { setupKey }) {
+  const key = String(setupKey || "").trim();
+
+  if (!key) {
+    const error = new Error("Telegram setup link is missing.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const queuedSetup = await findTelegramNotificationPayload(user.id, key);
+
+  if (!queuedSetup) {
+    const error = new Error("Telegram setup link expired or is not available for this account.");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const signal = {
+    ...queuedSetup,
+    id: queuedSetup.id || createId("sig"),
+    userId: user.id,
+    status: "Active",
+    statusUpdatedAt: new Date().toISOString()
+  };
+  const savedSignal = await saveUnlockedSignal(user.id, signal);
+
+  if (!savedSignal?.alreadyUnlocked) {
+    await trackProductEvent({
+      eventType: "unlock",
+      userId: user.id,
+      symbol: signal.symbol,
+      timeframe: signal.timeframe,
+      metadata: { source: "telegram" }
+    });
+  }
+
+  if (user.role !== "tester" && !savedSignal?.alreadyUnlocked) {
+    user.unlockCreditsBalance = Math.max(0, Number(user.unlockCreditsBalance || 0) - 1);
+    user.lifetimeUnlocksUsed = Number(user.lifetimeUnlocksUsed || 0) + 1;
+    user.trialSignalsUsed = Number(user.trialSignalsUsed || 0) +
+      (user.plan === "free" || user.plan === "trial" ? 1 : 0);
+  }
+
+  return {
+    signal: savedSignal,
+    alreadyUnlocked: Boolean(savedSignal?.alreadyUnlocked),
     subscription: getSubscriptionSummary(user)
   };
 }

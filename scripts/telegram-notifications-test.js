@@ -4,6 +4,7 @@ process.env.TELEGRAM_BOT_USERNAME = "signalforge_test_bot";
 import { readFileSync } from "node:fs";
 
 const {
+  formatTelegramSignalReplyMarkup,
   formatTelegramSignalMessage,
   telegramPreferenceMatchesSetup
 } = await import("../src/modules/notifications/notificationService.js");
@@ -40,6 +41,7 @@ const setup = {
   takeProfit: 70000,
   riskRewardRatio: 2,
   confidenceScore: 86,
+  setupType: "Pullback bounce",
   confirmations: [
     { name: "Trend", passed: true },
     { name: "RSI", passed: true },
@@ -49,6 +51,7 @@ const setup = {
   ]
 };
 const message = formatTelegramSignalMessage(setup);
+const replyMarkup = formatTelegramSignalReplyMarkup(setup);
 let telegramRequest;
 
 globalThis.fetch = async (url, options) => {
@@ -65,7 +68,7 @@ globalThis.fetch = async (url, options) => {
   });
 };
 
-await sendTelegramMessage("123456789", message);
+await sendTelegramMessage("123456789", message, replyMarkup);
 
 const result = {
   settingsAndQueuePersisted: migration.includes("telegram_notification_settings") &&
@@ -88,15 +91,21 @@ const result = {
     ...setup,
     confidenceScore: 79
   }),
-  messageContainsTradeLevels: ["Market: BTC-USD", "Timeframe: 1h", "Direction: LONG",
-    "Entry:", "Stop Loss:", "Take Profit:", "Risk/Reward:", "Confidence:"]
+  messageIsPreviewOnly: ["Market: BTCUSD", "Provider: Coinbase · BTC-USD", "Timeframe: 1h",
+    "Direction: LONG", "Confidence: 86% (Strong)", "Setup: Pullback bounce",
+    "Preview only. Unlock to view full levels."]
     .every((value) => message.includes(value)),
-  messageContainsReasonAndDisclaimer: message.includes("Reason:") &&
-    message.includes("Trend ✓") &&
+  messageDoesNotLeakPaidLevels: !["Entry:", "Stop Loss:", "Take Profit:", "Risk/Reward:"]
+    .some((value) => message.includes(value)),
+  messageContainsReasonAndDisclaimer: message.includes("Preview reason:") &&
+    message.includes("Trend") &&
     message.includes("Educational tool only. Not financial advice."),
+  telegramReplyMarkupUnlocksExactSetup: replyMarkup.reply_markup.inline_keyboard[0][0].text === "Unlock Signal" &&
+    replyMarkup.reply_markup.inline_keyboard[0][0].url.includes("telegramUnlock=BTC-USD%3A1h%3Along%3A1770000000"),
   telegramApiCalledSafely: telegramRequest.url.includes("/bottest-token/sendMessage") &&
     telegramRequest.body.chat_id === "123456789" &&
-    telegramRequest.body.text === message,
+    telegramRequest.body.text === message &&
+    telegramRequest.body.reply_markup.inline_keyboard[0][0].text === "Unlock Signal",
   telegramPipelineLogs:
     autoScan.includes("[auto-scan] matched alert") &&
     queue.includes("[telegram] sending alert") &&
@@ -105,6 +114,29 @@ const result = {
   scanQueuesPrivately: signalController.includes("scanMarketSetupDetailed") &&
     signalController.includes("enqueueMatchingTelegramNotifications") &&
     !signalController.includes("entryPrice: result.fullSetup"),
+  telegramUnlockRoutePresent: signalController.includes('/api/signals/telegram-unlock') &&
+    signalController.includes("unlockTelegramSignal") &&
+    repositories.includes("findTelegramNotificationPayload") &&
+    repositories.includes("saveUnlockedSignal"),
+  telegramUnlockChargesOneCreditThroughIdempotentSave:
+    repositories.indexOf("if (existing.rows[0])") < repositories.indexOf("unlock_credits_balance = unlock_credits_balance - 1") &&
+    repositories.includes("SELECT pg_advisory_xact_lock") &&
+    repositories.includes("mapped.alreadyUnlocked = true") &&
+    repositories.includes("unlock_credits_balance = unlock_credits_balance - 1"),
+  duplicateTelegramUnlockDoesNotDoubleCharge:
+    repositories.includes("WHERE s.user_id = $1 AND s.setup_key = $2 LIMIT 1") &&
+    repositories.includes("return mapped;") &&
+    signalController.includes("result.alreadyUnlocked") &&
+    app.includes("Already unlocked. No additional credit was used."),
+  telegramUnlockCreatesSavedSignal:
+    repositories.includes("INSERT INTO saved_signals") &&
+    repositories.includes("INSERT INTO unlocked_signals") &&
+    repositories.includes("INSERT INTO signal_outcomes") &&
+    app.includes("showView(\"signals\")") &&
+    app.includes("highlightSignalKey(unlockedKey)"),
+  telegramUnlockFrontendPresent: app.includes("telegramUnlock") &&
+    app.includes("/api/signals/telegram-unlock") &&
+    app.includes("Sign in to unlock this Telegram signal preview."),
   notificationsPagePresent: html.includes('data-view="notifications"') &&
     html.includes("telegram-connect-form") &&
     html.includes("telegram-preferences-form") &&
