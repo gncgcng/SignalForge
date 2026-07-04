@@ -5,15 +5,81 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#000000" />
     <meta name="application-name" content="SignalForge" />
+    <meta name="description" content="SignalForge is a trading signal scanner for crypto markets with multi-timeframe analysis, risk management, Telegram alerts, paper trading, and performance tracking." />
+    <link rel="canonical" href="https://signalforge-app.xyz/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://signalforge-app.xyz/" />
+    <meta property="og:title" content="SignalForge | Crypto Trading Signal Scanner" />
+    <meta property="og:description" content="SignalForge is a trading signal scanner for crypto markets with multi-timeframe analysis, risk management, Telegram alerts, paper trading, and performance tracking." />
+    <meta property="og:image" content="https://signalforge-app.xyz/icons/android-chrome-512x512.png" />
+    <meta property="og:site_name" content="SignalForge" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="SignalForge | Crypto Trading Signal Scanner" />
+    <meta name="twitter:description" content="SignalForge is a trading signal scanner for crypto markets with multi-timeframe analysis, risk management, Telegram alerts, paper trading, and performance tracking." />
+    <meta name="twitter:image" content="https://signalforge-app.xyz/icons/android-chrome-512x512.png" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="SignalForge" />
-    <title>SignalForge</title>
+    <title>SignalForge | Crypto Trading Signal Scanner</title>
     <link rel="manifest" href="/manifest.json" />
     <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png" />
     <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
     <link rel="stylesheet" href="/styles.css" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "SignalForge",
+        "applicationCategory": "FinanceApplication",
+        "operatingSystem": "Web, iOS, Android, Desktop",
+        "url": "https://signalforge-app.xyz/",
+        "description": "SignalForge is a crypto trading signal scanner and trading setup assistant with multi-timeframe analysis, risk management, Telegram alerts, paper trading, and performance tracking.",
+        "offers": [
+          { "@type": "Offer", "name": "Free", "price": "0", "priceCurrency": "USD" },
+          { "@type": "Offer", "name": "Pro", "priceCurrency": "USD", "availability": "https://schema.org/InStock" },
+          { "@type": "Offer", "name": "Elite", "priceCurrency": "USD", "availability": "https://schema.org/InStock" }
+        ]
+      }
+    </script>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "Is SignalForge financial advice?",
+            "acceptedAnswer": { "@type": "Answer", "text": "No. SignalForge is an educational trading setup assistant and scanner. It is not financial advice." }
+          },
+          {
+            "@type": "Question",
+            "name": "Do SignalForge signals guarantee profit?",
+            "acceptedAnswer": { "@type": "Answer", "text": "No. Signals do not guarantee profit. Trading involves risk and outcomes are uncertain." }
+          },
+          {
+            "@type": "Question",
+            "name": "What markets are supported?",
+            "acceptedAnswer": { "@type": "Answer", "text": "SignalForge focuses on crypto trading signals including BTC and Ethereum markets, with commodities such as gold, silver, and oil available when provider data is configured." }
+          },
+          {
+            "@type": "Question",
+            "name": "How do Telegram trading alerts work?",
+            "acceptedAnswer": { "@type": "Answer", "text": "Users can connect Telegram and receive in-app or Telegram alerts when the scanner detects setups that match their timeframe, direction, and confidence preferences." }
+          },
+          {
+            "@type": "Question",
+            "name": "Can I cancel anytime?",
+            "acceptedAnswer": { "@type": "Answer", "text": "Yes. Paid subscriptions are managed through Stripe billing." }
+          },
+          {
+            "@type": "Question",
+            "name": "How do affiliates get paid?",
+            "acceptedAnswer": { "@type": "Answer", "text": "Affiliates may request payouts after reaching the minimum payout threshold. Supported payout methods include PayPal, Wise, and USDT, subject to admin approval." }
+          }
+        ]
+      }
+    </script>
   </head>
   <body>
     <div class="app-splash" id="app-splash" role="status" aria-label="Loading SignalForge">
@@ -32,13 +98,15 @@
             <strong>SignalForge</strong>
           </div>
           <div class="landing-nav-actions">
+            <a href="#features">Features</a>
             <a href="#pricing">Pricing</a>
+            <a href="#affiliate-program">Affiliates</a>
             <button class="text-link" type="button" data-legal-doc="risk">Risk disclaimer</button>
             <button class="secondary-action" id="landing-login-button" type="button">Sign in</button>
           </div>
         </header>
 
-        <section class="landing-hero">
+        <section class="landing-hero" id="top">
           <div class="hero-market-scene" aria-hidden="true">
             <div class="hero-grid"></div>
             <svg viewBox="0 0 1200 520" preserveAspectRatio="none">
@@ -46,72 +114,140 @@
               <polyline class="hero-line hero-line-soft" points="0,430 120,405 240,418 360,352 480,370 600,300 720,318 840,250 960,270 1080,220 1200,236" />
             </svg>
           </div>
-          <div class="hero-content">
-            <div class="hero-brand">
-              <img class="brand-logo hero-logo" src="/icons/android-chrome-192x192.png" alt="" />
-              <span class="eyebrow">Rule-based market intelligence</span>
+          <div class="hero-layout">
+            <div class="hero-content">
+              <div class="hero-brand">
+                <img class="brand-logo hero-logo" src="/icons/android-chrome-192x192.png" alt="" />
+                <span class="eyebrow">Crypto trading signal scanner</span>
+              </div>
+              <h1>Find high-probability trading setups in seconds.</h1>
+              <p>SignalForge scans crypto markets with multi-timeframe analysis, risk management, and real-time alerts.</p>
+              <p class="brand-copy">SignalForge is a crypto trading signal scanner and trading setup assistant for traders who want clearer levels, cleaner risk, and fewer missed setups.</p>
+              <div class="hero-actions">
+                <button id="start-free-button" type="button">Start with 3 free unlocks</button>
+                <button class="secondary-action" id="view-demo-button" type="button">View demo</button>
+              </div>
+              <p class="risk-caption">Educational tool only. Not financial advice.</p>
+              <div class="hero-assurance" aria-label="Product highlights">
+                <a href="#features">Crypto trading signals</a>
+                <a href="#markets-covered">BTC and Ethereum trading signals</a>
+                <a href="#features">Telegram trading alerts</a>
+              </div>
             </div>
-            <h1>Find crypto trading setups in seconds</h1>
-            <p>Scan major crypto, altcoins, and commodities across multiple timeframes with rule-based signals, stop loss, take profit, and risk/reward.</p>
-            <div class="hero-actions">
-              <button id="start-free-button" type="button">Start with 3 free unlocks</button>
-              <button class="secondary-action hidden" id="view-demo-button" type="button">View demo</button>
-            </div>
-            <div class="hero-assurance" aria-label="Product highlights">
-              <span>Live market data</span>
-              <span>Transparent signal logic</span>
-              <span>No broker connection</span>
-            </div>
-          </div>
-        </section>
 
-        <section class="landing-band how-it-works">
-          <div class="section-title">
-            <div>
-              <span class="eyebrow">How it works</span>
-              <h3>A disciplined workflow from scan to outcome</h3>
-            </div>
-          </div>
-          <div class="landing-cards three">
-            <article>
-              <span>01</span>
-              <strong>Scan markets</strong>
-              <p>Run a multi-timeframe sweep across supported crypto and commodity markets.</p>
-            </article>
-            <article>
-              <span>02</span>
-              <strong>Unlock setup</strong>
-              <p>Review qualifying setups, then unlock the full entry, stop loss, take profit, and risk/reward.</p>
-            </article>
-            <article>
-              <span>03</span>
-              <strong>Track outcome</strong>
-              <p>Saved signals are monitored for Hit TP, Hit SL, or Expired status in your history.</p>
-            </article>
+            <aside class="hero-signal-card" aria-label="Example SignalForge signal card">
+              <div class="signal-card-topline">
+                <div>
+                  <span>BTCUSD</span>
+                  <strong>LONG</strong>
+                </div>
+                <span class="signal-provider-pill">Coinbase · BTC-USD</span>
+              </div>
+              <div class="hero-signal-metrics">
+                <div>
+                  <span>Confidence</span>
+                  <strong>87%</strong>
+                </div>
+                <div>
+                  <span>Reward/Risk</span>
+                  <strong>2.4R</strong>
+                </div>
+              </div>
+              <div class="mini-signal-chart" aria-hidden="true">
+                <span></span><span></span><span></span><span></span><span></span><span></span>
+              </div>
+              <div class="hero-signal-reasons">
+                <span>Trend aligned</span>
+                <span>Risk engine ready</span>
+                <span>Telegram alert ready</span>
+              </div>
+              <button class="launch-auth-button" type="button">Unlock setup</button>
+              <small>Example card only. No profit claims or guaranteed outcomes.</small>
+            </aside>
           </div>
         </section>
 
         <section class="landing-proof">
           <div>
             <span class="eyebrow">Built for disciplined traders</span>
-            <h2>Less noise. More context before every decision.</h2>
+            <h2>Know what matters before you unlock a setup.</h2>
           </div>
-          <p>SignalForge brings market structure, risk levels, confidence factors, and tracked outcomes into one focused workspace.</p>
+          <p>SignalForge brings market structure, confluence, risk levels, alerts, paper trading, and tracked outcomes into one focused workspace without promising impossible certainty.</p>
         </section>
 
-        <section class="landing-band">
+        <section class="landing-band how-it-works" id="how-it-works">
           <div class="section-title">
             <div>
-              <span class="eyebrow">Inside SignalForge</span>
-              <h3>Everything needed to review a setup clearly</h3>
+              <span class="eyebrow">How it works</span>
+              <h3>From market scan to tracked outcome</h3>
             </div>
           </div>
-          <div class="landing-cards five">
-            <article><strong>Scan All</strong><p>Check major crypto, altcoins, and supported commodities in one pass.</p></article>
-            <article><strong>Entry/SL/TP</strong><p>Unlocked signals include complete trade levels.</p></article>
-            <article><strong>Risk/reward</strong><p>Every setup includes a clear R/R ratio before you act.</p></article>
-            <article><strong>Outcome tracking</strong><p>Active signals are checked against live market candles.</p></article>
-            <article><strong>Signals history</strong><p>Filter saved signals by pair, timeframe, and direction.</p></article>
+          <div class="landing-cards three">
+            <article>
+              <span>01</span>
+              <strong>Scan markets</strong>
+              <p>Run the scanner across supported crypto markets, including BTC trading signals and Ethereum trading signals, with selectable timeframes.</p>
+            </article>
+            <article>
+              <span>02</span>
+              <strong>Unlock setup</strong>
+              <p>Open the complete setup with entry, stop loss, take profit, reward/risk, and a concise reason for the signal.</p>
+            </article>
+            <article>
+              <span>03</span>
+              <strong>Track outcome</strong>
+              <p>Monitor saved signals, paper trades, journal notes, and performance outcomes over time.</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="landing-band" id="features">
+          <div class="section-title">
+            <div>
+              <span class="eyebrow">Features</span>
+              <h3>A practical scanner for crypto trading signals and setup review</h3>
+            </div>
+          </div>
+          <div class="landing-cards feature-grid">
+            <article><strong>Crypto scanner</strong><p>Scan supported Coinbase crypto pairs and rank qualified setups by confidence and reward/risk.</p></article>
+            <article><strong>Multi-timeframe confluence</strong><p>Review lower timeframe setups in context of higher timeframe trend and structure.</p></article>
+            <article><strong>Risk engine</strong><p>See stop loss, take profit, R multiple, and risk context before using a setup.</p></article>
+            <article><strong>Telegram alerts</strong><p>Receive Telegram trading alerts when matched setups meet your preferences.</p></article>
+            <article><strong>Paper trading</strong><p>Paper-enter unlocked setups and track fake P/L in R multiples.</p></article>
+            <article><strong>Performance tracking</strong><p>Measure outcomes by market, timeframe, regime, session, and signal factors.</p></article>
+            <article><strong>Backtesting lab</strong><p>Research historical OHLCV performance with configurable strategy components.</p></article>
+            <article><strong>Paper trading journal</strong><p>Capture notes, emotion tags, screenshots, ratings, and post-trade review.</p></article>
+          </div>
+        </section>
+
+        <section class="landing-band markets-section" id="markets-covered">
+          <div class="section-title">
+            <div>
+              <span class="eyebrow">Markets covered</span>
+              <h3>Crypto first, commodities where live provider data is available</h3>
+            </div>
+          </div>
+          <div class="market-pill-grid">
+            <article>
+              <strong>Crypto</strong>
+              <span>BTC, ETH, SOL, XRP, ADA, DOGE, LINK, AVAX, LTC and more supported pairs.</span>
+            </article>
+            <article>
+              <strong>Gold</strong>
+              <span>Gold trading signals may be available as XAU/USD when the commodity data provider is configured.</span>
+            </article>
+            <article>
+              <strong>Silver</strong>
+              <span>XAG/USD support depends on live provider availability and timeframe support.</span>
+            </article>
+            <article>
+              <strong>Oil</strong>
+              <span>WTI and Brent can be scanned when supported by the configured commodity provider.</span>
+            </article>
+            <article>
+              <strong>More coming soon</strong>
+              <span>Additional markets stay disabled until reliable live data is available.</span>
+            </article>
           </div>
         </section>
 
@@ -119,7 +255,7 @@
           <div class="section-title">
             <div>
               <span class="eyebrow">Pricing</span>
-              <h3>Choose the scanning capacity that fits your workflow</h3>
+              <h3>Start free, then upgrade when you need more unlocks</h3>
             </div>
             <span>Secure checkout and subscription management by Stripe</span>
           </div>
@@ -127,39 +263,42 @@
             <article class="pricing-plan">
               <div class="pricing-heading">
                 <span>Free</span>
-                <strong>Start exploring</strong>
+                <strong>3 free unlocks</strong>
               </div>
-              <p>For learning the workflow and reviewing occasional setups.</p>
+              <p>For trying the scanner and learning the SignalForge workflow.</p>
               <ul>
+                <li>3 free unlocks after email verification</li>
                 <li>10 setup discoveries per day</li>
-                <li>3 lifetime signal unlocks</li>
-                <li>Signal history and outcome tracking</li>
+                <li>Basic scanner access</li>
+                <li>Signal history and educational risk context</li>
               </ul>
               <button class="secondary-action launch-auth-button" type="button">Start free</button>
             </article>
             <article class="pricing-plan featured-price">
               <div class="pricing-heading">
                 <span>Pro</span>
-                <strong>Active scanning</strong>
+                <strong>Monthly unlocks</strong>
               </div>
-              <p>For traders who scan multiple markets throughout the month.</p>
+              <p>For active traders who want more monthly setup access and alerts.</p>
               <ul>
                 <li>300 setup discoveries per month</li>
-                <li>100 signal unlocks per month</li>
-                <li>Unused unlock credits roll over</li>
+                <li>100 monthly unlock credits</li>
+                <li>Telegram trading alerts</li>
+                <li>Performance tracking and signal history</li>
               </ul>
               <button class="launch-auth-button" type="button">Choose Pro</button>
             </article>
             <article class="pricing-plan">
               <div class="pricing-heading">
                 <span>Elite</span>
-                <strong>High-volume research</strong>
+                <strong>Advanced analytics</strong>
               </div>
-              <p>For deeper market coverage, alerts, and frequent setup review.</p>
+              <p>For heavier research, backtesting, and advanced performance review.</p>
               <ul>
                 <li>1,000 setup discoveries per month</li>
-                <li>500 signal unlocks per month</li>
-                <li>Unused unlock credits roll over</li>
+                <li>500 monthly unlock credits</li>
+                <li>Backtesting lab access</li>
+                <li>Advanced analytics and research workflows</li>
               </ul>
               <button class="secondary-action launch-auth-button" type="button">Choose Elite</button>
             </article>
@@ -167,16 +306,71 @@
           <div class="credit-pack-note">
             <div>
               <strong>Need extra unlocks?</strong>
-              <span>One-time packs of 10, 50, or 100 unlock credits are available from Billing.</span>
+              <span>Use Billing for the live Stripe-configured plan prices and optional one-time unlock credit packs.</span>
             </div>
             <button class="secondary-action launch-auth-button" type="button">View credit packs</button>
           </div>
         </section>
 
+        <section class="landing-band affiliate-landing" id="affiliate-program">
+          <div>
+            <span class="eyebrow">Affiliate program</span>
+            <h3>Earn recurring commissions by referring paid subscribers.</h3>
+            <p>SignalForge affiliates can earn 20% recurring commission on referred Pro and Elite subscriptions while the subscriber remains active. No commissions are paid on free accounts or one-time credit packs.</p>
+          </div>
+          <button class="launch-auth-button" type="button">Join affiliate program</button>
+        </section>
+
+        <section class="landing-band faq-section" id="faq">
+          <div class="section-title">
+            <div>
+              <span class="eyebrow">FAQ</span>
+              <h3>Clear answers before you create an account</h3>
+            </div>
+          </div>
+          <div class="faq-grid">
+            <article>
+              <strong>Is this financial advice?</strong>
+              <p>No. SignalForge is an educational tool only. It is not financial advice and does not provide personalized recommendations.</p>
+            </article>
+            <article>
+              <strong>Do signals guarantee profit?</strong>
+              <p>No. Signals do not guarantee profit. Trading involves risk, and losses can happen even when multiple confirmations align.</p>
+            </article>
+            <article>
+              <strong>What markets are supported?</strong>
+              <p>SignalForge focuses on supported crypto markets such as BTC and Ethereum pairs. Gold, silver, and oil depend on live commodity provider availability.</p>
+            </article>
+            <article>
+              <strong>How do Telegram alerts work?</strong>
+              <p>Connect the SignalForge Telegram bot, choose timeframes, direction, and minimum confidence, then receive alerts when matching crypto setups are detected.</p>
+            </article>
+            <article>
+              <strong>Can I cancel anytime?</strong>
+              <p>Yes. Subscriptions are managed through Stripe, including plan changes and cancellation.</p>
+            </article>
+            <article>
+              <strong>How do affiliates get paid?</strong>
+              <p>Affiliates can request payout after the minimum threshold. PayPal, Wise, and USDT are supported subject to admin approval.</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="landing-final-cta">
+          <span class="eyebrow">Ready to scan cleaner?</span>
+          <h2>Start with 3 free unlocks.</h2>
+          <p>Review crypto trading signals, Telegram alerts, risk levels, performance tracking, and paper trading journal tools in one workspace.</p>
+          <div class="hero-actions">
+            <button class="launch-auth-button" type="button">Create free account</button>
+            <a class="secondary-anchor" href="#pricing">Compare plans</a>
+          </div>
+          <p class="risk-caption">Educational tool only. Not financial advice.</p>
+        </section>
+
         <section class="disclaimer-band">
           <div>
             <span class="eyebrow">Risk disclosure</span>
-            <strong>Educational tool only, not financial advice.</strong>
+            <strong>Educational tool only. Not financial advice.</strong>
           </div>
           <p>SignalForge does not provide personalized investment recommendations or guarantee outcomes. Trading involves risk, and past or simulated performance does not predict future results.</p>
         </section>
@@ -187,6 +381,9 @@
             <strong>SignalForge</strong>
           </div>
           <div class="footer-links">
+            <a href="#features">Features</a>
+            <a href="#pricing">Pricing</a>
+            <a href="#affiliate-program">Affiliate disclosure</a>
             <button type="button" data-legal-doc="terms">Terms</button>
             <button type="button" data-legal-doc="privacy">Privacy Policy</button>
             <button type="button" data-legal-doc="risk">Risk Disclaimer</button>

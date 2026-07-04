@@ -2,7 +2,7 @@
   "id": "/",
   "name": "SignalForge",
   "short_name": "SignalForge",
-  "description": "Rule-based crypto and commodities market scanner with signal tracking.",
+  "description": "Crypto trading signal scanner with multi-timeframe analysis, risk management, Telegram alerts, paper trading, and performance tracking.",
   "start_url": "/?source=pwa",
   "scope": "/",
   "display": "standalone",
