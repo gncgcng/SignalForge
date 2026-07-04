@@ -1,6 +1,11 @@
 delete process.env.TWELVEDATA_API_KEY;
 
-const { listPairs, getOhlcv } = await import("../src/modules/market-data/marketDataService.js");
+const {
+  getOhlcv,
+  listPairs,
+  providerIssueStatus,
+  resolveMarketStatus
+} = await import("../src/modules/market-data/marketDataService.js");
 const { twelveDataMarketDataProvider } = await import("../src/modules/market-data/twelveDataMarketDataProvider.js");
 
 const pairs = listPairs();
@@ -12,6 +17,29 @@ const optionalCommoditySymbols = ["NATGAS"];
 const timeframes = ["5m", "15m", "1h", "4h"];
 const comingSoonChecks = [];
 const supportChecks = [];
+const now = new Date("2026-07-01T16:00:00Z");
+const freshCryptoStatus = resolveMarketStatus(
+  { category: "Crypto", symbol: "BTC-USD" },
+  "15m",
+  [{ time: Math.floor((now.getTime() - 5 * 60 * 1000) / 1000) }],
+  now.toISOString(),
+  now
+);
+const closedCommodityStatus = resolveMarketStatus(
+  { category: "Commodities", symbol: "XAU/USD" },
+  "1h",
+  [{ time: Math.floor(new Date("2026-07-04T21:00:00Z").getTime() / 1000) }],
+  "2026-07-04T22:00:00Z",
+  new Date("2026-07-04T22:00:00Z")
+);
+const staleCommodityStatus = resolveMarketStatus(
+  { category: "Commodities", symbol: "XAU/USD" },
+  "5m",
+  [{ time: Math.floor((now.getTime() - 30 * 60 * 1000) / 1000) }],
+  now.toISOString(),
+  now
+);
+const providerIssue = providerIssueStatus("Twelve Data rate limit reached.");
 
 for (const symbol of [...requiredCommoditySymbols, ...optionalCommoditySymbols]) {
   for (const timeframe of timeframes) {
@@ -54,6 +82,12 @@ const result = {
   }),
   unsupportedSymbol: !twelveDataMarketDataProvider.supports("COPPER", "15m"),
   unsupportedTimeframe: !twelveDataMarketDataProvider.supports("XAU/USD", "1d"),
+  cryptoLiveStatus: freshCryptoStatus.label === "Live" && freshCryptoStatus.code === "LIVE",
+  commodityClosedStatus: closedCommodityStatus.label === "Closed" && closedCommodityStatus.code === "CLOSED",
+  staleDataStatus: staleCommodityStatus.label === "Delayed" && staleCommodityStatus.code === "DELAYED",
+  providerIssueStatus: providerIssue.label === "Provider issue" &&
+    providerIssue.code === "PROVIDER_ISSUE" &&
+    providerIssue.detail.includes("rate limit"),
   combinationsTested: supportChecks.length
 };
 
@@ -70,6 +104,10 @@ if (
   !result.clearProviderMessage ||
   !result.unsupportedSymbol ||
   !result.unsupportedTimeframe ||
+  !result.cryptoLiveStatus ||
+  !result.commodityClosedStatus ||
+  !result.staleDataStatus ||
+  !result.providerIssueStatus ||
   result.combinationsTested !== 20
 ) {
   process.exitCode = 1;

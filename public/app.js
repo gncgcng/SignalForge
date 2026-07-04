@@ -1688,20 +1688,24 @@ async function loadMarketData() {
     }
 
     state.marketData = marketData;
-    state.selectedPair = marketData.pair;
-    state.pairs = state.pairs.map((pair) => pair.symbol === marketData.pair.symbol ? marketData.pair : pair);
+    state.selectedPair = {
+      ...marketData.pair,
+      marketStatus: marketData.marketStatus,
+      lastCandleAt: marketData.lastCandleAt
+    };
+    state.pairs = state.pairs.map((pair) => pair.symbol === marketData.pair.symbol ? state.selectedPair : pair);
     renderPairs();
     renderSelectedMarket();
     renderChart(marketData.candles, marketData.advancedStructure);
     document.querySelector("#provider-name").textContent = providerLabel;
-    document.querySelector("#candle-count").textContent = `${marketData.candles.length}`;
+    document.querySelector("#candle-count").textContent = `${marketData.candles.length} · Last ${formatDateTime(marketData.lastCandleAt)}`;
     renderMarketRegime(marketData.regime);
     renderMultiTimeframeConfluence(marketData.confluence);
     renderAdvancedMarketStructure(marketData.advancedStructure, marketData.correlation);
-    document.querySelector("#provider-status").textContent = marketData.cache === "hit" ? "Cached live" : "Live candles";
+    document.querySelector("#provider-status").textContent = marketData.marketStatus?.label || (marketData.cache === "hit" ? "Cached live" : "Live candles");
     state.marketStatus[statusKey] = {
       type: "loaded",
-      message: `Loaded ${marketData.candles.length} live ${state.selectedPair.symbol} ${state.timeframe} candles from ${providerLabel}.`
+      message: `${marketData.marketStatus?.label || "Loaded"} ${state.selectedPair.symbol} ${state.timeframe}: ${marketData.candles.length} candles from ${providerLabel}. Last candle ${formatDateTime(marketData.lastCandleAt)}.`
     };
     renderMarketStatus();
   } catch (error) {
@@ -1710,6 +1714,15 @@ async function loadMarketData() {
     }
 
     state.marketData = null;
+    state.selectedPair = {
+      ...state.selectedPair,
+      marketStatus: {
+        code: "PROVIDER_ISSUE",
+        label: "Provider issue",
+        detail: error.message,
+        lastCandleAt: null
+      }
+    };
     renderChart([]);
     document.querySelector("#provider-name").textContent = providerLabel;
     document.querySelector("#provider-status").textContent = "Provider issue";
@@ -1722,6 +1735,7 @@ async function loadMarketData() {
       type: "error",
       message: `${state.selectedPair.symbol} ${state.timeframe}: ${error.message}`
     };
+    renderSelectedMarket();
     renderMarketStatus();
   }
 }
@@ -1999,7 +2013,7 @@ function renderPairs() {
     <section class="market-category">
       <div class="market-category-title">
         <strong>${group}</strong>
-        <span>${state.pairs.filter((pair) => (pair.group || pair.category) === group && pair.status === "active").length} live</span>
+        <span>${state.pairs.filter((pair) => (pair.group || pair.category) === group && pair.status === "active").length} active</span>
       </div>
       ${state.pairs.filter((pair) => (pair.group || pair.category) === group).map((pair) => pair.selectable ? `
         <button class="pair-button ${state.selectedPair?.symbol === pair.symbol ? "active" : ""}" data-symbol="${pair.symbol}" data-status="${pair.status}" ${pair.status !== "active" ? "disabled" : ""} aria-busy="${getPairIsLoading(pair)}">
@@ -2039,7 +2053,7 @@ function getPairBadge(pair) {
       : "Coming Soon";
   }
 
-  return Number.isFinite(pair.change24h) ? formatPercent(pair.change24h) : "Live";
+  return pair.marketStatus?.label || (Number.isFinite(pair.change24h) ? formatPercent(pair.change24h) : "Ready");
 }
 
 function getMarketStatusKey(pair = state.selectedPair, timeframe = state.timeframe) {
@@ -2072,6 +2086,8 @@ function renderSelectedMarket() {
     ? formatCurrency(state.selectedPair.lastPrice)
     : state.selectedPair.availabilityMessage || "Coming Soon";
   document.querySelector("#selected-change").textContent = Number.isFinite(state.selectedPair.change24h) ? formatPercent(state.selectedPair.change24h) : "--";
+  document.querySelector("#provider-status").textContent = state.selectedPair.marketStatus?.label ||
+    (state.selectedPair.status === "active" ? "Ready" : state.selectedPair.availabilityMessage || "Coming Soon");
   renderFavoriteButton();
 }
 

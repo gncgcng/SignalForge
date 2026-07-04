@@ -1,4 +1,5 @@
 import {
+  classifySetupType,
   calculateDisplayConfidence,
   generateMarketDataSetup
 } from "../src/modules/signals/signalGenerator.js";
@@ -58,6 +59,121 @@ const stats = calculateSignalStats([
   { status: "Expired" },
   { status: "Active" }
 ]);
+
+function makeStrategyCandles({ previousClose = 103, latestOpen = 103, latestHigh = 104, latestLow = 102, latestClose = 103.4 } = {}) {
+  const base = [];
+  const start = 1770000000;
+  for (let index = 0; index < 27; index += 1) {
+    base.push({
+      time: start + index * 900,
+      open: 100,
+      high: index === 10 ? 105 : 103,
+      low: index === 12 ? 95 : 97,
+      close: 101,
+      volume: 100
+    });
+  }
+  base.push({ time: start + 27 * 900, open: 103, high: Math.max(previousClose, 104), low: 101, close: previousClose, volume: 110 });
+  base.push({ time: start + 28 * 900, open: latestOpen, high: latestHigh, low: latestLow, close: latestClose, volume: 140 });
+  return base;
+}
+
+function classifyFixture(overrides = {}) {
+  const candles = overrides.candles || makeStrategyCandles(overrides.candleShape);
+  return classifySetupType(
+    overrides.direction || "long",
+    candles,
+    {
+      ema20: overrides.ema20 ?? 102,
+      ema50: overrides.ema50 ?? 100,
+      rsi14: overrides.rsi14 ?? 55,
+      atr14: overrides.atr14 ?? 2,
+      volumeMa20: overrides.volumeMa20 ?? 100
+    },
+    {
+      nearestSupport: overrides.nearestSupport ?? { price: 101 },
+      nearestResistance: overrides.nearestResistance ?? { price: 110 },
+      supportStrength: overrides.supportStrength ?? 3,
+      resistanceStrength: overrides.resistanceStrength ?? 3
+    },
+    {
+      label: overrides.regimeLabel || "Trend Up",
+      trendStrength: overrides.trendStrength ?? 0.72
+    },
+    overrides.smcState || null,
+    overrides.advancedStructure || null,
+    overrides.confluenceContext || null
+  );
+}
+
+const strategyTypes = {
+  trendContinuation: classifyFixture({
+    candleShape: { previousClose: 103, latestOpen: 103, latestLow: 102.4, latestClose: 104.1 },
+    nearestSupport: { price: 98 },
+    trendStrength: 0.78
+  }),
+  pullbackBounce: classifyFixture({
+    candleShape: { previousClose: 102, latestOpen: 101.6, latestLow: 101, latestClose: 102.2 },
+    ema20: 102,
+    nearestSupport: { price: 97 },
+    trendStrength: 0.5
+  }),
+  breakoutRetest: classifyFixture({
+    candleShape: { previousClose: 106, latestOpen: 105.2, latestLow: 105.1, latestHigh: 107, latestClose: 106.2 }
+  }),
+  rangeBounce: classifyFixture({
+    regimeLabel: "Range",
+    candleShape: { previousClose: 100, latestOpen: 100.6, latestLow: 100, latestClose: 101.3 },
+    nearestSupport: { price: 100.5 },
+    rsi14: 50,
+    trendStrength: 0.25
+  }),
+  meanReversion: classifyFixture({
+    regimeLabel: "Range",
+    candleShape: { previousClose: 100, latestOpen: 101.2, latestLow: 100.2, latestClose: 101.1 },
+    nearestSupport: { price: 100.5 },
+    rsi14: 42,
+    trendStrength: 0.25
+  }),
+  momentumBreakout: classifyFixture({
+    candleShape: { previousClose: 104.5, latestOpen: 104.8, latestLow: 104.6, latestHigh: 107, latestClose: 106.4 }
+  }),
+  liquiditySweepReversal: classifyFixture({
+    candleShape: { previousClose: 101, latestOpen: 100.8, latestLow: 94.5, latestClose: 101.8 },
+    smcState: { liquiditySweep: { confirmed: true, direction: "long" } }
+  }),
+  vwapReclaim: classifyFixture({
+    candleShape: { previousClose: 103, latestOpen: 103, latestLow: 102, latestClose: 103.6 },
+    advancedStructure: { vwap: { event: "Reclaim" } },
+    trendStrength: 0.4,
+    nearestSupport: { price: 98 }
+  }),
+  supportResistanceRetest: classifyFixture({
+    candleShape: { previousClose: 103, latestOpen: 103.2, latestLow: 102.7, latestClose: 103.8 },
+    ema20: 101,
+    nearestSupport: { price: 102.8 },
+    trendStrength: 0.45
+  }),
+  multiTimeframeContinuation: classifyFixture({
+    candleShape: { previousClose: 103, latestOpen: 103, latestLow: 102.5, latestClose: 104 },
+    nearestSupport: { price: 98 },
+    trendStrength: 0.45,
+    confluenceContext: {
+      higherTimeframes: [
+        { available: true, regime: { preferredDirection: "long" } }
+      ]
+    }
+  }),
+  weakPattern: classifyFixture({
+    candleShape: { previousClose: 100, latestOpen: 100.2, latestLow: 99.8, latestClose: 100.1 },
+    ema20: 101,
+    ema50: 102,
+    nearestSupport: { price: 95 },
+    supportStrength: 1,
+    trendStrength: 0.2,
+    regimeLabel: "Low Volatility"
+  })
+};
 
 function confidenceFixture(overrides = {}) {
   return {
@@ -179,7 +295,8 @@ console.log(JSON.stringify({
     mediumConfidence,
     strongConfidence,
     nearPerfectConfidence
-  }
+  },
+  strategyTypes
 }, null, 2));
 
 if (
@@ -192,7 +309,7 @@ if (
     .every((name) => commodityConfirmationNames.includes(name)) ||
   !commodityExplanation.toLowerCase().includes("commodity") ||
   ranked.map((setup) => setup.symbol).join(",") !== "WTI,XAG/USD,BTC-USD" ||
-  !result.analysis.message.includes("No valid setup") ||
+  !result.analysis.message.includes("No high-quality setup") ||
   stats.totalSignals !== 5 ||
   stats.hitTpCount !== 2 ||
   stats.hitSlCount !== 1 ||
@@ -204,7 +321,18 @@ if (
   strongConfidence < 90 ||
   strongConfidence > 97 ||
   nearPerfectConfidence < 98 ||
-  nearPerfectConfidence > 100
+  nearPerfectConfidence > 100 ||
+  strategyTypes.trendContinuation !== "Trend continuation" ||
+  strategyTypes.pullbackBounce !== "Pullback bounce" ||
+  strategyTypes.breakoutRetest !== "Breakout retest" ||
+  strategyTypes.rangeBounce !== "Range bounce" ||
+  strategyTypes.meanReversion !== "Mean reversion" ||
+  strategyTypes.momentumBreakout !== "Momentum breakout" ||
+  strategyTypes.liquiditySweepReversal !== "Liquidity sweep reversal" ||
+  strategyTypes.vwapReclaim !== "VWAP reclaim/rejection" ||
+  strategyTypes.supportResistanceRetest !== "Support/resistance retest" ||
+  strategyTypes.multiTimeframeContinuation !== "Multi-timeframe continuation" ||
+  strategyTypes.weakPattern !== null
 ) {
   process.exitCode = 1;
 }

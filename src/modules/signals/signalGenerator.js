@@ -79,13 +79,14 @@ export function generateMarketDataSetup(marketData, timeframe, options = {}) {
     .sort((a, b) => b.qualityScore - a.qualityScore || b.confidenceScore - a.confidenceScore)[0];
 
   if (!bestCase) {
+    const evaluated = [longCase, shortCase];
     return noSetup(
       isCommodity
         ? "No valid commodity setup found. EMA trend, RSI, ATR, support, and resistance are not sufficiently aligned."
-        : "No valid setup found. Conditions are too mixed for a high-probability entry.",
+        : buildNoSetupMessage(evaluated),
       marketData,
       timeframe,
-      [longCase, shortCase]
+      evaluated
     );
   }
   const analyst = buildSignalAnalystReport(bestCase, options.analystProfile);
@@ -301,7 +302,16 @@ function validateCandidate(
   correlationContext,
   analystProfile
 ) {
-  const setupType = classifySetupType(candidate.direction, candles, indicators, levels, regime);
+  const setupType = classifySetupType(
+    candidate.direction,
+    candles,
+    indicators,
+    levels,
+    regime,
+    smcState,
+    advancedStructure,
+    confluenceContext
+  );
   const confluence = scoreMultiTimeframeConfluence(confluenceContext, candidate.direction);
   const smc = evaluateSmcConfluence(smcState, candidate.direction, regime);
   const marketStructure = evaluateAdvancedStructure(
@@ -360,15 +370,15 @@ function validateCandidate(
   }
   if (
     ["Trend Up", "Trend Down"].includes(regime.label) &&
-    !["Trend continuation", "Pullback bounce"].includes(setupType)
+    !["Trend continuation", "Pullback bounce", "Multi-timeframe continuation", "Support/resistance retest"].includes(setupType)
   ) {
-    rejectionReasons.push(`${regime.label} requires a continuation or pullback setup.`);
+    rejectionReasons.push(`${regime.label} requires a continuation, retest, or pullback setup.`);
   }
-  if (regime.label === "Range" && setupType !== "Reversal") {
-    rejectionReasons.push("Range conditions avoid trend trades and require strong mean-reversion structure.");
+  if (regime.label === "Range" && !["Range bounce", "Mean reversion", "Liquidity sweep reversal"].includes(setupType)) {
+    rejectionReasons.push("Range conditions avoid trend trades and require range bounce or mean-reversion structure.");
   }
-  if (regime.label === "Breakout" && setupType !== "Breakout retest") {
-    rejectionReasons.push("Breakout conditions require a confirmed breakout retest.");
+  if (regime.label === "Breakout" && !["Breakout retest", "Momentum breakout", "VWAP reclaim/rejection"].includes(setupType)) {
+    rejectionReasons.push("Breakout conditions require a confirmed breakout, retest, or VWAP event.");
   }
   if (regime.label === "Low Volatility") {
     rejectionReasons.push("Low volatility conditions do not justify forcing a trade.");
@@ -464,7 +474,8 @@ function validateCandidate(
     opposingRoom,
     emaAligned
   });
-  const requiredQuality = setupType === "Reversal" ? 86 : minimumQualityScore;
+  const reversalSetups = new Set(["Mean reversion", "Range bounce", "Liquidity sweep reversal"]);
+  const requiredQuality = reversalSetups.has(setupType) ? 86 : minimumQualityScore;
 
   if (qualityScore < requiredQuality) {
     rejectionReasons.push(`Quality score ${qualityScore} is below the required ${requiredQuality}.`);
@@ -501,7 +512,7 @@ function validateCandidate(
     rejectionReasons,
     valid: (
       candidate.valid ||
-      (setupType === "Reversal" && candidate.passedCount >= candidate.requiredPassCount - 1)
+      (reversalSetups.has(setupType) && candidate.passedCount >= candidate.requiredPassCount - 1)
     ) && rejectionReasons.length === 0
   };
 }
@@ -662,7 +673,16 @@ function isNearPerfectConfluence({
   );
 }
 
-function classifySetupType(direction, candles, indicators, levels, regime) {
+export function classifySetupType(
+  direction,
+  candles,
+  indicators,
+  levels,
+  regime,
+  smcState = null,
+  advancedStructure = null,
+  confluenceContext = null
+) {
   const latest = candles[candles.length - 1];
   const previous = candles[candles.length - 2];
   const atrValue = indicators.atr14;
@@ -675,16 +695,47 @@ function classifySetupType(direction, candles, indicators, levels, regime) {
   const priorWindow = candles.slice(-24, -3);
   const priorHigh = Math.max(...priorWindow.map((candle) => candle.high));
   const priorLow = Math.min(...priorWindow.map((candle) => candle.low));
+  const directionalBreakout = direction === "long"
+    ? previous.close <= priorHigh && latest.close > priorHigh && latest.close > latest.open
+    : previous.close >= priorLow && latest.close < priorLow && latest.close < latest.open;
   const breakoutRetest = direction === "long"
     ? previous.close > priorHigh && latest.low <= priorHigh + atrValue * 0.35 && latest.close > priorHigh
     : previous.close < priorLow && latest.high >= priorLow - atrValue * 0.35 && latest.close < priorLow;
+  const activeVwap = advancedStructure?.vwap;
+  const vwapEvent = activeVwap?.event === "Reclaim" && direction === "long" ||
+    activeVwap?.event === "Rejection" && direction === "short";
+  const htfAligned = (confluenceContext?.higherTimeframes || [])
+    .filter((item) => item?.available && item.regime?.preferredDirection)
+    .filter((item) => item.regime.preferredDirection === direction).length >= 1;
+  const sweptLiquidity = smcState?.liquiditySweep?.confirmed &&
+    smcState.liquiditySweep.direction === direction;
+
+  if (sweptLiquidity && isDirectionalCandle(latest, direction)) {
+    return "Liquidity sweep reversal";
+  }
 
   if (breakoutRetest && aligned) {
     return "Breakout retest";
   }
 
-  if (aligned && (nearEma20 || nearLevel) && isDirectionalCandle(latest, direction)) {
+  if (directionalBreakout && aligned && latest.volume >= indicators.volumeMa20 * 1.1) {
+    return "Momentum breakout";
+  }
+
+  if (vwapEvent && isDirectionalCandle(latest, direction)) {
+    return "VWAP reclaim/rejection";
+  }
+
+  if (htfAligned && aligned && isDirectionalCandle(latest, direction)) {
+    return "Multi-timeframe continuation";
+  }
+
+  if (aligned && nearEma20 && isDirectionalCandle(latest, direction)) {
     return "Pullback bounce";
+  }
+
+  if (aligned && nearLevel && isDirectionalCandle(latest, direction)) {
+    return "Support/resistance retest";
   }
 
   if (aligned && regime.trendStrength >= 0.65 && isDirectionalCandle(latest, direction)) {
@@ -696,8 +747,12 @@ function classifySetupType(direction, candles, indicators, levels, regime) {
     ? indicators.rsi14 >= 32 && indicators.rsi14 <= 48
     : indicators.rsi14 >= 52 && indicators.rsi14 <= 68;
 
-  if (levelStrength >= 3 && reversalRsi && isDirectionalCandle(latest, direction)) {
-    return "Reversal";
+  if (regime.label === "Range" && levelStrength >= 2 && nearLevel && isDirectionalCandle(latest, direction)) {
+    return "Range bounce";
+  }
+
+  if (levelStrength >= 3 && reversalRsi) {
+    return "Mean reversion";
   }
 
   return null;
@@ -711,7 +766,13 @@ function calculateQualityScore({ candidate, setupType, regime, levelStrength, op
     "Trend continuation": 14,
     "Pullback bounce": 16,
     "Breakout retest": 18,
-    Reversal: 20
+    "Range bounce": 18,
+    "Mean reversion": 20,
+    "Momentum breakout": 16,
+    "Liquidity sweep reversal": 20,
+    "VWAP reclaim/rejection": 17,
+    "Support/resistance retest": 16,
+    "Multi-timeframe continuation": 18
   }[setupType] || 0;
   const score =
     confirmationRatio * 42 +
@@ -964,6 +1025,26 @@ function noSetup(message, marketData, timeframe, candidates) {
       }))
     }
   };
+}
+
+function buildNoSetupMessage(candidates = []) {
+  const reasons = candidates.flatMap((candidate) => candidate.rejectionReasons || []);
+  const joined = reasons.join(" ").toLowerCase();
+
+  if (joined.includes("low volatility") || joined.includes("atr volatility")) {
+    return "No high-quality setup. Volatility is too low or outside the tradable ATR range.";
+  }
+  if (joined.includes("trend up") || joined.includes("trend down") || joined.includes("countertrend") || joined.includes("ema")) {
+    return "No high-quality setup. Trend and higher-timeframe structure are conflicting.";
+  }
+  if (joined.includes("target") || joined.includes("opposing level") || joined.includes("resistance") || joined.includes("support")) {
+    return "No high-quality setup. Price is too close to support/resistance or the risk/reward is poor.";
+  }
+  if (joined.includes("required confirmations") || joined.includes("quality score")) {
+    return "No high-quality setup. The pattern did not receive enough objective confirmation.";
+  }
+
+  return "No high-quality setup. Conditions are too mixed for a reliable entry.";
 }
 
 function buildReasoning(candidate, indicators, levels, regime, isCommodity) {

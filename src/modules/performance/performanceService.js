@@ -25,6 +25,7 @@ export function buildPerformanceAnalytics(signals, filters = {}) {
   const byTimeframe = aggregateCounts(signals, (signal) => signal.timeframe);
   const marketPerformance = aggregateMarketPerformance(signals);
   const timeframePerformance = aggregatePerformance(signals, (signal) => signal.timeframe);
+  const strategyPerformance = aggregatePerformance(signals, (signal) => signal.setupType || "Unknown");
   const monthly = aggregateMonthly(signals);
   const bestMarket = findBestPerformer(signals, (signal) => signal.symbol);
   const bestTimeframe = findBestPerformer(signals, (signal) => signal.timeframe);
@@ -96,6 +97,7 @@ export function buildPerformanceAnalytics(signals, filters = {}) {
     signalsByTimeframe: byTimeframe,
     marketPerformance,
     timeframePerformance,
+    strategyPerformance,
     recentClosedSignals: getRecentClosedSignals(signals),
     regimePerformance,
     confluencePerformance,

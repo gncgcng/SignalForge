@@ -314,8 +314,16 @@ function evaluateHistoricalSetup({
 
   const setupType = classifyHistoricalSetup(candles, regime, direction);
   if (!setupType) return null;
-  if (components.marketRegime && regime.label === "Breakout" && setupType !== "Breakout retest") return null;
-  if (components.marketRegime && regime.label === "Range" && setupType !== "Reversal") return null;
+  if (
+    components.marketRegime &&
+    regime.label === "Breakout" &&
+    !["Breakout retest", "Momentum breakout", "VWAP reclaim/rejection"].includes(setupType)
+  ) return null;
+  if (
+    components.marketRegime &&
+    regime.label === "Range" &&
+    !["Range bounce", "Mean reversion", "Liquidity sweep reversal"].includes(setupType)
+  ) return null;
 
   const confluenceContext = buildHistoricalConfluenceContext({
     symbol: marketData.pair.symbol,
@@ -461,18 +469,37 @@ function classifyHistoricalSetup(candles, regime, direction) {
   const priorHigh = Math.max(...prior.map((candle) => candle.high));
   const priorLow = Math.min(...prior.map((candle) => candle.low));
   const atrValue = Number(regime.metrics.atr14);
+  const aligned = direction === "long"
+    ? latest.close > regime.metrics.ema20 && regime.metrics.ema20 > regime.metrics.ema50
+    : latest.close < regime.metrics.ema20 && regime.metrics.ema20 < regime.metrics.ema50;
+  const directionalCandle = direction === "long" ? latest.close > latest.open : latest.close < latest.open;
+  const breakout = direction === "long"
+    ? previous.close <= priorHigh && latest.close > priorHigh && directionalCandle
+    : previous.close >= priorLow && latest.close < priorLow && directionalCandle;
   const breakoutRetest = direction === "long"
     ? previous.close > priorHigh && latest.low <= priorHigh + atrValue * 0.35 && latest.close > priorHigh
     : previous.close < priorLow && latest.high >= priorLow - atrValue * 0.35 && latest.close < priorLow;
   if (breakoutRetest) return "Breakout retest";
+  if (breakout && aligned) return "Momentum breakout";
   if (regime.label === "Range") {
     const nearLevel = direction === "long"
       ? latest.close - regime.metrics.support <= atrValue * 1.2
       : regime.metrics.resistance - latest.close <= atrValue * 1.2;
-    return nearLevel ? "Reversal" : null;
+    const rsi = Number(regime.metrics.rsi14);
+    if (nearLevel && directionalCandle) return "Range bounce";
+    if (
+      nearLevel &&
+      (direction === "long" ? rsi >= 32 && rsi <= 48 : rsi >= 52 && rsi <= 68)
+    ) return "Mean reversion";
+    return null;
   }
   const nearEma20 = Math.abs(latest.close - regime.metrics.ema20) <= atrValue * 0.8;
+  const nearSupportResistance = direction === "long"
+    ? latest.close > regime.metrics.support && latest.close - regime.metrics.support <= atrValue
+    : latest.close < regime.metrics.resistance && regime.metrics.resistance - latest.close <= atrValue;
   if (nearEma20) return "Pullback bounce";
+  if (nearSupportResistance && aligned && directionalCandle) return "Support/resistance retest";
+  if (aligned && regime.trendStrength >= 0.7) return "Multi-timeframe continuation";
   if (["Trend Up", "Trend Down", "High Volatility"].includes(regime.label)) return "Trend continuation";
   return null;
 }
@@ -531,6 +558,7 @@ function aggregateBacktestReports(
   const breakdowns = {
     markets: aggregateWinRate(trades, (trade) => trade.symbol),
     timeframes: aggregateWinRate(trades, (trade) => trade.timeframe),
+    strategies: aggregateWinRate(trades, (trade) => trade.setupType || "Unknown"),
     regimes: aggregateWinRate(trades, (trade) => trade.regime || "Unknown"),
     confluence: aggregateWinRate(trades, (trade) => confluenceRange(trade.confluenceScore))
     ,

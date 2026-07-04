@@ -147,6 +147,7 @@ export async function getOhlcv(symbol, timeframe) {
     `[market-data] provider=${provider.id} category=${pair.category} symbol=${pair.symbol} timeframe=${timeframe}`
   );
   const marketData = await provider.getCandles(pair.symbol, timeframe);
+  const marketStatus = resolveMarketStatus(pair, timeframe, marketData.candles, marketData.receivedAt);
   const advancedStructure = analyzeAdvancedMarketStructure(marketData.candles, {
     volumeAvailable: marketData.volumeAvailable !== false
   });
@@ -162,6 +163,8 @@ export async function getOhlcv(symbol, timeframe) {
     advancedStructure,
     source: marketData.source,
     volumeAvailable: marketData.volumeAvailable !== false,
+    marketStatus,
+    lastCandleAt: marketStatus.lastCandleAt,
     cache: marketData.cache,
     receivedAt: marketData.receivedAt
   };
@@ -194,9 +197,91 @@ export function getCachedOhlcv(symbol, timeframe) {
     }),
     source: marketData.source,
     volumeAvailable: marketData.volumeAvailable !== false,
+    marketStatus: resolveMarketStatus(pair, timeframe, marketData.candles, marketData.receivedAt),
+    lastCandleAt: resolveLastCandleAt(marketData.candles),
     cache: marketData.cache,
     receivedAt: marketData.receivedAt
   };
+}
+
+export function resolveMarketStatus(pair, timeframe, candles = [], receivedAt = new Date().toISOString(), now = new Date()) {
+  const latestCandleAt = resolveLastCandleAt(candles);
+  const ageMs = latestCandleAt ? now.getTime() - new Date(latestCandleAt).getTime() : Infinity;
+  const expectedMs = timeframeToMilliseconds(timeframe);
+  const stale = !Number.isFinite(ageMs) || ageMs > expectedMs * 2.5;
+
+  if (pair.category === "Crypto") {
+    return {
+      code: stale ? "DELAYED" : "LIVE",
+      label: stale ? "Delayed" : "Live",
+      detail: stale ? "Latest crypto candle is older than expected." : "Crypto trades continuously.",
+      stale,
+      lastCandleAt: latestCandleAt,
+      checkedAt: receivedAt
+    };
+  }
+
+  if (pair.category === "Commodities") {
+    const open = isCommodityMarketOpen(now);
+    const code = !open ? "CLOSED" : stale ? "DELAYED" : "LIVE";
+
+    return {
+      code,
+      label: code === "LIVE" ? "Live" : code === "DELAYED" ? "Delayed" : "Closed",
+      detail: code === "CLOSED"
+        ? "Commodity session is closed or the feed is not actively updating."
+        : code === "DELAYED"
+          ? "Commodity feed is active, but the latest candle is stale."
+          : "Commodity feed is updating during active session hours.",
+      stale,
+      lastCandleAt: latestCandleAt,
+      checkedAt: receivedAt
+    };
+  }
+
+  return {
+    code: "COMING_SOON",
+    label: "Coming Soon",
+    detail: "Market data is not enabled for this market yet.",
+    stale: true,
+    lastCandleAt: latestCandleAt,
+    checkedAt: receivedAt
+  };
+}
+
+export function providerIssueStatus(message = "Market data provider is unavailable.") {
+  return {
+    code: "PROVIDER_ISSUE",
+    label: "Provider issue",
+    detail: message,
+    stale: true,
+    lastCandleAt: null,
+    checkedAt: new Date().toISOString()
+  };
+}
+
+function resolveLastCandleAt(candles = []) {
+  const latest = candles[candles.length - 1];
+  return latest?.time ? new Date(Number(latest.time) * 1000).toISOString() : null;
+}
+
+function timeframeToMilliseconds(timeframe) {
+  return {
+    "5m": 5 * 60 * 1000,
+    "15m": 15 * 60 * 1000,
+    "1h": 60 * 60 * 1000,
+    "4h": 4 * 60 * 60 * 1000
+  }[timeframe] || 15 * 60 * 1000;
+}
+
+function isCommodityMarketOpen(date) {
+  const day = date.getUTCDay();
+  const hour = date.getUTCHours();
+
+  if (day === 0) return hour >= 22;
+  if (day >= 1 && day <= 4) return true;
+  if (day === 5) return hour < 22;
+  return false;
 }
 
 function withAvailability(pair) {
