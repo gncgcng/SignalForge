@@ -559,10 +559,13 @@
                     Enabled
                   </label>
                 </div>
-                <p class="reasoning">Telegram alerts apply to markets in your Watchlist. Valid Scan All discoveries use setup credits; full signal levels use unlock credits.</p>
-                <label class="switch-row">
-                  <input type="checkbox" checked disabled />
-                  Favorite markets
+                <p class="reasoning">Telegram alerts scan all supported crypto by default. Use Watchlist only if you want fewer alerts.</p>
+                <label>
+                  Alert scope
+                  <select id="telegram-scope">
+                    <option value="all_crypto">All crypto markets</option>
+                    <option value="watchlist">Watchlist only</option>
+                  </select>
                 </label>
                 <fieldset class="timeframe-options">
                   <legend>Timeframes</legend>

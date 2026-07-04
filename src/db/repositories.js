@@ -1505,6 +1505,21 @@ export async function getTelegramSettingsByUser(userId) {
   return result.rows[0] ? mapTelegramSettings(result.rows[0]) : null;
 }
 
+export async function listAllEnabledTelegramSettings() {
+  const result = await query(`
+    SELECT s.*, u.role, u.email_verified_at
+    FROM telegram_notification_settings s
+    JOIN users u ON u.id = s.user_id
+    WHERE s.enabled = true
+      AND s.chat_id IS NOT NULL
+    ORDER BY s.user_id
+  `);
+  return result.rows.map((row) => ({
+    ...mapTelegramSettings(row),
+    userId: row.user_id
+  }));
+}
+
 export async function upsertTelegramSettings(userId, settings) {
   return transaction(async (client) => {
     const result = await client.query(`
@@ -1512,12 +1527,12 @@ export async function upsertTelegramSettings(userId, settings) {
         user_id, chat_id, enabled, favorite_markets_only, timeframes,
         direction, minimum_confidence
       )
-      VALUES ($1,$2,$3,true,$4,$5,$6)
+      VALUES ($1,$2,$3,$4,$5,$6,$7)
       ON CONFLICT (user_id)
       DO UPDATE SET
         chat_id = EXCLUDED.chat_id,
         enabled = EXCLUDED.enabled,
-        favorite_markets_only = true,
+        favorite_markets_only = EXCLUDED.favorite_markets_only,
         timeframes = EXCLUDED.timeframes,
         direction = EXCLUDED.direction,
         minimum_confidence = EXCLUDED.minimum_confidence,
@@ -1527,6 +1542,7 @@ export async function upsertTelegramSettings(userId, settings) {
       userId,
       settings.chatId,
       settings.enabled,
+      Boolean(settings.favoriteMarketsOnly),
       settings.timeframes,
       settings.direction,
       settings.minimumConfidence
@@ -1702,7 +1718,7 @@ export async function confirmTelegramConnectionCode(code, chatId) {
         user_id, chat_id, enabled, favorite_markets_only, timeframes,
         direction, minimum_confidence
       )
-      VALUES ($1,$2,false,true,ARRAY['1h','4h']::text[],'both',75)
+      VALUES ($1,$2,false,false,ARRAY['1h','4h']::text[],'both',75)
       ON CONFLICT (user_id)
       DO UPDATE SET
         chat_id = EXCLUDED.chat_id,

@@ -19,9 +19,14 @@ const queue = readFileSync(new URL("../src/modules/notifications/notificationQue
 
 const settings = {
   enabled: true,
+  favoriteMarketsOnly: false,
   timeframes: ["1h", "4h"],
   direction: "both",
   minimumConfidence: 80
+};
+const watchlistSettings = {
+  ...settings,
+  favoriteMarketsOnly: true
 };
 const favorites = new Set(["BTC-USD", "XAU/USD"]);
 const setup = {
@@ -70,8 +75,9 @@ const result = {
   queueIsUserScoped: repositories.includes("user_id text NOT NULL") === false &&
     repositories.includes("const setupKey = setup.setupKey || setup.id") &&
     repositories.includes("userId,\n    setupKey"),
-  favoriteMarketMatches: telegramPreferenceMatchesSetup(settings, favorites, setup),
-  nonFavoriteRejected: !telegramPreferenceMatchesSetup(settings, new Set(["XAU/USD"]), setup),
+  allCryptoMatchesWithoutFavorite: telegramPreferenceMatchesSetup(settings, new Set(), setup),
+  favoriteMarketMatches: telegramPreferenceMatchesSetup(watchlistSettings, favorites, setup),
+  nonFavoriteRejected: !telegramPreferenceMatchesSetup(watchlistSettings, new Set(["XAU/USD"]), setup),
   timeframeRejected: !telegramPreferenceMatchesSetup(settings, favorites, { ...setup, timeframe: "15m" }),
   directionRejected: !telegramPreferenceMatchesSetup(
     { ...settings, direction: "short" },
@@ -102,7 +108,8 @@ const result = {
   notificationsPagePresent: html.includes('data-view="notifications"') &&
     html.includes("telegram-connect-form") &&
     html.includes("telegram-preferences-form") &&
-    html.includes("Favorite markets"),
+    html.includes("All crypto markets") &&
+    html.includes("Watchlist only"),
   notificationsCanBeDisabled: app.includes("/api/notifications/telegram/enabled"),
   disablingCancelsPendingQueue: repositories.includes("Notifications disabled by user.") &&
     repositories.includes("WHERE user_id = $1 AND status IN ('queued', 'failed')"),

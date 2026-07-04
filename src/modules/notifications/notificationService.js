@@ -88,7 +88,9 @@ export async function enqueueMatchingTelegramNotifications(user, setups) {
     return [];
   }
 
-  const watchlist = await listWatchlistByUser(user.id);
+  const watchlist = settings.favoriteMarketsOnly
+    ? await listWatchlistByUser(user.id)
+    : [];
   const favoriteSymbols = new Set(watchlist.map((item) => item.symbol));
   const queued = [];
 
@@ -113,7 +115,7 @@ export async function enqueueMatchingTelegramNotifications(user, setups) {
 export function telegramPreferenceMatchesSetup(settings, favoriteSymbols, setup) {
   return Boolean(
     setup?.setupKey &&
-    favoriteSymbols.has(setup.symbol) &&
+    (!settings.favoriteMarketsOnly || favoriteSymbols.has(setup.symbol)) &&
     settings.timeframes.includes(setup.timeframe) &&
     (settings.direction === "both" || settings.direction === setup.direction) &&
     Number(setup.confidenceScore) >= Number(settings.minimumConfidence)
@@ -171,6 +173,7 @@ function validateSettings(input) {
   return {
     chatId,
     enabled: input.enabled !== false,
+    favoriteMarketsOnly: input.scope === "watchlist" || input.favoriteMarketsOnly === true,
     timeframes: selectedTimeframes,
     direction: input.direction,
     minimumConfidence

@@ -3,10 +3,15 @@ import {
   findUserById,
   hasRecentDetectedAlert,
   listAllEnabledAlertPreferences,
+  listAllEnabledTelegramSettings,
+  listWatchlistByUser,
   saveDetectedAlert
 } from "../../db/repositories.js";
-import { getPair } from "../market-data/marketDataService.js";
-import { enqueueMatchingTelegramNotifications } from "../notifications/notificationService.js";
+import { getPair, listActivePairs } from "../market-data/marketDataService.js";
+import {
+  enqueueMatchingTelegramNotifications,
+  telegramPreferenceMatchesSetup
+} from "../notifications/notificationService.js";
 import { scanMarketSetupDetailed } from "../signals/signalService.js";
 import { preferenceMatchesSetup } from "./alertService.js";
 
@@ -43,6 +48,7 @@ export async function runAutoCryptoAlertScan() {
   autoScanRunning = true;
   let scanned = 0;
   let alertsCreated = 0;
+  let telegramAlertsQueued = 0;
   let skippedDuplicates = 0;
   const users = new Map();
 
@@ -85,17 +91,70 @@ export async function runAutoCryptoAlertScan() {
         const queuedTelegramAlerts = await enqueueMatchingTelegramNotifications(user, [setup]);
         if (!queuedTelegramAlerts.length) {
           console.log(`[auto-scan] matched alert telegram_queued=0 user=${user.id} symbol=${setup.symbol} timeframe=${setup.timeframe}`);
+        } else {
+          telegramAlertsQueued += queuedTelegramAlerts.length;
+          console.log(`[auto-scan] telegram alert sent user=${user.id} symbol=${setup.symbol} timeframe=${setup.timeframe}`);
         }
       } catch (error) {
         console.warn(`[auto-scan] ${preference.symbol} ${preference.timeframe} skipped: ${error.message}`);
       }
     }
 
+    const telegramSettings = await listAllEnabledTelegramSettings();
+    const cryptoSymbols = listActivePairs()
+      .filter((pair) => pair.category === "Crypto")
+      .map((pair) => pair.symbol);
+
+    for (const settings of telegramSettings) {
+      const user = await getPreferenceUser(settings.userId, users);
+      if (!user) continue;
+
+      const watchlist = settings.favoriteMarketsOnly
+        ? await listWatchlistByUser(user.id)
+        : [];
+      const favoriteSymbols = new Set(watchlist.map((item) => item.symbol));
+      const selectedSymbols = settings.favoriteMarketsOnly
+        ? cryptoSymbols.filter((symbol) => favoriteSymbols.has(symbol))
+        : cryptoSymbols;
+      const scope = settings.favoriteMarketsOnly ? "watchlist" : "all_crypto";
+
+      console.log(`[auto-scan] scope=${scope} user=${user.id}`);
+      console.log(`[auto-scan] markets selected user=${user.id} count=${selectedSymbols.length}`);
+
+      for (const symbol of selectedSymbols) {
+        for (const timeframe of settings.timeframes) {
+          scanned += 1;
+
+          try {
+            const detailed = await scanMarketSetupDetailed(user, { symbol, timeframe });
+            const setup = detailed.fullSetup;
+
+            if (!setup || !telegramPreferenceMatchesSetup(settings, favoriteSymbols, setup)) {
+              continue;
+            }
+
+            const queuedTelegramAlerts = await enqueueMatchingTelegramNotifications(user, [setup]);
+
+            if (queuedTelegramAlerts.length) {
+              telegramAlertsQueued += queuedTelegramAlerts.length;
+              console.log(`[auto-scan] matched alert user=${user.id} symbol=${setup.symbol} timeframe=${setup.timeframe} direction=${setup.direction}`);
+              console.log(`[auto-scan] telegram alert sent user=${user.id} symbol=${setup.symbol} timeframe=${setup.timeframe}`);
+            } else {
+              skippedDuplicates += 1;
+            }
+          } catch (error) {
+            console.warn(`[auto-scan] ${symbol} ${timeframe} skipped: ${error.message}`);
+          }
+        }
+      }
+    }
+
     console.log(`[auto-scan] markets scanned ${scanned}`);
     console.log(`[auto-scan] alerts created ${alertsCreated}`);
+    console.log(`[auto-scan] telegram alerts queued ${telegramAlertsQueued}`);
     console.log(`[auto-scan] skipped duplicates ${skippedDuplicates}`);
 
-    return { scanned, alertsCreated, skippedDuplicates };
+    return { scanned, alertsCreated, telegramAlertsQueued, skippedDuplicates };
   } finally {
     autoScanRunning = false;
   }

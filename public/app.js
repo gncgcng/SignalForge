@@ -154,6 +154,7 @@ const telegramTestButton = document.querySelector("#telegram-test-button");
 const telegramPreferencesForm = document.querySelector("#telegram-preferences-form");
 const telegramChatId = document.querySelector("#telegram-chat-id");
 const telegramEnabled = document.querySelector("#telegram-enabled");
+const telegramScope = document.querySelector("#telegram-scope");
 const telegramDirection = document.querySelector("#telegram-direction");
 const telegramMinimumConfidence = document.querySelector("#telegram-minimum-confidence");
 const telegramStatusLine = document.querySelector("#telegram-status-line");
@@ -828,6 +829,7 @@ telegramPreferencesForm.addEventListener("submit", async (event) => {
       method: "PUT",
       body: JSON.stringify({
         enabled: telegramEnabled.checked,
+        scope: telegramScope.value,
         timeframes: getSelectedTelegramTimeframes(),
         direction: telegramDirection.value,
         minimumConfidence: Number(telegramMinimumConfidence.value)
@@ -3480,6 +3482,7 @@ function renderNotifications() {
   telegramConnectForm.querySelector("button").disabled = !configured;
   telegramPreferencesForm.querySelector("button").disabled = !connected;
   telegramEnabled.disabled = !connected;
+  telegramScope.disabled = !connected;
   telegramTestButton.classList.toggle("hidden", !connected);
 
   if (!settings) {
@@ -3492,6 +3495,7 @@ function renderNotifications() {
 
   telegramChatId.value = settings.chatId;
   telegramEnabled.checked = settings.enabled;
+  telegramScope.value = settings.favoriteMarketsOnly ? "watchlist" : "all_crypto";
   telegramDirection.value = settings.direction;
   telegramMinimumConfidence.value = settings.minimumConfidence;
 

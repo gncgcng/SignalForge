@@ -20,6 +20,10 @@ const checks = {
     server.includes("startAutoCryptoAlertScanner") &&
     autoScan.includes("[auto-scan] started") &&
     autoScan.includes("[auto-scan] matched alert") &&
+    autoScan.includes('const scope = settings.favoriteMarketsOnly ? "watchlist" : "all_crypto"') &&
+    autoScan.includes("[auto-scan] scope=${scope}") &&
+    autoScan.includes("[auto-scan] markets selected") &&
+    autoScan.includes("[auto-scan] telegram alert sent") &&
     autoScan.includes("[auto-scan] markets scanned") &&
     autoScan.includes("[auto-scan] alerts created") &&
     autoScan.includes("[auto-scan] skipped duplicates"),
@@ -29,6 +33,7 @@ const checks = {
     !autoScan.includes("Commodities"),
   preferenceScopedAutoScan:
     autoScan.includes("listAllEnabledAlertPreferences") &&
+    autoScan.includes("listAllEnabledTelegramSettings") &&
     autoScan.includes("scanMarketSetupDetailed(user") &&
     autoScan.includes("preference.symbol") &&
     autoScan.includes("preference.timeframe"),
