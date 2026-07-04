@@ -95,6 +95,10 @@ const legalModalTitle = document.querySelector("#legal-modal-title");
 const legalModalBody = document.querySelector("#legal-modal-body");
 const googleAuthButton = document.querySelector("#google-auth-button");
 const viewDemoButton = document.querySelector("#view-demo-button");
+const livePreviewSection = document.querySelector("#live-preview");
+const landingRunScan = document.querySelector("#landing-run-scan");
+const landingDemoShell = document.querySelector(".landing-demo-shell");
+const landingDemoResult = document.querySelector("#landing-demo-result");
 const pairSearch = document.querySelector("#pair-search");
 const pairList = document.querySelector("#pair-list");
 const timeframes = document.querySelector("#timeframes");
@@ -323,6 +327,20 @@ document.querySelectorAll(".launch-auth-button").forEach((button) => {
   });
 });
 
+landingRunScan?.addEventListener("click", () => {
+  landingRunScan.disabled = true;
+  landingRunScan.textContent = "Scanning...";
+  landingDemoShell?.classList.add("scanning");
+  landingDemoResult?.classList.add("hidden");
+
+  window.setTimeout(() => {
+    landingDemoShell?.classList.remove("scanning");
+    landingDemoResult?.classList.remove("hidden");
+    landingRunScan.disabled = false;
+    landingRunScan.textContent = "Run Scan";
+  }, 900);
+});
+
 document.querySelectorAll("[data-legal-doc]").forEach((trigger) => {
   trigger.addEventListener("click", () => {
     openLegalDocument(trigger.dataset.legalDoc);
@@ -343,16 +361,9 @@ viewOpportunitiesButton.addEventListener("click", () => {
   scrollToSignalDesk();
 });
 
-viewDemoButton.addEventListener("click", async () => {
-  try {
-    const { user, restore } = await api.request("/api/auth/demo", { method: "POST" });
-    saveRestoreToken(restore);
-    state.user = user;
-    await bootDashboard();
-  } catch (error) {
-    showAuth();
-    authNote.textContent = error.message;
-  }
+viewDemoButton.addEventListener("click", () => {
+  livePreviewSection?.scrollIntoView({ behavior: "smooth", block: "start" });
+  landingRunScan?.focus({ preventScroll: true });
 });
 
 authForm.addEventListener("submit", async (event) => {
@@ -1224,7 +1235,7 @@ async function init() {
     loadStartupSession(),
     loadAuthConfig()
   ]);
-  viewDemoButton.classList.toggle("hidden", !authConfig.demoEnabled);
+  viewDemoButton.classList.remove("hidden");
   googleAuthButton.classList.toggle("hidden", !authConfig.googleEnabled);
   const user = session.user;
 

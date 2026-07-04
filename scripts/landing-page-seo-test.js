@@ -10,7 +10,7 @@ const sitemap = readFileSync(new URL("../public/sitemap.xml", import.meta.url), 
 const result = {
   seoMetadata:
     html.includes("<title>SignalForge | Crypto Trading Signal Scanner</title>") &&
-    html.includes('name="description" content="SignalForge is a trading signal scanner for crypto markets') &&
+    html.includes('name="description" content="SignalForge is a crypto trading signal scanner and setup assistant') &&
     html.includes('rel="canonical" href="https://signalforge-app.xyz/"') &&
     html.includes('property="og:title" content="SignalForge | Crypto Trading Signal Scanner"') &&
     html.includes('name="twitter:card" content="summary_large_image"'),
@@ -19,14 +19,17 @@ const result = {
     html.includes('"@type": "FAQPage"') &&
     html.includes("SignalForge is a crypto trading signal scanner and trading setup assistant"),
   conversionHero:
-    html.includes("Find high-probability trading setups in seconds.") &&
-    html.includes("Start with 3 free unlocks") &&
-    html.includes("View demo") &&
-    html.includes("Telegram alert ready") &&
-    html.includes("Educational tool only. Not financial advice."),
+    html.includes("Stop Searching Charts. Start Finding High-Probability Setups.") &&
+    html.includes("Start Free") &&
+    html.includes("3 Free Signal Unlocks") &&
+    html.includes("Watch Demo") &&
+    html.includes("Telegram Ready") &&
+    html.includes("Educational Tool Only. Not Financial Advice."),
   requiredSections:
     html.includes('id="how-it-works"') &&
+    html.includes('id="why-signalforge"') &&
     html.includes('id="features"') &&
+    html.includes('id="live-preview"') &&
     html.includes('id="markets-covered"') &&
     html.includes('id="pricing"') &&
     html.includes('id="affiliate-program"') &&
@@ -39,15 +42,26 @@ const result = {
     html.includes("Telegram trading alerts") &&
     html.includes("Paper trading journal"),
   affiliateDisclosure:
-    html.includes("Earn recurring commissions by referring paid subscribers.") &&
+    html.includes("Earn While Others Trade.") &&
     html.includes("20% recurring commission") &&
+    html.includes("Become an Affiliate") &&
     html.includes("Affiliate disclosure"),
+  premiumSaasUx:
+    html.includes("Manual Trading") &&
+    html.includes("SignalForge") &&
+    html.includes("Automatic scanning") &&
+    html.includes('id="landing-run-scan"') &&
+    html.includes("Signal Found") &&
+    html.includes("Unlock Preview") &&
+    html.includes('class="landing-band performance-preview hidden"'),
   mobileResponsiveStyles:
-    styles.includes(".hero-layout") &&
-    styles.includes(".hero-signal-card") &&
+    styles.includes(".premium-hero-layout") &&
+    styles.includes(".app-mockup-card") &&
+    styles.includes(".comparison-table") &&
+    styles.includes(".landing-demo-shell") &&
     styles.includes("@media (max-width: 760px)") &&
-    styles.includes(".feature-grid") &&
-    styles.includes(".faq-grid"),
+    styles.includes(".premium-feature-grid") &&
+    styles.includes(".faq-accordion"),
   crawlFiles:
     robots.includes("Allow: /") &&
     robots.includes("https://signalforge-app.xyz/sitemap.xml") &&
