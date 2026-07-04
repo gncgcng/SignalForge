@@ -1527,7 +1527,7 @@ async function bootDashboard() {
   landingPage.classList.add("hidden");
   authScreen.classList.add("hidden");
   dashboard.classList.remove("hidden");
-  document.querySelector("#user-name").textContent = state.user.username || state.user.name;
+  document.querySelector("#user-name").textContent = getUserDisplayName();
   adminNavLink.classList.toggle("hidden", !state.user.isAdmin);
   affiliateAdminNavLink.classList.toggle("hidden", !state.user.isAdmin);
   webhookEventsNavLink.classList.toggle("hidden", !state.user.isAdmin);
@@ -1560,7 +1560,7 @@ async function bootDashboard() {
   if (state.user.isAdmin) {
     allowedInitialViews.push("admin", "affiliate-admin", "webhook-events");
   }
-  const initialView = state.user.usernameRequired
+  const initialView = state.user?.profile?.usernameRequired || state.user?.usernameRequired
     ? "profile"
     : allowedInitialViews.includes(requestedView)
       ? requestedView
@@ -1877,16 +1877,18 @@ async function loadTesterAccess() {
 }
 
 async function loadProfile() {
-  const { profile } = await api.request("/api/profile/me");
+  const result = await api.request("/api/profile/me");
+  const profile = normalizeProfile(result.profile, state.user);
   state.profile = profile;
   state.user = {
     ...state.user,
-    username: profile.username,
-    usernameRequired: profile.usernameRequired,
-    publicProfileEnabled: profile.publicProfileEnabled,
-    usernameUpdatedAt: profile.private?.usernameUpdatedAt || state.user?.usernameUpdatedAt
+    username: profile?.username || "",
+    usernameRequired: Boolean(profile?.usernameRequired),
+    publicProfileEnabled: Boolean(profile?.publicProfileEnabled),
+    usernameUpdatedAt: profile?.private?.usernameUpdatedAt || state.user?.usernameUpdatedAt || null,
+    profile
   };
-  document.querySelector("#user-name").textContent = state.user.username || state.user.name;
+  document.querySelector("#user-name").textContent = getUserDisplayName();
   renderProfile();
   return profile;
 }
@@ -1894,22 +1896,24 @@ async function loadProfile() {
 async function saveProfileSettings({ username, publicProfileEnabled, messageElement }) {
   try {
     if (messageElement) messageElement.textContent = "Saving profile...";
-    const { profile } = await api.request("/api/profile/me", {
+    const result = await api.request("/api/profile/me", {
       method: "PUT",
       body: JSON.stringify({
         username,
         publicProfileEnabled
       })
     });
+    const profile = normalizeProfile(result.profile, state.user);
     state.profile = profile;
     state.user = {
       ...state.user,
-      username: profile.username,
-      usernameRequired: profile.usernameRequired,
-      publicProfileEnabled: profile.publicProfileEnabled,
-      usernameUpdatedAt: profile.private?.usernameUpdatedAt || state.user?.usernameUpdatedAt
+      username: profile?.username || "",
+      usernameRequired: Boolean(profile?.usernameRequired),
+      publicProfileEnabled: Boolean(profile?.publicProfileEnabled),
+      usernameUpdatedAt: profile?.private?.usernameUpdatedAt || state.user?.usernameUpdatedAt || null,
+      profile
     };
-    document.querySelector("#user-name").textContent = state.user.username || state.user.name;
+    document.querySelector("#user-name").textContent = getUserDisplayName();
     renderProfile();
     if (messageElement) messageElement.textContent = "Profile updated.";
     showToast("Profile updated");
@@ -4472,16 +4476,16 @@ function renderLabTrades(trades) {
 }
 
 function renderProfile() {
-  const profile = state.profile;
-  if (!profile) return;
-  const stats = profile.stats || {};
-  const username = profile.username || "";
+  const profile = normalizeProfile(state.profile, state.user);
+  state.profile = profile;
+  const stats = profile?.stats || {};
+  const username = profile?.username || "";
   const displayName = username || "Create a username";
 
-  setText("#profile-avatar", profile.avatarInitial || "SF");
+  setText("#profile-avatar", profile?.avatarInitial || "SF");
   setText("#profile-username", displayName);
-  setText("#profile-joined", `Joined ${formatProfileDate(profile.joinedAt)}`);
-  setText("#profile-plan-badge", profile.plan || "Free");
+  setText("#profile-joined", `Joined ${formatProfileDate(profile?.joinedAt)}`);
+  setText("#profile-plan-badge", profile?.plan || "Free");
   setText("#profile-signals-unlocked", formatInteger(stats.signalsUnlocked));
   setText("#profile-closed-signals", formatInteger(stats.closedSignals));
   setText("#profile-win-rate", `${Number(stats.winRate || 0).toFixed(1)}%`);
@@ -4493,20 +4497,53 @@ function renderProfile() {
   setText("#profile-best-streak", `${stats.bestStreak || 0}`);
 
   if (settingsUsername) settingsUsername.value = username;
-  if (settingsPublicProfile) settingsPublicProfile.checked = Boolean(profile.publicProfileEnabled);
+  if (settingsPublicProfile) settingsPublicProfile.checked = Boolean(profile?.publicProfileEnabled);
   if (onboardingUsername && !onboardingUsername.value) onboardingUsername.value = username;
-  if (onboardingPublicProfile) onboardingPublicProfile.checked = Boolean(profile.publicProfileEnabled);
+  if (onboardingPublicProfile) onboardingPublicProfile.checked = Boolean(profile?.publicProfileEnabled);
   if (settingsProfilePreview) {
-    settingsProfilePreview.href = profile.publicProfileUrl || "#";
+    settingsProfilePreview.href = profile?.publicProfileUrl || "#";
     settingsProfilePreview.textContent = username ? `View /u/${username}` : "Create a username first";
-    settingsProfilePreview.classList.toggle("disabled-link", !username || !profile.publicProfileEnabled);
+    settingsProfilePreview.classList.toggle("disabled-link", !username || !profile?.publicProfileEnabled);
   }
-  usernameRequiredPanel?.classList.toggle("hidden", !profile.usernameRequired);
+  usernameRequiredPanel?.classList.toggle("hidden", !profile?.usernameRequired);
 }
 
 function setText(selector, value) {
   const element = document.querySelector(selector);
   if (element) element.textContent = value;
+}
+
+function normalizeProfile(profile, user = state.user) {
+  const source = profile || user?.profile || {};
+  const username = source?.username || user?.username || "";
+  return {
+    username,
+    usernameRequired: source?.usernameRequired ?? !username,
+    avatarInitial: source?.avatarInitial || (username || user?.name || "S").slice(0, 1).toUpperCase(),
+    joinedAt: source?.joinedAt || user?.createdAt || null,
+    publicProfileEnabled: Boolean(source?.publicProfileEnabled ?? user?.publicProfileEnabled),
+    publicProfileUrl: source?.publicProfileUrl || (username ? `/u/${username}` : null),
+    plan: source?.plan || user?.plan || "free",
+    stats: {
+      signalsUnlocked: Number(source?.stats?.signalsUnlocked || 0),
+      closedSignals: Number(source?.stats?.closedSignals || 0),
+      winRate: Number(source?.stats?.winRate || 0),
+      netR: Number(source?.stats?.netR || 0),
+      averageR: Number(source?.stats?.averageR || 0),
+      favoriteMarket: source?.stats?.favoriteMarket || null,
+      bestTimeframe: source?.stats?.bestTimeframe || null,
+      currentStreak: source?.stats?.currentStreak || "No closed trades",
+      bestStreak: source?.stats?.bestStreak || "No wins yet"
+    },
+    private: {
+      usernameUpdatedAt: source?.private?.usernameUpdatedAt || user?.usernameUpdatedAt || null,
+      canChangeUsernameAt: source?.private?.canChangeUsernameAt || null
+    }
+  };
+}
+
+function getUserDisplayName() {
+  return state.user?.profile?.username || state.user?.username || state.user?.name || "Trader";
 }
 
 function isPublicProfileRoute() {

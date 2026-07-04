@@ -47,14 +47,16 @@ function isValidPassword(password, record) {
 }
 
 function publicUser(user) {
+  const profile = publicUserProfile(user);
   return {
     id: user.id,
     name: user.name,
     email: user.email,
-    username: user.username,
-    usernameRequired: !user.username,
-    publicProfileEnabled: Boolean(user.publicProfileEnabled),
-    usernameUpdatedAt: user.usernameUpdatedAt,
+    username: profile.username,
+    usernameRequired: profile.usernameRequired,
+    publicProfileEnabled: profile.publicProfileEnabled,
+    usernameUpdatedAt: profile.usernameUpdatedAt,
+    profile,
     role: user.role,
     isAdmin: appConfig.adminEmails.has(user.email.toLowerCase()),
     plan: user.plan,
@@ -63,6 +65,15 @@ function publicUser(user) {
     abuseReviewStatus: user.abuseReviewStatus || "clear",
     trialSignalsUsed: user.trialSignalsUsed,
     freeSignalAllowance: user.freeSignalAllowance ?? appConfig.freeSignalAllowance
+  };
+}
+
+function publicUserProfile(user) {
+  return {
+    username: user?.username || "",
+    usernameRequired: !user?.username,
+    publicProfileEnabled: Boolean(user?.publicProfileEnabled),
+    usernameUpdatedAt: user?.usernameUpdatedAt || null
   };
 }
 

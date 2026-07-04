@@ -25,13 +25,17 @@ assert.match(repositories, /normalizeUsernameForLookup\(username\)/);
 assert.match(repositories, /WHERE username_normalized = \$1 AND id <> \$2/);
 assert.match(repositories, /You can change your username once every 30 days/);
 
-assert.match(authService, /usernameRequired: !user\.username/);
+assert.match(authService, /usernameRequired: profile\.usernameRequired/);
+assert.match(authService, /profile,/);
+assert.match(authService, /function publicUserProfile\(user\)/);
 assert.match(authService, /findUserByUsername\(normalizedUsername\)/);
 assert.match(authService, /USERNAME_TAKEN/);
 
 assert.match(profileController, /pathname === "\/api\/profile\/me"/);
 assert.match(profileController, /pathname\.startsWith\("\/api\/profiles\/"\)/);
 assert.match(profileService, /publicProfileEnabled/);
+assert.match(profileService, /buildEmptyProfile\(user/);
+assert.match(profileService, /safeUser\.username \|\| ""/);
 assert.match(profileService, /Public profile not found/);
 assert.doesNotMatch(profileService, /email:/);
 assert.doesNotMatch(profileService, /telegram/i);
@@ -43,6 +47,9 @@ assert.match(html, /id="username-required-panel"/);
 assert.match(html, /id="public-profile-page"/);
 assert.match(app, /isPublicProfileRoute/);
 assert.match(app, /loadProfile\(\)/);
+assert.match(app, /normalizeProfile\(result\.profile, state\.user\)/);
+assert.match(app, /source\?\.username \|\| user\?\.username \|\| ""/);
+assert.match(app, /profile\?\.usernameRequired/);
 assert.match(app, /usernameRequired/);
 assert.match(app, /settings-public-profile/);
 

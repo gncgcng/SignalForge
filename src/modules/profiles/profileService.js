@@ -20,6 +20,7 @@ export function validateUsername(username) {
 
 export async function getMyProfile(user) {
   const freshUser = await findUserById(user.id);
+  if (!freshUser) return buildEmptyProfile(user, { privateView: true });
   const signals = await listPerformanceSignalsByUser(user.id);
   return buildProfile(freshUser, signals, { privateView: true });
 }
@@ -34,6 +35,7 @@ export async function updateMyProfile(user, input) {
       ? input.publicProfileEnabled === true
       : undefined
   });
+  if (!updated) return buildEmptyProfile(user, { privateView: true });
   const signals = await listPerformanceSignalsByUser(user.id);
   return buildProfile(updated, signals, { privateView: true });
 }
@@ -50,7 +52,8 @@ export async function getPublicProfile(username) {
   return buildProfile(user, signals, { privateView: false });
 }
 
-function buildProfile(user, signals, { privateView }) {
+function buildProfile(user, signals = [], { privateView }) {
+  const safeUser = user || {};
   const stats = calculateSignalStats(signals);
   const closed = signals.filter((signal) => ["Hit TP", "Hit SL", "Expired"].includes(signal.status));
   const resolved = signals.filter((signal) => ["Hit TP", "Hit SL"].includes(signal.status));
@@ -60,13 +63,13 @@ function buildProfile(user, signals, { privateView }) {
   const streaks = calculateStreaks(signals);
 
   return {
-    username: user.username,
-    usernameRequired: !user.username,
-    avatarInitial: (user.username || user.name || "S").slice(0, 1).toUpperCase(),
-    joinedAt: user.createdAt,
-    publicProfileEnabled: Boolean(user.publicProfileEnabled),
-    publicProfileUrl: user.username ? `${appConfig.appUrl || ""}/u/${user.username}` : null,
-    plan: user.plan || "free",
+    username: safeUser.username || "",
+    usernameRequired: !safeUser.username,
+    avatarInitial: (safeUser.username || safeUser.name || "S").slice(0, 1).toUpperCase(),
+    joinedAt: safeUser.createdAt || null,
+    publicProfileEnabled: Boolean(safeUser.publicProfileEnabled),
+    publicProfileUrl: safeUser.username ? `${appConfig.appUrl || ""}/u/${safeUser.username}` : null,
+    plan: safeUser.plan || "free",
     stats: {
       signalsUnlocked: signals.length,
       closedSignals: closed.length,
@@ -79,12 +82,24 @@ function buildProfile(user, signals, { privateView }) {
       bestStreak: streaks.best
     },
     private: privateView ? {
-      usernameUpdatedAt: user.usernameUpdatedAt,
-      canChangeUsernameAt: user.usernameUpdatedAt
-        ? new Date(new Date(user.usernameUpdatedAt).getTime() + 30 * 24 * 60 * 60 * 1000).toISOString()
+      usernameUpdatedAt: safeUser.usernameUpdatedAt || null,
+      canChangeUsernameAt: safeUser.usernameUpdatedAt
+        ? new Date(new Date(safeUser.usernameUpdatedAt).getTime() + 30 * 24 * 60 * 60 * 1000).toISOString()
         : null
     } : undefined
   };
+}
+
+function buildEmptyProfile(user, options) {
+  return buildProfile({
+    id: user?.id,
+    name: user?.name || "",
+    username: "",
+    publicProfileEnabled: false,
+    usernameUpdatedAt: null,
+    createdAt: user?.createdAt || null,
+    plan: user?.plan || "free"
+  }, [], options);
 }
 
 function realizedR(signal) {
