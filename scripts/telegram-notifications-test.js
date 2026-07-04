@@ -14,6 +14,8 @@ const repositories = readFileSync(new URL("../src/db/repositories.js", import.me
 const signalController = readFileSync(new URL("../src/modules/signals/signalController.js", import.meta.url), "utf8");
 const app = readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
 const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
+const autoScan = readFileSync(new URL("../src/modules/alerts/autoScanService.js", import.meta.url), "utf8");
+const queue = readFileSync(new URL("../src/modules/notifications/notificationQueue.js", import.meta.url), "utf8");
 
 const settings = {
   enabled: true,
@@ -89,6 +91,11 @@ const result = {
   telegramApiCalledSafely: telegramRequest.url.includes("/bottest-token/sendMessage") &&
     telegramRequest.body.chat_id === "123456789" &&
     telegramRequest.body.text === message,
+  telegramPipelineLogs:
+    autoScan.includes("[auto-scan] matched alert") &&
+    queue.includes("[telegram] sending alert") &&
+    queue.includes("[telegram] sent") &&
+    queue.includes("[telegram] failed"),
   scanQueuesPrivately: signalController.includes("scanMarketSetupDetailed") &&
     signalController.includes("enqueueMatchingTelegramNotifications") &&
     !signalController.includes("entryPrice: result.fullSetup"),

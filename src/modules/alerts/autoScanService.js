@@ -81,7 +81,11 @@ export async function runAutoCryptoAlertScan() {
         }
 
         alertsCreated += 1;
-        await enqueueMatchingTelegramNotifications(user, [setup]);
+        console.log(`[auto-scan] matched alert user=${user.id} symbol=${setup.symbol} timeframe=${setup.timeframe} direction=${setup.direction}`);
+        const queuedTelegramAlerts = await enqueueMatchingTelegramNotifications(user, [setup]);
+        if (!queuedTelegramAlerts.length) {
+          console.log(`[auto-scan] matched alert telegram_queued=0 user=${user.id} symbol=${setup.symbol} timeframe=${setup.timeframe}`);
+        }
       } catch (error) {
         console.warn(`[auto-scan] ${preference.symbol} ${preference.timeframe} skipped: ${error.message}`);
       }

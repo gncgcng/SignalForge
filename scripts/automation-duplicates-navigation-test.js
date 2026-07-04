@@ -19,6 +19,7 @@ const checks = {
   autoScanStarted:
     server.includes("startAutoCryptoAlertScanner") &&
     autoScan.includes("[auto-scan] started") &&
+    autoScan.includes("[auto-scan] matched alert") &&
     autoScan.includes("[auto-scan] markets scanned") &&
     autoScan.includes("[auto-scan] alerts created") &&
     autoScan.includes("[auto-scan] skipped duplicates"),
@@ -33,6 +34,7 @@ const checks = {
     autoScan.includes("preference.timeframe"),
   alertDuplicateCooldown:
     repositories.includes("hasRecentDetectedAlert") &&
+    repositories.includes("AND setup_id = $2") &&
     repositories.includes("idx_detected_alerts_cooldown") === false &&
     migration.includes("idx_detected_alerts_cooldown") &&
     autoScan.includes("hasRecentDetectedAlert"),
@@ -47,7 +49,8 @@ const checks = {
     ["Trading", "Alerts", "Research", "Portfolio", "Growth", "Account"].every((label) => html.includes(`>${label}</button>`)) &&
     app.includes("NAV_SECTIONS_KEY") &&
     app.includes("renderNavSections()") &&
-    css.includes(".nav-section.collapsed .nav-section-links"),
+    css.includes(".nav-section.collapsed .nav-section-links") &&
+    css.includes(".nav-section:has(a.active) .nav-section-toggle"),
   backtestingUxStates:
     html.includes('id="lab-empty-state"') &&
     html.includes('id="lab-loading-state"') &&

@@ -1434,20 +1434,17 @@ export async function listAllEnabledAlertPreferences() {
 
 export async function hasRecentDetectedAlert(userId, setup, cooldownMs) {
   const cooldownSeconds = Math.max(1, Math.floor(Number(cooldownMs || 0) / 1000));
+  const setupId = setup.setupKey || setup.id;
   const result = await query(`
     SELECT id
     FROM detected_alerts
     WHERE user_id = $1
-      AND symbol = $2
-      AND timeframe = $3
-      AND direction = $4
-      AND detected_at >= now() - ($5::text || ' seconds')::interval
+      AND setup_id = $2
+      AND detected_at >= now() - ($3::text || ' seconds')::interval
     LIMIT 1
   `, [
     userId,
-    setup.symbol,
-    setup.timeframe,
-    setup.direction,
+    setupId,
     String(cooldownSeconds)
   ]);
   return Boolean(result.rows[0]);

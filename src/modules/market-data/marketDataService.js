@@ -67,7 +67,16 @@ export function listPairs(query = "") {
   }
 
   return pairs.filter((pair) => {
-    return [pair.symbol, pair.name, pair.group, pair.category, pair.assetClass, pair.venue]
+    return [
+      pair.symbol,
+      pair.displaySymbol,
+      pair.providerLabel,
+      pair.name,
+      pair.group,
+      pair.category,
+      pair.assetClass,
+      pair.venue
+    ]
       .join(" ")
       .toLowerCase()
       .includes(normalized);
@@ -192,12 +201,23 @@ export function getCachedOhlcv(symbol, timeframe) {
 
 function withAvailability(pair) {
   const availability = getPairProviderAvailability(pair);
+  const displaySymbol = getDisplaySymbol(pair);
 
   return {
     ...pair,
+    displaySymbol,
+    providerLabel: `${pair.venue}${pair.symbol ? ` · ${pair.symbol}` : ""}`,
     status: availability.configured ? "active" : "coming-soon",
     selectable: availability.configured,
     availabilityCode: availability.code,
     availabilityMessage: availability.message
   };
+}
+
+function getDisplaySymbol(pair) {
+  if (pair.category === "Crypto") {
+    return pair.symbol.replace("-", "");
+  }
+
+  return pair.symbol;
 }

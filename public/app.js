@@ -1098,15 +1098,18 @@ signalsGrid.addEventListener("click", async (event) => {
       return;
     }
 
-    state.signals = [signal, ...state.signals];
-    state.expandedSignalKeys = new Set([getSignalKey(signal)]);
+    const unlockedKey = getSignalKey(signal);
+    state.scanResults = [];
+    state.expandedSignalKeys = new Set([unlockedKey]);
     await loadSignals();
+    showView("signals");
     renderSignals();
     renderSignalsHistory();
     statusLine.textContent = alreadyUnlocked
       ? "Already unlocked. No additional credit was used."
       : "Full signal unlocked and saved. Unlock credit deducted.";
-    scrollToSignalKey(getSignalKey(signal));
+    showToast(alreadyUnlocked ? "Already unlocked" : "Signal unlocked");
+    highlightSignalKey(unlockedKey);
   } catch (error) {
     statusLine.textContent = error.message;
   } finally {
@@ -1894,16 +1897,16 @@ function renderPairs() {
       ${state.pairs.filter((pair) => (pair.group || pair.category) === group).map((pair) => pair.selectable ? `
         <button class="pair-button ${state.selectedPair?.symbol === pair.symbol ? "active" : ""}" data-symbol="${pair.symbol}" data-status="${pair.status}" ${pair.status !== "active" ? "disabled" : ""} aria-busy="${getPairIsLoading(pair)}">
           <span>
-            <strong>${pair.symbol}</strong><br />
-            <small>${pair.name} · ${pair.assetClass} · ${pair.venue}</small>
+            <strong>${getDisplaySymbol(pair)}</strong><br />
+            <small>${pair.name} · ${getProviderSymbolLabel(pair)}</small>
           </span>
           <strong>${getPairBadge(pair)}</strong>
         </button>
       ` : `
         <div class="pair-button unavailable" data-symbol="${pair.symbol}" data-status="${pair.status}" aria-disabled="true">
           <span>
-            <strong>${pair.symbol}</strong><br />
-            <small>${pair.name} · ${pair.availabilityMessage}</small>
+            <strong>${getDisplaySymbol(pair)}</strong><br />
+            <small>${getProviderSymbolLabel(pair)} · ${pair.availabilityMessage}</small>
           </span>
           <strong>${getPairBadge(pair)}</strong>
         </div>
@@ -1956,8 +1959,8 @@ function renderMarketStatus() {
 
 function renderSelectedMarket() {
   if (!state.selectedPair) return;
-  document.querySelector("#provider-name").textContent = getProviderLabel(state.selectedPair);
-  document.querySelector("#selected-symbol").textContent = state.selectedPair.symbol;
+  document.querySelector("#provider-name").textContent = getProviderSymbolLabel(state.selectedPair);
+  document.querySelector("#selected-symbol").textContent = getDisplaySymbol(state.selectedPair);
   document.querySelector("#selected-price").textContent = Number.isFinite(state.selectedPair.lastPrice)
     ? formatCurrency(state.selectedPair.lastPrice)
     : state.selectedPair.availabilityMessage || "Coming Soon";
@@ -1981,6 +1984,26 @@ function getProviderLabel(pair) {
   if (pair?.provider === "twelve-data") return "Twelve Data";
   if (pair?.provider === "coinbase-exchange") return "Coinbase";
   return "Not configured";
+}
+
+function getDisplaySymbol(pairOrSymbol) {
+  const pair = typeof pairOrSymbol === "string"
+    ? state.marketCatalog.find((item) => item.symbol === pairOrSymbol) ||
+      state.pairs.find((item) => item.symbol === pairOrSymbol)
+    : pairOrSymbol;
+
+  if (!pair) return String(pairOrSymbol || "");
+  return pair.displaySymbol || (pair.category === "Crypto" ? pair.symbol.replace("-", "") : pair.symbol);
+}
+
+function getProviderSymbolLabel(pairOrSymbol) {
+  const pair = typeof pairOrSymbol === "string"
+    ? state.marketCatalog.find((item) => item.symbol === pairOrSymbol) ||
+      state.pairs.find((item) => item.symbol === pairOrSymbol)
+    : pairOrSymbol;
+
+  if (!pair) return "";
+  return `${getProviderLabel(pair)} · ${pair.symbol}`;
 }
 
 function renderTimeframes() {
@@ -2899,8 +2922,8 @@ function renderScanCard(setup) {
     <article class="signal-card compact-signal-card ${expanded ? "expanded" : ""}" data-signal-key="${key}">
       <div class="signal-top">
         <div>
-          <strong>${setup.symbol}</strong>
-          <span>${setup.timeframe} · ${setup.marketType || getMarketType(setup.symbol)}</span>
+          <strong>${getDisplaySymbol(setup.symbol)}</strong>
+          <span>${setup.timeframe} · ${setup.marketType || getMarketType(setup.symbol)} · ${getProviderSymbolLabel(setup.symbol)}</span>
         </div>
         <strong class="direction ${setup.direction}">${setup.direction}</strong>
       </div>
@@ -2928,8 +2951,8 @@ function renderSignalCard(signal) {
     <article class="signal-card compact-signal-card ${expanded ? "expanded" : ""}" data-signal-key="${key}">
       <div class="signal-top">
         <div>
-          <strong>${signal.symbol}</strong>
-          <span>${signal.timeframe} · ${getMarketType(signal.symbol)}</span>
+          <strong>${getDisplaySymbol(signal.symbol)}</strong>
+          <span>${signal.timeframe} · ${getMarketType(signal.symbol)} · ${getProviderSymbolLabel(signal.symbol)}</span>
         </div>
         <strong class="direction ${signal.direction}">${signal.direction}</strong>
       </div>
@@ -4151,6 +4174,29 @@ function scrollToSignalKey(key) {
   const cards = [...document.querySelectorAll("[data-signal-key]")];
   const card = cards.find((item) => item.dataset.signalKey === key);
   card?.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+function highlightSignalKey(key) {
+  requestAnimationFrame(() => {
+    const cards = [...document.querySelectorAll("[data-signal-key]")];
+    const card = cards.find((item) => item.dataset.signalKey === key);
+    if (!card) return;
+    card.classList.add("signal-highlight");
+    card.scrollIntoView({ behavior: "smooth", block: "center" });
+    setTimeout(() => card.classList.remove("signal-highlight"), 3200);
+  });
+}
+
+function showToast(message) {
+  const toast = document.createElement("div");
+  toast.className = "app-toast";
+  toast.textContent = message;
+  document.body.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add("visible"));
+  setTimeout(() => {
+    toast.classList.remove("visible");
+    setTimeout(() => toast.remove(), 220);
+  }, 2600);
 }
 
 async function captureAffiliateReferral() {

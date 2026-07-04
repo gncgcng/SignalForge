@@ -100,7 +100,10 @@ export async function enqueueMatchingTelegramNotifications(user, setups) {
     const inserted = await enqueueTelegramNotification(user.id, settings, setup);
 
     if (inserted) {
+      console.log(`[telegram] queued alert user=${user.id} symbol=${setup.symbol} timeframe=${setup.timeframe} queue_id=${inserted.id}`);
       queued.push(inserted.id);
+    } else {
+      console.log(`[telegram] duplicate alert skipped user=${user.id} symbol=${setup.symbol} timeframe=${setup.timeframe}`);
     }
   }
 

@@ -73,9 +73,10 @@ const checks = {
     app.includes("scrollToSignalKey(key)") &&
     app.includes('data-signal-key="${key}"'),
   unlockExpandsUnlockedSignal:
-    app.includes("state.expandedSignalKeys = new Set([getSignalKey(signal)])") &&
-    app.includes("scrollToSignalKey(getSignalKey(signal))") &&
-    app.includes("Full signal unlocked and saved. Unlock credit deducted."),
+    app.includes("state.expandedSignalKeys = new Set([unlockedKey])") &&
+    app.includes('showView("signals")') &&
+    app.includes("highlightSignalKey(unlockedKey)") &&
+    app.includes("Signal unlocked"),
   basicAdvancedModePersists:
     html.includes('id="scanner-mode-toggle"') &&
     app.includes("SCANNER_MODE_KEY") &&
@@ -90,7 +91,13 @@ const checks = {
   creditsNotDeductedForScanning:
     app.includes("No unlock credits used yet") &&
     app.includes("No credits used") &&
-    app.includes("Unlocking one will use a trial credit.")
+    app.includes("Unlocking one will use a trial credit."),
+  tradingViewSymbolDisplay:
+    marketDataService.includes("displaySymbol") &&
+    marketDataService.includes('pair.symbol.replace("-", "")') &&
+    marketDataService.includes("providerLabel") &&
+    app.includes("getDisplaySymbol(pair)") &&
+    app.includes("getProviderSymbolLabel(pair)")
 };
 
 for (const [name, passed] of Object.entries(checks)) {

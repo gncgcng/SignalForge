@@ -721,6 +721,28 @@ button {
   font-size: 13px;
 }
 
+.app-toast {
+  position: fixed;
+  z-index: 1200;
+  right: 22px;
+  bottom: 22px;
+  max-width: min(360px, calc(100vw - 32px));
+  padding: 12px 14px;
+  border: 1px solid rgba(34, 211, 238, 0.42);
+  border-radius: 8px;
+  background: rgba(8, 13, 20, 0.96);
+  color: var(--text);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.42);
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.app-toast.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
 .dashboard {
   display: grid;
   grid-template-columns: 260px 1fr;
@@ -759,7 +781,7 @@ button {
 
 .nav-section {
   display: grid;
-  gap: 6px;
+  gap: 7px;
 }
 
 .nav-section-toggle {
@@ -767,14 +789,22 @@ button {
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  padding: 5px 4px;
-  border: 0;
-  background: transparent;
-  color: var(--muted);
+  padding: 7px 10px;
+  border: 1px solid rgba(34, 211, 238, 0.16);
+  border-radius: 999px;
+  background: rgba(34, 211, 238, 0.06);
+  color: #a7f3ff;
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.11em;
   text-transform: uppercase;
+  transition: border-color 160ms ease, background 160ms ease, color 160ms ease;
+}
+
+.nav-section-toggle:hover {
+  border-color: rgba(34, 211, 238, 0.38);
+  background: rgba(34, 211, 238, 0.1);
+  color: var(--text);
 }
 
 .nav-section-toggle::after {
@@ -812,6 +842,12 @@ nav a.active,
 nav a:hover {
   background: var(--surface-2);
   color: var(--text);
+}
+
+.nav-section:has(a.active) .nav-section-toggle {
+  border-color: rgba(34, 211, 238, 0.5);
+  background: rgba(34, 211, 238, 0.13);
+  color: #e6fbff;
 }
 
 .nav-count {
@@ -1253,6 +1289,11 @@ polyline {
 
 .compact-signal-card.expanded {
   border-color: rgba(94, 234, 212, 0.34);
+}
+
+.compact-signal-card.signal-highlight {
+  border-color: rgba(34, 211, 238, 0.85);
+  box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.18), 0 24px 80px rgba(34, 211, 238, 0.12);
 }
 
 .watchlist-grid,
