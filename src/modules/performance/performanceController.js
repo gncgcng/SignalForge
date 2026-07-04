@@ -18,8 +18,8 @@ export async function handlePerformanceRoutes(req, res, pathname, url) {
           to: url.searchParams.get("to") || "",
           symbol: url.searchParams.get("symbol") || "",
           timeframe: url.searchParams.get("timeframe") || "",
-          direction: url.searchParams.get("direction") || ""
-          ,
+          direction: url.searchParams.get("direction") || "",
+          status: url.searchParams.get("status") || "",
           session: url.searchParams.get("session") || "",
           newsRisk: url.searchParams.get("newsRisk") || ""
         })

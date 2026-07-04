@@ -5,6 +5,7 @@ import { buildAnalystProfile } from "../analyst/signalAnalystService.js";
 
 const timeframes = new Set(["5m", "15m", "1h", "4h"]);
 const directions = new Set(["long", "short"]);
+const outcomes = new Set(["Active", "Hit TP", "Hit SL", "Expired"]);
 const sessions = new Set(["Asia", "London", "New York", "London/New York Overlap", "Low Liquidity"]);
 const newsRiskFilters = new Set(["with-news-risk", "without-news-risk"]);
 
@@ -22,6 +23,8 @@ export function buildPerformanceAnalytics(signals, filters = {}) {
     : 0;
   const byMarket = aggregateCounts(signals, (signal) => signal.symbol);
   const byTimeframe = aggregateCounts(signals, (signal) => signal.timeframe);
+  const marketPerformance = aggregateMarketPerformance(signals);
+  const timeframePerformance = aggregatePerformance(signals, (signal) => signal.timeframe);
   const monthly = aggregateMonthly(signals);
   const bestMarket = findBestPerformer(signals, (signal) => signal.symbol);
   const bestTimeframe = findBestPerformer(signals, (signal) => signal.timeframe);
@@ -91,6 +94,9 @@ export function buildPerformanceAnalytics(signals, filters = {}) {
     },
     signalsByMarket: byMarket,
     signalsByTimeframe: byTimeframe,
+    marketPerformance,
+    timeframePerformance,
+    recentClosedSignals: getRecentClosedSignals(signals),
     regimePerformance,
     confluencePerformance,
     sessionPerformance,
@@ -155,6 +161,41 @@ function aggregateSmcPerformance(signals) {
       winRate: 0
     };
   });
+}
+
+function aggregateMarketPerformance(signals) {
+  return aggregatePerformance(signals, (signal) => signal.symbol).map((market) => {
+    const bestTimeframe = aggregatePerformance(
+      signals.filter((signal) => signal.symbol === market.label),
+      (signal) => signal.timeframe
+    ).filter((item) => item.hitTpCount + item.hitSlCount > 0)[0] || null;
+    return {
+      ...market,
+      bestTimeframe
+    };
+  });
+}
+
+function getRecentClosedSignals(signals) {
+  return signals
+    .filter((signal) => signal.status !== "Active")
+    .sort((a, b) => new Date(b.resolvedAt || b.generatedAt) - new Date(a.resolvedAt || a.generatedAt))
+    .slice(0, 10)
+    .map((signal) => ({
+      id: signal.id,
+      symbol: signal.symbol,
+      timeframe: signal.timeframe,
+      direction: signal.direction,
+      status: signal.status,
+      resultR: getSignalResultR(signal),
+      closedAt: signal.resolvedAt || signal.generatedAt
+    }));
+}
+
+function getSignalResultR(signal) {
+  if (signal.status === "Hit TP") return round(signal.riskRewardRatio);
+  if (signal.status === "Hit SL") return -1;
+  return 0;
 }
 
 function getSmcFactors(signal) {
@@ -343,6 +384,13 @@ function normalizeFilters(input) {
       throw validationError("Unsupported performance direction.");
     }
     filters.direction = input.direction;
+  }
+
+  if (input.status) {
+    if (!outcomes.has(input.status)) {
+      throw validationError("Unsupported performance outcome.");
+    }
+    filters.status = input.status;
   }
 
   if (input.session) {

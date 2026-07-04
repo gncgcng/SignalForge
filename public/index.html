@@ -1110,17 +1110,25 @@
             </div>
           </section>
 
-          <section class="page-view hidden" id="performance-view" data-view="performance">
-            <div class="section-title">
+          <section class="page-view hidden performance-dashboard" id="performance-view" data-view="performance">
+            <div class="performance-hero">
               <div>
                 <span class="eyebrow">Outcome analytics</span>
-                <h3>Performance</h3>
+                <h3>Performance Dashboard</h3>
+                <p>Track unlocked signals, outcomes, win rate, average R, and market performance.</p>
               </div>
-              <span id="performance-filter-label">All history</span>
+              <span class="performance-filter-chip" id="performance-filter-label">All history</span>
             </div>
-            <form class="performance-filters" id="performance-filters">
-              <label>From<input id="performance-from" type="date" /></label>
-              <label>To<input id="performance-to" type="date" /></label>
+            <form class="performance-filters premium-performance-filters" id="performance-filters">
+              <fieldset class="performance-range-tabs">
+                <legend>Date range</legend>
+                <button type="button" data-performance-range="7">7D</button>
+                <button type="button" data-performance-range="30">30D</button>
+                <button type="button" data-performance-range="90">90D</button>
+                <button class="active" type="button" data-performance-range="all">All</button>
+              </fieldset>
+              <label class="hidden">From<input id="performance-from" type="date" /></label>
+              <label class="hidden">To<input id="performance-to" type="date" /></label>
               <label>Market<select id="performance-market"><option value="">All markets</option></select></label>
               <label>
                 Timeframe
@@ -1141,30 +1149,27 @@
                 </select>
               </label>
               <label>
-                Session
-                <select id="performance-session">
-                  <option value="">All sessions</option>
-                  <option value="Asia">Asia</option>
-                  <option value="London">London</option>
-                  <option value="New York">New York</option>
-                  <option value="London/New York Overlap">London/New York Overlap</option>
-                  <option value="Low Liquidity">Low Liquidity</option>
+                Outcome
+                <select id="performance-outcome">
+                  <option value="">All outcomes</option>
+                  <option value="Active">Active</option>
+                  <option value="Hit TP">Hit TP</option>
+                  <option value="Hit SL">Hit SL</option>
+                  <option value="Expired">Expired</option>
                 </select>
               </label>
-              <label>
-                News risk
-                <select id="performance-news-risk">
-                  <option value="">All news conditions</option>
-                  <option value="with-news-risk">With news risk</option>
-                  <option value="without-news-risk">Without news risk</option>
-                </select>
-              </label>
-              <button type="submit">Apply Filters</button>
+              <button type="submit">Apply</button>
               <button class="secondary-action" id="performance-clear" type="button">Clear</button>
             </form>
-            <div class="performance-summary-grid">
-              <div><span>Total signals</span><strong id="performance-total">0</strong></div>
-              <div><span>Win rate</span><strong id="performance-win-rate">0%</strong></div>
+            <div class="performance-empty-state hidden" id="performance-empty-state">
+              <strong>No completed signals yet.</strong>
+              <p>Unlock and track signals to build your performance history.</p>
+            </div>
+            <div class="performance-summary-grid premium-stat-grid">
+              <div class="primary-stat"><span>Total unlocked signals</span><strong id="performance-total">0</strong></div>
+              <div class="primary-stat"><span>Win rate</span><strong id="performance-win-rate">0%</strong></div>
+              <div class="primary-stat"><span>Net R</span><strong id="performance-net-r">0.00R</strong></div>
+              <div><span>Average R</span><strong id="performance-average-r">0.00R</strong></div>
               <div><span>Hit TP</span><strong id="performance-hit-tp">0</strong></div>
               <div><span>Hit SL</span><strong id="performance-hit-sl">0</strong></div>
               <div><span>Expired</span><strong id="performance-expired">0</strong></div>
@@ -1175,26 +1180,28 @@
               <div><span>Best confluence</span><strong id="performance-best-confluence">--</strong></div>
             </div>
             <div class="performance-charts">
-              <article class="analytics-panel">
-                <div class="panel-header"><div><span class="eyebrow">Trend</span><h3>Win rate over time</h3></div></div>
+              <article class="analytics-panel performance-wide-card">
+                <div class="panel-header"><div><span class="eyebrow">Overview</span><h3>Cumulative R and win rate over time</h3></div></div>
+                <div class="line-chart" id="equity-curve-chart"></div>
                 <div class="line-chart" id="win-rate-chart"></div>
+                <p class="performance-insight" id="performance-overview-note">Not enough closed signals yet. Keep tracking outcomes to build performance history.</p>
               </article>
-              <article class="analytics-panel">
+              <article class="analytics-panel outcome-breakdown-card">
                 <div class="panel-header"><div><span class="eyebrow">Outcomes</span><h3>TP vs SL vs Expired</h3></div></div>
                 <div class="bar-chart" id="tp-sl-chart"></div>
               </article>
-              <article class="analytics-panel">
+              <article class="analytics-panel market-distribution-card">
                 <div class="panel-header"><div><span class="eyebrow">Exposure</span><h3>Market distribution</h3></div></div>
                 <div class="bar-chart" id="market-distribution-chart"></div>
               </article>
             </div>
             <div class="performance-breakdowns">
-              <article class="analytics-panel"><h3>Signals by market</h3><div id="signals-by-market"></div></article>
-              <article class="analytics-panel"><h3>Signals by timeframe</h3><div id="signals-by-timeframe"></div></article>
-              <article class="analytics-panel"><h3>Win rate by regime</h3><div id="signals-by-regime"></div></article>
-              <article class="analytics-panel"><h3>Win rate by SMC factor</h3><div id="signals-by-smc"></div></article>
-              <article class="analytics-panel"><h3>Win rate by confluence</h3><div id="signals-by-confluence"></div></article>
-              <article class="analytics-panel"><h3>Win rate by session</h3><div id="signals-by-session"></div></article>
+              <article class="analytics-panel performance-table-card"><h3>Market performance</h3><div class="performance-table" id="signals-by-market"></div></article>
+              <article class="analytics-panel performance-table-card"><h3>Timeframe performance</h3><div class="performance-table" id="signals-by-timeframe"></div></article>
+              <article class="analytics-panel"><h3>Regime performance</h3><div class="factor-table" id="signals-by-regime"></div></article>
+              <article class="analytics-panel"><h3>SMC factor performance</h3><div class="factor-table" id="signals-by-smc"></div></article>
+              <article class="analytics-panel"><h3>Confluence performance</h3><div class="factor-table" id="signals-by-confluence"></div></article>
+              <article class="analytics-panel"><h3>Session performance</h3><div class="factor-table" id="signals-by-session"></div></article>
               <article class="analytics-panel"><h3>News risk comparison</h3><div id="signals-by-news-risk"></div></article>
               <article class="analytics-panel"><h3>Expectancy by risk level</h3><div id="signals-by-risk-level"></div></article>
               <article class="analytics-panel"><h3>Performance by stop style</h3><div id="signals-by-stop-style"></div></article>
@@ -1211,6 +1218,10 @@
             <article class="analytics-panel">
               <h3>Best session by market</h3>
               <div id="best-session-by-market"></div>
+            </article>
+            <article class="analytics-panel recent-closed-card">
+              <div class="panel-header"><div><span class="eyebrow">Closed signals</span><h3>Recent closed signals</h3></div></div>
+              <div class="performance-table" id="recent-closed-signals"></div>
             </article>
             <article class="analytics-panel">
               <div class="panel-header"><div><span class="eyebrow">Realized R</span><h3>Monthly performance</h3></div></div>

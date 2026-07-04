@@ -203,6 +203,7 @@ const performanceTo = document.querySelector("#performance-to");
 const performanceMarket = document.querySelector("#performance-market");
 const performanceTimeframe = document.querySelector("#performance-timeframe");
 const performanceDirection = document.querySelector("#performance-direction");
+const performanceOutcome = document.querySelector("#performance-outcome");
 const performanceClear = document.querySelector("#performance-clear");
 let marketRequestId = 0;
 let signalRefreshTimer = null;
@@ -941,12 +942,43 @@ performanceFilters.addEventListener("submit", async (event) => {
   await loadPerformance();
 });
 
+document.querySelector("#performance-view")?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-performance-open-signals]");
+  if (button) showView("signals");
+});
+
+document.querySelectorAll("[data-performance-range]").forEach((button) => {
+  button.addEventListener("click", async () => {
+    const range = button.dataset.performanceRange;
+    document.querySelectorAll("[data-performance-range]").forEach((item) => {
+      item.classList.toggle("active", item === button);
+    });
+
+    if (range === "all") {
+      performanceFrom.value = "";
+      performanceTo.value = "";
+    } else {
+      const end = new Date();
+      const start = new Date();
+      start.setDate(end.getDate() - Number(range));
+      performanceFrom.value = toDateInputValue(start);
+      performanceTo.value = toDateInputValue(end);
+    }
+
+    await loadPerformance();
+  });
+});
+
 performanceClear.addEventListener("click", async () => {
   performanceFrom.value = "";
   performanceTo.value = "";
   performanceMarket.value = "";
   performanceTimeframe.value = "";
   performanceDirection.value = "";
+  performanceOutcome.value = "";
+  document.querySelectorAll("[data-performance-range]").forEach((item) => {
+    item.classList.toggle("active", item.dataset.performanceRange === "all");
+  });
   await loadPerformance();
 });
 
@@ -1674,6 +1706,7 @@ async function loadPerformance() {
   if (performanceMarket.value) params.set("symbol", performanceMarket.value);
   if (performanceTimeframe.value) params.set("timeframe", performanceTimeframe.value);
   if (performanceDirection.value) params.set("direction", performanceDirection.value);
+  if (performanceOutcome.value) params.set("status", performanceOutcome.value);
   const query = params.toString();
   const { performance } = await api.request(`/api/performance${query ? `?${query}` : ""}`);
   state.performance = performance;
@@ -2534,9 +2567,27 @@ function renderJournal() {
 
 function renderPerformance() {
   if (!state.performance) return;
-  const { summary, signalsByMarket, signalsByTimeframe, monthlyPerformance, charts } = state.performance;
+  const {
+    summary,
+    signalsByMarket,
+    signalsByTimeframe,
+    monthlyPerformance,
+    charts,
+    regimePerformance = [],
+    smcPerformance = [],
+    confluencePerformance = [],
+    sessionPerformance = []
+  } = state.performance;
+  const netR = calculateNetRFromPerformance(state.performance);
+  const closedCount = Number(summary.hitTpCount || 0) + Number(summary.hitSlCount || 0) + Number(summary.expiredCount || 0);
+  const hasClosedSignals = closedCount > 0;
+
+  document.querySelector("#performance-empty-state")?.classList.toggle("hidden", hasClosedSignals);
   document.querySelector("#performance-total").textContent = `${summary.totalSignals}`;
   document.querySelector("#performance-win-rate").textContent = `${summary.winRate}%`;
+  document.querySelector("#performance-net-r").textContent = formatR(netR);
+  document.querySelector("#performance-net-r").className = netR >= 0 ? "positive" : "negative";
+  document.querySelector("#performance-average-r").textContent = formatR(closedCount ? netR / closedCount : 0);
   document.querySelector("#performance-hit-tp").textContent = `${summary.hitTpCount}`;
   document.querySelector("#performance-hit-sl").textContent = `${summary.hitSlCount}`;
   document.querySelector("#performance-expired").textContent = `${summary.expiredCount}`;
@@ -2554,18 +2605,17 @@ function renderPerformance() {
     ? `${summary.bestConfluenceRange.label} · ${summary.bestConfluenceRange.winRate}%`
     : "--";
   document.querySelector("#performance-filter-label").textContent = getPerformanceFilterLabel();
+  document.querySelector("#performance-overview-note").classList.toggle("hidden", hasClosedSignals && monthlyPerformance.length > 1);
+  renderEquityCurve(monthlyPerformance);
   renderWinRateChart(charts.winRateOverTime);
   renderAnalyticsBars(document.querySelector("#tp-sl-chart"), charts.outcomes, true);
   renderAnalyticsBars(document.querySelector("#market-distribution-chart"), charts.marketDistribution);
-  renderAnalyticsBars(document.querySelector("#signals-by-market"), signalsByMarket);
-  renderAnalyticsBars(document.querySelector("#signals-by-timeframe"), signalsByTimeframe);
-  renderRegimePerformance(state.performance.regimePerformance || []);
-  renderConfluencePerformance(state.performance.confluencePerformance || []);
-  renderSmcPerformance(
-    document.querySelector("#signals-by-smc"),
-    state.performance.smcPerformance || [],
-    "signals"
-  );
+  renderMarketPerformanceTable(document.querySelector("#signals-by-market"), buildMarketPerformanceRows(state.performance));
+  renderFactorTable(document.querySelector("#signals-by-timeframe"), buildTimeframePerformanceRows(state.performance));
+  renderFactorTable(document.querySelector("#signals-by-regime"), regimePerformance);
+  renderFactorTable(document.querySelector("#signals-by-smc"), smcPerformance);
+  renderFactorTable(document.querySelector("#signals-by-confluence"), confluencePerformance);
+  renderFactorTable(document.querySelector("#signals-by-session"), sessionPerformance);
   renderRiskPerformance(
     document.querySelector("#signals-by-risk-level"),
     state.performance.expectancyByRiskLevel || []
@@ -2591,6 +2641,158 @@ function renderPerformance() {
     state.performance.correlationPerformance || []
   );
   renderMonthlyPerformance(monthlyPerformance);
+  renderRecentClosedSignals();
+}
+
+function calculateNetRFromPerformance(performance) {
+  if (performance?.monthlyPerformance?.length) {
+    return performance.monthlyPerformance.reduce((sum, month) => sum + Number(month.netR || 0), 0);
+  }
+  const summary = performance?.summary || {};
+  return Number(summary.hitTpCount || 0) * Number(summary.averageRiskReward || 0) -
+    Number(summary.hitSlCount || 0);
+}
+
+function buildMarketPerformanceRows(performance) {
+  if (performance.marketPerformance?.length) return performance.marketPerformance;
+  return (performance.signalsByMarket || []).map((item) => ({
+    label: item.label,
+    totalSignals: item.value,
+    winRate: 0,
+    netR: 0,
+    bestTimeframe: null
+  }));
+}
+
+function buildTimeframePerformanceRows(performance) {
+  if (performance.timeframePerformance?.length) return performance.timeframePerformance;
+  return (performance.signalsByTimeframe || []).map((item) => ({
+    label: item.label,
+    totalSignals: item.value,
+    winRate: 0,
+    netR: 0
+  }));
+}
+
+function renderMarketPerformanceTable(container, rows) {
+  if (!container) return;
+  if (!rows?.length) {
+    container.innerHTML = renderPerformanceEmpty("No market performance yet.");
+    return;
+  }
+
+  container.innerHTML = `
+    <table class="performance-data-table">
+      <thead><tr><th>Market</th><th>Signals</th><th>Win rate</th><th>Net R</th><th>Average R</th><th>Best timeframe</th></tr></thead>
+      <tbody>${rows.map((row) => `
+        <tr>
+          <td><strong>${escapeHtml(row.label)}</strong></td>
+          <td>${row.totalSignals ?? row.value ?? 0}</td>
+          <td>${row.winRate || 0}%</td>
+          <td class="${Number(row.netR || 0) >= 0 ? "positive" : "negative"}">${formatR(row.netR || 0)}</td>
+          <td>${formatR(getAverageR(row))}</td>
+          <td>${row.bestTimeframe ? `${escapeHtml(row.bestTimeframe.label)} · ${row.bestTimeframe.winRate}%` : "--"}</td>
+        </tr>
+      `).join("")}</tbody>
+    </table>
+  `;
+}
+
+function renderFactorTable(container, rows) {
+  if (!container) return;
+  const activeRows = (rows || []).filter((row) => Number(row.totalSignals || row.value || 0) > 0);
+  if (!activeRows.length) {
+    container.innerHTML = renderPerformanceEmpty("No tracked outcomes yet.");
+    return;
+  }
+
+  container.innerHTML = `
+    <table class="performance-data-table compact">
+      <thead><tr><th>Factor</th><th>Signals</th><th>Win rate</th><th>Net R</th><th>Average R</th></tr></thead>
+      <tbody>${activeRows.map((row) => `
+        <tr>
+          <td><strong>${escapeHtml(row.label)}</strong></td>
+          <td>${row.totalSignals ?? row.value ?? 0}</td>
+          <td>${row.winRate || 0}%</td>
+          <td class="${Number(row.netR || 0) >= 0 ? "positive" : "negative"}">${formatR(row.netR || 0)}</td>
+          <td>${formatR(getAverageR(row))}</td>
+        </tr>
+      `).join("")}</tbody>
+    </table>
+  `;
+}
+
+function getAverageR(row) {
+  const total = Number(row.totalSignals ?? row.value ?? 0);
+  return total ? Number(row.netR || 0) / total : 0;
+}
+
+function renderPerformanceEmpty(message) {
+  return `<div class="empty-state"><span>${escapeHtml(message)}</span></div>`;
+}
+
+function renderRecentClosedSignals() {
+  const container = document.querySelector("#recent-closed-signals");
+  if (!container) return;
+  const signals = state.performance?.recentClosedSignals || [];
+  if (!signals.length) {
+    container.innerHTML = renderPerformanceEmpty("No completed signals yet.");
+    return;
+  }
+
+  container.innerHTML = `
+    <table class="performance-data-table">
+      <thead><tr><th>Market</th><th>Timeframe</th><th>Direction</th><th>Outcome</th><th>R result</th><th>Closed</th><th></th></tr></thead>
+      <tbody>${signals.map((signal) => `
+        <tr>
+          <td><strong>${escapeHtml(signal.symbol)}</strong></td>
+          <td>${escapeHtml(signal.timeframe)}</td>
+          <td><strong class="direction ${signal.direction}">${escapeHtml(signal.direction).toUpperCase()}</strong></td>
+          <td><span class="status-pill ${getPaperStatusClass(signal.status)}">${escapeHtml(signal.status)}</span></td>
+          <td class="${Number(signal.resultR || 0) >= 0 ? "positive" : "negative"}">${formatR(signal.resultR || 0)}</td>
+          <td>${formatDateTime(signal.closedAt)}</td>
+          <td><button class="secondary-action" type="button" data-performance-open-signals>View signal</button></td>
+        </tr>
+      `).join("")}</tbody>
+    </table>
+  `;
+}
+
+function renderEquityCurve(months) {
+  const points = [];
+  let cumulative = 0;
+  for (const month of months || []) {
+    cumulative += Number(month.netR || 0);
+    points.push({ label: month.label, value: cumulative });
+  }
+  renderRLineChart(document.querySelector("#equity-curve-chart"), points, "Cumulative R over time");
+}
+
+function renderRLineChart(container, points, label) {
+  if (!container) return;
+  if (!points?.length || points.length === 1) {
+    container.innerHTML = `<div class="empty-state"><span>Not enough closed signals yet. Keep tracking outcomes to build performance history.</span></div>`;
+    return;
+  }
+  const width = 620;
+  const height = 220;
+  const padding = 28;
+  const values = points.map((point) => Number(point.value));
+  const min = Math.min(...values, 0);
+  const max = Math.max(...values, 0);
+  const range = Math.max(max - min, 1);
+  const x = (index) => padding + (index / Math.max(1, points.length - 1)) * (width - padding * 2);
+  const y = (value) => height - padding - ((value - min) / range) * (height - padding * 2);
+  const path = points.map((point, index) => `${index ? "L" : "M"} ${x(index)} ${y(point.value)}`).join(" ");
+
+  container.innerHTML = `
+    <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(label)}">
+      <line class="chart-axis" x1="${padding}" y1="${y(0)}" x2="${width - padding}" y2="${y(0)}"></line>
+      <path class="chart-line" d="${path}"></path>
+      <text class="chart-label" x="4" y="${y(max) + 4}">${formatR(max)}</text>
+      <text class="chart-label" x="4" y="${y(min) + 4}">${formatR(min)}</text>
+    </svg>
+  `;
 }
 
 function renderEvidencePerformance(container, items) {
@@ -2780,6 +2982,8 @@ function getPerformanceFilterLabel() {
   }
   if (performanceMarket.value) parts.push(performanceMarket.value);
   if (performanceTimeframe.value) parts.push(performanceTimeframe.value);
+  if (performanceDirection.value) parts.push(performanceDirection.value.toUpperCase());
+  if (performanceOutcome.value) parts.push(performanceOutcome.value);
   return parts.length ? parts.join(" · ") : "All history";
 }
 
@@ -4405,6 +4609,12 @@ function formatDateTime(value) {
     hour: "numeric",
     minute: "2-digit"
   }).format(new Date(value));
+}
+
+function toDateInputValue(date) {
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60000)
+    .toISOString()
+    .slice(0, 10);
 }
 
 registerPwa();

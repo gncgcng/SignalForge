@@ -1163,6 +1163,11 @@ export async function listPerformanceSignalsByUser(userId, filters = {}) {
     clauses.push(`s.direction = $${values.length}`);
   }
 
+  if (filters.status) {
+    values.push(filters.status);
+    clauses.push(`COALESCE(o.status, 'Active') = $${values.length}`);
+  }
+
   if (filters.session) {
     values.push(filters.session);
     clauses.push(`COALESCE(s.indicators->>'session', 'Unknown') = $${values.length}`);

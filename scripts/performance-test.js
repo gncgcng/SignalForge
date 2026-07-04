@@ -11,8 +11,10 @@ const signals = [
 
 const analytics = buildPerformanceAnalytics(signals);
 const repositories = readFileSync(new URL("../src/db/repositories.js", import.meta.url), "utf8");
+const controller = readFileSync(new URL("../src/modules/performance/performanceController.js", import.meta.url), "utf8");
 const app = readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
 const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
+const styles = readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
 
 const result = {
   summaryCorrect: analytics.summary.totalSignals === 5 &&
@@ -30,20 +32,43 @@ const result = {
     analytics.summary.bestConfluenceRange?.label === "80-100",
   monthlyPerformanceCorrect: analytics.monthlyPerformance[0].netR === 1 &&
     analytics.monthlyPerformance[1].netR === 2.5,
+  premiumPerformanceTables:
+    analytics.marketPerformance.find((item) => item.label === "BTC-USD")?.netR === 1 &&
+    analytics.marketPerformance.find((item) => item.label === "BTC-USD")?.bestTimeframe?.label === "1h" &&
+    analytics.timeframePerformance.find((item) => item.label === "1h")?.totalSignals === 3 &&
+    analytics.recentClosedSignals.length === 4 &&
+    analytics.recentClosedSignals[0].status === "Expired",
   chartsPresent: analytics.charts.winRateOverTime.length === 2 &&
     analytics.charts.outcomes[0].value === 2 &&
     analytics.charts.outcomes[2].value === 1 &&
     analytics.charts.marketDistribution.length === 3,
   repositoryUserScoped: repositories.includes('const clauses = ["s.user_id = $1"]') &&
     repositories.includes("s.generated_at >= $") &&
-    repositories.includes("s.symbol = $"),
+    repositories.includes("s.symbol = $") &&
+    repositories.includes("COALESCE(o.status, 'Active') = $"),
   performanceTabPresent: html.includes('data-view-link="performance"') &&
     html.includes('data-view="performance"'),
-  filtersPresent: ["performance-from", "performance-to", "performance-market", "performance-timeframe", "performance-direction"]
+  filtersPresent: ["performance-from", "performance-to", "performance-market", "performance-timeframe", "performance-direction", "performance-outcome"]
     .every((id) => html.includes(`id="${id}"`)),
+  premiumUiPresent:
+    html.includes("Performance Dashboard") &&
+    html.includes("Total unlocked signals") &&
+    html.includes("Net R") &&
+    html.includes("Recent closed signals") &&
+    html.includes('data-performance-range="30"') &&
+    html.includes('id="equity-curve-chart"') &&
+    styles.includes(".performance-hero") &&
+    styles.includes(".performance-data-table") &&
+    styles.includes("@media (max-width: 560px)"),
+  outcomeFilterWired:
+    controller.includes('status: url.searchParams.get("status")') &&
+    app.includes('params.set("status", performanceOutcome.value)') &&
+    app.includes('performanceOutcome.value = ""'),
   requiredChartsRendered: app.includes("renderWinRateChart") &&
     app.includes("renderAnalyticsBars") &&
-    app.includes("renderMonthlyPerformance"),
+    app.includes("renderMonthlyPerformance") &&
+    app.includes("renderEquityCurve") &&
+    app.includes("renderRecentClosedSignals"),
   cryptoAndCommoditiesRemainFilterable: app.includes('pair.category === "Crypto" || pair.category === "Commodities"')
 };
 
