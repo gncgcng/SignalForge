@@ -88,7 +88,8 @@ export async function createUser({
   abuseFlags = [],
   abuseReviewStatus = "clear",
   username = null,
-  publicProfileEnabled = false
+  publicProfileEnabled = false,
+  publicLeaderboardEnabled = false
 }) {
   const usernameNormalized = normalizeUsernameForLookup(username);
   await transaction(async (client) => {
@@ -97,9 +98,9 @@ export async function createUser({
         id, name, email, password_salt, password_hash, plan, email_verified_at,
         signup_ip_hash, device_fingerprint_hash, abuse_score, abuse_flags,
         abuse_review_status, affiliate_code, username, username_normalized,
-        username_updated_at, public_profile_enabled
+        username_updated_at, public_profile_enabled, public_leaderboard_enabled
       )
-      VALUES ($1,$2,$3,$4,$5,'free',$6,$7,$8,$9,$10,$11,lower(substr(md5($1),1,12)),$12,$13,CASE WHEN $13 IS NULL THEN NULL ELSE now() END,$14)
+      VALUES ($1,$2,$3,$4,$5,'free',$6,$7,$8,$9,$10,$11,lower(substr(md5($1),1,12)),$12,$13,CASE WHEN $13 IS NULL THEN NULL ELSE now() END,$14,$15)
     `, [
       id,
       name,
@@ -114,7 +115,8 @@ export async function createUser({
       abuseReviewStatus,
       usernameNormalized ? username : null,
       usernameNormalized,
-      Boolean(publicProfileEnabled)
+      Boolean(publicProfileEnabled),
+      Boolean(publicProfileEnabled && publicLeaderboardEnabled)
     ]);
 
     await client.query(`
@@ -136,11 +138,13 @@ export async function createUser({
 
 export async function updateUserProfileSettings(userId, {
   username = undefined,
-  publicProfileEnabled = undefined
+  publicProfileEnabled = undefined,
+  publicLeaderboardEnabled = undefined
 }) {
   return transaction(async (client) => {
     const currentResult = await client.query(`
-      SELECT id, username, username_normalized, username_updated_at, public_profile_enabled
+      SELECT id, username, username_normalized, username_updated_at,
+        public_profile_enabled, public_leaderboard_enabled
       FROM users
       WHERE id = $1
       FOR UPDATE
@@ -198,6 +202,10 @@ export async function updateUserProfileSettings(userId, {
         username_normalized = $3,
         username_updated_at = CASE WHEN $4 THEN now() ELSE username_updated_at END,
         public_profile_enabled = COALESCE($5, public_profile_enabled),
+        public_leaderboard_enabled = CASE
+          WHEN COALESCE($5, public_profile_enabled) = false THEN false
+          ELSE COALESCE($6, public_leaderboard_enabled)
+        END,
         updated_at = now()
       WHERE id = $1
     `, [
@@ -205,7 +213,8 @@ export async function updateUserProfileSettings(userId, {
       nextUsername,
       nextNormalized,
       updateUsernameTimestamp,
-      publicProfileEnabled === undefined ? null : Boolean(publicProfileEnabled)
+      publicProfileEnabled === undefined ? null : Boolean(publicProfileEnabled),
+      publicLeaderboardEnabled === undefined ? null : Boolean(publicLeaderboardEnabled)
     ]);
   });
 
@@ -440,6 +449,54 @@ export async function getAdminProductAnalytics() {
     mostScannedMarkets: mostScanned.rows,
     mostUnlockedMarkets: mostUnlocked.rows
   };
+}
+
+export async function listLeaderboardPerformanceRows() {
+  const result = await query(`
+    SELECT
+      u.id AS user_id,
+      u.username,
+      u.plan,
+      u.role,
+      u.email,
+      s.id AS signal_id,
+      s.setup_key,
+      s.symbol,
+      s.timeframe,
+      s.risk_reward_ratio,
+      s.generated_at,
+      s.created_at AS signal_created_at,
+      COALESCE(o.status, 'Active') AS status,
+      o.resolved_at,
+      p.id AS paper_trade_id
+    FROM users u
+    JOIN saved_signals s ON s.user_id = u.id
+    LEFT JOIN signal_outcomes o ON o.saved_signal_id = s.id
+    LEFT JOIN paper_trades p ON p.saved_signal_id = s.id AND p.user_id = u.id
+    WHERE u.public_profile_enabled = true
+      AND u.public_leaderboard_enabled = true
+      AND u.username_normalized IS NOT NULL
+      AND COALESCE(u.role, 'user') <> 'tester'
+    ORDER BY u.username_normalized ASC, s.generated_at ASC
+  `);
+
+  return result.rows.map((row) => ({
+    userId: row.user_id,
+    username: row.username,
+    plan: row.plan || "free",
+    role: row.role || "user",
+    email: row.email,
+    signalId: row.signal_id,
+    setupKey: row.setup_key,
+    symbol: row.symbol,
+    timeframe: row.timeframe,
+    riskRewardRatio: Number(row.risk_reward_ratio || 0),
+    generatedAt: row.generated_at,
+    createdAt: row.signal_created_at,
+    status: row.status || "Active",
+    resolvedAt: row.resolved_at,
+    paperTradeId: row.paper_trade_id
+  }));
 }
 
 export async function incrementTrialSignalsUsed(userId) {
@@ -2108,6 +2165,7 @@ function mapUser(row) {
     usernameNormalized: row.username_normalized || null,
     usernameUpdatedAt: row.username_updated_at || null,
     publicProfileEnabled: Boolean(row.public_profile_enabled),
+    publicLeaderboardEnabled: Boolean(row.public_leaderboard_enabled),
     role: row.role || "user",
     password: {
       salt: row.password_salt,

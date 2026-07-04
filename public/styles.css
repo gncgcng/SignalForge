@@ -4913,6 +4913,93 @@ polyline {
   font-weight: 800;
 }
 
+.leaderboard-page {
+  display: grid;
+  gap: 18px;
+}
+
+.leaderboard-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.leaderboard-tabs button {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #0b1018;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 850;
+}
+
+.leaderboard-tabs button.active,
+.leaderboard-tabs button:hover {
+  border-color: rgba(34, 211, 238, 0.52);
+  background: rgba(34, 211, 238, 0.12);
+  color: #e6fbff;
+}
+
+.leaderboard-panel {
+  overflow: hidden;
+}
+
+.leaderboard-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.leaderboard-table th,
+.leaderboard-table td {
+  padding: 13px 11px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.84rem;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.leaderboard-table th {
+  color: #c4cedd;
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.leaderboard-table tr:hover td {
+  background: rgba(34, 211, 238, 0.035);
+}
+
+.leaderboard-user {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.leaderboard-user small {
+  display: block;
+  margin-top: 3px;
+  color: var(--cyan);
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.leaderboard-avatar {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid rgba(34, 211, 238, 0.38);
+  border-radius: 10px;
+  background: rgba(34, 211, 238, 0.1);
+  color: #dffbff;
+  font-weight: 950;
+}
+
 @media (max-width: 760px) {
   .public-profile-page {
     padding: 18px;
@@ -4925,6 +5012,57 @@ polyline {
 
   .profile-stat-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .leaderboard-tabs {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .leaderboard-table,
+  .leaderboard-table thead,
+  .leaderboard-table tbody,
+  .leaderboard-table tr,
+  .leaderboard-table th,
+  .leaderboard-table td {
+    display: block;
+  }
+
+  .leaderboard-table thead {
+    display: none;
+  }
+
+  .leaderboard-table tr {
+    margin-bottom: 10px;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: #0b1018;
+  }
+
+  .leaderboard-table td {
+    display: flex;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(40, 49, 66, 0.7);
+  }
+
+  .leaderboard-table td::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-size: 0.72rem;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+
+  .leaderboard-table td:last-child {
+    border-bottom: 0;
+  }
+
+  .leaderboard-user {
+    align-items: flex-start;
+    text-align: right;
   }
 }
 

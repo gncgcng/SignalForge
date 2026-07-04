@@ -54,6 +54,8 @@ const state = {
   adminAnalytics: null,
   profile: null,
   publicProfile: null,
+  leaderboards: null,
+  leaderboardTab: "topRMultiple",
   performance: null,
   paperPortfolio: {
     trades: [],
@@ -174,6 +176,7 @@ const testerAccessMessage = document.querySelector("#tester-access-message");
 const profileSettingsForm = document.querySelector("#profile-settings-form");
 const settingsUsername = document.querySelector("#settings-username");
 const settingsPublicProfile = document.querySelector("#settings-public-profile");
+const settingsPublicLeaderboard = document.querySelector("#settings-public-leaderboard");
 const settingsProfilePreview = document.querySelector("#settings-profile-preview");
 const profileSettingsMessage = document.querySelector("#profile-settings-message");
 const usernameRequiredPanel = document.querySelector("#username-required-panel");
@@ -219,6 +222,11 @@ const performanceTimeframe = document.querySelector("#performance-timeframe");
 const performanceDirection = document.querySelector("#performance-direction");
 const performanceOutcome = document.querySelector("#performance-outcome");
 const performanceClear = document.querySelector("#performance-clear");
+const leaderboardTabs = document.querySelector("#leaderboard-tabs");
+const leaderboardTable = document.querySelector("#leaderboard-table");
+const leaderboardTitle = document.querySelector("#leaderboard-title");
+const leaderboardEyebrow = document.querySelector("#leaderboard-eyebrow");
+const leaderboardUpdated = document.querySelector("#leaderboard-updated");
 let marketRequestId = 0;
 let signalRefreshTimer = null;
 let marketLoadTimer = null;
@@ -464,6 +472,7 @@ profileSettingsForm?.addEventListener("submit", async (event) => {
   await saveProfileSettings({
     username: settingsUsername.value,
     publicProfileEnabled: settingsPublicProfile.checked,
+    publicLeaderboardEnabled: settingsPublicLeaderboard.checked,
     messageElement: profileSettingsMessage
   });
 });
@@ -1015,6 +1024,13 @@ performanceClear.addEventListener("click", async () => {
   await loadPerformance();
 });
 
+leaderboardTabs?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-leaderboard-tab]");
+  if (!button) return;
+  state.leaderboardTab = button.dataset.leaderboardTab;
+  renderLeaderboards();
+});
+
 journalFilters.addEventListener("submit", async (event) => {
   event.preventDefault();
   await loadJournal();
@@ -1473,6 +1489,8 @@ function clearClientAuthState() {
   state.profile = null;
   state.publicProfile = null;
   state.performance = null;
+  state.leaderboards = null;
+  state.leaderboardTab = "topRMultiple";
   state.paperPortfolio = {
     trades: [],
     stats: {
@@ -1556,7 +1574,7 @@ async function bootDashboard() {
   }
   renderTimeframes();
   const requestedView = location.hash?.replace("#", "").split("?")[0];
-  const allowedInitialViews = ["signals", "paper-portfolio", "journal", "backtesting", "performance", "watchlist", "alerts", "notifications", "affiliate", "profile", "settings", "billing"];
+  const allowedInitialViews = ["signals", "paper-portfolio", "journal", "backtesting", "performance", "watchlist", "alerts", "notifications", "affiliate", "leaderboard", "profile", "settings", "billing"];
   if (state.user.isAdmin) {
     allowedInitialViews.push("admin", "affiliate-admin", "webhook-events");
   }
@@ -1885,6 +1903,7 @@ async function loadProfile() {
     username: profile?.username || "",
     usernameRequired: Boolean(profile?.usernameRequired),
     publicProfileEnabled: Boolean(profile?.publicProfileEnabled),
+    publicLeaderboardEnabled: Boolean(profile?.publicLeaderboardEnabled),
     usernameUpdatedAt: profile?.private?.usernameUpdatedAt || state.user?.usernameUpdatedAt || null,
     profile
   };
@@ -1893,14 +1912,20 @@ async function loadProfile() {
   return profile;
 }
 
-async function saveProfileSettings({ username, publicProfileEnabled, messageElement }) {
+async function saveProfileSettings({
+  username,
+  publicProfileEnabled,
+  publicLeaderboardEnabled,
+  messageElement
+}) {
   try {
     if (messageElement) messageElement.textContent = "Saving profile...";
     const result = await api.request("/api/profile/me", {
       method: "PUT",
       body: JSON.stringify({
         username,
-        publicProfileEnabled
+        publicProfileEnabled,
+        publicLeaderboardEnabled
       })
     });
     const profile = normalizeProfile(result.profile, state.user);
@@ -1910,6 +1935,7 @@ async function saveProfileSettings({ username, publicProfileEnabled, messageElem
       username: profile?.username || "",
       usernameRequired: Boolean(profile?.usernameRequired),
       publicProfileEnabled: Boolean(profile?.publicProfileEnabled),
+      publicLeaderboardEnabled: Boolean(profile?.publicLeaderboardEnabled),
       usernameUpdatedAt: profile?.private?.usernameUpdatedAt || state.user?.usernameUpdatedAt || null,
       profile
     };
@@ -1920,6 +1946,12 @@ async function saveProfileSettings({ username, publicProfileEnabled, messageElem
   } catch (error) {
     if (messageElement) messageElement.textContent = error.message;
   }
+}
+
+async function loadLeaderboards() {
+  const { leaderboards } = await api.request("/api/leaderboards");
+  state.leaderboards = leaderboards;
+  renderLeaderboards();
 }
 
 async function loadAffiliate() {
@@ -1990,7 +2022,7 @@ function startSignalHistoryRefresh() {
 }
 
 function showView(view) {
-  const allowedViews = ["scanner", "watchlist", "alerts", "notifications", "signals", "paper-portfolio", "journal", "backtesting", "performance", "affiliate", "profile", "settings", "billing"];
+  const allowedViews = ["scanner", "watchlist", "alerts", "notifications", "signals", "paper-portfolio", "journal", "backtesting", "performance", "affiliate", "leaderboard", "profile", "settings", "billing"];
   if (state.user?.isAdmin) {
     allowedViews.push("admin", "affiliate-admin", "webhook-events");
   }
@@ -2023,6 +2055,7 @@ function showView(view) {
     backtesting: ["Historical strategy research", "Backtesting Lab"],
     performance: ["Outcome analytics", "Performance"],
     affiliate: ["Recurring commissions", "Affiliate Program"],
+    leaderboard: ["Community rankings", "Leaderboard"],
     profile: ["Public identity", "Profile"],
     settings: ["Account", "Settings"],
     admin: ["Administration", "Tester access requests"],
@@ -2056,6 +2089,17 @@ function showView(view) {
   if (normalizedView === "profile") {
     loadProfile().catch((error) => {
       usernameOnboardingMessage.textContent = error.message;
+    });
+  }
+
+  if (normalizedView === "leaderboard") {
+    loadLeaderboards().catch((error) => {
+      leaderboardTable.innerHTML = `
+        <div class="empty-state">
+          <strong>Leaderboard unavailable</strong>
+          <p class="reasoning">${escapeHtml(error.message)}</p>
+        </div>
+      `;
     });
   }
 
@@ -4475,6 +4519,85 @@ function renderLabTrades(trades) {
   `;
 }
 
+function renderLeaderboards() {
+  if (!leaderboardTable) return;
+  const metadata = {
+    topRMultiple: ["Top R-Multiple", "Ranked by net R"],
+    bestWinRate: ["Best Win Rate", "Minimum 10 closed signals"],
+    mostActive: ["Most Active", "Ranked by tracked signals"],
+    longestWinStreak: ["Longest Win Streak", "Consecutive TP hits"],
+    monthlyChampions: ["Monthly Champions", "Current calendar month"]
+  };
+  const tab = state.leaderboardTab || "topRMultiple";
+  const rows = state.leaderboards?.tabs?.[tab] || [];
+  const [title, eyebrow] = metadata[tab] || metadata.topRMultiple;
+
+  leaderboardTitle.textContent = title;
+  leaderboardEyebrow.textContent = eyebrow;
+  leaderboardUpdated.textContent = state.leaderboards?.generatedAt
+    ? `Updated ${formatDateTime(state.leaderboards.generatedAt)}`
+    : "Live rankings";
+  leaderboardTabs?.querySelectorAll("[data-leaderboard-tab]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.leaderboardTab === tab);
+  });
+
+  if (!rows.length) {
+    leaderboardTable.innerHTML = `
+      <div class="empty-state">
+        <strong>No ranked traders yet.</strong>
+        <p class="reasoning">Enable your public profile and track signals to join the leaderboard.</p>
+      </div>
+    `;
+    return;
+  }
+
+  leaderboardTable.innerHTML = `
+    <table class="leaderboard-table">
+      <thead>
+        <tr>
+          <th>Rank</th>
+          <th>Trader</th>
+          <th>Net R</th>
+          <th>Win rate</th>
+          <th>Closed</th>
+          <th>Best market</th>
+          <th>Best timeframe</th>
+          <th>Current streak</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map((row) => `
+          <tr>
+            <td data-label="Rank"><strong>#${row.rank}</strong></td>
+            <td data-label="Trader">
+              <a class="leaderboard-user" href="${escapeHtml(row.profileUrl)}">
+                <span class="leaderboard-avatar">${escapeHtml(row.avatarInitial || "S")}</span>
+                <span>
+                  <strong>${escapeHtml(row.username)}</strong>
+                  <small>${escapeHtml(formatPlanBadge(row.plan))}</small>
+                </span>
+              </a>
+            </td>
+            <td data-label="Net R"><strong class="${Number(row.netR) >= 0 ? "positive" : "negative"}">${formatR(row.netR)}</strong></td>
+            <td data-label="Win rate">${Number(row.winRate || 0).toFixed(1)}%</td>
+            <td data-label="Closed">${formatInteger(row.closedSignals)}</td>
+            <td data-label="Best market">${escapeHtml(row.bestMarket?.label || "--")}</td>
+            <td data-label="Best timeframe">${escapeHtml(row.bestTimeframe?.label || "--")}</td>
+            <td data-label="Current streak">${escapeHtml(row.currentStreak || "No closed trades")}</td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+function formatPlanBadge(plan) {
+  const value = String(plan || "free").toLowerCase();
+  if (value === "elite") return "Elite";
+  if (value === "pro") return "Pro";
+  return "Free";
+}
+
 function renderProfile() {
   const profile = normalizeProfile(state.profile, state.user);
   state.profile = profile;
@@ -4498,6 +4621,10 @@ function renderProfile() {
 
   if (settingsUsername) settingsUsername.value = username;
   if (settingsPublicProfile) settingsPublicProfile.checked = Boolean(profile?.publicProfileEnabled);
+  if (settingsPublicLeaderboard) {
+    settingsPublicLeaderboard.checked = Boolean(profile?.publicLeaderboardEnabled);
+    settingsPublicLeaderboard.disabled = !profile?.publicProfileEnabled || !username;
+  }
   if (onboardingUsername && !onboardingUsername.value) onboardingUsername.value = username;
   if (onboardingPublicProfile) onboardingPublicProfile.checked = Boolean(profile?.publicProfileEnabled);
   if (settingsProfilePreview) {
@@ -4522,6 +4649,7 @@ function normalizeProfile(profile, user = state.user) {
     avatarInitial: source?.avatarInitial || (username || user?.name || "S").slice(0, 1).toUpperCase(),
     joinedAt: source?.joinedAt || user?.createdAt || null,
     publicProfileEnabled: Boolean(source?.publicProfileEnabled ?? user?.publicProfileEnabled),
+    publicLeaderboardEnabled: Boolean(source?.publicLeaderboardEnabled ?? user?.publicLeaderboardEnabled),
     publicProfileUrl: source?.publicProfileUrl || (username ? `/u/${username}` : null),
     plan: source?.plan || user?.plan || "free",
     stats: {
@@ -4667,6 +4795,7 @@ function getStoredNavSections() {
     research: true,
     portfolio: true,
     growth: true,
+    community: true,
     account: true
   };
 

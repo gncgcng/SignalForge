@@ -33,6 +33,9 @@ export async function updateMyProfile(user, input) {
     username,
     publicProfileEnabled: Object.hasOwn(input, "publicProfileEnabled")
       ? input.publicProfileEnabled === true
+      : undefined,
+    publicLeaderboardEnabled: Object.hasOwn(input, "publicLeaderboardEnabled")
+      ? input.publicLeaderboardEnabled === true
       : undefined
   });
   if (!updated) return buildEmptyProfile(user, { privateView: true });
@@ -68,6 +71,7 @@ function buildProfile(user, signals = [], { privateView }) {
     avatarInitial: (safeUser.username || safeUser.name || "S").slice(0, 1).toUpperCase(),
     joinedAt: safeUser.createdAt || null,
     publicProfileEnabled: Boolean(safeUser.publicProfileEnabled),
+    publicLeaderboardEnabled: Boolean(safeUser.publicLeaderboardEnabled),
     publicProfileUrl: safeUser.username ? `${appConfig.appUrl || ""}/u/${safeUser.username}` : null,
     plan: safeUser.plan || "free",
     stats: {
@@ -96,6 +100,7 @@ function buildEmptyProfile(user, options) {
     name: user?.name || "",
     username: "",
     publicProfileEnabled: false,
+    publicLeaderboardEnabled: false,
     usernameUpdatedAt: null,
     createdAt: user?.createdAt || null,
     plan: user?.plan || "free"

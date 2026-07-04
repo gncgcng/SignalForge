@@ -15,6 +15,7 @@ import { handleAffiliateRoutes } from "./modules/affiliates/affiliateController.
 import { handleMarketDataRoutes } from "./modules/market-data/marketDataController.js";
 import { handleJournalRoutes } from "./modules/journal/journalController.js";
 import { handleIntelligenceRoutes } from "./modules/intelligence/intelligenceController.js";
+import { handleLeaderboardRoutes } from "./modules/leaderboards/leaderboardController.js";
 import { handleNotificationRoutes } from "./modules/notifications/notificationController.js";
 import { handlePaperTradingRoutes } from "./modules/paper-trading/paperTradingController.js";
 import { handlePerformanceRoutes } from "./modules/performance/performanceController.js";
@@ -60,6 +61,7 @@ const server = createServer(async (req, res) => {
       (await handleBacktestRoutes(req, res, url.pathname, url)) ||
       (await handlePerformanceRoutes(req, res, url.pathname, url)) ||
       (await handleProfileRoutes(req, res, url.pathname)) ||
+      (await handleLeaderboardRoutes(req, res, url.pathname)) ||
       (await handleSignalRoutes(req, res, url.pathname));
 
     if (handled !== false) {

@@ -527,6 +527,12 @@
                 <a href="#affiliate" data-view-link="affiliate">Affiliate</a>
               </div>
             </section>
+            <section class="nav-section" data-nav-section="community">
+              <button class="nav-section-toggle" type="button" data-nav-section-toggle="community" aria-expanded="true">Community</button>
+              <div class="nav-section-links">
+                <a href="#leaderboard" data-view-link="leaderboard">Leaderboard</a>
+              </div>
+            </section>
             <section class="nav-section" data-nav-section="account">
               <button class="nav-section-toggle" type="button" data-nav-section-toggle="account" aria-expanded="true">Account</button>
               <div class="nav-section-links">
@@ -1296,10 +1302,45 @@
                   <input id="settings-public-profile" name="publicProfileEnabled" type="checkbox" />
                   <span>Show my profile publicly</span>
                 </label>
+                <label class="consent-row">
+                  <input id="settings-public-leaderboard" name="publicLeaderboardEnabled" type="checkbox" />
+                  <span>Show me on public leaderboards</span>
+                </label>
                 <button type="submit">Save profile</button>
               </form>
-              <p class="form-note" id="profile-settings-message">Usernames are unique and can be changed once every 30 days.</p>
+              <p class="form-note" id="profile-settings-message">Usernames are unique and can be changed once every 30 days. Leaderboards require a public profile and username.</p>
             </article>
+          </section>
+
+          <section class="page-view hidden leaderboard-page" id="leaderboard-view" data-view="leaderboard">
+            <div class="performance-hero">
+              <div>
+                <span class="eyebrow">Community rankings</span>
+                <h3>SignalForge Leaderboards</h3>
+                <p>Rankings use real tracked SignalForge outcomes and R-multiple performance from unlocked signals and linked paper trades.</p>
+              </div>
+              <span class="performance-filter-chip" id="leaderboard-updated">Live rankings</span>
+            </div>
+            <div class="leaderboard-tabs" id="leaderboard-tabs" role="tablist" aria-label="Leaderboard rankings">
+              <button class="active" type="button" data-leaderboard-tab="topRMultiple">Top R-Multiple</button>
+              <button type="button" data-leaderboard-tab="bestWinRate">Best Win Rate</button>
+              <button type="button" data-leaderboard-tab="mostActive">Most Active</button>
+              <button type="button" data-leaderboard-tab="longestWinStreak">Longest Win Streak</button>
+              <button type="button" data-leaderboard-tab="monthlyChampions">Monthly Champions</button>
+            </div>
+            <article class="analytics-panel leaderboard-panel">
+              <div class="panel-header">
+                <div>
+                  <span class="eyebrow" id="leaderboard-eyebrow">Ranked by net R</span>
+                  <h3 id="leaderboard-title">Top R-Multiple</h3>
+                </div>
+              </div>
+              <div id="leaderboard-table"></div>
+            </article>
+            <div class="signal-disclaimer">
+              <strong>Leaderboard disclaimer</strong>
+              <span>Leaderboard is based on tracked SignalForge outcomes and R-multiple performance. Past performance does not guarantee future results.</span>
+            </div>
           </section>
 
           <section class="page-view hidden profile-page" id="profile-view" data-view="profile">

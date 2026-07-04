@@ -73,6 +73,7 @@ function publicUserProfile(user) {
     username: user?.username || "",
     usernameRequired: !user?.username,
     publicProfileEnabled: Boolean(user?.publicProfileEnabled),
+    publicLeaderboardEnabled: Boolean(user?.publicLeaderboardEnabled),
     usernameUpdatedAt: user?.usernameUpdatedAt || null
   };
 }
@@ -178,7 +179,8 @@ export async function registerOrLogin({
     abuseFlags: abuse.flags,
     abuseReviewStatus: abuse.reviewStatus,
     username: normalizedUsername,
-    publicProfileEnabled: Boolean(publicProfileEnabled)
+    publicProfileEnabled: Boolean(publicProfileEnabled),
+    publicLeaderboardEnabled: false
   });
   if (!options.bypassVerification) {
     await attributeAffiliateReferral(user.id, affiliateCode);
