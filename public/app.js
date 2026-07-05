@@ -54,6 +54,7 @@ const state = {
     disposableEmails: []
   },
   adminAnalytics: null,
+  validationDashboard: null,
   profile: null,
   publicProfile: null,
   leaderboards: null,
@@ -1517,6 +1518,7 @@ function clearClientAuthState() {
   state.webhookEvents = [];
   state.testerAccess = null;
   state.adminRequests = [];
+  state.validationDashboard = null;
   state.abuseDashboard = {
     flaggedAccounts: [],
     accountsPerIp: [],
@@ -2016,7 +2018,7 @@ async function loadWebhookEvents() {
 
 async function loadAdminRequests() {
   if (!state.user.isAdmin) return;
-  const [{ requests }, { abuse }, { affiliateAdmin }, { analytics }] = await Promise.all([
+  const [{ requests }, { abuse }, { affiliateAdmin }, { analytics, validation }] = await Promise.all([
     api.request("/api/admin/tester-access"),
     api.request("/api/admin/abuse"),
     api.request("/api/admin/affiliates"),
@@ -2026,6 +2028,7 @@ async function loadAdminRequests() {
   state.abuseDashboard = abuse;
   state.affiliateAdmin = affiliateAdmin;
   state.adminAnalytics = analytics;
+  state.validationDashboard = validation;
   renderAdminAnalytics();
   renderAdminRequests();
   renderAbuseDashboard();
@@ -3529,6 +3532,8 @@ function renderScanCard(setup) {
         <div><span>Setup type</span><strong>${setup.setupType || "Qualified setup"}</strong></div>
         <div><span>Confidence</span><strong>${setup.confidenceScore}%</strong></div>
         <div><span>Risk/reward</span><strong>${setup.riskRewardRatio}:1</strong></div>
+        <div><span>Validation</span><strong>${setup.validationPassed === false ? "Rejected" : "Passed"}</strong></div>
+        <div><span>Validation score</span><strong>${Number(setup.validationScore || 100)}/100</strong></div>
       </div>
       <div class="compact-actions">
         <button data-unlock-symbol="${setup.symbol}" data-unlock-timeframe="${setup.timeframe}" type="button">Unlock Signal</button>
@@ -3561,6 +3566,8 @@ function renderSignalCard(signal) {
         <div><span>Take profit</span><strong>${formatCurrency(signal.takeProfit)}</strong></div>
         <div><span>Risk/reward</span><strong>${signal.riskRewardRatio}:1</strong></div>
         <div><span>Confidence</span><strong>${signal.confidenceScore}%</strong></div>
+        <div><span>Validation</span><strong>${signal.validationPassed === false ? "Rejected" : "Passed"}</strong></div>
+        <div><span>Validation score</span><strong>${Number(signal.validationScore || 100)}/100</strong></div>
       </div>
       <div class="compact-actions">
         <button class="secondary-action" data-signal-details="${key}" type="button">${expanded ? "Hide Details" : "View Details"}</button>
@@ -3593,6 +3600,7 @@ function renderModeDetails(signal, locked = false) {
             <span>Review risk and market context before making any decision.</span>
           </div>
         </section>
+        ${renderSignalValidation(signal)}
         ${locked ? "" : renderRiskEngineCard(signal)}
       </section>
     `;
@@ -3602,8 +3610,26 @@ function renderModeDetails(signal, locked = false) {
     <section class="advanced-signal-details">
       <p class="reasoning">${escapeHtml(signal.reasoning || "Advanced signal context is based on rule alignment.")}</p>
       ${renderSignalTransparency(signal)}
+      ${renderSignalValidation(signal)}
       ${renderSignalConfluence(signal)}
       ${renderRiskEngineCard(signal, locked)}
+    </section>
+  `;
+}
+
+function renderSignalValidation(signal) {
+  const rejected = signal.rejectedReasons || signal.indicators?.validationRejectedReasons || [];
+  return `
+    <section class="signal-validation-card">
+      <div>
+        <span>Validation ${signal.validationPassed === false ? "Rejected" : "Passed"}</span>
+        <strong>${Number(signal.validationScore || signal.indicators?.validationScore || 100)}/100</strong>
+      </div>
+      ${rejected.length ? `
+        <div class="diagnostic-reasons">
+          ${rejected.map((item) => `<span>${escapeHtml(item.stage || "validation")}: ${escapeHtml(item.reason || item)}</span>`).join("")}
+        </div>
+      ` : `<p class="reasoning">Final validation passed before publication, unlock, history, and performance tracking.</p>`}
     </section>
   `;
 }
@@ -4325,6 +4351,38 @@ function renderAdminAnalytics() {
   ]);
   renderMarketMetricRows("#analytics-most-scanned", analytics.mostScannedMarkets);
   renderMarketMetricRows("#analytics-most-unlocked", analytics.mostUnlockedMarkets);
+  renderValidationDashboard();
+}
+
+function renderValidationDashboard() {
+  const validation = state.validationDashboard || {};
+  setText("#validation-pass-rate", `${Number(validation.validationPassRate || 0).toFixed(1)}% pass rate`);
+  setText("#validation-generated", formatInteger(validation.signalsGenerated));
+  setText("#validation-rejected", formatInteger(validation.signalsRejected));
+  setText("#validation-average-confidence", `${Number(validation.averageConfidence || 0).toFixed(1)}%`);
+  setText("#validation-average-rr", `${Number(validation.averageRiskReward || 0).toFixed(2)}R`);
+  renderValidationRows("#validation-top-reasons", validation.topRejectionReasons, (item) => [
+    `${item.stage || "validation"} · ${item.reason || "Unknown reason"}`,
+    item.count
+  ]);
+  renderValidationRows("#validation-top-strategies", validation.strategiesPassingMost, (item) => [
+    item.strategy || "Unknown strategy",
+    item.count
+  ]);
+  renderValidationRows("#validation-top-markets", validation.marketsPassingMost, (item) => [
+    item.symbol || "Unknown market",
+    item.count
+  ]);
+}
+
+function renderValidationRows(selector, rows = [], rowFormatter) {
+  const normalized = Array.isArray(rows) ? rows : [];
+  document.querySelector(selector).innerHTML = normalized.length
+    ? normalized.map((row) => {
+      const [label, count] = rowFormatter(row);
+      return `<div class="metric-row"><span>${escapeHtml(label)}</span><strong>${formatInteger(count)}</strong></div>`;
+    }).join("")
+    : `<div class="empty-state"><span>No validation data yet.</span></div>`;
 }
 
 function renderMetricRows(selector, rows) {

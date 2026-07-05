@@ -1214,9 +1214,9 @@ export async function saveUnlockedSignal(userId, signal) {
       INSERT INTO saved_signals (
         id, user_id, setup_key, symbol, timeframe, direction, entry_price, stop_loss, take_profit,
         risk_reward_ratio, confidence_score, quality_score, setup_type, reasoning,
-        confirmations, indicators, market_source, generated_at
+        confirmations, indicators, market_source, generated_at, validation_score, validation_passed
       )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
     `, [
       signal.id,
       userId,
@@ -1235,7 +1235,9 @@ export async function saveUnlockedSignal(userId, signal) {
       JSON.stringify(signal.confirmations || []),
       JSON.stringify(signal.indicators || {}),
       signal.marketSource,
-      signal.generatedAt
+      signal.generatedAt,
+      signal.validationScore ?? signal.validation?.score ?? 100,
+      signal.validationPassed !== false
     ]);
 
     await client.query(`
@@ -1283,6 +1285,121 @@ export async function saveUnlockedSignal(userId, signal) {
     );
     return saved.rows[0] ? mapSignal(saved.rows[0]) : null;
   });
+}
+
+export async function findActiveDuplicateSignal(userId, signal) {
+  const result = await query(`
+    SELECT s.id, s.setup_key
+    FROM saved_signals s
+    LEFT JOIN signal_outcomes o ON o.saved_signal_id = s.id
+    WHERE s.user_id = $1
+      AND s.symbol = $2
+      AND s.timeframe = $3
+      AND s.direction = $4
+      AND s.setup_type = $5
+      AND s.setup_key = $6
+      AND COALESCE(o.status, 'Active') = 'Active'
+    LIMIT 1
+  `, [
+    userId,
+    signal.symbol,
+    signal.timeframe,
+    signal.direction,
+    signal.setupType,
+    signal.setupKey || signal.id || null
+  ]);
+
+  return result.rows[0] || null;
+}
+
+export async function recordSignalValidationRejection(rejection) {
+  await query(`
+    INSERT INTO signal_validation_rejections (
+      id, user_id, setup_key, symbol, timeframe, direction, strategy,
+      validation_score, confidence_score, risk_reward_ratio, reasons, source
+    )
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+  `, [
+    createId("valrej"),
+    rejection.userId,
+    rejection.setupKey,
+    rejection.symbol,
+    rejection.timeframe,
+    rejection.direction,
+    rejection.strategy,
+    rejection.validationScore,
+    rejection.confidenceScore,
+    rejection.riskRewardRatio,
+    JSON.stringify(rejection.reasons || []),
+    rejection.source
+  ]);
+}
+
+export async function getSignalValidationDashboard() {
+  const [
+    totals,
+    topReasons,
+    strategies,
+    markets
+  ] = await Promise.all([
+    query(`
+      SELECT
+        (SELECT COUNT(*) FROM saved_signals WHERE validation_passed = true) AS generated,
+        (SELECT COUNT(*) FROM signal_validation_rejections) AS rejected,
+        (SELECT COALESCE(AVG(confidence_score), 0) FROM saved_signals WHERE validation_passed = true) AS average_confidence,
+        (SELECT COALESCE(AVG(risk_reward_ratio), 0) FROM saved_signals WHERE validation_passed = true) AS average_rr
+    `),
+    query(`
+      SELECT reason->>'stage' AS stage, reason->>'reason' AS reason, COUNT(*) AS count
+      FROM signal_validation_rejections r
+      CROSS JOIN LATERAL jsonb_array_elements(r.reasons) AS reason
+      GROUP BY stage, reason
+      ORDER BY count DESC
+      LIMIT 8
+    `),
+    query(`
+      SELECT setup_type AS strategy, COUNT(*) AS count
+      FROM saved_signals
+      WHERE validation_passed = true
+      GROUP BY setup_type
+      ORDER BY count DESC
+      LIMIT 8
+    `),
+    query(`
+      SELECT symbol, COUNT(*) AS count
+      FROM saved_signals
+      WHERE validation_passed = true
+      GROUP BY symbol
+      ORDER BY count DESC
+      LIMIT 8
+    `)
+  ]);
+
+  const row = totals.rows[0] || {};
+  const generated = Number(row.generated || 0);
+  const rejected = Number(row.rejected || 0);
+  const total = generated + rejected;
+
+  return {
+    signalsGenerated: generated,
+    signalsRejected: rejected,
+    validationPassRate: total ? Number(((generated / total) * 100).toFixed(1)) : 0,
+    averageConfidence: Number(Number(row.average_confidence || 0).toFixed(1)),
+    averageRiskReward: Number(Number(row.average_rr || 0).toFixed(2)),
+    topRejectionReasons: topReasons.rows.map((item) => ({
+      stage: item.stage,
+      reason: item.reason,
+      count: Number(item.count)
+    })),
+    strategiesPassingMost: strategies.rows.map((item) => ({
+      strategy: item.strategy,
+      count: Number(item.count)
+    })),
+    marketsPassingMost: markets.rows.map((item) => ({
+      symbol: item.symbol,
+      count: Number(item.count)
+    }))
+  };
 }
 
 export async function findSignalById(signalId, userId) {
@@ -2224,6 +2341,10 @@ function mapSignal(row) {
     riskRewardRatio: Number(row.risk_reward_ratio),
     confidenceScore: Number(row.confidence_score),
     qualityScore: Number(row.quality_score || 0),
+    validationPassed: row.validation_passed !== false,
+    validationScore: Number(row.validation_score || row.indicators?.validationScore || 100),
+    confidenceBand: row.indicators?.validationConfidenceBand || null,
+    rejectedReasons: row.indicators?.validationRejectedReasons || [],
     setupType: row.setup_type || "Qualified setup",
     confluenceScore: Number(row.indicators?.confluenceScore || 0),
     alignmentBadge: row.indicators?.alignmentBadge || "Partial Alignment",

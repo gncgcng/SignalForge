@@ -1,8 +1,10 @@
 import {
   cacheScanResult,
+  findActiveDuplicateSignal,
   findTelegramNotificationPayload,
   getCachedScanResult,
   listSignalsByUser,
+  recordSignalValidationRejection,
   saveUnlockedSignal
 } from "../../db/repositories.js";
 import { createId } from "../../shared/ids.js";
@@ -14,6 +16,11 @@ import {
   recordDiscoveryUsage
 } from "../subscriptions/subscriptionService.js";
 import { generateMarketDataSetup } from "./signalGenerator.js";
+import {
+  applyValidationToSignal,
+  validateSignalPipeline,
+  validationNoSetupAnalysis
+} from "./signalValidationService.js";
 import { calculateSignalStats, updateSignalsForUser } from "./signalOutcomeService.js";
 import { buildAnalystProfile } from "../analyst/signalAnalystService.js";
 import { trackProductEvent } from "../analytics/productAnalyticsService.js";
@@ -40,8 +47,22 @@ export async function createSignal(user, { symbol, timeframe }) {
     };
   }
 
+  const freshMarketData = await getMultiTimeframeMarketData(symbol, timeframe);
+  const unlockValidation = await validateSignalForPublication(result.fullSetup, freshMarketData, user, {
+    source: "unlock",
+    duplicate: false
+  });
+
+  if (!unlockValidation.passed) {
+    return {
+      signal: null,
+      analysis: validationNoSetupAnalysis(result.fullSetup, unlockValidation),
+      subscription: getSubscriptionSummary(user)
+    };
+  }
+
   const signal = {
-    ...result.fullSetup,
+    ...applyValidationToSignal(result.fullSetup, unlockValidation),
     id: createId("sig"),
     userId: user.id,
     status: "Active",
@@ -96,14 +117,29 @@ export async function unlockTelegramSignal(user, { setupKey }) {
     status: "Active",
     statusUpdatedAt: new Date().toISOString()
   };
-  const savedSignal = await saveUnlockedSignal(user.id, signal);
+  const freshMarketData = await getMultiTimeframeMarketData(signal.symbol, signal.timeframe);
+  const validation = await validateSignalForPublication(signal, freshMarketData, user, {
+    source: "telegram_unlock",
+    duplicate: false
+  });
+
+  if (!validation.passed) {
+    return {
+      signal: null,
+      analysis: validationNoSetupAnalysis(signal, validation),
+      subscription: getSubscriptionSummary(user)
+    };
+  }
+
+  const validatedSignal = applyValidationToSignal(signal, validation);
+  const savedSignal = await saveUnlockedSignal(user.id, validatedSignal);
 
   if (!savedSignal?.alreadyUnlocked) {
     await trackProductEvent({
       eventType: "unlock",
       userId: user.id,
-      symbol: signal.symbol,
-      timeframe: signal.timeframe,
+      symbol: validatedSignal.symbol,
+      timeframe: validatedSignal.timeframe,
       metadata: { source: "telegram" }
     });
   }
@@ -162,16 +198,28 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
   const marketData = await getMultiTimeframeMarketData(symbol, timeframe);
   const profile = analystProfile || await getUserAnalystProfile(user);
   const result = generateMarketDataSetup(marketData, timeframe, { analystProfile: profile });
+  const validation = result.valid
+    ? await validateSignalForPublication(result.signal, marketData, user, {
+      source: "scanner",
+      duplicate: true
+    })
+    : null;
+  const valid = Boolean(result.valid && validation?.passed);
+  const signal = valid ? applyValidationToSignal(result.signal, validation) : null;
+  const analysis = result.valid && validation && !validation.passed
+    ? validationNoSetupAnalysis(result.signal, validation)
+    : result.analysis;
 
   return {
     publicResult: {
       symbol,
       timeframe,
-      valid: result.valid,
-      setup: result.valid ? toScanPreview(result.signal) : null,
-      analysis: result.analysis
+      valid,
+      setup: valid ? toScanPreview(signal) : null,
+      analysis
     },
-    fullSetup: result.valid ? result.signal : null
+    fullSetup: signal,
+    analysis
   };
 }
 
@@ -366,13 +414,27 @@ function toScanPreview(signal) {
     analyst: signal.analyst,
     riskRewardRatio: signal.riskRewardRatio,
     confidenceScore: signal.confidenceScore,
+    confidenceBand: signal.confidenceBand,
     qualityScore: signal.qualityScore,
+    validationPassed: signal.validationPassed,
+    validationScore: signal.validationScore,
+    rejectedReasons: signal.rejectedReasons || [],
     reasoning: signal.reasoning,
     confirmations: signal.confirmations,
     indicators: signal.indicators,
     generatedAt: signal.generatedAt,
     locked: true
   };
+}
+
+async function validateSignalForPublication(signal, marketData, user, options = {}) {
+  return validateSignalPipeline(signal, {
+    userId: user?.id,
+    marketData,
+    source: options.source,
+    findActiveDuplicateSignal: options.duplicate === false ? null : findActiveDuplicateSignal,
+    recordValidationRejection: recordSignalValidationRejection
+  });
 }
 
 async function getUserAnalystProfile(user) {

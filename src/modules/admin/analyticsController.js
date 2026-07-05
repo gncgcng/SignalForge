@@ -1,4 +1,7 @@
-import { getAdminProductAnalytics } from "../../db/repositories.js";
+import {
+  getAdminProductAnalytics,
+  getSignalValidationDashboard
+} from "../../db/repositories.js";
 import { sendError, sendJson } from "../../shared/http.js";
 import { isAdminUser } from "../auth/authService.js";
 
@@ -12,7 +15,8 @@ export async function handleAdminAnalyticsRoutes(req, res, pathname) {
 
   if (req.method === "GET") {
     return sendJson(res, 200, {
-      analytics: await getAdminProductAnalytics()
+      analytics: await getAdminProductAnalytics(),
+      validation: await getSignalValidationDashboard()
     });
   }
 

@@ -2254,6 +2254,18 @@ polyline {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.validation-dashboard-title {
+  margin-top: 18px;
+}
+
+.validation-dashboard-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.validation-dashboard-lists {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .admin-analytics-grid .panel {
   display: grid;
   gap: 7px;
@@ -4303,6 +4315,30 @@ polyline {
 .signal-confluence > div > span:first-child {
   color: var(--muted);
   font-size: 0.78rem;
+}
+
+.signal-validation-card {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 13px;
+  border: 1px solid rgba(74, 222, 128, 0.24);
+  border-radius: 8px;
+  background: rgba(74, 222, 128, 0.045);
+}
+
+.signal-validation-card > div:first-child {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.signal-validation-card span {
+  color: var(--muted);
+}
+
+.signal-validation-card strong {
+  color: var(--green);
 }
 
 .market-regime-card > div {
