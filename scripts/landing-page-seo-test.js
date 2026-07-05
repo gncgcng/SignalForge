@@ -6,6 +6,10 @@ const styles = readFileSync(new URL("../public/styles.css", import.meta.url), "u
 const manifest = JSON.parse(readFileSync(new URL("../public/manifest.json", import.meta.url), "utf8"));
 const robots = readFileSync(new URL("../public/robots.txt", import.meta.url), "utf8");
 const sitemap = readFileSync(new URL("../public/sitemap.xml", import.meta.url), "utf8");
+const landingMockup = html.slice(
+  html.indexOf('aria-label="SignalForge app preview"'),
+  html.indexOf('id="how-it-works"')
+);
 
 const result = {
   seoMetadata:
@@ -54,6 +58,11 @@ const result = {
     html.includes("Signal Found") &&
     html.includes("Unlock Preview") &&
     html.includes('class="landing-band performance-preview hidden"'),
+  landingDemoDoesNotLeakFakeLevels:
+    /<span>Entry<\/span>\s*<strong>Unlock to view<\/strong>/.test(landingMockup) &&
+    /<span>Take Profit<\/span>\s*<strong>Unlock to view<\/strong>/.test(landingMockup) &&
+    /<span>Stop Loss<\/span>\s*<strong>Unlock to view<\/strong>/.test(landingMockup) &&
+    !/68,?420|70,?060|67,?730/.test(landingMockup),
   mobileResponsiveStyles:
     styles.includes(".premium-hero-layout") &&
     styles.includes(".app-mockup-card") &&
