@@ -2282,6 +2282,205 @@ polyline {
   font-size: 24px;
 }
 
+.admin-dashboard-groups,
+.admin-health-grid,
+.admin-ops-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.admin-dashboard-groups {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.admin-health-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.admin-health-card {
+  display: grid;
+  gap: 5px;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(16, 20, 29, 0.88);
+}
+
+.admin-health-card span,
+.admin-health-card small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.admin-health-card strong {
+  color: var(--red);
+  font-size: 20px;
+}
+
+.admin-health-card.healthy strong {
+  color: var(--green);
+}
+
+.admin-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.admin-panel-header input,
+.admin-panel-header select,
+.admin-user-search-form input {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(5, 8, 13, 0.9);
+  color: var(--text);
+}
+
+.admin-user-search-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.admin-table,
+.admin-compact-table {
+  display: grid;
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid rgba(40, 49, 66, 0.68);
+  border-radius: 8px;
+}
+
+.admin-table-row,
+.admin-compact-row {
+  display: grid;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border-bottom: 1px solid rgba(40, 49, 66, 0.68);
+}
+
+.admin-table-row {
+  grid-template-columns: 1.2fr 1.3fr 0.8fr 0.65fr 0.75fr 0.9fr 1.2fr;
+}
+
+.admin-compact-row {
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.admin-compact-row span,
+.admin-table-row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.admin-table-row strong {
+  display: block;
+  color: var(--text);
+}
+
+.admin-table-row small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+}
+
+.admin-table-head {
+  background: rgba(34, 211, 238, 0.06);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.admin-table-row:last-child,
+.admin-compact-row:last-child {
+  border-bottom: 0;
+}
+
+.admin-bar-row {
+  display: grid;
+  gap: 7px;
+  padding: 9px 0;
+  border-bottom: 1px solid rgba(40, 49, 66, 0.68);
+}
+
+.admin-bar-row:last-child {
+  border-bottom: 0;
+}
+
+.admin-bar-row div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.admin-bar-row strong {
+  color: var(--text);
+}
+
+.admin-bar-track {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.12);
+}
+
+.admin-bar-track i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--cyan), #60a5fa);
+}
+
+.admin-user-result {
+  display: grid;
+  gap: 12px;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.admin-user-result > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.admin-user-result > div:first-child span {
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.admin-user-result-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.admin-user-result-grid span {
+  display: grid;
+  gap: 3px;
+  padding: 9px;
+  border: 1px solid rgba(40, 49, 66, 0.68);
+  border-radius: 7px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.admin-user-result-grid strong {
+  color: var(--text);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
 .metric-row {
   display: flex;
   align-items: center;
@@ -5486,5 +5685,62 @@ polyline {
 
   .profile-settings-form button {
     width: 100%;
+  }
+}
+
+@media (max-width: 1100px) {
+  .admin-dashboard-groups,
+  .admin-health-grid,
+  .admin-analytics-grid.compact,
+  .admin-ops-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .admin-dashboard-groups,
+  .admin-health-grid,
+  .admin-analytics-grid,
+  .admin-analytics-grid.compact,
+  .admin-ops-grid,
+  .validation-dashboard-grid,
+  .validation-dashboard-lists,
+  .admin-abuse-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-panel-header,
+  .admin-user-search-form {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .admin-table,
+  .admin-compact-table {
+    border: 0;
+    gap: 10px;
+    overflow: visible;
+  }
+
+  .admin-table-head {
+    display: none;
+  }
+
+  .admin-table-row,
+  .admin-compact-row {
+    grid-template-columns: 1fr;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: rgba(5, 8, 13, 0.42);
+  }
+
+  .admin-user-result-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 460px) {
+  .admin-user-result-grid {
+    grid-template-columns: 1fr;
   }
 }

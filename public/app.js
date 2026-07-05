@@ -54,6 +54,8 @@ const state = {
     disposableEmails: []
   },
   adminAnalytics: null,
+  adminDashboard: null,
+  adminUserSearchResults: [],
   validationDashboard: null,
   profile: null,
   publicProfile: null,
@@ -986,6 +988,34 @@ adminRequestList.addEventListener("click", async (event) => {
   }
 });
 
+document.querySelector("#admin-signal-search")?.addEventListener("input", () => {
+  renderAdminSignalMonitor();
+});
+
+document.querySelector("#admin-error-filter")?.addEventListener("change", () => {
+  renderAdminErrorLogs();
+});
+
+document.querySelector("#admin-user-search-form")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const input = document.querySelector("#admin-user-search-input");
+  const output = document.querySelector("#admin-user-search-results");
+  const query = input?.value?.trim() || "";
+  if (!query || query.length < 2) {
+    output.innerHTML = `<div class="empty-state"><span>Enter at least 2 characters.</span></div>`;
+    return;
+  }
+
+  try {
+    output.innerHTML = `<div class="empty-state"><span>Searching users...</span></div>`;
+    const result = await api.request(`/api/admin/users/search?q=${encodeURIComponent(query)}`);
+    state.adminUserSearchResults = result.users || [];
+    renderAdminUserSearchResults();
+  } catch (error) {
+    output.innerHTML = `<div class="empty-state"><span>${escapeHtml(error.message)}</span></div>`;
+  }
+});
+
 backtestForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const submitButton = backtestForm.querySelector("button");
@@ -1518,6 +1548,9 @@ function clearClientAuthState() {
   state.webhookEvents = [];
   state.testerAccess = null;
   state.adminRequests = [];
+  state.adminAnalytics = null;
+  state.adminDashboard = null;
+  state.adminUserSearchResults = [];
   state.validationDashboard = null;
   state.abuseDashboard = {
     flaggedAccounts: [],
@@ -2018,7 +2051,7 @@ async function loadWebhookEvents() {
 
 async function loadAdminRequests() {
   if (!state.user.isAdmin) return;
-  const [{ requests }, { abuse }, { affiliateAdmin }, { analytics, validation }] = await Promise.all([
+  const [{ requests }, { abuse }, { affiliateAdmin }, { analytics, validation, dashboard }] = await Promise.all([
     api.request("/api/admin/tester-access"),
     api.request("/api/admin/abuse"),
     api.request("/api/admin/affiliates"),
@@ -2028,6 +2061,7 @@ async function loadAdminRequests() {
   state.abuseDashboard = abuse;
   state.affiliateAdmin = affiliateAdmin;
   state.adminAnalytics = analytics;
+  state.adminDashboard = dashboard;
   state.validationDashboard = validation;
   renderAdminAnalytics();
   renderAdminRequests();
@@ -4330,18 +4364,12 @@ function renderAdminAnalytics() {
   if (!state.user?.isAdmin || !state.adminAnalytics) return;
   const analytics = state.adminAnalytics;
   document.querySelector("#admin-analytics-summary").textContent =
-    `${analytics.signups || 0} signups · ${analytics.scans || 0} scans · ${analytics.unlocks || 0} unlocks`;
-  document.querySelector("#analytics-total-users").textContent = formatInteger(analytics.totalUsers);
-  document.querySelector("#analytics-paid-users").textContent = formatInteger(analytics.paidUsers);
-  document.querySelector("#analytics-conversion-rate").textContent = `${analytics.conversionRate || 0}%`;
-  document.querySelector("#analytics-mrr").textContent = formatCents(analytics.monthlyRecurringRevenueCents);
-  document.querySelector("#analytics-affiliate-owed").textContent = formatCents(analytics.affiliateRevenueOwedCents);
-  document.querySelector("#analytics-checkout-funnel").textContent =
-    `${formatInteger(analytics.checkoutCompleted)} / ${formatInteger(analytics.checkoutStarted)}`;
+    `${formatInteger(analytics.totalUsers)} users · ${formatCents(analytics.monthlyRecurringRevenueCents)} MRR · ${formatInteger(analytics.unlocks)} unlocks`;
   renderMetricRows("#analytics-signups", [
     ["Total signups", analytics.signups],
     ["Email signups", analytics.emailSignups],
-    ["Google signups", analytics.googleSignups]
+    ["Google signups", analytics.googleSignups],
+    ["Checkout completed", analytics.checkoutCompleted]
   ]);
   renderMetricRows("#analytics-usage", [
     ["Scans", analytics.scans],
@@ -4351,7 +4379,245 @@ function renderAdminAnalytics() {
   ]);
   renderMarketMetricRows("#analytics-most-scanned", analytics.mostScannedMarkets);
   renderMarketMetricRows("#analytics-most-unlocked", analytics.mostUnlockedMarkets);
+  renderAdminOperationsDashboard();
   renderValidationDashboard();
+}
+
+function renderAdminOperationsDashboard() {
+  const dashboard = state.adminDashboard || {};
+  const overview = dashboard.overview || {};
+  renderAdminHealth(dashboard.health || []);
+  renderMetricRows("#admin-overview-users", [
+    ["Total users", overview.users?.totalUsers],
+    ["Active today", overview.users?.activeToday],
+    ["Active this week", overview.users?.activeThisWeek],
+    ["New users today", overview.users?.newUsersToday],
+    ["New Pro", overview.users?.newPro],
+    ["New Elite", overview.users?.newElite]
+  ]);
+  renderMetricRows("#admin-overview-revenue", [
+    ["Monthly recurring revenue", formatCents(overview.revenue?.monthlyRecurringRevenueCents)],
+    ["Revenue today", formatCents(overview.revenue?.revenueTodayCents)],
+    ["Revenue this month", formatCents(overview.revenue?.revenueThisMonthCents)],
+    ["Failed payments", overview.revenue?.failedPayments],
+    ["Renewals today", overview.revenue?.renewalsToday]
+  ], { rawValues: true });
+  renderMetricRows("#admin-overview-signals", [
+    ["Generated today", overview.signals?.generatedToday],
+    ["Validated today", overview.signals?.validatedToday],
+    ["Rejected today", overview.signals?.rejectedToday],
+    ["Telegram alerts sent", overview.signals?.telegramAlertsSentToday],
+    ["Unlocks today", overview.signals?.unlocksToday],
+    ["Average confidence", `${Number(overview.signals?.averageConfidence || 0).toFixed(1)}%`],
+    ["Average R:R", `${Number(overview.signals?.averageRiskReward || 0).toFixed(2)}R`]
+  ], { rawValues: true });
+  renderMetricRows("#admin-overview-system", [
+    ["Server uptime", formatDuration(overview.system?.serverUptimeSeconds)],
+    ["Database status", titleCase(overview.system?.databaseStatus || "unknown")],
+    ["Coinbase status", titleCase(overview.system?.coinbaseStatus || "unknown")],
+    ["Commodity provider", titleCase(overview.system?.commodityProviderStatus || "unknown")],
+    ["Telegram bot", titleCase(overview.system?.telegramBotStatus || "unknown")],
+    ["Stripe", titleCase(overview.system?.stripeStatus || "unknown")]
+  ], { rawValues: true });
+
+  renderAdminSignalMonitor();
+  renderAdminRejectionAnalytics();
+  renderAdminStrategyAnalytics();
+  renderAdminMarketAnalytics();
+  renderAdminTelegram();
+  renderAdminAffiliates();
+  renderAdminStripe();
+  renderAdminErrorLogs();
+  renderAdminUserSearchResults();
+}
+
+function renderAdminHealth(health = []) {
+  const container = document.querySelector("#admin-health-grid");
+  if (!container) return;
+  container.innerHTML = health.length
+    ? health.map((item) => `
+      <article class="admin-health-card ${item.status === "green" ? "healthy" : "unhealthy"}">
+        <span>${escapeHtml(item.label)}</span>
+        <strong>${item.status === "green" ? "Green" : "Red"}</strong>
+        <small>${escapeHtml(item.detail || "")}</small>
+      </article>
+    `).join("")
+    : `<div class="empty-state"><span>No health data yet.</span></div>`;
+}
+
+function renderAdminSignalMonitor() {
+  const container = document.querySelector("#admin-signal-monitor");
+  if (!container) return;
+  const query = (document.querySelector("#admin-signal-search")?.value || "").trim().toLowerCase();
+  const rows = (state.adminDashboard?.signalMonitor || []).filter((signal) => {
+    if (!query) return true;
+    return [
+      signal.market,
+      signal.timeframe,
+      signal.direction,
+      signal.strategy,
+      signal.status,
+      signal.rejectedReason
+    ].join(" ").toLowerCase().includes(query);
+  });
+
+  container.innerHTML = rows.length
+    ? `
+      <div class="admin-table">
+        <div class="admin-table-row admin-table-head">
+          <span>Market</span><span>Strategy</span><span>Confidence</span><span>RR</span><span>Validation</span><span>Status</span><span>Reason</span>
+        </div>
+        ${rows.map((signal) => `
+          <div class="admin-table-row">
+            <span><strong>${escapeHtml(signal.market || "--")}</strong><small>${escapeHtml(signal.timeframe || "--")} · ${escapeHtml(signal.direction || "--")}</small></span>
+            <span>${escapeHtml(signal.strategy || "Unknown")}</span>
+            <span>${Number(signal.confidence || 0).toFixed(0)}%</span>
+            <span>${Number(signal.riskReward || 0).toFixed(2)}R</span>
+            <span>${Number(signal.validationScore || 0).toFixed(0)}</span>
+            <span><em class="status-pill ${signal.validationPassed ? "status-hit-tp" : "status-hit-sl"}">${escapeHtml(signal.status || "Unknown")}</em></span>
+            <span>${escapeHtml(signal.rejectedReason || "None")}</span>
+          </div>
+        `).join("")}
+      </div>
+    `
+    : `<div class="empty-state"><span>No signal monitor rows match.</span></div>`;
+}
+
+function renderAdminRejectionAnalytics() {
+  const rows = state.adminDashboard?.rejectionAnalytics || [];
+  renderAdminBarList("#admin-rejection-pie", rows, (item) => item.reason, (item) => item.count);
+}
+
+function renderAdminStrategyAnalytics() {
+  const rows = state.adminDashboard?.strategyAnalytics || [];
+  renderAdminCompactTable("#admin-strategy-analytics", ["Strategy", "Generated", "Passed", "Rejected", "Conf", "RR", "Win"], rows, (item) => [
+    item.strategy,
+    formatInteger(item.generated),
+    formatInteger(item.passed),
+    formatInteger(item.rejected),
+    `${Number(item.averageConfidence || 0).toFixed(1)}%`,
+    `${Number(item.averageRiskReward || 0).toFixed(2)}R`,
+    `${Number(item.winRate || 0).toFixed(1)}%`
+  ]);
+}
+
+function renderAdminMarketAnalytics() {
+  const rows = state.adminDashboard?.marketAnalytics || [];
+  renderAdminCompactTable("#admin-market-analytics", ["Market", "Signals", "Win", "RR", "Conf"], rows, (item) => [
+    item.market,
+    formatInteger(item.signals),
+    `${Number(item.winRate || 0).toFixed(1)}%`,
+    `${Number(item.averageRiskReward || 0).toFixed(2)}R`,
+    `${Number(item.averageConfidence || 0).toFixed(1)}%`
+  ]);
+}
+
+function renderAdminTelegram() {
+  const telegram = state.adminDashboard?.telegram || {};
+  renderMetricRows("#admin-telegram-metrics", [
+    ["Messages sent", telegram.messagesSent],
+    ["Failed sends", telegram.failedSends],
+    ["Pending queue", telegram.pendingQueue],
+    ["Avg delivery", `${Number(telegram.averageDeliverySeconds || 0).toFixed(1)}s`],
+    ["Retry count", telegram.retryCount]
+  ], { rawValues: true });
+  renderAdminRows("#admin-telegram-failures", telegram.latestFailures || [], (item) => `
+    <div><strong>${escapeHtml(item.setupKey || item.id)}</strong><span>${escapeHtml(item.error || "No error")} · attempts ${formatInteger(item.attempts)}</span></div>
+  `);
+}
+
+function renderAdminAffiliates() {
+  const affiliates = state.adminDashboard?.affiliates || {};
+  renderMetricRows("#admin-affiliate-metrics", [
+    ["Active referrals", affiliates.activeReferrals],
+    ["Monthly commissions", formatCents(affiliates.monthlyCommissionsCents)],
+    ["Pending payouts", formatCents(affiliates.pendingPayoutsCents)],
+    ["Paid payouts", formatCents(affiliates.paidPayoutsCents)],
+    ["Conversion rate", `${Number(affiliates.conversionRate || 0).toFixed(1)}%`]
+  ], { rawValues: true });
+  renderAdminRows("#admin-top-affiliates", affiliates.topAffiliates || [], (item) => `
+    <div><strong>${escapeHtml(item.username || item.email || item.userId)}</strong><span>${formatInteger(item.activeReferrals)} active · ${formatCents(item.lifetimeEarningsCents)} lifetime</span></div>
+  `);
+}
+
+function renderAdminStripe() {
+  const stripe = state.adminDashboard?.stripe || {};
+  renderMetricRows("#admin-stripe-metrics", [
+    ["Latest subscriptions", stripe.activeSubscriptions],
+    ["Renewals", stripe.renewals],
+    ["Failed renewals", stripe.failedRenewals],
+    ["Refunds", stripe.refunds],
+    ["Webhook failures", stripe.webhookFailures]
+  ]);
+  renderAdminRows("#admin-stripe-latest", stripe.latestSubscriptions || [], (item) => `
+    <div><strong>${escapeHtml(item.username || item.email || item.userId)}</strong><span>${escapeHtml(String(item.plan || "free").toUpperCase())} · ${escapeHtml(item.status || "unknown")} · ${formatDateTime(item.updatedAt)}</span></div>
+  `);
+}
+
+function renderAdminErrorLogs() {
+  const container = document.querySelector("#admin-error-logs");
+  if (!container) return;
+  const filter = document.querySelector("#admin-error-filter")?.value || "all";
+  const rows = (state.adminDashboard?.errorLogs || []).filter((item) => filter === "all" || item.area === filter);
+  renderAdminRows("#admin-error-logs", rows, (item) => `
+    <div><strong>${escapeHtml(item.area)} · ${escapeHtml(item.id || "event")}</strong><span>${escapeHtml(item.message || "No message")} · ${formatDateTime(item.createdAt)}</span></div>
+  `);
+}
+
+function renderAdminUserSearchResults() {
+  const container = document.querySelector("#admin-user-search-results");
+  if (!container) return;
+  const rows = state.adminUserSearchResults || [];
+  container.innerHTML = rows.length
+    ? rows.map((user) => `
+      <article class="admin-user-result">
+        <div>
+          <strong>${escapeHtml(user.username || user.name || user.id)}</strong>
+          <span>${escapeHtml(user.email)} · ${escapeHtml(user.id)}</span>
+        </div>
+        <div class="admin-user-result-grid">
+          <span>Plan <strong>${escapeHtml(String(user.plan || "free").toUpperCase())}</strong></span>
+          <span>Subscription <strong>${escapeHtml(user.subscription?.status || "none")}</strong></span>
+          <span>Unlock credits <strong>${formatInteger(user.credits?.unlockCreditsBalance)}</strong></span>
+          <span>Signals <strong>${formatInteger(user.signals?.unlocked)}</strong></span>
+          <span>Affiliate <strong>${formatInteger(user.affiliate?.activeReferrals)} active</strong></span>
+          <span>Telegram <strong>${user.telegram?.connected ? "Connected" : "Not connected"}</strong></span>
+          <span>Profile <strong>${user.profile?.publicProfileEnabled ? "Public" : "Private"}</strong></span>
+          <span>Abuse score <strong>${formatInteger(user.profile?.abuseScore)}</strong></span>
+        </div>
+      </article>
+    `).join("")
+    : `<div class="empty-state"><span>Search by username, email, or user ID.</span></div>`;
+}
+
+function renderAdminBarList(selector, rows = [], labelGetter, valueGetter) {
+  const container = document.querySelector(selector);
+  if (!container) return;
+  const max = Math.max(...rows.map((item) => Number(valueGetter(item) || 0)), 1);
+  container.innerHTML = rows.length
+    ? rows.map((item) => {
+      const value = Number(valueGetter(item) || 0);
+      return `
+        <div class="admin-bar-row">
+          <div><span>${escapeHtml(labelGetter(item))}</span><strong>${formatInteger(value)}</strong></div>
+          <span class="admin-bar-track"><i style="width:${Math.max(5, (value / max) * 100)}%"></i></span>
+        </div>
+      `;
+    }).join("")
+    : `<div class="empty-state"><span>No rejection data yet.</span></div>`;
+}
+
+function renderAdminCompactTable(selector, columns, rows = [], rowFormatter) {
+  const container = document.querySelector(selector);
+  if (!container) return;
+  container.innerHTML = rows.length
+    ? `
+      <div class="admin-compact-table">
+        <div class="admin-compact-row admin-table-head">${columns.map((column) => `<span>${escapeHtml(column)}</span>`).join("")}</div>
+        ${rows.map((row) => `<div class="admin-compact-row">${rowFormatter(row).map((value) => `<span>${escapeHtml(value)}</span>`).join("")}</div>`).join("")}
+      </div>
+    `
+    : `<div class="empty-state"><span>No analytics yet.</span></div>`;
 }
 
 function renderValidationDashboard() {
@@ -4385,9 +4651,9 @@ function renderValidationRows(selector, rows = [], rowFormatter) {
     : `<div class="empty-state"><span>No validation data yet.</span></div>`;
 }
 
-function renderMetricRows(selector, rows) {
+function renderMetricRows(selector, rows, options = {}) {
   document.querySelector(selector).innerHTML = rows.map(([label, value]) => `
-    <div class="metric-row"><span>${escapeHtml(label)}</span><strong>${formatInteger(value)}</strong></div>
+    <div class="metric-row"><span>${escapeHtml(label)}</span><strong>${escapeHtml(options.rawValues ? value : formatInteger(value))}</strong></div>
   `).join("");
 }
 
@@ -5408,6 +5674,22 @@ function formatInteger(value) {
 function formatR(value) {
   const numeric = Number(value || 0);
   return `${numeric > 0 ? "+" : ""}${numeric.toFixed(2)}R`;
+}
+
+function formatDuration(seconds) {
+  const total = Math.max(0, Number(seconds || 0));
+  const days = Math.floor(total / 86400);
+  const hours = Math.floor((total % 86400) / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
+}
+
+function titleCase(value) {
+  return String(value || "")
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function getPaperStatusClass(status) {

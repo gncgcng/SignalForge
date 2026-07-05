@@ -451,6 +451,474 @@ export async function getAdminProductAnalytics() {
   };
 }
 
+export async function getAdminOperationsDashboard() {
+  const [
+    overview,
+    signals,
+    rejectedSignals,
+    rejectionReasons,
+    strategyAnalytics,
+    marketAnalytics,
+    telegram,
+    telegramFailures,
+    affiliates,
+    topAffiliates,
+    stripe,
+    latestSubscriptions,
+    stripeFailures,
+    errorLogs,
+    systemActivity
+  ] = await Promise.all([
+    query(`
+      SELECT
+        (SELECT COUNT(*)::integer FROM users WHERE COALESCE(role, 'user') <> 'tester') AS total_users,
+        (SELECT COUNT(DISTINCT user_id)::integer FROM product_analytics_events
+          WHERE created_at >= date_trunc('day', now()) AND user_id IS NOT NULL) AS active_today,
+        (SELECT COUNT(DISTINCT user_id)::integer FROM product_analytics_events
+          WHERE created_at >= now() - interval '7 days' AND user_id IS NOT NULL) AS active_week,
+        (SELECT COUNT(*)::integer FROM users
+          WHERE created_at >= date_trunc('day', now()) AND COALESCE(role, 'user') <> 'tester') AS new_users_today,
+        (SELECT COUNT(*)::integer FROM users
+          WHERE plan = 'pro' AND updated_at >= date_trunc('day', now()) AND COALESCE(role, 'user') <> 'tester') AS new_pro,
+        (SELECT COUNT(*)::integer FROM users
+          WHERE plan = 'elite' AND updated_at >= date_trunc('day', now()) AND COALESCE(role, 'user') <> 'tester') AS new_elite,
+        COALESCE((SELECT SUM(CASE WHEN u.plan = 'pro' THEN 2900 WHEN u.plan = 'elite' THEN 9900 ELSE 0 END)
+          FROM users u
+          LEFT JOIN subscriptions s ON s.user_id = u.id
+          WHERE COALESCE(s.status, '') IN ('active', 'trialing')
+            AND u.plan IN ('pro', 'elite')
+            AND COALESCE(u.role, 'user') <> 'tester'), 0)::integer AS mrr_cents,
+        COALESCE((SELECT SUM(amount_cents) FROM product_analytics_events
+          WHERE event_type IN ('subscription', 'checkout_completed')
+            AND created_at >= date_trunc('day', now())), 0)::integer AS revenue_today_cents,
+        COALESCE((SELECT SUM(amount_cents) FROM product_analytics_events
+          WHERE event_type IN ('subscription', 'checkout_completed')
+            AND created_at >= date_trunc('month', now())), 0)::integer AS revenue_month_cents,
+        (SELECT COUNT(*)::integer FROM stripe_webhook_events
+          WHERE (event_type = 'invoice.payment_failed' OR status = 'failed')
+            AND received_at >= date_trunc('month', now())) AS failed_payments,
+        (SELECT COUNT(*)::integer FROM stripe_webhook_events
+          WHERE event_type = 'invoice.payment_succeeded'
+            AND received_at >= date_trunc('day', now())) AS renewals_today,
+        (SELECT COUNT(*)::integer FROM saved_signals
+          WHERE created_at >= date_trunc('day', now())) AS signals_generated_today,
+        (SELECT COUNT(*)::integer FROM saved_signals
+          WHERE validation_passed = true AND created_at >= date_trunc('day', now())) AS signals_validated_today,
+        (SELECT COUNT(*)::integer FROM signal_validation_rejections
+          WHERE created_at >= date_trunc('day', now())) AS signals_rejected_today,
+        (SELECT COUNT(*)::integer FROM telegram_notification_queue
+          WHERE status = 'sent' AND sent_at >= date_trunc('day', now())) AS telegram_sent_today,
+        (SELECT COUNT(*)::integer FROM unlocked_signals
+          WHERE created_at >= date_trunc('day', now())) AS unlocks_today,
+        COALESCE((SELECT AVG(confidence_score) FROM saved_signals
+          WHERE validation_passed = true AND created_at >= date_trunc('day', now())), 0)::numeric AS average_confidence_today,
+        COALESCE((SELECT AVG(risk_reward_ratio) FROM saved_signals
+          WHERE validation_passed = true AND created_at >= date_trunc('day', now())), 0)::numeric AS average_rr_today
+    `),
+    query(`
+      SELECT s.id, s.symbol, s.timeframe, s.direction, s.setup_type AS strategy,
+        s.confidence_score, s.risk_reward_ratio, s.validation_score,
+        s.validation_passed, COALESCE(o.status, 'Active') AS status,
+        NULL::jsonb AS rejected_reasons, s.created_at
+      FROM saved_signals s
+      LEFT JOIN signal_outcomes o ON o.saved_signal_id = s.id
+      ORDER BY s.created_at DESC
+      LIMIT 40
+    `),
+    query(`
+      SELECT id, symbol, timeframe, direction, strategy,
+        confidence_score, risk_reward_ratio, validation_score,
+        false AS validation_passed, 'Rejected' AS status, reasons AS rejected_reasons,
+        created_at
+      FROM signal_validation_rejections
+      ORDER BY created_at DESC
+      LIMIT 40
+    `),
+    query(`
+      SELECT reason->>'reason' AS reason, COUNT(*)::integer AS count
+      FROM signal_validation_rejections r
+      CROSS JOIN LATERAL jsonb_array_elements(r.reasons) AS reason
+      GROUP BY reason
+      ORDER BY count DESC, reason ASC
+      LIMIT 10
+    `),
+    query(`
+      WITH generated AS (
+        SELECT setup_type AS strategy, COUNT(*)::integer AS generated,
+          COUNT(*) FILTER (WHERE validation_passed = true)::integer AS passed,
+          COALESCE(AVG(confidence_score), 0)::numeric AS average_confidence,
+          COALESCE(AVG(risk_reward_ratio), 0)::numeric AS average_rr,
+          COUNT(*) FILTER (WHERE o.status = 'Hit TP')::integer AS tp,
+          COUNT(*) FILTER (WHERE o.status IN ('Hit TP', 'Hit SL'))::integer AS closed
+        FROM saved_signals s
+        LEFT JOIN signal_outcomes o ON o.saved_signal_id = s.id
+        GROUP BY setup_type
+      ),
+      rejected AS (
+        SELECT strategy, COUNT(*)::integer AS rejected
+        FROM signal_validation_rejections
+        GROUP BY strategy
+      )
+      SELECT COALESCE(g.strategy, r.strategy, 'Unknown') AS strategy,
+        COALESCE(g.generated, 0)::integer AS generated,
+        COALESCE(g.passed, 0)::integer AS passed,
+        COALESCE(r.rejected, 0)::integer AS rejected,
+        COALESCE(g.average_confidence, 0)::numeric AS average_confidence,
+        COALESCE(g.average_rr, 0)::numeric AS average_rr,
+        CASE WHEN COALESCE(g.closed, 0) > 0
+          THEN ROUND((g.tp::numeric / g.closed::numeric) * 100, 1)
+          ELSE 0
+        END AS win_rate
+      FROM generated g
+      FULL OUTER JOIN rejected r ON r.strategy = g.strategy
+      ORDER BY generated DESC, passed DESC, strategy ASC
+      LIMIT 20
+    `),
+    query(`
+      SELECT s.symbol,
+        COUNT(*)::integer AS signals,
+        COALESCE(AVG(s.risk_reward_ratio), 0)::numeric AS average_rr,
+        COALESCE(AVG(s.confidence_score), 0)::numeric AS average_confidence,
+        COUNT(*) FILTER (WHERE o.status = 'Hit TP')::integer AS tp,
+        COUNT(*) FILTER (WHERE o.status IN ('Hit TP', 'Hit SL'))::integer AS closed,
+        CASE WHEN COUNT(*) FILTER (WHERE o.status IN ('Hit TP', 'Hit SL')) > 0
+          THEN ROUND((COUNT(*) FILTER (WHERE o.status = 'Hit TP')::numeric /
+            COUNT(*) FILTER (WHERE o.status IN ('Hit TP', 'Hit SL'))::numeric) * 100, 1)
+          ELSE 0
+        END AS win_rate
+      FROM saved_signals s
+      LEFT JOIN signal_outcomes o ON o.saved_signal_id = s.id
+      WHERE s.validation_passed = true
+      GROUP BY s.symbol
+      ORDER BY signals DESC, s.symbol ASC
+      LIMIT 60
+    `),
+    query(`
+      SELECT
+        COUNT(*) FILTER (WHERE status = 'sent')::integer AS messages_sent,
+        COUNT(*) FILTER (WHERE status = 'failed')::integer AS failed_sends,
+        COUNT(*) FILTER (WHERE status IN ('queued', 'sending'))::integer AS pending_queue,
+        COALESCE(AVG(EXTRACT(EPOCH FROM (sent_at - created_at))) FILTER (WHERE sent_at IS NOT NULL), 0)::numeric
+          AS average_delivery_seconds,
+        COALESCE(SUM(GREATEST(attempts - 1, 0)), 0)::integer AS retry_count
+      FROM telegram_notification_queue
+    `),
+    query(`
+      SELECT id, user_id, setup_key, status, attempts, last_error, created_at, updated_at
+      FROM telegram_notification_queue
+      WHERE status = 'failed' OR last_error IS NOT NULL
+      ORDER BY updated_at DESC
+      LIMIT 8
+    `),
+    query(`
+      SELECT
+        COUNT(*) FILTER (WHERE active)::integer AS active_referrals,
+        COALESCE(SUM(monthly_commission_cents) FILTER (WHERE active), 0)::integer AS monthly_commissions_cents,
+        COALESCE((SELECT SUM(amount_cents) FROM affiliate_payout_requests WHERE status = 'pending'), 0)::integer
+          AS pending_payouts_cents,
+        COALESCE((SELECT SUM(amount_cents) FROM affiliate_payout_requests WHERE status = 'approved'), 0)::integer
+          AS paid_payouts_cents,
+        (SELECT COUNT(*)::integer FROM affiliate_clicks) AS clicks,
+        COUNT(*)::integer AS referrals
+      FROM affiliate_referrals
+    `),
+    query(`
+      SELECT u.id, u.email, u.username, u.affiliate_code,
+        COUNT(r.id)::integer AS referrals,
+        COUNT(r.id) FILTER (WHERE r.active)::integer AS active_referrals,
+        COALESCE(SUM(r.monthly_commission_cents) FILTER (WHERE r.active), 0)::integer AS monthly_commissions_cents,
+        COALESCE(SUM(r.lifetime_commission_cents), 0)::integer AS lifetime_earnings_cents
+      FROM users u
+      LEFT JOIN affiliate_referrals r ON r.affiliate_user_id = u.id
+      WHERE u.affiliate_code IS NOT NULL AND COALESCE(u.role, 'user') <> 'tester'
+      GROUP BY u.id
+      ORDER BY lifetime_earnings_cents DESC, active_referrals DESC
+      LIMIT 8
+    `),
+    query(`
+      SELECT
+        (SELECT COUNT(*)::integer
+          FROM users u
+          LEFT JOIN subscriptions s ON s.user_id = u.id
+          WHERE u.plan IN ('pro', 'elite')
+            AND COALESCE(s.status, '') IN ('active', 'trialing')) AS active_subscriptions,
+        (SELECT COUNT(*)::integer FROM stripe_webhook_events
+          WHERE event_type = 'invoice.payment_succeeded') AS renewals,
+        (SELECT COUNT(*)::integer FROM stripe_webhook_events
+          WHERE event_type = 'invoice.payment_failed') AS failed_renewals,
+        (SELECT COUNT(*)::integer FROM stripe_webhook_events
+          WHERE event_type LIKE '%refund%') AS refunds,
+        (SELECT COUNT(*)::integer FROM stripe_webhook_events
+          WHERE status = 'failed') AS webhook_failures
+    `),
+    query(`
+      SELECT u.id AS user_id, u.email, u.username, u.plan, s.status,
+        s.provider_subscription_id, s.current_period_end, s.updated_at
+      FROM subscriptions s
+      JOIN users u ON u.id = s.user_id
+      WHERE u.plan IN ('pro', 'elite')
+      ORDER BY s.updated_at DESC
+      LIMIT 8
+    `),
+    query(`
+      SELECT event_id, event_type, stripe_object_id, status, attempts, last_error, received_at
+      FROM stripe_webhook_events
+      WHERE status = 'failed' OR last_error IS NOT NULL
+      ORDER BY received_at DESC
+      LIMIT 8
+    `),
+    query(`
+      SELECT 'Telegram' AS area, id AS id, COALESCE(last_error, 'Telegram delivery failed') AS message,
+        updated_at AS created_at
+      FROM telegram_notification_queue
+      WHERE status = 'failed' OR last_error IS NOT NULL
+      UNION ALL
+      SELECT 'Stripe' AS area, event_id AS id, COALESCE(last_error, 'Stripe webhook failed') AS message,
+        received_at AS created_at
+      FROM stripe_webhook_events
+      WHERE status = 'failed' OR last_error IS NOT NULL
+      UNION ALL
+      SELECT 'Scanner' AS area, id AS id,
+        COALESCE((reasons->0->>'reason'), 'Signal rejected by validation') AS message,
+        created_at
+      FROM signal_validation_rejections
+      ORDER BY created_at DESC
+      LIMIT 25
+    `),
+    query(`
+      SELECT
+        (SELECT COUNT(*)::integer FROM setup_discovery_usage
+          WHERE created_at >= now() - interval '20 minutes') AS recent_scans,
+        (SELECT COUNT(*)::integer FROM telegram_notification_queue
+          WHERE status IN ('queued', 'sending')) AS telegram_pending,
+        (SELECT COUNT(*)::integer FROM signal_outcomes
+          WHERE status = 'Active') AS active_tracking
+    `)
+  ]);
+
+  const row = overview.rows[0] || {};
+  const affiliateRow = affiliates.rows[0] || {};
+  const stripeRow = stripe.rows[0] || {};
+  const systemRow = systemActivity.rows[0] || {};
+
+  return {
+    overview: {
+      users: {
+        totalUsers: Number(row.total_users || 0),
+        activeToday: Number(row.active_today || 0),
+        activeThisWeek: Number(row.active_week || 0),
+        newUsersToday: Number(row.new_users_today || 0),
+        newPro: Number(row.new_pro || 0),
+        newElite: Number(row.new_elite || 0)
+      },
+      revenue: {
+        monthlyRecurringRevenueCents: Number(row.mrr_cents || 0),
+        revenueTodayCents: Number(row.revenue_today_cents || 0),
+        revenueThisMonthCents: Number(row.revenue_month_cents || 0),
+        failedPayments: Number(row.failed_payments || 0),
+        renewalsToday: Number(row.renewals_today || 0)
+      },
+      signals: {
+        generatedToday: Number(row.signals_generated_today || 0),
+        validatedToday: Number(row.signals_validated_today || 0),
+        rejectedToday: Number(row.signals_rejected_today || 0),
+        telegramAlertsSentToday: Number(row.telegram_sent_today || 0),
+        unlocksToday: Number(row.unlocks_today || 0),
+        averageConfidence: Number(row.average_confidence_today || 0),
+        averageRiskReward: Number(row.average_rr_today || 0)
+      },
+      system: {
+        serverUptimeSeconds: Math.round(process.uptime()),
+        databaseStatus: "ok",
+        coinbaseStatus: "configured",
+        commodityProviderStatus: appConfig.twelveData?.apiKey ? "configured" : "not_configured",
+        telegramBotStatus: appConfig.telegram?.botToken ? "configured" : "not_configured",
+        stripeStatus: appConfig.stripe?.secretKey ? "configured" : "not_configured",
+        scannerStatus: Number(systemRow.recent_scans || 0) > 0 ? "active" : "idle",
+        autoScanStatus: appConfig.autoScan?.enabled ? "enabled" : "disabled"
+      }
+    },
+    signalMonitor: [...signals.rows, ...rejectedSignals.rows]
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      .slice(0, 60)
+      .map(mapAdminSignalMonitorRow),
+    rejectionAnalytics: rejectionReasons.rows.map((item) => ({
+      reason: item.reason || "Unknown",
+      count: Number(item.count || 0)
+    })),
+    strategyAnalytics: strategyAnalytics.rows.map((item) => ({
+      strategy: item.strategy || "Unknown",
+      generated: Number(item.generated || 0),
+      passed: Number(item.passed || 0),
+      rejected: Number(item.rejected || 0),
+      averageConfidence: Number(item.average_confidence || 0),
+      averageRiskReward: Number(item.average_rr || 0),
+      winRate: Number(item.win_rate || 0)
+    })),
+    marketAnalytics: marketAnalytics.rows.map((item) => ({
+      market: item.symbol,
+      signals: Number(item.signals || 0),
+      winRate: Number(item.win_rate || 0),
+      averageRiskReward: Number(item.average_rr || 0),
+      averageConfidence: Number(item.average_confidence || 0)
+    })),
+    telegram: {
+      messagesSent: Number(telegram.rows[0]?.messages_sent || 0),
+      failedSends: Number(telegram.rows[0]?.failed_sends || 0),
+      pendingQueue: Number(telegram.rows[0]?.pending_queue || 0),
+      averageDeliverySeconds: Number(telegram.rows[0]?.average_delivery_seconds || 0),
+      retryCount: Number(telegram.rows[0]?.retry_count || 0),
+      latestFailures: telegramFailures.rows.map((item) => ({
+        id: item.id,
+        userId: item.user_id,
+        setupKey: item.setup_key,
+        status: item.status,
+        attempts: Number(item.attempts || 0),
+        error: safeAdminMessage(item.last_error),
+        createdAt: item.created_at,
+        updatedAt: item.updated_at
+      }))
+    },
+    affiliates: {
+      activeReferrals: Number(affiliateRow.active_referrals || 0),
+      monthlyCommissionsCents: Number(affiliateRow.monthly_commissions_cents || 0),
+      pendingPayoutsCents: Number(affiliateRow.pending_payouts_cents || 0),
+      paidPayoutsCents: Number(affiliateRow.paid_payouts_cents || 0),
+      conversionRate: Number(affiliateRow.clicks || 0) > 0
+        ? Math.round((Number(affiliateRow.referrals || 0) / Number(affiliateRow.clicks || 1)) * 1000) / 10
+        : 0,
+      topAffiliates: topAffiliates.rows.map((item) => ({
+        userId: item.id,
+        email: item.email,
+        username: item.username,
+        affiliateCode: item.affiliate_code,
+        referrals: Number(item.referrals || 0),
+        activeReferrals: Number(item.active_referrals || 0),
+        monthlyCommissionsCents: Number(item.monthly_commissions_cents || 0),
+        lifetimeEarningsCents: Number(item.lifetime_earnings_cents || 0)
+      }))
+    },
+    stripe: {
+      activeSubscriptions: Number(stripeRow.active_subscriptions || 0),
+      renewals: Number(stripeRow.renewals || 0),
+      failedRenewals: Number(stripeRow.failed_renewals || 0),
+      refunds: Number(stripeRow.refunds || 0),
+      webhookFailures: Number(stripeRow.webhook_failures || 0),
+      latestSubscriptions: latestSubscriptions.rows.map((item) => ({
+        userId: item.user_id,
+        email: item.email,
+        username: item.username,
+        plan: item.plan,
+        status: item.status,
+        subscriptionId: item.provider_subscription_id,
+        currentPeriodEnd: item.current_period_end,
+        updatedAt: item.updated_at
+      })),
+      webhookFailuresLatest: stripeFailures.rows.map((item) => ({
+        eventId: item.event_id,
+        eventType: item.event_type,
+        stripeObjectId: item.stripe_object_id,
+        status: item.status,
+        attempts: Number(item.attempts || 0),
+        error: safeAdminMessage(item.last_error),
+        receivedAt: item.received_at
+      }))
+    },
+    errorLogs: errorLogs.rows.map((item) => ({
+      area: item.area,
+      id: item.id,
+      message: safeAdminMessage(item.message),
+      createdAt: item.created_at
+    })),
+    health: buildAdminHealth(systemRow)
+  };
+}
+
+export async function searchAdminUsers(searchTerm) {
+  const normalized = String(searchTerm || "").trim();
+  if (normalized.length < 2) return [];
+
+  const like = `%${normalized.toLowerCase()}%`;
+  const result = await query(`
+    SELECT u.id, u.name, u.email, u.username, u.plan, u.role, u.created_at,
+      u.email_verified_at, u.public_profile_enabled, u.public_leaderboard_enabled,
+      u.affiliate_code, u.affiliate_disabled, u.abuse_score, u.abuse_review_status,
+      s.status AS subscription_status, s.provider, s.provider_subscription_id,
+      s.current_period_end, c.unlock_credits_balance, c.lifetime_unlocks_used,
+      COALESCE(sig.signals, 0)::integer AS signals,
+      COALESCE(sig.closed_signals, 0)::integer AS closed_signals,
+      COALESCE(af.active_referrals, 0)::integer AS active_referrals,
+      COALESCE(af.lifetime_commission_cents, 0)::integer AS lifetime_commission_cents,
+      t.enabled AS telegram_enabled, t.connected_at AS telegram_connected_at
+    FROM users u
+    LEFT JOIN subscriptions s ON s.user_id = u.id
+    LEFT JOIN credit_balances c ON c.user_id = u.id
+    LEFT JOIN telegram_notification_settings t ON t.user_id = u.id
+    LEFT JOIN (
+      SELECT s.user_id,
+        COUNT(*)::integer AS signals,
+        COUNT(*) FILTER (WHERE COALESCE(o.status, 'Active') <> 'Active')::integer AS closed_signals
+      FROM saved_signals s
+      LEFT JOIN signal_outcomes o ON o.saved_signal_id = s.id
+      GROUP BY s.user_id
+    ) sig ON sig.user_id = u.id
+    LEFT JOIN (
+      SELECT affiliate_user_id,
+        COUNT(*) FILTER (WHERE active)::integer AS active_referrals,
+        COALESCE(SUM(lifetime_commission_cents), 0)::integer AS lifetime_commission_cents
+      FROM affiliate_referrals
+      GROUP BY affiliate_user_id
+    ) af ON af.affiliate_user_id = u.id
+    WHERE lower(u.id) = lower($1)
+      OR lower(u.email) LIKE $2
+      OR lower(COALESCE(u.username, '')) LIKE $2
+    ORDER BY u.created_at DESC
+    LIMIT 20
+  `, [normalized, like]);
+
+  return result.rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    email: row.email,
+    username: row.username,
+    plan: row.plan,
+    role: row.role || "user",
+    createdAt: row.created_at,
+    emailVerified: Boolean(row.email_verified_at),
+    subscription: {
+      status: row.subscription_status,
+      provider: row.provider,
+      subscriptionId: row.provider_subscription_id,
+      currentPeriodEnd: row.current_period_end
+    },
+    credits: {
+      unlockCreditsBalance: Number(row.unlock_credits_balance || 0),
+      lifetimeUnlocksUsed: Number(row.lifetime_unlocks_used || 0)
+    },
+    signals: {
+      unlocked: Number(row.signals || 0),
+      closed: Number(row.closed_signals || 0)
+    },
+    affiliate: {
+      code: row.affiliate_code,
+      disabled: Boolean(row.affiliate_disabled),
+      activeReferrals: Number(row.active_referrals || 0),
+      lifetimeCommissionCents: Number(row.lifetime_commission_cents || 0)
+    },
+    telegram: {
+      connected: Boolean(row.telegram_connected_at),
+      enabled: Boolean(row.telegram_enabled),
+      connectedAt: row.telegram_connected_at
+    },
+    profile: {
+      publicProfileEnabled: Boolean(row.public_profile_enabled),
+      publicLeaderboardEnabled: Boolean(row.public_leaderboard_enabled),
+      abuseScore: Number(row.abuse_score || 0),
+      abuseReviewStatus: row.abuse_review_status || "clear"
+    }
+  }));
+}
+
 export async function listLeaderboardPerformanceRows() {
   const result = await query(`
     SELECT
@@ -2271,6 +2739,85 @@ function signalSelectSql(whereClause) {
     LEFT JOIN signal_outcomes o ON o.saved_signal_id = s.id
     ${whereClause}
   `;
+}
+
+function mapAdminSignalMonitorRow(row) {
+  const rejectedReasons = Array.isArray(row.rejected_reasons) ? row.rejected_reasons : [];
+  return {
+    id: row.id,
+    market: row.symbol,
+    timeframe: row.timeframe,
+    direction: row.direction,
+    strategy: row.strategy || "Unknown",
+    confidence: Number(row.confidence_score || 0),
+    riskReward: Number(row.risk_reward_ratio || 0),
+    validationScore: Number(row.validation_score || 0),
+    validationPassed: row.validation_passed !== false,
+    status: row.status || (row.validation_passed === false ? "Rejected" : "Generated"),
+    rejectedReason: rejectedReasons[0]?.reason || null,
+    rejectedReasons,
+    createdAt: row.created_at
+  };
+}
+
+function buildAdminHealth(systemRow = {}) {
+  const telegramPending = Number(systemRow.telegram_pending || 0);
+  const activeTracking = Number(systemRow.active_tracking || 0);
+  return [
+    { key: "database", label: "Database", status: "green", detail: "Query OK" },
+    {
+      key: "telegram",
+      label: "Telegram",
+      status: appConfig.telegram?.botToken ? "green" : "red",
+      detail: appConfig.telegram?.botToken ? `${telegramPending} queued` : "Bot token missing"
+    },
+    {
+      key: "coinbase",
+      label: "Coinbase",
+      status: appConfig.marketData?.baseUrl ? "green" : "red",
+      detail: appConfig.marketData?.baseUrl ? "Provider configured" : "Provider URL missing"
+    },
+    {
+      key: "stripe",
+      label: "Stripe",
+      status: appConfig.stripe?.secretKey ? "green" : "red",
+      detail: appConfig.stripe?.secretKey ? "Secret configured" : "Secret key missing"
+    },
+    {
+      key: "scanner",
+      label: "Scanner",
+      status: "green",
+      detail: `${Number(systemRow.recent_scans || 0)} scans in last 20m`
+    },
+    {
+      key: "auto_scan",
+      label: "Auto Scan",
+      status: appConfig.autoScan?.enabled ? "green" : "red",
+      detail: appConfig.autoScan?.enabled
+        ? `Enabled every ${Math.round(Number(appConfig.autoScan.intervalMs || 0) / 60000)}m`
+        : "Disabled"
+    },
+    {
+      key: "outcome_tracker",
+      label: "Outcome Tracker",
+      status: appConfig.signalTracking?.enabled ? "green" : "red",
+      detail: appConfig.signalTracking?.enabled ? `${activeTracking} active signals` : "Disabled"
+    },
+    {
+      key: "commodities",
+      label: "Twelve Data",
+      status: appConfig.twelveData?.apiKey ? "green" : "red",
+      detail: appConfig.twelveData?.apiKey ? "Commodity provider configured" : "API key missing"
+    }
+  ];
+}
+
+function safeAdminMessage(message) {
+  return String(message || "")
+    .replace(/\b(?:sk|rk)_(?:test|live)_[A-Za-z0-9_]+\b/g, "[redacted-key]")
+    .replace(/\bwhsec_[A-Za-z0-9_]+\b/g, "[redacted-webhook-secret]")
+    .replace(/\b[A-Fa-f0-9]{64,}\b/g, "[redacted-token]")
+    .slice(0, 240);
 }
 
 function mapUser(row) {

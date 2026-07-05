@@ -76,8 +76,8 @@ const result = {
     analyticsController.includes("isAdminUser(req.user)") &&
     server.includes("handleAdminAnalyticsRoutes"),
   adminDashboard:
-    html.includes("Product analytics") &&
-    html.includes('id="analytics-total-users"') &&
+    html.includes("SignalForge Admin Dashboard") &&
+    html.includes('id="admin-overview-users"') &&
     html.includes('id="analytics-most-scanned"') &&
     app.includes('api.request("/api/admin/analytics")') &&
     app.includes("function renderAdminAnalytics()") &&

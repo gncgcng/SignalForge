@@ -1482,23 +1482,63 @@
             </div>
             <section class="admin-analytics-section">
               <div class="section-title">
-                <div><span class="eyebrow">Product analytics</span><h3>Growth and revenue metrics</h3></div>
-                <span id="admin-analytics-summary">Aggregate data only</span>
+                <div><span class="eyebrow">Operations</span><h3>SignalForge Admin Dashboard</h3></div>
+                <span id="admin-analytics-summary">Aggregate admin data only</span>
               </div>
-              <div class="admin-analytics-grid">
-                <article class="panel"><span>Total users</span><strong id="analytics-total-users">0</strong></article>
-                <article class="panel"><span>Paid users</span><strong id="analytics-paid-users">0</strong></article>
-                <article class="panel"><span>Conversion rate</span><strong id="analytics-conversion-rate">0%</strong></article>
-                <article class="panel"><span>Monthly recurring revenue</span><strong id="analytics-mrr">$0.00</strong></article>
-                <article class="panel"><span>Affiliate revenue owed</span><strong id="analytics-affiliate-owed">$0.00</strong></article>
-                <article class="panel"><span>Checkout funnel</span><strong id="analytics-checkout-funnel">0 / 0</strong></article>
+              <div class="admin-health-grid" id="admin-health-grid"></div>
+              <div class="admin-dashboard-groups">
+                <article class="analytics-panel"><h3>Users</h3><div id="admin-overview-users"></div></article>
+                <article class="analytics-panel"><h3>Revenue</h3><div id="admin-overview-revenue"></div></article>
+                <article class="analytics-panel"><h3>Signals</h3><div id="admin-overview-signals"></div></article>
+                <article class="analytics-panel"><h3>System</h3><div id="admin-overview-system"></div></article>
               </div>
               <div class="admin-analytics-grid compact">
-                <article class="analytics-panel"><h3>Signup mix</h3><div id="analytics-signups"></div></article>
+                <article class="analytics-panel"><h3>Growth funnel</h3><div id="analytics-signups"></div></article>
                 <article class="analytics-panel"><h3>Usage events</h3><div id="analytics-usage"></div></article>
                 <article class="analytics-panel"><h3>Most scanned markets</h3><div id="analytics-most-scanned"></div></article>
                 <article class="analytics-panel"><h3>Most unlocked markets</h3><div id="analytics-most-unlocked"></div></article>
               </div>
+              <article class="analytics-panel admin-signal-monitor">
+                <div class="admin-panel-header">
+                  <div><span class="eyebrow">Signal monitor</span><h3>Latest generated signals</h3></div>
+                  <input id="admin-signal-search" type="search" placeholder="Search market, strategy, status">
+                </div>
+                <div id="admin-signal-monitor"></div>
+              </article>
+              <div class="admin-analytics-grid admin-ops-grid">
+                <article class="analytics-panel"><h3>Rejection analytics</h3><div id="admin-rejection-pie"></div></article>
+                <article class="analytics-panel"><h3>Strategy analytics</h3><div id="admin-strategy-analytics"></div></article>
+                <article class="analytics-panel"><h3>Market analytics</h3><div id="admin-market-analytics"></div></article>
+              </div>
+              <div class="admin-analytics-grid compact">
+                <article class="analytics-panel"><h3>Telegram</h3><div id="admin-telegram-metrics"></div><div id="admin-telegram-failures"></div></article>
+                <article class="analytics-panel"><h3>Affiliates</h3><div id="admin-affiliate-metrics"></div><div id="admin-top-affiliates"></div></article>
+                <article class="analytics-panel"><h3>Stripe</h3><div id="admin-stripe-metrics"></div><div id="admin-stripe-latest"></div></article>
+                <article class="analytics-panel">
+                  <div class="admin-panel-header">
+                    <h3>Error logs</h3>
+                    <select id="admin-error-filter">
+                      <option value="all">All</option>
+                      <option value="Scanner">Scanner</option>
+                      <option value="Telegram">Telegram</option>
+                      <option value="Stripe">Stripe</option>
+                      <option value="Database">Database</option>
+                      <option value="Provider">Provider</option>
+                    </select>
+                  </div>
+                  <div id="admin-error-logs"></div>
+                </article>
+              </div>
+              <article class="analytics-panel admin-user-search-panel">
+                <div class="admin-panel-header">
+                  <div><span class="eyebrow">User search</span><h3>Lookup account</h3></div>
+                  <form id="admin-user-search-form" class="admin-user-search-form">
+                    <input id="admin-user-search-input" type="search" placeholder="Username, email, or user ID">
+                    <button type="submit">Search</button>
+                  </form>
+                </div>
+                <div id="admin-user-search-results"></div>
+              </article>
               <div class="section-title validation-dashboard-title">
                 <div><span class="eyebrow">Signal safety</span><h3>Validation Dashboard</h3></div>
                 <span id="validation-pass-rate">0% pass rate</span>
