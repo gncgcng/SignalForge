@@ -9,6 +9,8 @@ const state = {
   marketStatus: {},
   scannerMode: getStoredScannerMode(),
   navSections: getStoredNavSections(),
+  onboardingSkipped: getStoredOnboardingSkipped(),
+  firstScanCompleted: getStoredFirstScanCompleted(),
   expandedSignalKeys: new Set(),
   lastScanSummary: null,
   activeView: "scanner",
@@ -83,6 +85,8 @@ const RESTORE_TOKEN_KEY = "signalforge-restore-token";
 const SCANNER_MODE_KEY = "signalforge-scanner-mode";
 const NAV_SECTIONS_KEY = "signalforge-nav-sections";
 const TELEGRAM_UNLOCK_KEY = "signalforge-telegram-unlock";
+const ONBOARDING_SKIP_KEY = "signalforge-onboarding-skipped";
+const FIRST_SCAN_KEY = "signalforge-first-scan-complete";
 
 const authScreen = document.querySelector("#auth-screen");
 const landingPage = document.querySelector("#landing-page");
@@ -117,6 +121,13 @@ const scanProgressBar = document.querySelector("#scan-progress-bar");
 const scanSummaryPanel = document.querySelector("#scan-summary-panel");
 const viewOpportunitiesButton = document.querySelector("#view-opportunities-button");
 const scannerModeToggle = document.querySelector("#scanner-mode-toggle");
+const onboardingPanel = document.querySelector("#onboarding-panel");
+const onboardingChecklist = document.querySelector("#onboarding-checklist");
+const onboardingProgressText = document.querySelector("#onboarding-progress-text");
+const onboardingProgressBar = document.querySelector("#onboarding-progress-bar");
+const onboardingProgressNote = document.querySelector("#onboarding-progress-note");
+const onboardingSkipButton = document.querySelector("#onboarding-skip-button");
+const onboardingShowButton = document.querySelector("#onboarding-show-button");
 const statusLine = document.querySelector("#status-line");
 const signalsGrid = document.querySelector("#signals-grid");
 const paperPortfolioGrid = document.querySelector("#paper-portfolio-grid");
@@ -387,6 +398,27 @@ viewOpportunitiesButton.addEventListener("click", () => {
 viewDemoButton.addEventListener("click", () => {
   livePreviewSection?.scrollIntoView({ behavior: "smooth", block: "start" });
   landingRunScan?.focus({ preventScroll: true });
+});
+
+onboardingSkipButton?.addEventListener("click", () => {
+  state.onboardingSkipped = true;
+  localStorage.setItem(ONBOARDING_SKIP_KEY, "1");
+  renderOnboarding();
+  showToast("Checklist skipped. It stays available on the dashboard.");
+});
+
+onboardingShowButton?.addEventListener("click", () => {
+  state.onboardingSkipped = false;
+  localStorage.removeItem(ONBOARDING_SKIP_KEY);
+  renderOnboarding();
+  onboardingPanel?.scrollIntoView({ behavior: "smooth", block: "start" });
+});
+
+onboardingPanel?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-onboarding-action]");
+  if (!button) return;
+
+  handleOnboardingAction(button.dataset.onboardingAction);
 });
 
 authForm.addEventListener("submit", async (event) => {
@@ -682,6 +714,7 @@ scanAllButton.addEventListener("click", async () => {
     renderSubscription();
     updateScanProgress(total, total, "Market scan complete");
     await loadAlerts();
+    markFirstScanCompleted();
     renderScanResults(result.setups, result.errors, result.diagnostics);
   } catch (error) {
     updateScanProgress(0, total, "Scan All failed");
@@ -713,6 +746,7 @@ generateButton.addEventListener("click", async () => {
     renderSubscription();
 
     if (!signal) {
+      markFirstScanCompleted();
       renderNoSetup(analysis);
       statusLine.textContent = "No valid setup found. No unlock credit was used.";
       return;
@@ -720,6 +754,7 @@ generateButton.addEventListener("click", async () => {
 
     state.scanResults = [];
     state.signals = [signal, ...state.signals];
+    markFirstScanCompleted();
     await loadSignals();
     renderSignals();
     renderSignalsHistory();
@@ -1465,6 +1500,8 @@ function clearClientAuthState() {
   state.selectedPair = null;
   state.marketData = null;
   state.marketStatus = {};
+  state.onboardingSkipped = false;
+  state.firstScanCompleted = false;
   state.signals = [];
   state.watchlist = [];
   state.alerts = [];
@@ -1578,12 +1615,11 @@ async function bootDashboard() {
   if (state.user.isAdmin) {
     allowedInitialViews.push("admin", "affiliate-admin", "webhook-events");
   }
-  const initialView = state.user?.profile?.usernameRequired || state.user?.usernameRequired
-    ? "profile"
-    : allowedInitialViews.includes(requestedView)
-      ? requestedView
-      : "scanner";
+  const initialView = allowedInitialViews.includes(requestedView)
+    ? requestedView
+    : "scanner";
   showView(initialView);
+  renderOnboarding();
   renderCheckoutReturnStatus();
   startSignalHistoryRefresh();
 
@@ -1819,6 +1855,7 @@ async function loadSignals() {
   renderSignals();
   renderSignalsHistory();
   renderPerformanceStats();
+  renderOnboarding();
 }
 
 async function loadPaperPortfolio() {
@@ -1868,6 +1905,7 @@ async function loadAlerts() {
 async function loadNotifications() {
   state.notifications = await api.request("/api/notifications/telegram");
   renderNotifications();
+  renderOnboarding();
 
   if (!state.notifications.connected && state.notifications.configured) {
     try {
@@ -1909,6 +1947,7 @@ async function loadProfile() {
   };
   document.querySelector("#user-name").textContent = getUserDisplayName();
   renderProfile();
+  renderOnboarding();
   return profile;
 }
 
@@ -1941,6 +1980,7 @@ async function saveProfileSettings({
     };
     document.querySelector("#user-name").textContent = getUserDisplayName();
     renderProfile();
+    renderOnboarding();
     if (messageElement) messageElement.textContent = "Profile updated.";
     showToast("Profile updated");
   } catch (error) {
@@ -4046,6 +4086,7 @@ function renderNotifications() {
     if (!configured) {
       setTelegramConnectionFeedback("Telegram bot not configured", "error");
     }
+    renderOnboarding();
     return;
   }
 
@@ -4060,6 +4101,7 @@ function renderNotifications() {
   });
 
   setTelegramConnectionFeedback("Connected successfully", "success");
+  renderOnboarding();
 }
 
 function renderTesterAccess() {
@@ -4928,6 +4970,14 @@ function getStoredNavSections() {
   }
 }
 
+function getStoredOnboardingSkipped() {
+  return localStorage.getItem("signalforge-onboarding-skipped") === "1";
+}
+
+function getStoredFirstScanCompleted() {
+  return localStorage.getItem("signalforge-first-scan-complete") === "1";
+}
+
 function renderNavSections() {
   document.querySelectorAll("[data-nav-section]").forEach((section) => {
     const name = section.dataset.navSection;
@@ -4935,6 +4985,141 @@ function renderNavSections() {
     section.classList.toggle("collapsed", !expanded);
     section.querySelector("[data-nav-section-toggle]")?.setAttribute("aria-expanded", String(expanded));
   });
+}
+
+function getOnboardingSteps() {
+  const profile = normalizeProfile(state.profile, state.user);
+  const telegramSettings = state.notifications?.settings;
+  const telegramPreferencesChosen = Boolean(
+    state.notifications?.connected &&
+    telegramSettings &&
+    Array.isArray(telegramSettings.timeframes) &&
+    telegramSettings.timeframes.length &&
+    telegramSettings.direction &&
+    Number.isFinite(Number(telegramSettings.minimumConfidence))
+  );
+  const unlockedCount = Number(state.signalStats?.totalSignals || 0) || state.signals?.length || 0;
+
+  return [
+    {
+      id: "username",
+      title: "Create username",
+      description: "Reserve a public identity for profiles, rankings, and community features.",
+      done: Boolean(profile?.username),
+      action: "profile",
+      cta: profile?.username ? "View profile" : "Create username"
+    },
+    {
+      id: "telegram",
+      title: "Connect Telegram",
+      description: "Link your Telegram account so SignalForge can deliver setup previews.",
+      done: Boolean(state.notifications?.connected),
+      action: "telegram",
+      cta: state.notifications?.connected ? "Telegram settings" : "Connect Telegram"
+    },
+    {
+      id: "alerts",
+      title: "Choose alert preferences",
+      description: "Set timeframes, direction, alert scope, and minimum confidence.",
+      done: telegramPreferencesChosen,
+      action: "preferences",
+      cta: telegramPreferencesChosen ? "Review alerts" : "Choose preferences"
+    },
+    {
+      id: "scan",
+      title: "Run first scan",
+      description: "Scan supported markets and see why setups passed or failed.",
+      done: Boolean(state.firstScanCompleted || state.lastScanSummary),
+      action: "scan",
+      cta: "Run scan"
+    },
+    {
+      id: "unlock",
+      title: "Unlock first signal",
+      description: "Save a full signal to history with entry, stop, target, and outcome tracking.",
+      done: unlockedCount > 0,
+      action: "unlock",
+      cta: unlockedCount > 0 ? "View signals" : "Unlock signal"
+    }
+  ];
+}
+
+function renderOnboarding() {
+  if (!onboardingPanel || !onboardingChecklist) return;
+
+  const steps = getOnboardingSteps();
+  const completed = steps.filter((step) => step.done).length;
+  const total = steps.length;
+  const allComplete = completed === total;
+  const shouldShowPanel = !allComplete && !state.onboardingSkipped;
+
+  onboardingPanel.classList.toggle("hidden", !shouldShowPanel);
+  onboardingShowButton?.classList.toggle("hidden", shouldShowPanel || allComplete);
+  onboardingProgressText.textContent = `${completed}/${total} complete`;
+  onboardingProgressBar.max = total;
+  onboardingProgressBar.value = completed;
+  onboardingProgressNote.textContent = allComplete
+    ? "Your core SignalForge setup is complete."
+    : `${total - completed} step${total - completed === 1 ? "" : "s"} left. You can skip and return anytime from the dashboard.`;
+
+  const firstIncompleteId = steps.find((step) => !step.done)?.id;
+  onboardingChecklist.innerHTML = steps.map((step, index) => `
+    <article class="onboarding-step ${step.done ? "complete" : ""} ${step.id === firstIncompleteId ? "current" : ""}">
+      <span class="onboarding-step-icon">${step.done ? "✓" : index + 1}</span>
+      <div>
+        <strong>${escapeHtml(step.title)}</strong>
+        <p>${escapeHtml(step.description)}</p>
+      </div>
+      <button class="${step.done ? "secondary-action" : ""}" data-onboarding-action="${step.action}" type="button">
+        ${escapeHtml(step.cta)}
+      </button>
+    </article>
+  `).join("");
+}
+
+function handleOnboardingAction(action) {
+  if (action === "profile") {
+    showView("profile");
+    usernameRequiredPanel?.scrollIntoView({ behavior: "smooth", block: "start" });
+    onboardingUsername?.focus({ preventScroll: true });
+    return;
+  }
+
+  if (action === "telegram" || action === "preferences") {
+    showView("notifications");
+    if (action === "preferences") {
+      telegramPreferencesForm?.scrollIntoView({ behavior: "smooth", block: "start" });
+    } else {
+      telegramConnectButton?.focus({ preventScroll: true });
+    }
+    return;
+  }
+
+  if (action === "scan") {
+    showView("scanner");
+    scanAllButton?.scrollIntoView({ behavior: "smooth", block: "center" });
+    scanAllButton?.focus({ preventScroll: true });
+    return;
+  }
+
+  if (action === "unlock") {
+    if (state.scanResults?.length) {
+      showView("scanner");
+      scrollToSignalDesk();
+      return;
+    }
+
+    showView(state.signals?.length ? "signals" : "scanner");
+    if (!state.signals?.length) {
+      scrollToSignalDesk();
+    }
+  }
+}
+
+function markFirstScanCompleted() {
+  state.firstScanCompleted = true;
+  localStorage.setItem(FIRST_SCAN_KEY, "1");
+  renderOnboarding();
 }
 
 function getSignalKey(signal) {

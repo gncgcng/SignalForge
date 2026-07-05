@@ -16,6 +16,7 @@
     "test:product-analytics": "node scripts/product-analytics-test.js",
     "test:user-profiles": "node scripts/user-profiles-test.js",
     "test:leaderboards": "node scripts/leaderboard-test.js",
+    "test:onboarding": "node scripts/onboarding-flow-test.js",
     "test:affiliate-program": "node scripts/affiliate-program-test.js",
     "test:pwa": "node scripts/pwa-test.js",
     "test:mobile-nav": "node scripts/mobile-navigation-test.js",

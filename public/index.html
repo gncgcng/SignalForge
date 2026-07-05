@@ -569,6 +569,25 @@
           </header>
 
           <section id="scanner-view" data-view="scanner">
+            <section class="onboarding-panel hidden" id="onboarding-panel" aria-label="Get started checklist">
+              <div class="onboarding-header">
+                <div>
+                  <span class="eyebrow">Get started</span>
+                  <h3>Set up your trading desk</h3>
+                  <p>Complete the essentials once, then keep the checklist available whenever you want to come back to it.</p>
+                </div>
+                <div class="onboarding-progress" aria-live="polite">
+                  <strong id="onboarding-progress-text">0/5 complete</strong>
+                  <progress id="onboarding-progress-bar" max="5" value="0"></progress>
+                </div>
+              </div>
+              <div class="onboarding-checklist" id="onboarding-checklist"></div>
+              <div class="onboarding-footer">
+                <span id="onboarding-progress-note">Start with your public username, then connect alerts and run a scan.</span>
+                <button class="secondary-action" id="onboarding-skip-button" type="button">Skip for now</button>
+              </div>
+            </section>
+            <button class="secondary-action onboarding-show hidden" id="onboarding-show-button" type="button">Show get started checklist</button>
             <section class="scanner-grid">
               <div class="panel controls-panel">
                 <div class="panel-header">

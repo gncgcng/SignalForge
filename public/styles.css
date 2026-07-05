@@ -1941,6 +1941,142 @@ polyline {
   margin-top: 22px;
 }
 
+.onboarding-panel {
+  display: grid;
+  gap: 16px;
+  margin-bottom: 18px;
+  padding: 18px;
+  border: 1px solid rgba(34, 211, 238, 0.28);
+  border-radius: 12px;
+  background:
+    linear-gradient(135deg, rgba(34, 211, 238, 0.1), transparent 34%),
+    rgba(16, 20, 29, 0.92);
+  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.22);
+}
+
+.onboarding-header,
+.onboarding-footer {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.onboarding-header h3 {
+  margin: 4px 0 6px;
+  font-size: 1.35rem;
+}
+
+.onboarding-header p,
+.onboarding-footer span,
+.onboarding-step p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.onboarding-progress {
+  display: grid;
+  gap: 8px;
+  min-width: 180px;
+}
+
+.onboarding-progress strong {
+  color: #dffbff;
+  text-align: right;
+}
+
+.onboarding-progress progress {
+  width: 100%;
+  height: 8px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 999px;
+  background: var(--surface-2);
+}
+
+.onboarding-progress progress::-webkit-progress-bar {
+  border-radius: 999px;
+  background: var(--surface-2);
+}
+
+.onboarding-progress progress::-webkit-progress-value {
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--cyan), var(--green));
+}
+
+.onboarding-progress progress::-moz-progress-bar {
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--cyan), var(--green));
+}
+
+.onboarding-checklist {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.onboarding-step {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 10px;
+  min-width: 0;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(11, 16, 24, 0.82);
+  transition: border-color 160ms ease, transform 160ms ease, background 160ms ease;
+}
+
+.onboarding-step:hover,
+.onboarding-step.current {
+  border-color: rgba(34, 211, 238, 0.5);
+  background: rgba(34, 211, 238, 0.07);
+  transform: translateY(-1px);
+}
+
+.onboarding-step.complete {
+  border-color: rgba(74, 222, 128, 0.3);
+}
+
+.onboarding-step-icon {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid rgba(34, 211, 238, 0.38);
+  border-radius: 999px;
+  background: rgba(34, 211, 238, 0.1);
+  color: #dffbff;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.onboarding-step.complete .onboarding-step-icon {
+  border-color: rgba(74, 222, 128, 0.48);
+  background: rgba(74, 222, 128, 0.13);
+  color: var(--green);
+}
+
+.onboarding-step strong {
+  display: block;
+  margin-bottom: 5px;
+}
+
+.onboarding-step p {
+  font-size: 0.78rem;
+}
+
+.onboarding-step button {
+  min-height: 38px;
+  padding: 9px 10px;
+}
+
+.onboarding-show {
+  width: fit-content;
+  margin-bottom: 14px;
+}
+
 .signal-desk-actions {
   display: flex;
   align-items: center;
@@ -3121,6 +3257,10 @@ polyline {
     grid-template-columns: 1fr;
   }
 
+  .onboarding-checklist {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .auth-screen {
     padding: 24px;
   }
@@ -3288,6 +3428,44 @@ polyline {
 
   .user-chip #user-name {
     display: none;
+  }
+
+  .onboarding-panel {
+    gap: 14px;
+    padding: 15px;
+  }
+
+  .onboarding-header,
+  .onboarding-footer {
+    display: grid;
+    gap: 12px;
+  }
+
+  .onboarding-progress {
+    min-width: 0;
+  }
+
+  .onboarding-progress strong {
+    text-align: left;
+  }
+
+  .onboarding-checklist {
+    grid-template-columns: 1fr;
+  }
+
+  .onboarding-step {
+    grid-template-columns: auto 1fr;
+    grid-template-rows: auto auto;
+    align-items: start;
+  }
+
+  .onboarding-step button {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .onboarding-show {
+    width: 100%;
   }
 
   .scan-summary-panel {
