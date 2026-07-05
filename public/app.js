@@ -259,7 +259,7 @@ const legalDocuments = {
     title: "Terms",
     body: `
       <p>SignalForge provides market research tools, scanners, alerts, backtesting, paper trading, and educational analytics. You are responsible for how you use the information shown in the app.</p>
-      <p>SignalForge does not place trades, connect to brokers, manage money, or provide personalized investment recommendations. You agree not to misuse the service, bypass usage limits, abuse trials, or rely on SignalForge as your sole basis for trading decisions.</p>
+      <p>SignalForge does not place trades, connect to external trading accounts, manage money, or provide personalized investment recommendations. You agree not to misuse the service, bypass usage limits, abuse trials, or rely on SignalForge as your sole basis for trading decisions.</p>
       <p>Subscriptions, unlock credits, affiliate links, and notifications are provided subject to availability and may change as the product evolves.</p>
     `
   },

@@ -33,7 +33,7 @@ const result = {
   startCommandParsed: extractTelegramConnectionCode("/start ABCD2345") === "ABCD2345",
   addressedStartParsed: extractTelegramConnectionCode("/start@signalforge_bot xyz987") === "XYZ987",
   unrelatedMessageIgnored: extractTelegramConnectionCode("hello") === null,
-  connectionStartsDisabled: repositories.includes("VALUES ($1,$2,false,true") &&
+  connectionStartsDisabled: repositories.includes("VALUES ($1,$2,false,false") &&
     service.includes("Return to the app to enable Telegram alerts"),
   uniqueCodeAndBotLink: service.includes("randomBytes") &&
     service.includes("https://t.me/") &&

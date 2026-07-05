@@ -9,6 +9,7 @@ const { buildClearCookies, buildSessionCookie } = await import("../src/modules/a
 const { createDemoSession } = await import("../src/modules/auth/authService.js");
 const { listSignalsByUser } = await import("../src/db/repositories.js");
 const { getSubscriptionSummary } = await import("../src/modules/subscriptions/subscriptionService.js");
+const { parseCookies, readJson } = await import("../src/shared/http.js");
 
 const freshRequest = { headers: {} };
 await attachAuth(freshRequest);
@@ -48,6 +49,20 @@ const userB = getSubscriptionSummary({
   paidCredits: 0,
   subscription: { status: "trialing" }
 });
+let oversizedRejected = false;
+let invalidJsonRejected = false;
+
+try {
+  await readJson(streamRequest(["x".repeat(1024 * 1024 + 1)]));
+} catch (error) {
+  oversizedRejected = error.statusCode === 413;
+}
+
+try {
+  await readJson(streamRequest(["{not-json"]));
+} catch (error) {
+  invalidJsonRejected = error.statusCode === 400;
+}
 
 const result = {
   production: appConfig.isProduction,
@@ -68,7 +83,10 @@ const result = {
   queryScopedToUser: capturedSql.includes("WHERE s.user_id = $1") &&
     capturedParams.length === 1 &&
     capturedParams[0] === "usr_a",
-  separateCredits: userA.trialSignalsRemaining === 2 && userB.trialSignalsRemaining === 3
+  separateCredits: userA.trialSignalsRemaining === 2 && userB.trialSignalsRemaining === 3,
+  malformedCookieSafe: parseCookies("signalforge_session=%E0%A4%A").signalforge_session === "",
+  oversizedBodyRejected: oversizedRejected,
+  invalidJsonRejected
 };
 
 console.log(JSON.stringify(result, null, 2));
@@ -84,7 +102,20 @@ if (Object.values(result).some((value) => value !== true && value !== false) ||
   !result.clearsCurrentCookie ||
   !result.clearsLegacyCookie ||
   !result.queryScopedToUser ||
-  !result.separateCredits
+  !result.separateCredits ||
+  !result.malformedCookieSafe ||
+  !result.oversizedBodyRejected ||
+  !result.invalidJsonRejected
 ) {
   process.exitCode = 1;
+}
+
+function streamRequest(parts) {
+  return {
+    async *[Symbol.asyncIterator]() {
+      for (const part of parts) {
+        yield Buffer.from(part);
+      }
+    }
+  };
 }

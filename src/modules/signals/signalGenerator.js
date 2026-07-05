@@ -387,10 +387,10 @@ function validateCandidate(
     addRejection(rejectionReasons, rejectionReasonCodes, "trend_conflict", "Range conditions avoid trend trades and require range bounce or mean-reversion structure.");
   }
   if (regime.label === "Breakout" && !["Breakout retest", "Momentum breakout", "VWAP reclaim/rejection"].includes(setupType)) {
-    addRejection(rejectionReasons, rejectionReasonCodes, "strategy_not_matched", "Breakout conditions require a confirmed breakout, retest, or VWAP event.");
+    addRejection(rejectionReasons, rejectionReasonCodes, "strategy_not_matched", "Breakout conditions require a confirmed breakout retest, momentum breakout, or VWAP event.");
   }
   if (regime.label === "Low Volatility" && levelStrength < 3 && !["Breakout retest", "Momentum breakout", "VWAP reclaim/rejection"].includes(setupType)) {
-    addRejection(rejectionReasons, rejectionReasonCodes, "low_volatility", "Low volatility conditions need strong structure before a trade is allowed.");
+    addRejection(rejectionReasons, rejectionReasonCodes, "low_volatility", "Low volatility conditions do not justify forcing a trade without strong structure.");
   }
   if (confluence.badge === "Countertrend" && confluence.score < 25) {
     addRejection(rejectionReasons, rejectionReasonCodes, "failed_confluence_threshold", "Higher-timeframe structure strongly opposes this lower-timeframe setup.");
@@ -550,7 +550,7 @@ export function calculateDisplayConfidence({
   emaAligned
 }) {
   const rawScore = Number(candidate.confidenceScore || 0) +
-    Number(confluence?.confidenceAdjustment || 0) +
+    Number(confluence.confidenceAdjustment || 0) +
     Number(smc?.confidenceAdjustment || 0) +
     Number(marketStructure?.confidenceAdjustment || 0) +
     Number(correlation?.confidenceAdjustment || 0) +

@@ -1,6 +1,5 @@
 import { sendError, sendJson } from "../../shared/http.js";
 import { getMarketSnapshot, getOhlcv, listPairs } from "./marketDataService.js";
-import { getMultiTimeframeMarketData } from "./multiTimeframeService.js";
 
 export async function handleMarketDataRoutes(req, res, pathname, url) {
   if (!pathname.startsWith("/api/market-data")) {
@@ -31,7 +30,7 @@ export async function handleMarketDataRoutes(req, res, pathname, url) {
   if (pathname === "/api/market-data/candles" && req.method === "GET") {
     try {
       return sendJson(res, 200, {
-        marketData: await getMultiTimeframeMarketData(
+        marketData: await getOhlcv(
           url.searchParams.get("symbol") || "BTC-USD",
           url.searchParams.get("timeframe") || "15m"
         )

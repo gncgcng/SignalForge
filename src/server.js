@@ -74,7 +74,12 @@ const server = createServer(async (req, res) => {
 
     return serveStatic(url.pathname, res);
   } catch (error) {
-    return sendError(res, 500, "Unexpected server error.", error.message);
+    return sendError(
+      res,
+      error.statusCode || 500,
+      error.statusCode ? error.message : "Unexpected server error.",
+      error.statusCode ? undefined : error.message
+    );
   }
 });
 

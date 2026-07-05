@@ -127,7 +127,7 @@ export function calculatePositionSizing({
 export function getRiskTier(qualityScore) {
   const quality = Number(qualityScore);
   if (quality >= 86) return "High quality";
-  if (quality >= 70) return "Medium quality";
+  if (quality > 70) return "Medium quality";
   return "No trade";
 }
 
