@@ -2853,6 +2853,46 @@ polyline {
   line-height: 1.5;
 }
 
+.diagnostic-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.diagnostic-reasons span {
+  padding: 6px 9px;
+  border: 1px solid rgba(34, 211, 238, 0.22);
+  border-radius: 999px;
+  background: rgba(34, 211, 238, 0.07);
+  color: #b8f4ff;
+  font-size: 0.75rem;
+  font-weight: 850;
+}
+
+.diagnostic-samples {
+  display: grid;
+  gap: 8px;
+}
+
+.diagnostic-samples div {
+  display: grid;
+  gap: 3px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(11, 16, 24, 0.82);
+}
+
+.diagnostic-samples strong {
+  font-size: 0.8rem;
+}
+
+.diagnostic-samples span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
 .signal-disclaimer {
   display: flex;
   flex-wrap: wrap;

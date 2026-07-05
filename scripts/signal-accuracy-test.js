@@ -40,7 +40,7 @@ for (const setupType of [
   "Trend continuation",
   "Pullback bounce",
   "Breakout retest",
-  "Reversal"
+  "Liquidity sweep reversal"
 ]) {
   assert.ok(source.includes(`"${setupType}"`), `Missing setup type ${setupType}.`);
 }

@@ -19,7 +19,19 @@ import {
 } from "../analyst/signalAnalystService.js";
 
 const minimumCandles = 60;
-const minimumQualityScore = 78;
+const minimumQualityScore = 70;
+
+const diagnosticLabels = {
+  trend_conflict: "trend conflict",
+  weak_confirmation: "weak confirmation",
+  poor_rr: "poor RR",
+  low_volatility: "low volatility",
+  too_close_to_support_resistance: "too close to support/resistance",
+  failed_volume_filter: "failed volume filter",
+  failed_confluence_threshold: "failed confluence threshold",
+  news_session_blocked: "news/session blocked",
+  strategy_not_matched: "strategy not matched"
+};
 
 export function generateMarketDataSetup(marketData, timeframe, options = {}) {
   if (!appConfig.supportedTimeframes.includes(timeframe)) {
@@ -29,7 +41,7 @@ export function generateMarketDataSetup(marketData, timeframe, options = {}) {
   const candles = marketData.candles;
 
   if (candles.length < minimumCandles) {
-    return noSetup("Not enough candles to calculate reliable indicators.", marketData, timeframe, []);
+    return noSetup("Not enough candles to calculate reliable indicators.", marketData, timeframe, [], ["strategy_not_matched"]);
   }
 
   const indicators = calculateIndicators(candles);
@@ -257,7 +269,7 @@ function buildCandidate(direction, entry, stopLoss, confirmations, risk, require
     stopLoss,
     takeProfit,
     riskRewardRatio: rewardMultiple,
-    confidenceScore: Math.min(92, 48 + Math.round((passedCount / confirmations.length) * 44)),
+    confidenceScore: Math.min(89, 46 + Math.round((passedCount / confirmations.length) * 42)),
     requiredPassCount,
     passedCount,
     valid,
@@ -338,15 +350,12 @@ function validateCandidate(
     ? levels.supportStrength
     : levels.resistanceStrength;
   const requiredConfirmationNames = [
-    "RSI",
-    "ATR",
-    candidate.direction === "long" ? "Support" : "Resistance",
-    candidate.direction === "long" ? "Resistance room" : "Support room"
+    "ATR"
   ];
-  if (candidate.confirmations.some((item) => item.name === "Volume")) {
-    requiredConfirmationNames.push("Volume");
-  }
+  const strategyRules = getStrategyRules(setupType, candidate.direction, candidate.confirmations);
+  requiredConfirmationNames.push(...strategyRules.requiredConfirmations);
   const rejectionReasons = [];
+  const rejectionReasonCodes = new Set();
   const session = intelligence?.session || {
     name: "Unknown",
     liquidity: "Unknown",
@@ -363,59 +372,66 @@ function validateCandidate(
   };
 
   if (regime.label === "Trend Up" && candidate.direction !== "long") {
-    rejectionReasons.push("Trend Up only favors continuation and pullback longs.");
+    addRejection(rejectionReasons, rejectionReasonCodes, "trend_conflict", "Trend Up only favors continuation and pullback longs.");
   }
   if (regime.label === "Trend Down" && candidate.direction !== "short") {
-    rejectionReasons.push("Trend Down only favors continuation and pullback shorts.");
+    addRejection(rejectionReasons, rejectionReasonCodes, "trend_conflict", "Trend Down only favors continuation and pullback shorts.");
   }
   if (
     ["Trend Up", "Trend Down"].includes(regime.label) &&
-    !["Trend continuation", "Pullback bounce", "Multi-timeframe continuation", "Support/resistance retest"].includes(setupType)
+    !["Trend continuation", "Pullback bounce", "Multi-timeframe continuation", "Support/resistance retest", "Breakout retest", "Momentum breakout", "VWAP reclaim/rejection"].includes(setupType)
   ) {
-    rejectionReasons.push(`${regime.label} requires a continuation, retest, or pullback setup.`);
+    addRejection(rejectionReasons, rejectionReasonCodes, "strategy_not_matched", `${regime.label} requires a continuation, retest, pullback, breakout, or VWAP setup.`);
   }
   if (regime.label === "Range" && !["Range bounce", "Mean reversion", "Liquidity sweep reversal"].includes(setupType)) {
-    rejectionReasons.push("Range conditions avoid trend trades and require range bounce or mean-reversion structure.");
+    addRejection(rejectionReasons, rejectionReasonCodes, "trend_conflict", "Range conditions avoid trend trades and require range bounce or mean-reversion structure.");
   }
   if (regime.label === "Breakout" && !["Breakout retest", "Momentum breakout", "VWAP reclaim/rejection"].includes(setupType)) {
-    rejectionReasons.push("Breakout conditions require a confirmed breakout, retest, or VWAP event.");
+    addRejection(rejectionReasons, rejectionReasonCodes, "strategy_not_matched", "Breakout conditions require a confirmed breakout, retest, or VWAP event.");
   }
-  if (regime.label === "Low Volatility") {
-    rejectionReasons.push("Low volatility conditions do not justify forcing a trade.");
+  if (regime.label === "Low Volatility" && levelStrength < 3 && !["Breakout retest", "Momentum breakout", "VWAP reclaim/rejection"].includes(setupType)) {
+    addRejection(rejectionReasons, rejectionReasonCodes, "low_volatility", "Low volatility conditions need strong structure before a trade is allowed.");
   }
-  if (confluence.badge === "Countertrend" && confluence.score < 35) {
-    rejectionReasons.push("Higher-timeframe structure strongly opposes this lower-timeframe setup.");
+  if (confluence.badge === "Countertrend" && confluence.score < 25) {
+    addRejection(rejectionReasons, rejectionReasonCodes, "failed_confluence_threshold", "Higher-timeframe structure strongly opposes this lower-timeframe setup.");
   }
   if (newsRisk.blockSignal) {
-    rejectionReasons.push(newsRisk.explanation);
+    addRejection(rejectionReasons, rejectionReasonCodes, "news_session_blocked", newsRisk.explanation);
   }
-  if (!emaAligned && setupType !== "Reversal") {
-    rejectionReasons.push("Price and EMA20/EMA50 are not fully aligned.");
+  if (!emaAligned && strategyRules.requiresEmaAlignment) {
+    addRejection(rejectionReasons, rejectionReasonCodes, "trend_conflict", "Price and EMA20/EMA50 are not fully aligned.");
   }
   if (!regime.atrPass) {
-    rejectionReasons.push("ATR volatility is outside the tradable range.");
+    addRejection(rejectionReasons, rejectionReasonCodes, "low_volatility", "ATR volatility is outside the tradable range.");
   }
   if (regime.choppy && levelStrength < 3) {
-    rejectionReasons.push("Market is choppy without a very strong support/resistance level.");
+    addRejection(rejectionReasons, rejectionReasonCodes, "weak_confirmation", "Market is choppy without a very strong support/resistance level.");
   }
   if (
     candidate.riskRewardRatio < minimumRiskReward ||
     opposingRoom < candidate.riskRewardRatio
   ) {
-    rejectionReasons.push(
+    addRejection(rejectionReasons, rejectionReasonCodes, "poor_rr",
       `The ${candidate.riskRewardRatio.toFixed(2)}R target does not fit before the opposing level.`
     );
   }
   if (!setupType) {
-    rejectionReasons.push("Price action does not match an approved setup type.");
+    addRejection(rejectionReasons, rejectionReasonCodes, "strategy_not_matched", "Price action does not match an approved setup type.");
   }
   const failedRequiredConfirmations = requiredConfirmationNames.filter((name) => {
     return !candidate.confirmations.some((item) => item.name === name && item.passed);
   });
   if (failedRequiredConfirmations.length) {
-    rejectionReasons.push(
+    const failedVolume = failedRequiredConfirmations.includes("Volume");
+    addRejection(rejectionReasons, rejectionReasonCodes, failedVolume ? "failed_volume_filter" : "weak_confirmation",
       `Required confirmations failed: ${failedRequiredConfirmations.join(", ")}.`
     );
+  }
+  const missingPreferredConfirmations = strategyRules.preferredConfirmations.filter((name) => {
+    return !candidate.confirmations.some((item) => item.name === name && item.passed);
+  });
+  if (missingPreferredConfirmations.includes("Volume")) {
+    addRejection(rejectionReasons, rejectionReasonCodes, "failed_volume_filter", "Volume did not confirm this setup, so confidence is capped.");
   }
 
   const baseQualityScore = Math.max(0, Math.min(100, calculateQualityScore({
@@ -475,16 +491,16 @@ function validateCandidate(
     emaAligned
   });
   const reversalSetups = new Set(["Mean reversion", "Range bounce", "Liquidity sweep reversal"]);
-  const requiredQuality = reversalSetups.has(setupType) ? 86 : minimumQualityScore;
+  const requiredQuality = strategyRules.minimumQuality;
 
   if (qualityScore < requiredQuality) {
-    rejectionReasons.push(`Quality score ${qualityScore} is below the required ${requiredQuality}.`);
+    addRejection(rejectionReasons, rejectionReasonCodes, "weak_confirmation", `Quality score ${qualityScore} is below the required ${requiredQuality}.`);
   }
   if (confidenceScore < 70) {
-    rejectionReasons.push(`Confidence score ${confidenceScore} is below the 70% signal threshold.`);
+    addRejection(rejectionReasons, rejectionReasonCodes, "weak_confirmation", `Confidence score ${confidenceScore} is below the 70% signal threshold.`);
   }
   if (!riskPlan.tradeAllowed) {
-    rejectionReasons.push(
+    addRejection(rejectionReasons, rejectionReasonCodes, riskPlan.riskTier === "No trade" ? "weak_confirmation" : "poor_rr",
       riskPlan.riskTier === "No trade"
         ? "Dynamic Risk Engine classifies this as low quality and suggests no trade."
         : `Dynamic target is only ${riskPlan.riskRewardRatio.toFixed(2)}R; at least ${minimumRiskReward}R is required.`
@@ -510,6 +526,7 @@ function validateCandidate(
     regime: regime.label,
     opposingRoom: Number(opposingRoom.toFixed(2)),
     rejectionReasons,
+    rejectionReasonCodes: [...rejectionReasonCodes],
     valid: (
       candidate.valid ||
       (reversalSetups.has(setupType) && candidate.passedCount >= candidate.requiredPassCount - 1)
@@ -610,7 +627,7 @@ function getNormalConfidenceCap({
     Number(confluence?.score || 0) >= 55
   ) {
     cap = 92;
-  } else if (Number(qualityScore || 0) >= minimumQualityScore && confirmationRatio >= 0.66) {
+  } else if (Number(qualityScore || 0) >= minimumQualityScore && confirmationRatio >= 0.6) {
     cap = 89;
   } else {
     cap = 69;
@@ -691,7 +708,7 @@ export function classifySetupType(
     : latest.close < indicators.ema20 && indicators.ema20 < indicators.ema50;
   const nearEma20 = Math.abs(latest.close - indicators.ema20) <= atrValue * 0.8;
   const activeLevel = direction === "long" ? levels.nearestSupport : levels.nearestResistance;
-  const nearLevel = activeLevel && Math.abs(latest.close - activeLevel.price) <= atrValue;
+  const nearLevel = activeLevel && Math.abs(latest.close - activeLevel.price) <= atrValue * 1.35;
   const priorWindow = candles.slice(-24, -3);
   const priorHigh = Math.max(...priorWindow.map((candle) => candle.high));
   const priorLow = Math.min(...priorWindow.map((candle) => candle.low));
@@ -718,7 +735,7 @@ export function classifySetupType(
     return "Breakout retest";
   }
 
-  if (directionalBreakout && aligned && latest.volume >= indicators.volumeMa20 * 1.1) {
+  if (directionalBreakout && aligned && latest.volume >= indicators.volumeMa20 * 1.02) {
     return "Momentum breakout";
   }
 
@@ -738,7 +755,7 @@ export function classifySetupType(
     return "Support/resistance retest";
   }
 
-  if (aligned && regime.trendStrength >= 0.65 && isDirectionalCandle(latest, direction)) {
+  if (aligned && regime.trendStrength >= 0.56 && isDirectionalCandle(latest, direction)) {
     return "Trend continuation";
   }
 
@@ -751,7 +768,7 @@ export function classifySetupType(
     return "Range bounce";
   }
 
-  if (levelStrength >= 3 && reversalRsi) {
+  if (levelStrength >= 2 && reversalRsi && nearLevel) {
     return "Mean reversion";
   }
 
@@ -786,6 +803,92 @@ function calculateQualityScore({ candidate, setupType, regime, levelStrength, op
     (regime.label === "High Volatility" ? 10 : 0);
 
   return Math.max(0, Math.min(100, Math.round(score)));
+}
+
+function getStrategyRules(setupType, direction, confirmations = []) {
+  const levelName = direction === "long" ? "Support" : "Resistance";
+  const roomName = direction === "long" ? "Resistance room" : "Support room";
+  const hasVolume = confirmations.some((item) => item.name === "Volume");
+  const base = {
+    minimumQuality: minimumQualityScore,
+    requiredConfirmations: ["RSI", levelName, roomName],
+    preferredConfirmations: [],
+    requiresEmaAlignment: true
+  };
+
+  const rules = {
+    "Trend continuation": {
+      minimumQuality: 70,
+      requiredConfirmations: ["RSI", roomName],
+      preferredConfirmations: hasVolume ? ["Volume"] : [],
+      requiresEmaAlignment: true
+    },
+    "Pullback bounce": {
+      minimumQuality: 70,
+      requiredConfirmations: ["RSI", levelName, roomName],
+      preferredConfirmations: hasVolume ? ["Volume"] : [],
+      requiresEmaAlignment: true
+    },
+    "Breakout retest": {
+      minimumQuality: 72,
+      requiredConfirmations: ["RSI", roomName],
+      preferredConfirmations: hasVolume ? ["Volume"] : [],
+      requiresEmaAlignment: true
+    },
+    "Momentum breakout": {
+      minimumQuality: 74,
+      requiredConfirmations: ["RSI", roomName, ...(hasVolume ? ["Volume"] : [])],
+      preferredConfirmations: [],
+      requiresEmaAlignment: true
+    },
+    "Range bounce": {
+      minimumQuality: 72,
+      requiredConfirmations: ["RSI", levelName, roomName],
+      preferredConfirmations: [],
+      requiresEmaAlignment: false
+    },
+    "Mean reversion": {
+      minimumQuality: 74,
+      requiredConfirmations: ["RSI", levelName, roomName],
+      preferredConfirmations: [],
+      requiresEmaAlignment: false
+    },
+    "Liquidity sweep reversal": {
+      minimumQuality: 76,
+      requiredConfirmations: ["RSI", levelName, roomName],
+      preferredConfirmations: [],
+      requiresEmaAlignment: false
+    },
+    "VWAP reclaim/rejection": {
+      minimumQuality: 72,
+      requiredConfirmations: ["RSI", roomName],
+      preferredConfirmations: hasVolume ? ["Volume"] : [],
+      requiresEmaAlignment: false
+    },
+    "Support/resistance retest": {
+      minimumQuality: 70,
+      requiredConfirmations: ["RSI", levelName, roomName],
+      preferredConfirmations: hasVolume ? ["Volume"] : [],
+      requiresEmaAlignment: true
+    },
+    "Multi-timeframe continuation": {
+      minimumQuality: 72,
+      requiredConfirmations: ["RSI", roomName],
+      preferredConfirmations: hasVolume ? ["Volume"] : [],
+      requiresEmaAlignment: true
+    }
+  }[setupType] || base;
+
+  return {
+    ...rules,
+    requiredConfirmations: [...new Set(rules.requiredConfirmations)],
+    preferredConfirmations: [...new Set(rules.preferredConfirmations || [])]
+  };
+}
+
+function addRejection(rejectionReasons, rejectionReasonCodes, code, detail) {
+  rejectionReasonCodes.add(code);
+  rejectionReasons.push(detail);
 }
 
 function isDirectionalCandle(candle, direction) {
@@ -999,7 +1102,8 @@ function atrConfirmation(atrValue, price) {
   );
 }
 
-function noSetup(message, marketData, timeframe, candidates) {
+function noSetup(message, marketData, timeframe, candidates, fallbackCodes = []) {
+  const diagnostics = summarizeDiagnostics(candidates, fallbackCodes);
   return {
     valid: false,
     signal: null,
@@ -1007,6 +1111,9 @@ function noSetup(message, marketData, timeframe, candidates) {
       symbol: marketData.pair.symbol,
       timeframe,
       message,
+      rejectionReasons: diagnostics.reasons,
+      rejectionReasonCodes: diagnostics.codes,
+      rejectionSummary: diagnostics.summary,
       evaluatedAt: new Date().toISOString(),
       candidates: candidates.map((candidate) => ({
         direction: candidate.direction,
@@ -1021,6 +1128,7 @@ function noSetup(message, marketData, timeframe, candidates) {
         session: candidate.session,
         newsRisk: candidate.newsRisk,
         rejectionReasons: candidate.rejectionReasons,
+        rejectionReasonCodes: candidate.rejectionReasonCodes || [],
         confirmations: candidate.confirmations
       }))
     }
@@ -1029,22 +1137,39 @@ function noSetup(message, marketData, timeframe, candidates) {
 
 function buildNoSetupMessage(candidates = []) {
   const reasons = candidates.flatMap((candidate) => candidate.rejectionReasons || []);
+  const codes = new Set(candidates.flatMap((candidate) => candidate.rejectionReasonCodes || []));
   const joined = reasons.join(" ").toLowerCase();
 
-  if (joined.includes("low volatility") || joined.includes("atr volatility")) {
+  if (codes.has("low_volatility") || joined.includes("low volatility") || joined.includes("atr volatility")) {
     return "No high-quality setup. Volatility is too low or outside the tradable ATR range.";
   }
-  if (joined.includes("trend up") || joined.includes("trend down") || joined.includes("countertrend") || joined.includes("ema")) {
+  if (codes.has("trend_conflict") || codes.has("failed_confluence_threshold") || joined.includes("trend up") || joined.includes("trend down") || joined.includes("countertrend") || joined.includes("ema")) {
     return "No high-quality setup. Trend and higher-timeframe structure are conflicting.";
   }
-  if (joined.includes("target") || joined.includes("opposing level") || joined.includes("resistance") || joined.includes("support")) {
+  if (codes.has("poor_rr") || codes.has("too_close_to_support_resistance") || joined.includes("target") || joined.includes("opposing level") || joined.includes("resistance") || joined.includes("support")) {
     return "No high-quality setup. Price is too close to support/resistance or the risk/reward is poor.";
   }
-  if (joined.includes("required confirmations") || joined.includes("quality score")) {
+  if (codes.has("weak_confirmation") || codes.has("failed_volume_filter") || joined.includes("required confirmations") || joined.includes("quality score")) {
     return "No high-quality setup. The pattern did not receive enough objective confirmation.";
   }
 
   return "No high-quality setup. Conditions are too mixed for a reliable entry.";
+}
+
+function summarizeDiagnostics(candidates = [], fallbackCodes = []) {
+  const codes = [...new Set([
+    ...fallbackCodes,
+    ...candidates.flatMap((candidate) => candidate.rejectionReasonCodes || [])
+  ])];
+  const reasons = codes.map((code) => diagnosticLabels[code]).filter(Boolean);
+
+  return {
+    codes,
+    reasons: reasons.length ? reasons : ["strategy not matched"],
+    summary: reasons.length
+      ? `No setup found because: ${reasons.slice(0, 4).join(", ")}.`
+      : "No setup found because: strategy not matched."
+  };
 }
 
 function buildReasoning(candidate, indicators, levels, regime, isCommodity) {

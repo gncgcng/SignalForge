@@ -235,6 +235,11 @@ export async function scanAllMarketsDetailed(user) {
   const setups = [];
   const fullSetups = [];
   const errors = [];
+  const diagnostics = {
+    rejectionReasonCodes: {},
+    rejectionReasons: {},
+    samples: []
+  };
   const scanSymbols = listActivePairs().map((pair) => pair.symbol);
   const analystProfile = await getUserAnalystProfile(user);
 
@@ -247,11 +252,20 @@ export async function scanAllMarketsDetailed(user) {
           analystProfile
         );
         const result = detailed.publicResult;
-        scanned.push({ symbol, timeframe, valid: result.valid });
+        const analysis = result.analysis || {};
+        scanned.push({
+          symbol,
+          timeframe,
+          valid: result.valid,
+          rejectionReasonCodes: analysis.rejectionReasonCodes || [],
+          rejectionReasons: analysis.rejectionReasons || []
+        });
 
         if (result.valid) {
           setups.push(result.setup);
           fullSetups.push(detailed.fullSetup);
+        } else {
+          recordScanDiagnostics(diagnostics, symbol, timeframe, analysis);
         }
       } catch (error) {
         scanned.push({ symbol, timeframe, valid: false });
@@ -271,9 +285,47 @@ export async function scanAllMarketsDetailed(user) {
       setups,
       scanned,
       errors,
+      diagnostics: finalizeScanDiagnostics(diagnostics),
       message: setups.length ? "Valid setups found." : "No high-probability setups right now"
     },
     fullSetups
+  };
+}
+
+function recordScanDiagnostics(diagnostics, symbol, timeframe, analysis = {}) {
+  for (const code of analysis.rejectionReasonCodes || []) {
+    diagnostics.rejectionReasonCodes[code] = (diagnostics.rejectionReasonCodes[code] || 0) + 1;
+  }
+  for (const reason of analysis.rejectionReasons || []) {
+    diagnostics.rejectionReasons[reason] = (diagnostics.rejectionReasons[reason] || 0) + 1;
+  }
+  if (diagnostics.samples.length < 8) {
+    diagnostics.samples.push({
+      symbol,
+      timeframe,
+      message: analysis.rejectionSummary || analysis.message || "No setup met the active filters.",
+      reasons: analysis.rejectionReasons || []
+    });
+  }
+}
+
+function finalizeScanDiagnostics(diagnostics) {
+  const topReasons = Object.entries(diagnostics.rejectionReasons)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([reason, count]) => ({ reason, count }));
+  const topCodes = Object.entries(diagnostics.rejectionReasonCodes)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8)
+    .map(([code, count]) => ({ code, count }));
+
+  return {
+    topReasons,
+    topCodes,
+    samples: diagnostics.samples,
+    summary: topReasons.length
+      ? `No setup found because: ${topReasons.slice(0, 3).map((item) => item.reason).join(", ")}.`
+      : "No setup found because: strategy not matched."
   };
 }
 

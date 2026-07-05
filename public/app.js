@@ -682,10 +682,10 @@ scanAllButton.addEventListener("click", async () => {
     renderSubscription();
     updateScanProgress(total, total, "Market scan complete");
     await loadAlerts();
-    renderScanResults(result.setups, result.errors);
+    renderScanResults(result.setups, result.errors, result.diagnostics);
   } catch (error) {
     updateScanProgress(0, total, "Scan All failed");
-    renderScanResults([], [{ symbol: "Scan All", timeframe: "", message: error.message }]);
+    renderScanResults([], [{ symbol: "Scan All", timeframe: "", message: error.message }], null);
   } finally {
     clearInterval(progressTimer);
     scanAllButton.disabled = false;
@@ -3254,6 +3254,10 @@ function getDemoSignalStatus(signal) {
 }
 
 function renderNoSetup(analysis) {
+  const rejectionSummary = analysis?.rejectionSummary ||
+    (analysis?.rejectionReasons?.length
+      ? `No setup found because: ${analysis.rejectionReasons.slice(0, 3).join(", ")}.`
+      : "");
   const rows = (analysis?.candidates || []).flatMap((candidate) => {
     return candidate.confirmations.map((item) => `
       <div>
@@ -3271,7 +3275,8 @@ function renderNoSetup(analysis) {
           <span>${state.selectedPair?.symbol || ""} ${state.timeframe}</span>
         </div>
       </div>
-      <p class="reasoning">${analysis?.message || "Conditions are too weak for a rule-based setup."}</p>
+      <p class="reasoning">${rejectionSummary || analysis?.message || "Conditions are too weak for a rule-based setup."}</p>
+      ${renderRejectionReasons(analysis?.rejectionReasons)}
       <div class="signal-metrics">${rows}</div>
       <div class="signal-disclaimer">
         <strong>Educational tool only. Not financial advice.</strong>
@@ -3290,7 +3295,7 @@ function updateScanProgress(done, total, message) {
   statusLine.textContent = message;
 }
 
-function renderScanSummary(opportunitiesFound, marketsScanned, timeframesScanned, errors = []) {
+function renderScanSummary(opportunitiesFound, marketsScanned, timeframesScanned, errors = [], diagnostics = null) {
   scanSummaryPanel.classList.remove("hidden");
   document.querySelector("#scan-summary-title").textContent = opportunitiesFound > 0
     ? "Scan Summary"
@@ -3304,10 +3309,10 @@ function renderScanSummary(opportunitiesFound, marketsScanned, timeframesScanned
   document.querySelector("#scan-summary-next").textContent = `Suggested next scan: ${formatSuggestedScanTime()}`;
   document.querySelector("#scan-summary-reason").textContent = opportunitiesFound > 0
     ? "Open Signal Desk to unlock or inspect compact opportunities."
-    : `No setup met the confidence and risk filters.${errors.length ? ` ${errors.length} provider warning${errors.length === 1 ? "" : "s"} logged.` : ""}`;
+    : diagnostics?.summary || `No setup met the confidence and risk filters.${errors.length ? ` ${errors.length} provider warning${errors.length === 1 ? "" : "s"} logged.` : ""}`;
 }
 
-function renderScanResults(setups, errors) {
+function renderScanResults(setups, errors, diagnostics = null) {
   state.scanResults = setups;
   document.querySelector("#signal-count").textContent = `${setups.length} scan results`;
   const activePairs = state.pairs
@@ -3322,7 +3327,7 @@ function renderScanResults(setups, errors) {
     opportunitiesFound: setups.length,
     errors: errors.length
   };
-  renderScanSummary(setups.length, scannedMarkets.length, frames.length, errors);
+  renderScanSummary(setups.length, scannedMarkets.length, frames.length, errors, diagnostics);
 
   if (setups.length === 0) {
     signalsGrid.innerHTML = `
@@ -3333,7 +3338,9 @@ function renderScanResults(setups, errors) {
             <span>${scannedMarkets.slice(0, 12).join(" · ")}${scannedMarkets.length > 12 ? " · ..." : ""}</span>
           </div>
         </div>
-        <p class="reasoning">No setup met the confidence and risk filters. No credits used.</p>
+        <p class="reasoning">${escapeHtml(diagnostics?.summary || "No setup found because: weak confirmation, poor RR, or trend conflict.")} No credits used.</p>
+        ${renderRejectionReasons((diagnostics?.topReasons || []).map((item) => `${item.reason} (${item.count})`))}
+        ${renderDiagnosticSamples(diagnostics?.samples)}
         <div class="signal-metrics">
           <div><span>Markets scanned</span><strong>${scannedMarkets.length}</strong></div>
           <div><span>Timeframes</span><strong>${frames.join(", ")}</strong></div>
@@ -3350,6 +3357,32 @@ function renderScanResults(setups, errors) {
   signalsGrid.innerHTML = setups.map((setup) => renderScanCard(setup)).join("");
   statusLine.textContent = `Found ${setups.length} high-probability setup${setups.length === 1 ? "" : "s"}. Unlocking one will use a trial credit.`;
   scanSummaryPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function renderRejectionReasons(reasons = []) {
+  const uniqueReasons = [...new Set((reasons || []).filter(Boolean))].slice(0, 6);
+  if (!uniqueReasons.length) return "";
+
+  return `
+    <div class="diagnostic-reasons">
+      ${uniqueReasons.map((reason) => `<span>${escapeHtml(reason)}</span>`).join("")}
+    </div>
+  `;
+}
+
+function renderDiagnosticSamples(samples = []) {
+  if (!samples?.length) return "";
+
+  return `
+    <div class="diagnostic-samples">
+      ${samples.slice(0, 4).map((sample) => `
+        <div>
+          <strong>${escapeHtml(getDisplaySymbol(sample.symbol))} ${escapeHtml(sample.timeframe)}</strong>
+          <span>${escapeHtml(sample.message)}</span>
+        </div>
+      `).join("")}
+    </div>
+  `;
 }
 
 function renderScanCard(setup) {
@@ -3520,7 +3553,7 @@ function updateRiskCard(card) {
   card.querySelector("[data-risk-profit]").textContent = formatCurrency(positionSize * reward);
   card.querySelector("[data-risk-note]").textContent = quality >= 86
     ? `Normal risk applies, capped at 2%. Effective risk: ${Math.min(2, effectiveRisk)}%.`
-    : quality >= 78
+    : quality >= 70
       ? `Medium quality reduces requested risk by half. Effective risk: ${effectiveRisk}%.`
       : "Low quality: no trade suggested.";
 }

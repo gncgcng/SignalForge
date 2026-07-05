@@ -1901,7 +1901,7 @@ export async function confirmTelegramConnectionCode(code, chatId) {
         user_id, chat_id, enabled, favorite_markets_only, timeframes,
         direction, minimum_confidence
       )
-      VALUES ($1,$2,false,false,ARRAY['1h','4h']::text[],'both',75)
+      VALUES ($1,$2,false,false,ARRAY['1h','4h']::text[],'both',80)
       ON CONFLICT (user_id)
       DO UPDATE SET
         chat_id = EXCLUDED.chat_id,

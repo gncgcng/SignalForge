@@ -119,7 +119,7 @@ export function telegramPreferenceMatchesSetup(settings, favoriteSymbols, setup)
     settings.timeframes.includes(setup.timeframe) &&
     (settings.direction === "both" || settings.direction === setup.direction) &&
     Number(setup.confidenceScore) >= Number(settings.minimumConfidence) &&
-    Number(setup.confidenceScore) >= 70
+    Number(setup.confidenceScore) >= 80
   );
 }
 
