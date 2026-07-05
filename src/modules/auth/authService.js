@@ -3,6 +3,7 @@ import { appConfig } from "../../config/appConfig.js";
 import { createId } from "../../shared/ids.js";
 import {
   createEmailVerificationToken,
+  createPasswordResetToken as createPasswordResetTokenRecord,
   createSession as createSessionRecord,
   createUser,
   deleteSession,
@@ -15,6 +16,7 @@ import {
   markAuthRestoreTokenUsed,
   recordSignupAttempt,
   refreshSession,
+  resetPasswordWithToken,
   revokeAuthRestoreToken,
   revokeAuthRestoreTokensForUserDevice,
   storeAuthRestoreToken,
@@ -35,6 +37,10 @@ import {
 } from "./emailVerificationService.js";
 import { trackProductEvent } from "../analytics/productAnalyticsService.js";
 import { attributeAffiliateReferral } from "../affiliates/affiliateRepository.js";
+import {
+  sendPasswordResetEmail,
+  sendWelcomeEmail
+} from "../notifications/transactionalEmailService.js";
 
 function hashPassword(password, salt = randomBytes(16).toString("hex")) {
   const hash = createHash("sha256").update(`${salt}:${password}`).digest("hex");
@@ -202,6 +208,7 @@ export async function registerOrLogin({
   if (!options.bypassVerification) {
     verification = await issueVerification(user);
   }
+  sendWelcomeEmail(user);
 
   return {
     ...(await createSession(user)),
@@ -258,6 +265,40 @@ export async function verifyEmail(token) {
     throw error;
   }
   return result;
+}
+
+export async function requestPasswordReset(email) {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  if (!normalizedEmail) {
+    return passwordResetRequestResult();
+  }
+
+  const user = await findUserByEmail(normalizedEmail);
+  if (!user || (appConfig.isProduction && isDemoOrTesterIdentity(user.email))) {
+    return passwordResetRequestResult();
+  }
+
+  const token = createPasswordResetToken();
+  await createPasswordResetTokenRecord(user.id, token.tokenHash, token.expiresAt);
+  const resetUrl = `${appConfig.abuseProtection.publicAppUrl}/?reset=${encodeURIComponent(token.token)}`;
+  sendPasswordResetEmail(user, resetUrl);
+  return passwordResetRequestResult(!appConfig.isProduction ? resetUrl : null);
+}
+
+export async function completePasswordReset({ token, password }) {
+  if (!password || password.length < 6) {
+    const error = new Error("Use a password with at least 6 characters.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const result = await resetPasswordWithToken(hashPasswordResetToken(token), hashPassword(password));
+  if (!result) {
+    const error = new Error("Password reset link is invalid or expired.");
+    error.statusCode = 400;
+    throw error;
+  }
+  return { ok: true };
 }
 
 export async function destroySession(sessionId) {
@@ -370,10 +411,33 @@ async function issueVerification(user, { enforceCooldown = false } = {}) {
   return sendVerificationEmail(user, token.token);
 }
 
+function createPasswordResetToken() {
+  const token = randomBytes(32).toString("base64url");
+  return {
+    token,
+    tokenHash: hashPasswordResetToken(token),
+    expiresAt: new Date(Date.now() + 60 * 60 * 1000)
+  };
+}
+
 function hashRestoreToken(token) {
   return createHmac("sha256", appConfig.abuseProtection.hashSecret)
     .update(`auth-restore:${token}`)
     .digest("hex");
+}
+
+function hashPasswordResetToken(token) {
+  return createHmac("sha256", appConfig.abuseProtection.hashSecret)
+    .update(`password-reset:${String(token || "")}`)
+    .digest("hex");
+}
+
+function passwordResetRequestResult(developmentResetUrl = null) {
+  return {
+    ok: true,
+    message: "If an account exists for that email, a password reset link has been sent.",
+    developmentResetUrl
+  };
 }
 
 function sanitizeRestoreToken(value) {

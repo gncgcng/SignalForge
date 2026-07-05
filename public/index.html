@@ -477,11 +477,33 @@
             </span>
           </label>
           <button type="submit">Enter Dashboard</button>
+          <button class="link-button" id="forgot-password-button" type="button">Forgot password?</button>
           <div class="auth-divider"><span>or</span></div>
           <button class="google-auth-button" id="google-auth-button" type="button">
             Continue with Google
           </button>
           <p class="form-note" id="auth-note">Sign in or create your account. Your first 3 signals are included.</p>
+        </form>
+        <form class="auth-card hidden" id="password-reset-request-form">
+          <span class="eyebrow">Account recovery</span>
+          <h2>Reset password</h2>
+          <label>
+            Email
+            <input name="email" type="email" autocomplete="email" placeholder="alex@signalforge.app" required />
+          </label>
+          <button type="submit">Send reset link</button>
+          <button class="secondary-action" id="back-to-login-button" type="button">Back to sign in</button>
+          <p class="form-note" id="password-reset-request-note">We will email a reset link if the account exists.</p>
+        </form>
+        <form class="auth-card hidden" id="password-reset-confirm-form">
+          <span class="eyebrow">Secure reset</span>
+          <h2>Choose a new password</h2>
+          <label>
+            New password
+            <input name="password" type="password" autocomplete="new-password" placeholder="6+ characters" required />
+          </label>
+          <button type="submit">Update password</button>
+          <p class="form-note" id="password-reset-confirm-note">Reset links can be used once.</p>
         </form>
       </section>
 

@@ -3,8 +3,10 @@ import { readJson, sendError, sendJson, parseCookies } from "../../shared/http.j
 import {
   createDemoSession,
   createPersistentRestoreToken,
+  completePasswordReset,
   destroySession,
   registerOrLogin,
+  requestPasswordReset,
   resendVerification,
   refreshSessionExpiry,
   restoreSessionFromToken,
@@ -196,6 +198,27 @@ export async function handleAuthRoutes(req, res, pathname) {
         verificationRequired: result.verificationRequired,
         developmentVerificationUrl: result.verification?.developmentUrl || null
       }, authResponseHeaders());
+    } catch (error) {
+      return sendError(res, error.statusCode || 400, error.message);
+    }
+  }
+
+  if (pathname === "/api/auth/password-reset/request" && req.method === "POST") {
+    try {
+      const body = await readJson(req);
+      return sendJson(res, 200, await requestPasswordReset(body.email), authResponseHeaders());
+    } catch (error) {
+      return sendError(res, error.statusCode || 400, error.message);
+    }
+  }
+
+  if (pathname === "/api/auth/password-reset/confirm" && req.method === "POST") {
+    try {
+      const body = await readJson(req);
+      return sendJson(res, 200, await completePasswordReset({
+        token: body.token,
+        password: body.password
+      }), authResponseHeaders());
     } catch (error) {
       return sendError(res, error.statusCode || 400, error.message);
     }

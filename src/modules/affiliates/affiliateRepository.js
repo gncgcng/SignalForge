@@ -193,7 +193,8 @@ export async function recordRecurringAffiliateCommission({
   return transaction(async (client) => {
     const referralResult = await client.query(`
       SELECT r.*, affiliate.role AS affiliate_role,
-        affiliate.affiliate_disabled, referred.role AS referred_role
+        affiliate.affiliate_disabled, affiliate.email AS affiliate_email,
+        affiliate.name AS affiliate_name, referred.role AS referred_role
       FROM affiliate_referrals r
       JOIN users affiliate ON affiliate.id = r.affiliate_user_id
       JOIN users referred ON referred.id = r.referred_user_id
@@ -237,7 +238,14 @@ export async function recordRecurringAffiliateCommission({
         updated_at = now()
       WHERE id = $1
     `, [referral.id, plan, commissionCents]);
-    return inserted.rows[0];
+    return {
+      ...inserted.rows[0],
+      affiliateUser: {
+        id: referral.affiliate_user_id,
+        email: referral.affiliate_email,
+        name: referral.affiliate_name
+      }
+    };
   });
 }
 

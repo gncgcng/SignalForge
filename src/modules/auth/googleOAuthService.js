@@ -30,6 +30,7 @@ import { createSession } from "./authService.js";
 import { isDemoOrTesterIdentity } from "./authPolicy.js";
 import { trackProductEvent } from "../analytics/productAnalyticsService.js";
 import { attributeAffiliateReferral } from "../affiliates/affiliateRepository.js";
+import { sendWelcomeEmail } from "../notifications/transactionalEmailService.js";
 
 const provider = "google";
 const stateTtlMs = 10 * 60 * 1000;
@@ -220,6 +221,7 @@ async function createGoogleUser(claims, loginState) {
     successful: true,
     reason: repeatedDevice ? "google_repeated_device" : "google_created"
   });
+  sendWelcomeEmail(user);
   return createSession(user);
 }
 

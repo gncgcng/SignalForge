@@ -20,6 +20,11 @@ import {
   recordRecurringAffiliateCommission
 } from "../affiliates/affiliateRepository.js";
 import { trackProductEvent } from "../analytics/productAnalyticsService.js";
+import {
+  sendAffiliateCommissionEmail,
+  sendFailedPaymentEmail,
+  sendSubscriptionConfirmationEmail
+} from "../notifications/transactionalEmailService.js";
 import { BILLING_PLANS, CREDIT_PACKS, normalizePlan } from "./subscriptionService.js";
 
 const stripeApiBase = "https://api.stripe.com/v1";
@@ -157,6 +162,8 @@ export async function processStripeEvent(event) {
       event.type === "invoice.paid"
     ) {
       result = await processInvoicePaymentSucceeded(object, event.id);
+    } else if (event.type === "invoice.payment_failed") {
+      result = await processInvoicePaymentFailed(object);
     } else if (
       event.type === "customer.subscription.created" ||
       event.type === "customer.subscription.updated" ||
@@ -396,12 +403,31 @@ async function processInvoicePaymentSucceeded(invoice, stripeEventId) {
     amountCents: Number(invoice.amount_paid || 0),
     metadata: { source: "invoice" }
   });
+  sendSubscriptionConfirmationEmail(user, planId);
+  if (commission?.affiliateUser?.email) {
+    sendAffiliateCommissionEmail(commission.affiliateUser, {
+      plan: planId,
+      commissionCents: commission.commission_amount_cents
+    });
+  }
   return {
     action: "subscription_payment_applied",
     userId: user.id,
     plan: planId,
     affiliateCommissionCreated: Boolean(commission)
   };
+}
+
+async function processInvoicePaymentFailed(invoice) {
+  const customerId = stripeId(invoice.customer);
+  const userId = invoice.metadata?.user_id;
+  const user = userId
+    ? await findUserById(userId)
+    : await findUserByStripeCustomer(customerId, getStripeMode());
+  if (!user) throw retryableWebhookError("Unable to resolve the failed invoice user.");
+
+  sendFailedPaymentEmail(user);
+  return { action: "failed_payment_notified", userId: user.id };
 }
 
 async function processSubscriptionChanged(subscription, eventType) {

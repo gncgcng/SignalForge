@@ -1,5 +1,9 @@
 import { createHash, randomBytes } from "node:crypto";
 import { appConfig } from "../../config/appConfig.js";
+import {
+  buildButtonEmail,
+  sendTransactionalEmail
+} from "../notifications/transactionalEmailService.js";
 
 export function createVerificationToken() {
   const token = randomBytes(32).toString("base64url");
@@ -29,21 +33,21 @@ export async function sendVerificationEmail(user, token) {
     throw error;
   }
 
-  const response = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${appConfig.abuseProtection.resendApiKey}`,
-      "content-type": "application/json"
-    },
-    body: JSON.stringify({
-      from: appConfig.abuseProtection.emailFrom,
-      to: [user.email],
-      subject: "Verify your SignalForge email",
-      html: `<p>Verify your SignalForge email to activate free trial signals.</p><p><a href="${verificationUrl}">Verify email</a></p><p>This link expires in ${appConfig.abuseProtection.verificationTokenHours} hours.</p>`
-    })
+  const delivery = await sendTransactionalEmail({
+    to: user.email,
+    subject: "Verify your SignalForge email",
+    category: "email_verification",
+    html: buildButtonEmail({
+      title: "Verify your SignalForge email",
+      intro: "Verify your email to activate your free SignalForge unlocks.",
+      buttonLabel: "Verify email",
+      buttonUrl: verificationUrl,
+      footer: `This link expires in ${appConfig.abuseProtection.verificationTokenHours} hours.`
+    }),
+    text: `Verify your SignalForge email: ${verificationUrl}`
   });
 
-  if (!response.ok) {
+  if (!delivery.delivered) {
     const error = new Error("Verification email could not be delivered.");
     error.statusCode = 502;
     throw error;

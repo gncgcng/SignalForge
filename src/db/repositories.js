@@ -1147,6 +1147,47 @@ export async function verifyEmailToken(tokenHash) {
   });
 }
 
+export async function createPasswordResetToken(userId, tokenHash, expiresAt) {
+  await transaction(async (client) => {
+    await client.query(`
+      DELETE FROM password_reset_tokens
+      WHERE user_id = $1 AND used_at IS NULL
+    `, [userId]);
+    await client.query(`
+      INSERT INTO password_reset_tokens (token_hash, user_id, expires_at)
+      VALUES ($1, $2, $3)
+    `, [tokenHash, userId, expiresAt]);
+  });
+}
+
+export async function resetPasswordWithToken(tokenHash, password) {
+  return transaction(async (client) => {
+    const result = await client.query(`
+      SELECT t.*, u.email
+      FROM password_reset_tokens t
+      JOIN users u ON u.id = t.user_id
+      WHERE t.token_hash = $1
+      FOR UPDATE OF t, u
+    `, [tokenHash]);
+    const token = result.rows[0];
+
+    if (!token || token.used_at || new Date(token.expires_at).getTime() <= Date.now()) {
+      return null;
+    }
+
+    await client.query(`
+      UPDATE password_reset_tokens SET used_at = now() WHERE token_hash = $1
+    `, [tokenHash]);
+    await client.query(`
+      UPDATE users
+      SET password_salt = $2, password_hash = $3, updated_at = now()
+      WHERE id = $1
+    `, [token.user_id, password.salt, password.hash]);
+
+    return { userId: token.user_id, email: token.email };
+  });
+}
+
 export async function createOAuthLoginState({
   stateHash,
   provider,

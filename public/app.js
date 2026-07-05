@@ -102,6 +102,12 @@ const mobileMenuToggle = document.querySelector("#mobile-menu-toggle");
 const sidebar = document.querySelector(".sidebar");
 const authForm = document.querySelector("#auth-form");
 const authNote = document.querySelector("#auth-note");
+const forgotPasswordButton = document.querySelector("#forgot-password-button");
+const passwordResetRequestForm = document.querySelector("#password-reset-request-form");
+const passwordResetConfirmForm = document.querySelector("#password-reset-confirm-form");
+const passwordResetRequestNote = document.querySelector("#password-reset-request-note");
+const passwordResetConfirmNote = document.querySelector("#password-reset-confirm-note");
+const backToLoginButton = document.querySelector("#back-to-login-button");
 const legalConsent = document.querySelector("#legal-consent");
 const legalModal = document.querySelector("#legal-modal");
 const legalModalTitle = document.querySelector("#legal-modal-title");
@@ -448,6 +454,68 @@ authForm.addEventListener("submit", async (event) => {
     await bootDashboard();
   } catch (error) {
     authNote.textContent = error.message;
+  }
+});
+
+forgotPasswordButton?.addEventListener("click", () => {
+  showPasswordResetRequest();
+});
+
+backToLoginButton?.addEventListener("click", () => {
+  showAuthForm();
+});
+
+passwordResetRequestForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const submitButton = passwordResetRequestForm.querySelector("button[type='submit']");
+  const form = new FormData(passwordResetRequestForm);
+
+  try {
+    submitButton.disabled = true;
+    passwordResetRequestNote.textContent = "Sending reset link...";
+    const result = await api.request("/api/auth/password-reset/request", {
+      method: "POST",
+      body: JSON.stringify({ email: form.get("email") })
+    });
+    passwordResetRequestNote.textContent = result.developmentResetUrl
+      ? `${result.message} Development link: ${result.developmentResetUrl}`
+      : result.message;
+  } catch (error) {
+    passwordResetRequestNote.textContent = error.message;
+  } finally {
+    submitButton.disabled = false;
+  }
+});
+
+passwordResetConfirmForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const resetToken = getPasswordResetToken();
+  const submitButton = passwordResetConfirmForm.querySelector("button[type='submit']");
+  const form = new FormData(passwordResetConfirmForm);
+
+  if (!resetToken) {
+    passwordResetConfirmNote.textContent = "Reset link is missing. Request a new password reset email.";
+    return;
+  }
+
+  try {
+    submitButton.disabled = true;
+    passwordResetConfirmNote.textContent = "Updating password...";
+    await api.request("/api/auth/password-reset/confirm", {
+      method: "POST",
+      body: JSON.stringify({
+        token: resetToken,
+        password: form.get("password")
+      })
+    });
+    clearPasswordResetParam();
+    passwordResetConfirmForm.reset();
+    showAuthForm();
+    authNote.textContent = "Password updated. Sign in with your new password.";
+  } catch (error) {
+    passwordResetConfirmNote.textContent = error.message;
+  } finally {
+    submitButton.disabled = false;
   }
 });
 
@@ -1367,6 +1435,7 @@ async function init() {
   const oauthError = new URLSearchParams(location.search).get("oauth_error");
   const oauthSuccess = new URLSearchParams(location.search).get("oauth") === "success";
   const verificationToken = new URLSearchParams(location.search).get("verify");
+  const passwordResetToken = getPasswordResetToken();
   let verificationMessage = "";
   if (verificationToken) {
     try {
@@ -1392,6 +1461,16 @@ async function init() {
   const user = session.user;
 
   state.user = user;
+
+  if (passwordResetToken) {
+    setSplashStatus("Opening password reset");
+    publicProfilePage?.classList.add("hidden");
+    landingPage.classList.add("hidden");
+    dashboard.classList.add("hidden");
+    authScreen.classList.remove("hidden");
+    showPasswordResetConfirm();
+    return;
+  }
 
   if (user) {
     setSplashStatus("Opening your dashboard");
@@ -1741,6 +1820,39 @@ function showAuth() {
   landingPage.classList.add("hidden");
   dashboard.classList.add("hidden");
   authScreen.classList.remove("hidden");
+  showAuthForm();
+}
+
+function showAuthForm() {
+  authForm?.classList.remove("hidden");
+  passwordResetRequestForm?.classList.add("hidden");
+  passwordResetConfirmForm?.classList.add("hidden");
+}
+
+function showPasswordResetRequest() {
+  showAuth();
+  authForm?.classList.add("hidden");
+  passwordResetRequestForm?.classList.remove("hidden");
+  passwordResetConfirmForm?.classList.add("hidden");
+  passwordResetRequestNote.textContent = "We will email a reset link if the account exists.";
+}
+
+function showPasswordResetConfirm() {
+  showAuth();
+  authForm?.classList.add("hidden");
+  passwordResetRequestForm?.classList.add("hidden");
+  passwordResetConfirmForm?.classList.remove("hidden");
+  passwordResetConfirmNote.textContent = "Enter a new password to complete your reset.";
+}
+
+function getPasswordResetToken() {
+  return new URLSearchParams(location.search).get("reset") || "";
+}
+
+function clearPasswordResetParam() {
+  const url = new URL(location.href);
+  url.searchParams.delete("reset");
+  history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
 async function loadPairs(query = "") {
