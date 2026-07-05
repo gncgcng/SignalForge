@@ -7,8 +7,9 @@ const generator = readFileSync(new URL("../src/modules/signals/signalGenerator.j
 
 const result = {
   disclaimerVisibleInSignalDesk: html.includes("Educational tool only. Not financial advice."),
-  signalCardsUseTransparency: app.includes("renderSignalTransparency(setup)") &&
-    app.includes("renderSignalTransparency(signal)"),
+  signalCardsUseTransparency: app.includes("renderSignalTransparency") &&
+    app.includes("renderMobileSignalAccordion(signal)") &&
+    app.includes("renderModeDetails(signal"),
   historyUsesTransparency: app.includes("history-transparency"),
   whyThisSignalPresent: app.includes("Why this signal?"),
   confidenceBreakdownPresent: app.includes("Confidence summarizes rule alignment"),

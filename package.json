@@ -36,6 +36,7 @@
     "test:multi-timeframe": "node scripts/multi-timeframe-test.js",
     "test:expanded-crypto": "node scripts/expanded-crypto-test.js",
     "test:scanner-ux": "node scripts/scanner-ux-test.js",
+    "test:mobile-signals": "node scripts/mobile-signals-layout-test.js",
     "test:provider-routing": "node scripts/provider-routing-test.js",
     "test:session-migration": "node scripts/session-migration-test.js",
     "test:signal-setup-key-migration": "node scripts/signal-setup-key-migration-test.js",

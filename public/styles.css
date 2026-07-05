@@ -2754,6 +2754,10 @@ polyline {
   border-collapse: collapse;
 }
 
+.mobile-signals-list {
+  display: none;
+}
+
 .signals-table th,
 .signals-table td {
   padding: 13px 14px;
@@ -2998,6 +3002,110 @@ polyline {
   padding: 12px 0;
 }
 
+.mobile-signal-card {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(16, 20, 29, 0.92);
+}
+
+.mobile-signal-card-header,
+.mobile-signal-meta {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.mobile-signal-card-header > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.mobile-signal-card-header strong {
+  overflow-wrap: anywhere;
+  font-size: 1rem;
+}
+
+.mobile-signal-card-header span:not(.status-pill),
+.mobile-signal-meta span {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.mobile-signal-meta {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.mobile-signal-values {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.mobile-signal-values div {
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0b1018;
+}
+
+.mobile-signal-values span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.mobile-signal-values strong {
+  display: block;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+
+.mobile-signal-accordion {
+  display: grid;
+  gap: 8px;
+}
+
+.mobile-signal-accordion details {
+  min-width: 0;
+  border: 1px solid rgba(40, 49, 66, 0.86);
+  border-radius: 8px;
+  background: rgba(11, 16, 24, 0.7);
+}
+
+.mobile-signal-accordion summary {
+  min-height: 44px;
+  padding: 12px;
+  cursor: pointer;
+  color: var(--text);
+  font-size: 0.84rem;
+  font-weight: 900;
+  list-style-position: inside;
+}
+
+.mobile-signal-accordion details > :not(summary) {
+  margin: 0 12px 12px;
+}
+
+.mobile-signal-accordion .long-analysis,
+.mobile-signal-accordion .reasoning,
+.mobile-signal-accordion span,
+.mobile-signal-accordion p {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.mobile-confirmations .confirmation-item {
+  grid-template-columns: 1fr;
+}
+
 @media (max-width: 980px) {
   .auth-screen,
   .scanner-grid,
@@ -3038,6 +3146,12 @@ polyline {
 }
 
 @media (max-width: 767px) {
+  html,
+  body {
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
   body.mobile-nav-open {
     overflow: hidden;
   }
@@ -3108,8 +3222,9 @@ polyline {
     top: 0;
     align-items: center;
     flex-direction: row;
-    margin: -14px -16px 18px;
-    padding: calc(10px + env(safe-area-inset-top)) 14px 10px;
+    gap: 8px;
+    margin: -14px -16px 14px;
+    padding: calc(8px + env(safe-area-inset-top)) 12px 8px;
     border-bottom: 1px solid rgba(40, 49, 66, 0.86);
     background: rgba(8, 10, 15, 0.92);
     backdrop-filter: blur(16px);
@@ -3120,17 +3235,22 @@ polyline {
     flex: 1;
   }
 
+  .topbar .eyebrow {
+    display: none;
+  }
+
   .topbar h2 {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    font-size: 1rem;
   }
 
   .mobile-menu-toggle {
     display: inline-grid;
-    flex: 0 0 44px;
-    width: 44px;
-    height: 44px;
+    flex: 0 0 40px;
+    width: 40px;
+    height: 40px;
     place-items: center;
     padding: 0;
     border: 1px solid var(--line);
@@ -3157,6 +3277,15 @@ polyline {
     gap: 8px;
   }
 
+  .user-chip,
+  #logout-button {
+    min-height: 40px;
+  }
+
+  #logout-button {
+    padding: 0 10px;
+  }
+
   .user-chip #user-name {
     display: none;
   }
@@ -3181,6 +3310,36 @@ polyline {
 
   .signals-section .section-title {
     align-items: stretch;
+  }
+
+  .history-filters {
+    grid-template-columns: 1fr;
+  }
+
+  .signals-table-wrap {
+    overflow: visible;
+    border: 0;
+    background: transparent;
+  }
+
+  .signals-table {
+    display: none;
+  }
+
+  .mobile-signals-list {
+    display: grid;
+    gap: 12px;
+  }
+
+  .mobile-signal-card .paper-trade-action {
+    width: 100%;
+    min-height: 44px;
+  }
+
+  .signal-disclaimer {
+    align-items: flex-start;
+    flex-direction: column;
+    width: 100%;
   }
 
   .signals-grid {

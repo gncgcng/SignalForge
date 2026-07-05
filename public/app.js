@@ -2638,6 +2638,9 @@ function renderSignalsHistory() {
         </tr>
       `).join("")}</tbody>
     </table>
+    <div class="mobile-signals-list">
+      ${filtered.map((signal) => renderMobileSignalHistoryCard(signal)).join("")}
+    </div>
   `;
 }
 
@@ -3211,9 +3214,10 @@ function getPerformanceFilterLabel() {
 
 function renderSignalHistoryRow(signal) {
   const status = getDemoSignalStatus(signal);
+  const key = getSignalKey(signal);
 
   return `
-    <tr>
+    <tr data-signal-key="${key}">
       <td><strong>${signal.symbol}</strong></td>
       <td>${signal.timeframe}</td>
       <td><strong class="direction ${signal.direction}">${signal.direction}</strong></td>
@@ -3225,6 +3229,88 @@ function renderSignalHistoryRow(signal) {
       <td><span class="status-pill ${status.className}">${status.label}</span></td>
       <td>${formatDateTime(signal.generatedAt)}</td>
     </tr>
+  `;
+}
+
+function renderMobileSignalHistoryCard(signal) {
+  const status = getDemoSignalStatus(signal);
+  const key = getSignalKey(signal);
+
+  return `
+    <article class="mobile-signal-card" data-signal-key="${key}">
+      <div class="mobile-signal-card-header">
+        <div>
+          <strong>${escapeHtml(getDisplaySymbol(signal.symbol))}</strong>
+          <span>${escapeHtml(getProviderSymbolLabel(signal.symbol))}</span>
+        </div>
+        <span class="status-pill ${status.className}">${status.label}</span>
+      </div>
+      <div class="mobile-signal-meta">
+        <span>${escapeHtml(signal.timeframe)}</span>
+        <strong class="direction ${signal.direction}">${escapeHtml(signal.direction || "")}</strong>
+        <span>${formatDateTime(signal.generatedAt)}</span>
+      </div>
+      <div class="mobile-signal-values">
+        ${renderMobileSignalValue("Entry", formatCurrency(signal.entryPrice))}
+        ${renderMobileSignalValue("Stop", formatCurrency(signal.stopLoss))}
+        ${renderMobileSignalValue("Take profit", formatCurrency(signal.takeProfit))}
+        ${renderMobileSignalValue("R/R", `${signal.riskRewardRatio}:1`)}
+        ${renderMobileSignalValue("Confidence", `${signal.confidenceScore}%`)}
+      </div>
+      ${renderMobileSignalAccordion(signal)}
+      ${renderPaperTradeAction(signal)}
+    </article>
+  `;
+}
+
+function renderMobileSignalValue(label, value) {
+  return `
+    <div>
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+    </div>
+  `;
+}
+
+function renderMobileSignalAccordion(signal) {
+  const confirmations = normalizeConfirmations(signal.confirmations || [], signal.indicators || {});
+  const passed = confirmations.filter((item) => item.passed).map((item) => item.name);
+
+  return `
+    <div class="mobile-signal-accordion">
+      <details>
+        <summary>Overview</summary>
+        <p class="reasoning">${escapeHtml(getShortSignalReason(signal))}</p>
+      </details>
+      <details>
+        <summary>Why this signal?</summary>
+        <div class="confirmation-list mobile-confirmations">
+          ${confirmations.map((item) => `
+            <div class="confirmation-item ${item.passed ? "passed" : "failed"}">
+              <strong>${item.passed ? "Passed" : "Failed"} · ${escapeHtml(item.name)}</strong>
+              <span>${escapeHtml(item.detail)}</span>
+            </div>
+          `).join("") || `<p class="reasoning">Confirmed by ${escapeHtml(passed.join(", ") || "rule-based confluence")}.</p>`}
+        </div>
+      </details>
+      <details>
+        <summary>Risk levels</summary>
+        <div class="mobile-signal-values compact">
+          ${renderMobileSignalValue("Entry", formatCurrency(signal.entryPrice))}
+          ${renderMobileSignalValue("Stop loss", formatCurrency(signal.stopLoss))}
+          ${renderMobileSignalValue("Take profit", formatCurrency(signal.takeProfit))}
+          ${renderMobileSignalValue("Reward/risk", `${signal.riskRewardRatio}:1`)}
+        </div>
+        ${renderRiskEngineCard(signal)}
+      </details>
+      <details>
+        <summary>Advanced analysis</summary>
+        <p class="reasoning long-analysis">${escapeHtml(signal.reasoning || "Advanced signal context is based on rule alignment.")}</p>
+        ${renderSignalConfluence(signal)}
+        ${renderSmcExplanation(signal)}
+        ${renderAdvancedStructureExplanation(signal)}
+      </details>
+    </div>
   `;
 }
 
