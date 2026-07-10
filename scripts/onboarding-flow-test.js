@@ -26,8 +26,8 @@ includes(app, "Choose alert preferences", "alert preferences checklist copy");
 includes(app, "Run first scan", "first scan checklist copy");
 includes(app, "Unlock first signal", "unlock checklist copy");
 includes(app, "data-onboarding-action", "onboarding action buttons");
-includes(app, 'showView("notifications")', "notifications onboarding routing");
-includes(app, 'showView("profile")', "profile onboarding routing");
+includes(app, 'navigateTo("notifications")', "notifications onboarding routing");
+includes(app, 'navigateTo("profile")', "profile onboarding routing");
 includes(app, "markFirstScanCompleted();", "scan completion call sites");
 
 assert.ok(

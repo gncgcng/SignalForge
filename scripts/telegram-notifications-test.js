@@ -132,7 +132,7 @@ const result = {
     repositories.includes("INSERT INTO saved_signals") &&
     repositories.includes("INSERT INTO unlocked_signals") &&
     repositories.includes("INSERT INTO signal_outcomes") &&
-    app.includes("showView(\"signals\")") &&
+    app.includes("navigateTo(\"signals\"") &&
     app.includes("state.unlockedRevealSignalId = unlockedSignal.id") &&
     app.includes("if (key) highlightSignalKey(key)"),
   telegramUnlockFrontendPresent: app.includes("telegramUnlock") &&

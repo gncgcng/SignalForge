@@ -1,3 +1,5 @@
+import { ROUTE_TO_VIEW, buildRouteHash, normalizeAppRoute, parseAppHash } from "./router.js";
+
 const state = {
   user: null,
   subscription: null,
@@ -15,6 +17,8 @@ const state = {
   unlockedRevealSignalId: null,
   lastScanSummary: null,
   activeView: "scanner",
+  activeRoute: "scanner",
+  lastAppliedRouteHash: "",
   historyFilters: {
     pair: "all",
     timeframe: "all",
@@ -107,6 +111,7 @@ const UNLOCK_REVEAL_KEY = "signalforge-unlock-reveal";
 const ONBOARDING_SKIP_KEY = "signalforge-onboarding-skipped";
 const FIRST_SCAN_KEY = "signalforge-first-scan-complete";
 const PAPER_INDICATORS_KEY = "signalforge-paper-indicators";
+
 
 const authScreen = document.querySelector("#auth-screen");
 const landingPage = document.querySelector("#landing-page");
@@ -631,7 +636,7 @@ usernameOnboardingForm?.addEventListener("submit", async (event) => {
 });
 
 document.querySelector("#upgrade-button").addEventListener("click", async () => {
-  showView("billing");
+  navigateTo("billing");
 });
 
 billingPlanGrid.addEventListener("click", async (event) => {
@@ -765,10 +770,12 @@ window.addEventListener("resize", () => {
 document.querySelectorAll("[data-view-link]").forEach((link) => {
   link.addEventListener("click", (event) => {
     event.preventDefault();
-    showView(link.dataset.viewLink);
-    setMobileNavigationOpen(false);
+    navigateTo(link.dataset.viewLink);
   });
 });
+
+window.addEventListener("hashchange", handleBrowserRouteChange);
+window.addEventListener("popstate", handleBrowserRouteChange);
 
 document.querySelectorAll("[data-nav-section-toggle]").forEach((button) => {
   button.addEventListener("click", () => {
@@ -1161,7 +1168,7 @@ performanceFilters.addEventListener("submit", async (event) => {
 
 document.querySelector("#performance-view")?.addEventListener("click", (event) => {
   const button = event.target.closest("[data-performance-open-signals]");
-  if (button) showView("signals");
+  if (button) navigateTo("signals");
 });
 
 document.querySelectorAll("[data-performance-range]").forEach((button) => {
@@ -1317,7 +1324,7 @@ paperPortfolioGrid.addEventListener("click", async (event) => {
   if (button) {
     journalMarket.value = button.dataset.journalSymbol;
     journalTimeframe.value = button.dataset.journalTimeframe;
-    showView("journal");
+    navigateTo("journal");
     return;
   }
   const closeButton = event.target.closest("[data-paper-close-order]");
@@ -1505,7 +1512,7 @@ async function enterPaperTrade(button) {
   document.body.classList.remove("unlock-reveal-open");
   state.unlockedRevealSignalId = null;
   sessionStorage.removeItem(UNLOCK_REVEAL_KEY);
-  showView("paper-portfolio", { skipPaperLoad: true });
+  navigateTo("paper-trading", { pair: getDisplaySymbol(signal.symbol) }, { skipPaperLoad: true });
   await loadPaperTradingTerminal();
   prefillPaperOrderFromSignal(signal);
   showToast("Paper order ticket pre-filled");
@@ -1811,15 +1818,7 @@ async function bootDashboard() {
     }
   }
   renderTimeframes();
-  const requestedView = location.hash?.replace("#", "").split("?")[0];
-  const allowedInitialViews = ["signals", "paper-portfolio", "journal", "backtesting", "performance", "watchlist", "alerts", "notifications", "affiliate", "leaderboard", "profile", "settings", "billing"];
-  if (state.user.isAdmin) {
-    allowedInitialViews.push("admin", "affiliate-admin", "webhook-events");
-  }
-  const initialView = allowedInitialViews.includes(requestedView)
-    ? requestedView
-    : "scanner";
-  showView(initialView);
+  syncRouteFromLocation({ force: true, replaceInvalid: true });
   renderOnboarding();
   renderCheckoutReturnStatus();
   startSignalHistoryRefresh();
@@ -1848,7 +1847,11 @@ function reportDashboardLoadFailures(results) {
 }
 
 function getPendingTelegramUnlockKey() {
-  const fromUrl = new URLSearchParams(location.search).get("telegramUnlock") || "";
+  const hashParams = parseAppHash(location.hash).params;
+  const fromUrl = new URLSearchParams(location.search).get("telegramUnlock") ||
+    hashParams.get("unlock") ||
+    hashParams.get("telegramUnlock") ||
+    "";
   if (fromUrl) {
     sessionStorage.setItem(TELEGRAM_UNLOCK_KEY, fromUrl);
     return fromUrl;
@@ -1880,15 +1883,20 @@ async function processPendingTelegramUnlock() {
     await completeSignalUnlock({ signal, subscription, alreadyUnlocked, source: "telegram" });
   } catch (error) {
     statusLine.textContent = error.message;
-    showView("signals");
+    navigateTo("signals", {}, { replace: true });
   }
 }
 
 function removeTelegramUnlockParam() {
   const url = new URL(location.href);
   url.searchParams.delete("telegramUnlock");
+  const parsed = parseAppHash(url.hash);
+  parsed.params.delete("unlock");
+  parsed.params.delete("telegramUnlock");
+  url.hash = buildRouteHash(parsed.valid ? parsed.route : "signals", parsed.params);
   sessionStorage.removeItem(TELEGRAM_UNLOCK_KEY);
   history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+  state.lastAppliedRouteHash = url.hash;
 }
 
 function showAuth() {
@@ -2109,6 +2117,10 @@ async function loadPaperTradingTerminal() {
   renderPaperTradingTerminal();
   renderSignals();
   renderSignalsHistory();
+  const route = parseAppHash(location.hash);
+  if (route.route === "paper-trading" && route.params.has("pair")) {
+    removeHashParams(["pair"]);
+  }
 }
 
 async function loadJournal() {
@@ -2310,7 +2322,90 @@ function startSignalHistoryRefresh() {
   }, 30000);
 }
 
-function showView(view, options = {}) {
+function navigateTo(routeOrView, params = {}, options = {}) {
+  const route = normalizeAppRoute(routeOrView);
+  const allowedRoute = isRouteAllowed(route) ? route : "scanner";
+  const hash = buildRouteHash(allowedRoute, params);
+  const destination = `${location.pathname}${location.search}${hash}`;
+
+  if (location.hash !== hash) {
+    history[options.replace ? "replaceState" : "pushState"]({}, "", destination);
+  }
+  syncRouteFromLocation({ force: true, viewOptions: options });
+  setMobileNavigationOpen(false);
+}
+
+function syncRouteFromLocation({ force = false, replaceInvalid = false, viewOptions = {} } = {}) {
+  if (!state.user || dashboard.classList.contains("hidden")) return;
+  const parsed = parseAppHash(location.hash);
+  let route = parsed.route;
+  let params = parsed.params;
+
+  if (!parsed.valid || !isRouteAllowed(route)) {
+    route = "scanner";
+    params = new URLSearchParams();
+    if (replaceInvalid || location.hash) {
+      history.replaceState({}, "", `${location.pathname}${location.search}#scanner`);
+    }
+  } else if (!parsed.canonical) {
+    const canonicalHash = buildRouteHash(route, params);
+    history.replaceState({}, "", `${location.pathname}${location.search}${canonicalHash}`);
+  }
+
+  const currentHash = buildRouteHash(route, params);
+  if (!force && state.lastAppliedRouteHash === currentHash) return;
+  state.lastAppliedRouteHash = currentHash;
+  state.activeRoute = route;
+
+  if (route === "paper-trading" && params.get("pair")) {
+    const symbol = resolvePaperTradingRouteSymbol(params.get("pair"));
+    if (symbol) state.paperTrading.selectedSymbol = symbol;
+  }
+
+  applyViewState(ROUTE_TO_VIEW[route], viewOptions);
+  if (route === "signals") consumeSignalRouteParams(params);
+}
+
+function handleBrowserRouteChange() {
+  syncRouteFromLocation({ replaceInvalid: true });
+}
+
+function isRouteAllowed(route) {
+  if (!Object.hasOwn(ROUTE_TO_VIEW, route)) return false;
+  return !["admin", "affiliate-admin", "webhook-events"].includes(route) || Boolean(state.user?.isAdmin);
+}
+
+function resolvePaperTradingRouteSymbol(value) {
+  const normalized = String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const markets = [...state.paperTrading.markets, ...state.marketCatalog, ...state.pairs];
+  return markets.find((market) => {
+    return [market.symbol, market.displaySymbol, market.name]
+      .filter(Boolean)
+      .some((candidate) => String(candidate).toUpperCase().replace(/[^A-Z0-9]/g, "") === normalized);
+  })?.symbol || null;
+}
+
+function consumeSignalRouteParams(params) {
+  const signalId = params.get("signalId");
+  if (!signalId) return;
+  const signal = state.signals.find((item) => item.id === signalId);
+  if (!signal) return;
+  const key = getSignalKey(signal);
+  state.expandedSignalKeys = new Set([key]);
+  renderSignalsHistory();
+  highlightSignalKey(key);
+  removeHashParams(["signalId"]);
+}
+
+function removeHashParams(names) {
+  const parsed = parseAppHash(location.hash);
+  for (const name of names) parsed.params.delete(name);
+  const hash = buildRouteHash(parsed.route, parsed.params);
+  history.replaceState({}, "", `${location.pathname}${location.search}${hash}`);
+  state.lastAppliedRouteHash = hash;
+}
+
+function applyViewState(view, options = {}) {
   const allowedViews = ["scanner", "watchlist", "alerts", "notifications", "signals", "paper-portfolio", "journal", "backtesting", "performance", "affiliate", "leaderboard", "profile", "settings", "billing"];
   if (state.user?.isAdmin) {
     allowedViews.push("admin", "affiliate-admin", "webhook-events");
@@ -2809,7 +2904,7 @@ async function refreshBillingAfterCheckout() {
       await loadSubscription();
       if (billingSnapshot() !== baseline) {
         billingStatus.textContent = "Purchase confirmed. Billing credits are updated.";
-        history.replaceState({}, "", `${location.pathname}#billing`);
+        removeHashParams(["checkout"]);
         return;
       }
       billingStatus.textContent = `Purchase received. Waiting for Stripe confirmation (${attempt}/20)...`;
@@ -2819,7 +2914,7 @@ async function refreshBillingAfterCheckout() {
   }
 
   billingStatus.textContent = "Purchase received. Billing will update when Stripe confirms payment.";
-  history.replaceState({}, "", `${location.pathname}#billing`);
+  removeHashParams(["checkout"]);
 }
 
 function billingSnapshot() {
@@ -6097,14 +6192,14 @@ function renderOnboarding() {
 
 function handleOnboardingAction(action) {
   if (action === "profile") {
-    showView("profile");
+    navigateTo("profile");
     usernameRequiredPanel?.scrollIntoView({ behavior: "smooth", block: "start" });
     onboardingUsername?.focus({ preventScroll: true });
     return;
   }
 
   if (action === "telegram" || action === "preferences") {
-    showView("notifications");
+    navigateTo("notifications");
     if (action === "preferences") {
       telegramPreferencesForm?.scrollIntoView({ behavior: "smooth", block: "start" });
     } else {
@@ -6114,7 +6209,7 @@ function handleOnboardingAction(action) {
   }
 
   if (action === "scan") {
-    showView("scanner");
+    navigateTo("scanner");
     scanAllButton?.scrollIntoView({ behavior: "smooth", block: "center" });
     scanAllButton?.focus({ preventScroll: true });
     return;
@@ -6122,12 +6217,12 @@ function handleOnboardingAction(action) {
 
   if (action === "unlock") {
     if (state.scanResults?.length) {
-      showView("scanner");
+      navigateTo("scanner");
       scrollToSignalDesk();
       return;
     }
 
-    showView(state.signals?.length ? "signals" : "scanner");
+    navigateTo(state.signals?.length ? "signals" : "scanner");
     if (!state.signals?.length) {
       scrollToSignalDesk();
     }
@@ -6189,7 +6284,7 @@ async function completeSignalUnlock({ signal, subscription, alreadyUnlocked, sou
   state.unlockedRevealSignalId = unlockedSignal.id;
   sessionStorage.setItem(UNLOCK_REVEAL_KEY, unlockedSignal.id);
 
-  showView("signals");
+  navigateTo("signals", {}, { replace: source === "telegram" });
   renderSignals();
   renderSignalsHistory();
   renderUnlockReveal();
@@ -6211,7 +6306,7 @@ async function restoreUnlockReveal() {
   }
   await loadPaperPortfolio();
   state.unlockedRevealSignalId = signal.id;
-  showView("signals");
+  navigateTo("signals", {}, { replace: true });
   renderUnlockReveal();
 }
 
@@ -6300,14 +6395,16 @@ function getConfidenceBand(confidence) {
 
 function scrollToSignalKey(key) {
   const cards = [...document.querySelectorAll("[data-signal-key]")];
-  const card = cards.find((item) => item.dataset.signalKey === key);
+  const matches = cards.filter((item) => item.dataset.signalKey === key);
+  const card = matches.find((item) => item.offsetParent !== null) || matches[0];
   card?.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
 function highlightSignalKey(key) {
   requestAnimationFrame(() => {
     const cards = [...document.querySelectorAll("[data-signal-key]")];
-    const card = cards.find((item) => item.dataset.signalKey === key);
+    const matches = cards.filter((item) => item.dataset.signalKey === key);
+    const card = matches.find((item) => item.offsetParent !== null) || matches[0];
     if (!card) return;
     card.classList.add("signal-highlight");
     card.scrollIntoView({ behavior: "smooth", block: "center" });

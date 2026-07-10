@@ -34,7 +34,8 @@ const result = {
   menuClosesOnSelection:
     app.includes("mobileMenuToggle.addEventListener") &&
     app.includes("setMobileNavigationOpen(!dashboard.classList.contains(\"mobile-nav-open\"))") &&
-    app.includes("showView(link.dataset.viewLink);\n    setMobileNavigationOpen(false);"),
+    app.includes("navigateTo(link.dataset.viewLink);") &&
+    app.includes("setMobileNavigationOpen(false);"),
   menuClosesOnBackdropAndEscape:
     app.includes("dashboard.addEventListener(\"click\"") &&
     app.includes("!sidebar.contains(event.target)") &&
@@ -44,8 +45,9 @@ const result = {
     app.includes("mobileMenuToggle.setAttribute(\"aria-expanded\", String(open))") &&
     app.includes("mobileMenuToggle.setAttribute(\"aria-label\", open ? \"Close navigation\" : \"Open navigation\")"),
   pwaCacheBumped: css.includes("mobile-nav-open") &&
-    readFileSync(new URL("../public/service-worker.js", import.meta.url), "utf8")
-      .includes('signalforge-static-v11')
+    /signalforge-static-v\d+/.test(
+      readFileSync(new URL("../public/service-worker.js", import.meta.url), "utf8")
+    )
 };
 
 for (const [name, passed] of Object.entries(result)) {

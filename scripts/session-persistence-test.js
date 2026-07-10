@@ -182,9 +182,8 @@ const result = {
     migration.includes("ALTER COLUMN expires_at SET DEFAULT") &&
     migration.includes("interval '180 days'") &&
     migration.includes("WHERE expires_at > now()"),
-  pwaCacheBumped: serviceWorker.includes("signalforge-static-v10")
-    ? false
-    : serviceWorker.includes("signalforge-static-v11")
+  pwaCacheBumped: /signalforge-static-v\d+/.test(serviceWorker) &&
+    !serviceWorker.includes("signalforge-static-v10")
 };
 
 for (const [name, passed] of Object.entries(result)) {

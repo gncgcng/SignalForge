@@ -74,7 +74,7 @@ const checks = {
     app.includes('data-signal-key="${key}"'),
   unlockExpandsUnlockedSignal:
     app.includes("state.expandedSignalKeys = new Set([unlockedKey])") &&
-    app.includes('showView("signals")') &&
+    app.includes('navigateTo("signals"') &&
     app.includes("renderUnlockReveal()") &&
     app.includes("if (key) highlightSignalKey(key)") &&
     app.includes("Signal unlocked"),

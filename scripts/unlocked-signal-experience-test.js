@@ -21,7 +21,7 @@ const checks = {
     html.includes('id="unlock-reveal"') &&
     html.includes('id="unlock-reveal-card"') &&
     app.includes("completeSignalUnlock({ signal, subscription, alreadyUnlocked") &&
-    app.includes('showView("signals")') &&
+    app.includes('navigateTo("signals"') &&
     app.includes("renderUnlockReveal();"),
   levelsBeforeAnalysis:
     revealFunction.indexOf("Entry") < revealFunction.indexOf("View full analysis") &&
@@ -33,7 +33,8 @@ const checks = {
     revealFunction.includes("renderPaperTradeAction(signal, true)") &&
     app.includes("Already added to Paper Trading") &&
     app.includes("prefillPaperOrderFromSignal(signal)") &&
-    app.includes('showView("paper-portfolio", { skipPaperLoad: true })'),
+    app.includes('navigateTo("paper-trading"') &&
+    app.includes("skipPaperLoad: true"),
   duplicatePaperBlocked:
     paperMigration.includes("UNIQUE (user_id, saved_signal_id)") &&
     repositories.includes("ON CONFLICT (user_id, saved_signal_id) DO NOTHING"),
