@@ -1370,11 +1370,24 @@
                 </label>
                 <label class="consent-row">
                   <input id="settings-public-leaderboard" name="publicLeaderboardEnabled" type="checkbox" />
-                  <span>Show me on public leaderboards</span>
+                  <span>
+                    <strong>Appear on leaderboard</strong>
+                    <small>Your profile must be public. You need at least one completed tracked signal or linked paper trade to be ranked.</small>
+                  </span>
                 </label>
                 <button type="submit">Save profile</button>
               </form>
-              <p class="form-note" id="profile-settings-message">Usernames are unique and can be changed once every 30 days. Leaderboards require a public profile and username.</p>
+              <div class="leaderboard-eligibility" id="leaderboard-eligibility" aria-live="polite">
+                <div><span>Public profile</span><strong id="eligibility-public-profile">Off</strong></div>
+                <div><span>Leaderboard visibility</span><strong id="eligibility-leaderboard">Off</strong></div>
+                <div><span>Completed tracked signals</span><strong id="eligibility-tracked-signals">0</strong></div>
+                <div><span>Linked paper trades</span><strong id="eligibility-paper-trades">0</strong></div>
+                <div class="leaderboard-eligibility-status"><span>Eligibility status</span><strong id="eligibility-status">Not eligible yet</strong></div>
+              </div>
+              <div class="settings-profile-actions">
+                <button class="secondary-button" id="settings-view-leaderboard" type="button">View leaderboard</button>
+              </div>
+              <p class="form-note" id="profile-settings-message">Usernames are unique and can be changed once every 30 days.</p>
             </article>
           </section>
 

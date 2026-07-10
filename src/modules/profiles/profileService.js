@@ -1,6 +1,7 @@
 import {
   findUserById,
   findUserByUsername,
+  getLeaderboardEligibilityByUser,
   listPerformanceSignalsByUser,
   updateUserProfileSettings
 } from "../../db/repositories.js";
@@ -21,8 +22,11 @@ export function validateUsername(username) {
 export async function getMyProfile(user) {
   const freshUser = await findUserById(user.id);
   if (!freshUser) return buildEmptyProfile(user, { privateView: true });
-  const signals = await listPerformanceSignalsByUser(user.id);
-  return buildProfile(freshUser, signals, { privateView: true });
+  const [signals, leaderboardEligibility] = await Promise.all([
+    listPerformanceSignalsByUser(user.id),
+    getLeaderboardEligibilityByUser(user.id)
+  ]);
+  return buildProfile(freshUser, signals, { privateView: true, leaderboardEligibility });
 }
 
 export async function updateMyProfile(user, input) {
@@ -39,8 +43,11 @@ export async function updateMyProfile(user, input) {
       : undefined
   });
   if (!updated) return buildEmptyProfile(user, { privateView: true });
-  const signals = await listPerformanceSignalsByUser(user.id);
-  return buildProfile(updated, signals, { privateView: true });
+  const [signals, leaderboardEligibility] = await Promise.all([
+    listPerformanceSignalsByUser(user.id),
+    getLeaderboardEligibilityByUser(user.id)
+  ]);
+  return buildProfile(updated, signals, { privateView: true, leaderboardEligibility });
 }
 
 export async function getPublicProfile(username) {
@@ -55,7 +62,7 @@ export async function getPublicProfile(username) {
   return buildProfile(user, signals, { privateView: false });
 }
 
-function buildProfile(user, signals = [], { privateView }) {
+function buildProfile(user, signals = [], { privateView, leaderboardEligibility = null }) {
   const safeUser = user || {};
   const stats = calculateSignalStats(signals);
   const closed = signals.filter((signal) => ["Hit TP", "Hit SL", "Expired"].includes(signal.status));
@@ -89,7 +96,14 @@ function buildProfile(user, signals = [], { privateView }) {
       usernameUpdatedAt: safeUser.usernameUpdatedAt || null,
       canChangeUsernameAt: safeUser.usernameUpdatedAt
         ? new Date(new Date(safeUser.usernameUpdatedAt).getTime() + 30 * 24 * 60 * 60 * 1000).toISOString()
-        : null
+        : null,
+      leaderboardEligibility: leaderboardEligibility || {
+        publicProfileEnabled: Boolean(safeUser.publicProfileEnabled),
+        leaderboardEnabled: Boolean(safeUser.publicLeaderboardEnabled),
+        completedTrackedSignals: 0,
+        linkedPaperTrades: 0,
+        eligible: false
+      }
     } : undefined
   };
 }

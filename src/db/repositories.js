@@ -925,8 +925,9 @@ export async function listLeaderboardPerformanceRows() {
       u.id AS user_id,
       u.username,
       u.plan,
-      u.role,
       u.email,
+      u.public_profile_enabled,
+      u.public_leaderboard_enabled,
       s.id AS signal_id,
       s.setup_key,
       s.symbol,
@@ -934,26 +935,46 @@ export async function listLeaderboardPerformanceRows() {
       s.risk_reward_ratio,
       s.generated_at,
       s.created_at AS signal_created_at,
-      COALESCE(o.status, 'Active') AS status,
-      o.resolved_at,
-      p.id AS paper_trade_id
+      CASE
+        WHEN o.status IN ('Hit TP', 'Hit SL', 'Expired', 'Closed', 'Manually closed') THEN o.status
+        WHEN po.status IN ('Hit TP', 'Hit SL', 'Expired', 'Closed') THEN po.status
+        ELSE 'Active'
+      END AS status,
+      COALESCE(o.resolved_at, po.closed_at) AS resolved_at,
+      po.id AS paper_trade_id,
+      CASE
+        WHEN o.status = 'Hit TP' THEN s.risk_reward_ratio
+        WHEN o.status = 'Hit SL' THEN -1
+        WHEN o.status IN ('Expired') THEN 0
+        WHEN o.status IN ('Closed', 'Manually closed') THEN COALESCE(po.r_multiple, 0)
+        WHEN po.status IN ('Hit TP', 'Hit SL', 'Expired', 'Closed') THEN po.r_multiple
+        ELSE NULL
+      END AS result_r
     FROM users u
-    JOIN saved_signals s ON s.user_id = u.id
+    LEFT JOIN saved_signals s ON s.user_id = u.id
     LEFT JOIN signal_outcomes o ON o.saved_signal_id = s.id
-    LEFT JOIN paper_trades p ON p.saved_signal_id = s.id AND p.user_id = u.id
+    LEFT JOIN LATERAL (
+      SELECT id, status, r_multiple, closed_at
+      FROM paper_orders
+      WHERE user_id = u.id
+        AND saved_signal_id = s.id
+        AND archived_at IS NULL
+        AND status IN ('Hit TP', 'Hit SL', 'Expired', 'Closed')
+      ORDER BY closed_at DESC NULLS LAST, created_at DESC
+      LIMIT 1
+    ) po ON true
     WHERE u.public_profile_enabled = true
       AND u.public_leaderboard_enabled = true
-      AND u.username_normalized IS NOT NULL
-      AND COALESCE(u.role, 'user') <> 'tester'
-    ORDER BY u.username_normalized ASC, s.generated_at ASC
+    ORDER BY u.id ASC, s.generated_at ASC NULLS FIRST
   `);
 
   return result.rows.map((row) => ({
     userId: row.user_id,
     username: row.username,
     plan: row.plan || "free",
-    role: row.role || "user",
     email: row.email,
+    publicProfileEnabled: Boolean(row.public_profile_enabled),
+    publicLeaderboardEnabled: Boolean(row.public_leaderboard_enabled),
     signalId: row.signal_id,
     setupKey: row.setup_key,
     symbol: row.symbol,
@@ -963,8 +984,54 @@ export async function listLeaderboardPerformanceRows() {
     createdAt: row.signal_created_at,
     status: row.status || "Active",
     resolvedAt: row.resolved_at,
-    paperTradeId: row.paper_trade_id
+    paperTradeId: row.paper_trade_id,
+    resultR: row.result_r == null ? null : Number(row.result_r)
   }));
+}
+
+export async function getLeaderboardEligibilityByUser(userId) {
+  const result = await query(`
+    SELECT
+      u.public_profile_enabled,
+      u.public_leaderboard_enabled,
+      COUNT(DISTINCT s.id) FILTER (
+        WHERE o.status IN ('Hit TP', 'Hit SL', 'Expired', 'Closed', 'Manually closed')
+      ) AS completed_tracked_signals,
+      COUNT(DISTINCT po.id) FILTER (
+        WHERE po.status IN ('Hit TP', 'Hit SL', 'Expired', 'Closed')
+      ) AS linked_paper_trades
+    FROM users u
+    LEFT JOIN saved_signals s ON s.user_id = u.id
+    LEFT JOIN signal_outcomes o ON o.saved_signal_id = s.id
+    LEFT JOIN paper_orders po ON po.user_id = u.id
+      AND po.saved_signal_id = s.id
+      AND po.archived_at IS NULL
+    WHERE u.id = $1
+    GROUP BY u.id
+  `, [userId]);
+  const row = result.rows[0];
+  if (!row) {
+    return {
+      publicProfileEnabled: false,
+      leaderboardEnabled: false,
+      completedTrackedSignals: 0,
+      linkedPaperTrades: 0,
+      eligible: false
+    };
+  }
+
+  const completedTrackedSignals = Number(row.completed_tracked_signals || 0);
+  const linkedPaperTrades = Number(row.linked_paper_trades || 0);
+  const publicProfileEnabled = Boolean(row.public_profile_enabled);
+  const leaderboardEnabled = Boolean(row.public_leaderboard_enabled);
+  return {
+    publicProfileEnabled,
+    leaderboardEnabled,
+    completedTrackedSignals,
+    linkedPaperTrades,
+    eligible: publicProfileEnabled && leaderboardEnabled &&
+      (completedTrackedSignals > 0 || linkedPaperTrades > 0)
+  };
 }
 
 export async function incrementTrialSignalsUsed(userId) {

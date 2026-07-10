@@ -244,6 +244,7 @@ const settingsUsername = document.querySelector("#settings-username");
 const settingsPublicProfile = document.querySelector("#settings-public-profile");
 const settingsPublicLeaderboard = document.querySelector("#settings-public-leaderboard");
 const settingsProfilePreview = document.querySelector("#settings-profile-preview");
+const settingsViewLeaderboard = document.querySelector("#settings-view-leaderboard");
 const profileSettingsMessage = document.querySelector("#profile-settings-message");
 const usernameRequiredPanel = document.querySelector("#username-required-panel");
 const usernameOnboardingForm = document.querySelector("#username-onboarding-form");
@@ -625,6 +626,8 @@ profileSettingsForm?.addEventListener("submit", async (event) => {
     messageElement: profileSettingsMessage
   });
 });
+
+settingsViewLeaderboard?.addEventListener("click", () => navigateTo("leaderboard"));
 
 usernameOnboardingForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -1211,6 +1214,12 @@ leaderboardTabs?.addEventListener("click", (event) => {
   if (!button) return;
   state.leaderboardTab = button.dataset.leaderboardTab;
   renderLeaderboards();
+});
+
+leaderboardTable?.addEventListener("click", (event) => {
+  const action = event.target.closest("[data-leaderboard-action]")?.dataset.leaderboardAction;
+  if (!action) return;
+  navigateTo(action);
 });
 
 journalFilters.addEventListener("submit", async (event) => {
@@ -2220,7 +2229,7 @@ async function saveProfileSettings({
     const result = await api.request("/api/profile/me", {
       method: "PUT",
       body: JSON.stringify({
-        username,
+        ...(String(username || "").trim() ? { username: String(username).trim() } : {}),
         publicProfileEnabled,
         publicLeaderboardEnabled
       })
@@ -5788,7 +5797,7 @@ function renderLeaderboards() {
   if (!leaderboardTable) return;
   const metadata = {
     topRMultiple: ["Top R-Multiple", "Ranked by net R"],
-    bestWinRate: ["Best Win Rate", "Minimum 10 closed signals"],
+    bestWinRate: ["Best Win Rate", "Minimum 3 closed outcomes"],
     mostActive: ["Most Active", "Ranked by tracked signals"],
     longestWinStreak: ["Longest Win Streak", "Consecutive TP hits"],
     monthlyChampions: ["Monthly Champions", "Current calendar month"]
@@ -5807,10 +5816,31 @@ function renderLeaderboards() {
   });
 
   if (!rows.length) {
+    const eligibility = state.leaderboards?.viewerEligibility || {};
+    const hasAnyRankedUsers = Object.values(state.leaderboards?.tabs || {})
+      .some((tabRows) => Array.isArray(tabRows) && tabRows.length);
+    const tabMessage = hasAnyRankedUsers
+      ? getLeaderboardTabEmptyMessage(tab)
+      : "To appear here, enable your public profile, turn on leaderboard visibility, and complete at least one tracked signal or linked paper trade.";
     leaderboardTable.innerHTML = `
-      <div class="empty-state">
-        <strong>No ranked traders yet.</strong>
-        <p class="reasoning">Enable your public profile and track signals to join the leaderboard.</p>
+      <div class="empty-state leaderboard-empty-state">
+        <strong>${hasAnyRankedUsers ? "No qualifying traders for this ranking yet." : "No ranked traders yet."}</strong>
+        <p class="reasoning">${escapeHtml(tabMessage)}</p>
+        ${state.user ? `
+          <div class="leaderboard-checklist" aria-label="Your leaderboard eligibility">
+            ${renderEligibilityCheck("Public profile enabled", eligibility.publicProfileEnabled)}
+            ${renderEligibilityCheck("Leaderboard enabled", eligibility.leaderboardEnabled)}
+            ${renderEligibilityCheck(
+              "Completed tracked signal or linked paper trade",
+              Number(eligibility.completedTrackedSignals || 0) > 0 || Number(eligibility.linkedPaperTrades || 0) > 0
+            )}
+          </div>
+        ` : ""}
+        <div class="empty-state-actions">
+          <button type="button" data-leaderboard-action="settings">Open Profile Settings</button>
+          <button class="secondary-button" type="button" data-leaderboard-action="signals">Go to Signals</button>
+          <button class="secondary-button" type="button" data-leaderboard-action="paper-trading">Open Paper Trading</button>
+        </div>
       </div>
     `;
     return;
@@ -5835,13 +5865,13 @@ function renderLeaderboards() {
           <tr>
             <td data-label="Rank"><strong>#${row.rank}</strong></td>
             <td data-label="Trader">
-              <a class="leaderboard-user" href="${escapeHtml(row.profileUrl)}">
+              ${row.profileUrl ? `<a class="leaderboard-user" href="${escapeHtml(row.profileUrl)}">` : `<span class="leaderboard-user">`}
                 <span class="leaderboard-avatar">${escapeHtml(row.avatarInitial || "S")}</span>
                 <span>
                   <strong>${escapeHtml(row.username)}</strong>
                   <small>${escapeHtml(formatPlanBadge(row.plan))}</small>
                 </span>
-              </a>
+              ${row.profileUrl ? `</a>` : `</span>`}
             </td>
             <td data-label="Net R"><strong class="${Number(row.netR) >= 0 ? "positive" : "negative"}">${formatR(row.netR)}</strong></td>
             <td data-label="Win rate">${Number(row.winRate || 0).toFixed(1)}%</td>
@@ -5854,6 +5884,21 @@ function renderLeaderboards() {
       </tbody>
     </table>
   `;
+}
+
+function getLeaderboardTabEmptyMessage(tab) {
+  const messages = {
+    bestWinRate: "No trader has the minimum 3 completed outcomes required for this ranking yet.",
+    longestWinStreak: "No qualifying TP win streak has been recorded yet.",
+    monthlyChampions: "No completed tracked outcomes have been recorded this calendar month.",
+    mostActive: "No completed tracked outcomes are available for the activity ranking yet.",
+    topRMultiple: "No completed tracked outcomes are available for the R-multiple ranking yet."
+  };
+  return messages[tab] || messages.topRMultiple;
+}
+
+function renderEligibilityCheck(label, passed) {
+  return `<span class="${passed ? "passed" : "missing"}">${passed ? "✓" : "✕"} ${escapeHtml(label)}</span>`;
 }
 
 function formatPlanBadge(plan) {
@@ -5888,8 +5933,15 @@ function renderProfile() {
   if (settingsPublicProfile) settingsPublicProfile.checked = Boolean(profile?.publicProfileEnabled);
   if (settingsPublicLeaderboard) {
     settingsPublicLeaderboard.checked = Boolean(profile?.publicLeaderboardEnabled);
-    settingsPublicLeaderboard.disabled = !profile?.publicProfileEnabled || !username;
+    settingsPublicLeaderboard.disabled = false;
   }
+  const eligibility = profile?.private?.leaderboardEligibility || {};
+  setText("#eligibility-public-profile", profile?.publicProfileEnabled ? "On" : "Off");
+  setText("#eligibility-leaderboard", profile?.publicLeaderboardEnabled ? "On" : "Off");
+  setText("#eligibility-tracked-signals", formatInteger(eligibility.completedTrackedSignals));
+  setText("#eligibility-paper-trades", formatInteger(eligibility.linkedPaperTrades));
+  setText("#eligibility-status", eligibility.eligible ? "Eligible" : "Not eligible yet");
+  document.querySelector("#leaderboard-eligibility")?.classList.toggle("eligible", Boolean(eligibility.eligible));
   if (onboardingUsername && !onboardingUsername.value) onboardingUsername.value = username;
   if (onboardingPublicProfile) onboardingPublicProfile.checked = Boolean(profile?.publicProfileEnabled);
   if (settingsProfilePreview) {
@@ -5930,7 +5982,14 @@ function normalizeProfile(profile, user = state.user) {
     },
     private: {
       usernameUpdatedAt: source?.private?.usernameUpdatedAt || user?.usernameUpdatedAt || null,
-      canChangeUsernameAt: source?.private?.canChangeUsernameAt || null
+      canChangeUsernameAt: source?.private?.canChangeUsernameAt || null,
+      leaderboardEligibility: {
+        publicProfileEnabled: Boolean(source?.private?.leaderboardEligibility?.publicProfileEnabled ?? source?.publicProfileEnabled),
+        leaderboardEnabled: Boolean(source?.private?.leaderboardEligibility?.leaderboardEnabled ?? source?.publicLeaderboardEnabled),
+        completedTrackedSignals: Number(source?.private?.leaderboardEligibility?.completedTrackedSignals || 0),
+        linkedPaperTrades: Number(source?.private?.leaderboardEligibility?.linkedPaperTrades || 0),
+        eligible: Boolean(source?.private?.leaderboardEligibility?.eligible)
+      }
     }
   };
 }

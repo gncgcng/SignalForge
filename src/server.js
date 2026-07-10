@@ -16,6 +16,7 @@ import { handleMarketDataRoutes } from "./modules/market-data/marketDataControll
 import { handleJournalRoutes } from "./modules/journal/journalController.js";
 import { handleIntelligenceRoutes } from "./modules/intelligence/intelligenceController.js";
 import { handleLeaderboardRoutes } from "./modules/leaderboards/leaderboardController.js";
+import { recalculateLeaderboardStats } from "./modules/leaderboards/leaderboardService.js";
 import { handleNotificationRoutes } from "./modules/notifications/notificationController.js";
 import { handlePaperTradingRoutes } from "./modules/paper-trading/paperTradingController.js";
 import { handlePerformanceRoutes } from "./modules/performance/performanceController.js";
@@ -125,4 +126,7 @@ server.listen(appConfig.port, () => {
   startAutoCryptoAlertScanner();
   startTelegramNotificationQueue();
   startTelegramConnectionPoller();
+  recalculateLeaderboardStats().catch((error) => {
+    console.warn(`[leaderboard] recalculation failed: ${error.message}`);
+  });
 });

@@ -4,7 +4,7 @@ import { getLeaderboards } from "./leaderboardService.js";
 export async function handleLeaderboardRoutes(req, res, pathname) {
   if (pathname === "/api/leaderboards" && req.method === "GET") {
     try {
-      return sendJson(res, 200, { leaderboards: await getLeaderboards() }, {
+      return sendJson(res, 200, { leaderboards: await getLeaderboards(req.user?.id || null) }, {
         "cache-control": "no-store"
       });
     } catch (error) {
