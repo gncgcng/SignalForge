@@ -48,6 +48,7 @@
     "test:signal-accuracy": "node scripts/signal-accuracy-test.js",
     "test:signal-diagnostics": "node scripts/signal-diagnostics-test.js",
     "test:signal-validation": "node scripts/signal-validation-pipeline-test.js",
+    "test:signal-learning": "node scripts/signal-learning-engine-test.js",
     "test:signal-transparency": "node scripts/signal-transparency-test.js",
     "test:watchlist-alerts": "node scripts/watchlist-alerts-test.js",
     "test:automation-navigation": "node scripts/automation-duplicates-navigation-test.js",

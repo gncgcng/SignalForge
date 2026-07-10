@@ -1,6 +1,13 @@
 import { appConfig } from "../../config/appConfig.js";
-import { listActiveSignals, listSignalsByUser, updateSignalOutcome } from "../../db/repositories.js";
+import {
+  listActiveSignals,
+  listSignalsByUser,
+  recordSignalLearningEvent,
+  refreshLearningStats,
+  updateSignalOutcome
+} from "../../db/repositories.js";
 import { getCachedOhlcv, getOhlcv, getPair } from "../market-data/marketDataService.js";
+import { runSignalPostMortem } from "./signalLearningService.js";
 
 const terminalStatuses = new Set(["Hit TP", "Hit SL", "Expired"]);
 let trackingTimer = null;
@@ -145,5 +152,6 @@ function markSignal(signal, status, reason, candleTime = null) {
   signal.statusReason = reason;
   signal.statusUpdatedAt = new Date().toISOString();
   signal.resolvedAt = candleTime ? new Date(candleTime * 1000).toISOString() : signal.statusUpdatedAt;
-  return updateSignalOutcome(signal);
+  return updateSignalOutcome(signal)
+    .then(() => runSignalPostMortem({ recordSignalLearningEvent, refreshLearningStats }, signal));
 }

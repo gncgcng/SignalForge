@@ -1,5 +1,6 @@
 import {
   getAdminOperationsDashboard,
+  getAdminLearningDashboard,
   getAdminProductAnalytics,
   getSignalValidationDashboard,
   searchAdminUsers
@@ -16,9 +17,16 @@ export async function handleAdminAnalyticsRoutes(req, res, pathname) {
   if (!isAdminUser(req.user)) return sendError(res, 403, "Admin access required.");
 
   if (pathname === "/api/admin/analytics" && req.method === "GET") {
+    const url = new URL(req.url, `http://${req.headers.host}`);
     return sendJson(res, 200, {
       analytics: await getAdminProductAnalytics(),
       validation: await getSignalValidationDashboard(),
+      learning: await getAdminLearningDashboard({
+        market: url.searchParams.get("market") || "",
+        timeframe: url.searchParams.get("timeframe") || "",
+        strategy: url.searchParams.get("strategy") || "",
+        from: url.searchParams.get("from") || ""
+      }),
       dashboard: await getAdminOperationsDashboard()
     });
   }

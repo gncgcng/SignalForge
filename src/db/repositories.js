@@ -2012,6 +2012,392 @@ export async function updateSignalOutcome(signal) {
   ]);
 }
 
+export async function saveSignalSnapshot(userId, signalId, snapshot) {
+  await query(`
+    INSERT INTO signal_snapshots (saved_signal_id, user_id, snapshot)
+    VALUES ($1, $2, $3)
+    ON CONFLICT (saved_signal_id) DO NOTHING
+  `, [signalId, userId, JSON.stringify(snapshot || {})]);
+}
+
+export async function getLearningContextForSignal(signal) {
+  const [strategy, market, factors] = await Promise.all([
+    query(`
+      SELECT *
+      FROM strategy_learning_stats
+      WHERE strategy = $1 AND market = $2 AND timeframe = $3
+    `, [signal.setupType || "Unknown strategy", signal.symbol, signal.timeframe]),
+    query(`
+      SELECT *
+      FROM market_timeframe_learning_stats
+      WHERE market = $1 AND timeframe = $2
+    `, [signal.symbol, signal.timeframe]),
+    query(`
+      SELECT factor_name, factor_value, sample_size, confidence_adjustment
+      FROM factor_learning_stats
+      WHERE factor_name = ANY($1)
+      ORDER BY confidence_adjustment ASC, sample_size DESC
+      LIMIT 6
+    `, [[
+      `strategy:${signal.setupType || "Unknown strategy"}`,
+      `market:${signal.symbol}`,
+      `timeframe:${signal.timeframe}`,
+      `regime:${signal.indicators?.regime || "Unknown"}`,
+      `session:${signal.indicators?.session || "Unknown"}`,
+      `confluence:${signal.alignmentBadge || signal.indicators?.alignmentBadge || "Unknown"}`,
+      `vwap:${signal.indicators?.vwapAligned ? "aligned" : "not_aligned"}`,
+      `correlation:${signal.indicators?.correlationConflict ? "conflict" : "neutral"}`
+    ]])
+  ]);
+
+  return {
+    strategy: strategy.rows[0] ? mapLearningStats(strategy.rows[0]) : null,
+    marketTimeframe: market.rows[0] ? mapLearningStats(market.rows[0]) : null,
+    factorPenalty: factors.rows.reduce((sum, row) => {
+      if (Number(row.sample_size || 0) < 10) return sum;
+      return sum + Math.min(0, Number(row.confidence_adjustment || 0));
+    }, 0),
+    factors: factors.rows.map((row) => ({
+      name: row.factor_name,
+      value: row.factor_value,
+      sampleSize: Number(row.sample_size || 0),
+      confidenceAdjustment: Number(row.confidence_adjustment || 0)
+    }))
+  };
+}
+
+export async function recordSignalLearningEvent(event) {
+  await query(`
+    INSERT INTO signal_learning_events (
+      id, signal_id, user_id, pair, timeframe, direction, strategy,
+      outcome, net_r, post_mortem_tags, created_at, closed_at
+    )
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+    ON CONFLICT (signal_id) DO NOTHING
+  `, [
+    createId("learn"),
+    event.signalId,
+    event.userId,
+    event.pair,
+    event.timeframe,
+    event.direction,
+    event.strategy,
+    event.outcome,
+    event.netR,
+    JSON.stringify(event.postMortemTags || []),
+    event.createdAt,
+    event.closedAt
+  ]);
+}
+
+export async function refreshLearningStats(event) {
+  await transaction(async (client) => {
+    await refreshStrategyLearningStats(client, event.strategy, event.pair, event.timeframe);
+    await refreshMarketTimeframeLearningStats(client, event.pair, event.timeframe);
+    await refreshFactorLearningStats(client, event);
+  });
+}
+
+export async function getAdminLearningDashboard(filters = {}) {
+  const values = [];
+  const clauses = [];
+
+  if (filters.market) {
+    values.push(filters.market);
+    clauses.push(`pair = $${values.length}`);
+  }
+  if (filters.timeframe) {
+    values.push(filters.timeframe);
+    clauses.push(`timeframe = $${values.length}`);
+  }
+  if (filters.strategy) {
+    values.push(filters.strategy);
+    clauses.push(`strategy = $${values.length}`);
+  }
+  if (filters.from) {
+    values.push(filters.from);
+    clauses.push(`closed_at >= $${values.length}`);
+  }
+  const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+  const [
+    strategies,
+    markets,
+    timeframes,
+    slReasons,
+    expiredReasons,
+    bands,
+    outcomes,
+    activeAdjustments
+  ] = await Promise.all([
+    query(`
+      SELECT strategy, market, timeframe, sample_size, win_rate, avg_r
+      FROM strategy_learning_stats
+      ORDER BY avg_r DESC, win_rate DESC, sample_size DESC
+      LIMIT 8
+    `),
+    query(`
+      SELECT market, timeframe, sample_size, win_rate, avg_r, best_strategy, worst_strategy
+      FROM market_timeframe_learning_stats
+      ORDER BY avg_r DESC, win_rate DESC, sample_size DESC
+      LIMIT 8
+    `),
+    query(`
+      SELECT timeframe, COUNT(*)::integer AS sample_size,
+        COALESCE(AVG(CASE WHEN outcome = 'Hit TP' THEN 100 ELSE 0 END), 0)::numeric AS win_rate,
+        COALESCE(AVG(net_r), 0)::numeric AS avg_r
+      FROM signal_learning_events
+      ${where}
+      GROUP BY timeframe
+      ORDER BY avg_r DESC
+    `, values),
+    query(`
+      SELECT tag.value AS reason, COUNT(*)::integer AS count
+      FROM signal_learning_events e
+      CROSS JOIN LATERAL jsonb_array_elements_text(e.post_mortem_tags) tag(value)
+      WHERE e.outcome = 'Hit SL'
+      GROUP BY tag.value
+      ORDER BY count DESC
+      LIMIT 8
+    `),
+    query(`
+      SELECT tag.value AS reason, COUNT(*)::integer AS count
+      FROM signal_learning_events e
+      CROSS JOIN LATERAL jsonb_array_elements_text(e.post_mortem_tags) tag(value)
+      WHERE e.outcome = 'Expired'
+      GROUP BY tag.value
+      ORDER BY count DESC
+      LIMIT 8
+    `),
+    query(`
+      SELECT COALESCE(s.snapshot->>'confidenceBand', 'Unknown') AS band,
+        COUNT(*)::integer AS sample_size,
+        COALESCE(AVG(CASE WHEN e.outcome = 'Hit TP' THEN 100 ELSE 0 END), 0)::numeric AS win_rate,
+        COALESCE(AVG(e.net_r), 0)::numeric AS avg_r
+      FROM signal_learning_events e
+      LEFT JOIN signal_snapshots s ON s.saved_signal_id = e.signal_id
+      ${where ? where.replaceAll("pair", "e.pair").replaceAll("timeframe", "e.timeframe").replaceAll("strategy", "e.strategy").replaceAll("closed_at", "e.closed_at") : ""}
+      GROUP BY band
+      ORDER BY band ASC
+    `, values),
+    query(`
+      SELECT outcome, COUNT(*)::integer AS count, COALESCE(AVG(net_r), 0)::numeric AS avg_r
+      FROM signal_learning_events
+      ${where}
+      GROUP BY outcome
+      ORDER BY count DESC
+    `, values),
+    query(`
+      SELECT factor_name, factor_value, sample_size, confidence_adjustment
+      FROM factor_learning_stats
+      WHERE sample_size >= 10 AND confidence_adjustment <> 0
+      ORDER BY ABS(confidence_adjustment) DESC, sample_size DESC
+      LIMIT 12
+    `)
+  ]);
+
+  return {
+    bestStrategies: strategies.rows.slice(0, 5).map(mapStrategyLearningRow),
+    worstStrategies: [...strategies.rows].reverse().slice(0, 5).map(mapStrategyLearningRow),
+    bestMarkets: markets.rows.slice(0, 5).map(mapMarketLearningRow),
+    worstMarkets: [...markets.rows].reverse().slice(0, 5).map(mapMarketLearningRow),
+    bestTimeframes: timeframes.rows.map((row) => ({
+      timeframe: row.timeframe,
+      sampleSize: Number(row.sample_size || 0),
+      winRate: Number(Number(row.win_rate || 0).toFixed(1)),
+      avgR: Number(Number(row.avg_r || 0).toFixed(2))
+    })),
+    mostCommonSlReasons: slReasons.rows.map(mapReasonCount),
+    mostCommonExpiredReasons: expiredReasons.rows.map(mapReasonCount),
+    confidenceBandPerformance: bands.rows.map((row) => ({
+      band: row.band,
+      sampleSize: Number(row.sample_size || 0),
+      winRate: Number(Number(row.win_rate || 0).toFixed(1)),
+      avgR: Number(Number(row.avg_r || 0).toFixed(2))
+    })),
+    signalsByOutcome: outcomes.rows.map((row) => ({
+      outcome: row.outcome,
+      count: Number(row.count || 0),
+      avgR: Number(Number(row.avg_r || 0).toFixed(2))
+    })),
+    learningAdjustments: activeAdjustments.rows.map((row) => ({
+      factorName: row.factor_name,
+      factorValue: row.factor_value,
+      sampleSize: Number(row.sample_size || 0),
+      confidenceAdjustment: Number(row.confidence_adjustment || 0)
+    }))
+  };
+}
+
+async function refreshStrategyLearningStats(client, strategy, market, timeframe) {
+  const result = await client.query(`
+    SELECT
+      COUNT(*)::integer AS sample_size,
+      COALESCE(AVG(CASE WHEN outcome = 'Hit TP' THEN 100 ELSE 0 END), 0)::numeric AS win_rate,
+      COALESCE(AVG(net_r), 0)::numeric AS avg_r,
+      COALESCE(AVG(CASE WHEN outcome = 'Expired' THEN 100 ELSE 0 END), 0)::numeric AS expired_rate,
+      COALESCE(AVG(CASE WHEN outcome = 'Hit SL' THEN 100 ELSE 0 END), 0)::numeric AS stop_loss_rate
+    FROM signal_learning_events
+    WHERE strategy = $1 AND pair = $2 AND timeframe = $3
+  `, [strategy, market, timeframe]);
+  const row = result.rows[0] || {};
+  const tags = await learningTagsFor(client, "strategy = $1 AND pair = $2 AND timeframe = $3", [strategy, market, timeframe]);
+
+  await client.query(`
+    INSERT INTO strategy_learning_stats (
+      strategy, market, timeframe, sample_size, win_rate, avg_r,
+      expired_rate, stop_loss_rate, best_conditions, worst_conditions, updated_at
+    )
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now())
+    ON CONFLICT (strategy, market, timeframe)
+    DO UPDATE SET
+      sample_size = EXCLUDED.sample_size,
+      win_rate = EXCLUDED.win_rate,
+      avg_r = EXCLUDED.avg_r,
+      expired_rate = EXCLUDED.expired_rate,
+      stop_loss_rate = EXCLUDED.stop_loss_rate,
+      best_conditions = EXCLUDED.best_conditions,
+      worst_conditions = EXCLUDED.worst_conditions,
+      updated_at = now()
+  `, [
+    strategy,
+    market,
+    timeframe,
+    Number(row.sample_size || 0),
+    Number(row.win_rate || 0),
+    Number(row.avg_r || 0),
+    Number(row.expired_rate || 0),
+    Number(row.stop_loss_rate || 0),
+    JSON.stringify(tags.best),
+    JSON.stringify(tags.worst)
+  ]);
+}
+
+async function refreshMarketTimeframeLearningStats(client, market, timeframe) {
+  const result = await client.query(`
+    SELECT
+      COUNT(*)::integer AS sample_size,
+      COALESCE(AVG(CASE WHEN outcome = 'Hit TP' THEN 100 ELSE 0 END), 0)::numeric AS win_rate,
+      COALESCE(AVG(net_r), 0)::numeric AS avg_r
+    FROM signal_learning_events
+    WHERE pair = $1 AND timeframe = $2
+  `, [market, timeframe]);
+  const strategies = await client.query(`
+    SELECT strategy, COALESCE(AVG(net_r), 0)::numeric AS avg_r, COUNT(*)::integer AS sample_size
+    FROM signal_learning_events
+    WHERE pair = $1 AND timeframe = $2
+    GROUP BY strategy
+    ORDER BY avg_r DESC, sample_size DESC
+  `, [market, timeframe]);
+  const row = result.rows[0] || {};
+
+  await client.query(`
+    INSERT INTO market_timeframe_learning_stats (
+      market, timeframe, sample_size, win_rate, avg_r, best_strategy, worst_strategy, updated_at
+    )
+    VALUES ($1,$2,$3,$4,$5,$6,$7,now())
+    ON CONFLICT (market, timeframe)
+    DO UPDATE SET
+      sample_size = EXCLUDED.sample_size,
+      win_rate = EXCLUDED.win_rate,
+      avg_r = EXCLUDED.avg_r,
+      best_strategy = EXCLUDED.best_strategy,
+      worst_strategy = EXCLUDED.worst_strategy,
+      updated_at = now()
+  `, [
+    market,
+    timeframe,
+    Number(row.sample_size || 0),
+    Number(row.win_rate || 0),
+    Number(row.avg_r || 0),
+    strategies.rows[0]?.strategy || null,
+    strategies.rows[strategies.rows.length - 1]?.strategy || null
+  ]);
+}
+
+async function refreshFactorLearningStats(client, event) {
+  const factors = [
+    [`strategy:${event.strategy}`, event.strategy],
+    [`market:${event.pair}`, event.pair],
+    [`timeframe:${event.timeframe}`, event.timeframe],
+    ...event.postMortemTags.map((tag) => [`tag:${tag}`, tag])
+  ];
+
+  for (const [factorName, factorValue] of factors) {
+    const result = await client.query(`
+      SELECT
+        COUNT(*)::integer AS sample_size,
+        COALESCE(AVG(CASE WHEN outcome = 'Hit TP' THEN 100 ELSE 0 END), 0)::numeric AS win_rate,
+        COALESCE(AVG(net_r), 0)::numeric AS avg_r,
+        COALESCE(AVG(CASE WHEN outcome = 'Hit SL' THEN 100 ELSE 0 END), 0)::numeric AS stop_loss_rate,
+        COALESCE(AVG(CASE WHEN outcome = 'Expired' THEN 100 ELSE 0 END), 0)::numeric AS expired_rate
+      FROM signal_learning_events
+      WHERE post_mortem_tags ? $1 OR strategy = $2 OR pair = $2 OR timeframe = $2
+    `, [factorValue, factorValue]);
+    const row = result.rows[0] || {};
+    const sampleSize = Number(row.sample_size || 0);
+    const avgR = Number(row.avg_r || 0);
+    const winRate = Number(row.win_rate || 0);
+    const confidenceAdjustment = sampleSize < 10
+      ? 0
+      : avgR > 0.25 && winRate >= 58
+        ? 1
+        : avgR < 0 || winRate < 42
+          ? -1
+          : 0;
+
+    await client.query(`
+      INSERT INTO factor_learning_stats (
+        factor_name, factor_value, sample_size, win_rate, avg_r,
+        stop_loss_rate, expired_rate, confidence_adjustment, updated_at
+      )
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,now())
+      ON CONFLICT (factor_name, factor_value)
+      DO UPDATE SET
+        sample_size = EXCLUDED.sample_size,
+        win_rate = EXCLUDED.win_rate,
+        avg_r = EXCLUDED.avg_r,
+        stop_loss_rate = EXCLUDED.stop_loss_rate,
+        expired_rate = EXCLUDED.expired_rate,
+        confidence_adjustment = EXCLUDED.confidence_adjustment,
+        updated_at = now()
+    `, [
+      factorName,
+      factorValue,
+      sampleSize,
+      winRate,
+      avgR,
+      Number(row.stop_loss_rate || 0),
+      Number(row.expired_rate || 0),
+      confidenceAdjustment
+    ]);
+  }
+}
+
+async function learningTagsFor(client, whereClause, params) {
+  const best = await client.query(`
+    SELECT tag.value, COUNT(*)::integer AS count
+    FROM signal_learning_events e
+    CROSS JOIN LATERAL jsonb_array_elements_text(e.post_mortem_tags) tag(value)
+    WHERE ${whereClause} AND e.outcome = 'Hit TP'
+    GROUP BY tag.value
+    ORDER BY count DESC
+    LIMIT 5
+  `, params);
+  const worst = await client.query(`
+    SELECT tag.value, COUNT(*)::integer AS count
+    FROM signal_learning_events e
+    CROSS JOIN LATERAL jsonb_array_elements_text(e.post_mortem_tags) tag(value)
+    WHERE ${whereClause} AND e.outcome IN ('Hit SL', 'Expired')
+    GROUP BY tag.value
+    ORDER BY count DESC
+    LIMIT 5
+  `, params);
+  return {
+    best: best.rows.map(mapReasonCount),
+    worst: worst.rows.map(mapReasonCount)
+  };
+}
+
 export async function createPaperTrade(userId, signalId, sizing) {
   const result = await query(`
     INSERT INTO paper_trades (
@@ -2861,6 +3247,46 @@ function safeAdminMessage(message) {
     .slice(0, 240);
 }
 
+function mapLearningStats(row = {}) {
+  return {
+    sampleSize: Number(row.sample_size || 0),
+    winRate: Number(row.win_rate || 0),
+    avgR: Number(row.avg_r || 0),
+    expiredRate: Number(row.expired_rate || 0),
+    stopLossRate: Number(row.stop_loss_rate || 0)
+  };
+}
+
+function mapStrategyLearningRow(row = {}) {
+  return {
+    strategy: row.strategy,
+    market: row.market,
+    timeframe: row.timeframe,
+    sampleSize: Number(row.sample_size || 0),
+    winRate: Number(Number(row.win_rate || 0).toFixed(1)),
+    avgR: Number(Number(row.avg_r || 0).toFixed(2))
+  };
+}
+
+function mapMarketLearningRow(row = {}) {
+  return {
+    market: row.market,
+    timeframe: row.timeframe,
+    sampleSize: Number(row.sample_size || 0),
+    winRate: Number(Number(row.win_rate || 0).toFixed(1)),
+    avgR: Number(Number(row.avg_r || 0).toFixed(2)),
+    bestStrategy: row.best_strategy || null,
+    worstStrategy: row.worst_strategy || null
+  };
+}
+
+function mapReasonCount(row = {}) {
+  return {
+    reason: row.reason || row.value || "unknown",
+    count: Number(row.count || 0)
+  };
+}
+
 function mapUser(row) {
   return {
     id: row.id,
@@ -2990,6 +3416,13 @@ function mapSignal(row) {
         factors: row.indicators?.analystAdaptiveFactors || []
       },
       summary: row.reasoning
+    },
+    learningInsight: {
+      mode: row.indicators?.learningMode || "neutral",
+      message: row.indicators?.learningInsight ||
+        "This market/timeframe has limited completed-signal history, so learning adjustment is neutral.",
+      adjustment: Number(row.indicators?.learningAdjustment || 0),
+      sampleSize: Number(row.indicators?.learningSampleSize || 0)
     },
     reasoning: row.reasoning,
     confirmations: row.confirmations || [],

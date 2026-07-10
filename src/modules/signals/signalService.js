@@ -2,9 +2,11 @@ import {
   cacheScanResult,
   findActiveDuplicateSignal,
   findTelegramNotificationPayload,
+  getLearningContextForSignal,
   getCachedScanResult,
   listSignalsByUser,
   recordSignalValidationRejection,
+  saveSignalSnapshot,
   saveUnlockedSignal
 } from "../../db/repositories.js";
 import { createId } from "../../shared/ids.js";
@@ -24,6 +26,10 @@ import {
 import { calculateSignalStats, updateSignalsForUser } from "./signalOutcomeService.js";
 import { buildAnalystProfile } from "../analyst/signalAnalystService.js";
 import { trackProductEvent } from "../analytics/productAnalyticsService.js";
+import {
+  applyLearningAdjustment,
+  recordLearningSnapshot
+} from "./signalLearningService.js";
 
 const scanTimeframes = ["1h", "4h", "15m", "5m"];
 
@@ -61,8 +67,11 @@ export async function createSignal(user, { symbol, timeframe }) {
     };
   }
 
+  const learningAdjusted = await applyLearningToValidatedSignal(
+    applyValidationToSignal(result.fullSetup, unlockValidation)
+  );
   const signal = {
-    ...applyValidationToSignal(result.fullSetup, unlockValidation),
+    ...learningAdjusted,
     id: createId("sig"),
     userId: user.id,
     status: "Active",
@@ -70,6 +79,9 @@ export async function createSignal(user, { symbol, timeframe }) {
   };
 
   const savedSignal = await saveUnlockedSignal(user.id, signal);
+  if (!savedSignal?.alreadyUnlocked) {
+    await recordLearningSnapshot({ saveSignalSnapshot }, user.id, signal, freshMarketData);
+  }
   if (!savedSignal?.alreadyUnlocked) {
     await trackProductEvent({
       eventType: "unlock",
@@ -131,8 +143,13 @@ export async function unlockTelegramSignal(user, { setupKey }) {
     };
   }
 
-  const validatedSignal = applyValidationToSignal(signal, validation);
+  const validatedSignal = await applyLearningToValidatedSignal(
+    applyValidationToSignal(signal, validation)
+  );
   const savedSignal = await saveUnlockedSignal(user.id, validatedSignal);
+  if (!savedSignal?.alreadyUnlocked) {
+    await recordLearningSnapshot({ saveSignalSnapshot }, user.id, validatedSignal, freshMarketData);
+  }
 
   if (!savedSignal?.alreadyUnlocked) {
     await trackProductEvent({
@@ -205,7 +222,9 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
     })
     : null;
   const valid = Boolean(result.valid && validation?.passed);
-  const signal = valid ? applyValidationToSignal(result.signal, validation) : null;
+  const signal = valid
+    ? await applyLearningToValidatedSignal(applyValidationToSignal(result.signal, validation))
+    : null;
   const analysis = result.valid && validation && !validation.passed
     ? validationNoSetupAnalysis(result.signal, validation)
     : result.analysis;
@@ -435,6 +454,13 @@ async function validateSignalForPublication(signal, marketData, user, options = 
     findActiveDuplicateSignal: options.duplicate === false ? null : findActiveDuplicateSignal,
     recordValidationRejection: recordSignalValidationRejection
   });
+}
+
+async function applyLearningToValidatedSignal(signal) {
+  if (!signal) return signal;
+  if (signal.indicators?.learningApplied) return signal;
+  const learning = await getLearningContextForSignal(signal);
+  return applyLearningAdjustment(signal, learning);
 }
 
 async function getUserAnalystProfile(user) {

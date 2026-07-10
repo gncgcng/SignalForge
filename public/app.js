@@ -55,6 +55,7 @@ const state = {
   },
   adminAnalytics: null,
   adminDashboard: null,
+  learningDashboard: null,
   adminUserSearchResults: [],
   validationDashboard: null,
   profile: null,
@@ -2163,7 +2164,7 @@ async function loadWebhookEvents() {
 
 async function loadAdminRequests() {
   if (!state.user.isAdmin) return;
-  const [{ requests }, { abuse }, { affiliateAdmin }, { analytics, validation, dashboard }] = await Promise.all([
+  const [{ requests }, { abuse }, { affiliateAdmin }, { analytics, validation, learning, dashboard }] = await Promise.all([
     api.request("/api/admin/tester-access"),
     api.request("/api/admin/abuse"),
     api.request("/api/admin/affiliates"),
@@ -2174,6 +2175,7 @@ async function loadAdminRequests() {
   state.affiliateAdmin = affiliateAdmin;
   state.adminAnalytics = analytics;
   state.adminDashboard = dashboard;
+  state.learningDashboard = learning;
   state.validationDashboard = validation;
   renderAdminAnalytics();
   renderAdminRequests();
@@ -3924,11 +3926,33 @@ function renderSignalTransparency(signal) {
       </div>
       ${renderSmcExplanation(signal)}
       ${renderAdvancedStructureExplanation(signal)}
+      ${renderLearningInsight(signal)}
       <p class="risk-guidance"><strong>Risk per trade:</strong> Define a consistent maximum loss before entering, size the position from the stop distance, and avoid risking capital you cannot afford to lose.</p>
       <div class="signal-disclaimer">
         <strong>Educational tool only. Not financial advice.</strong>
         <span>Review the market and your own risk limits before making any decision.</span>
       </div>
+    </section>
+  `;
+}
+
+function renderLearningInsight(signal) {
+  const insight = signal.learningInsight || {
+    mode: signal.indicators?.learningMode || "neutral",
+    message: signal.indicators?.learningInsight ||
+      "This market/timeframe has limited completed-signal history, so learning adjustment is neutral.",
+    adjustment: Number(signal.indicators?.learningAdjustment || 0),
+    sampleSize: Number(signal.indicators?.learningSampleSize || 0)
+  };
+
+  return `
+    <section class="advanced-explanation learning-insight ${escapeHtml(insight.mode || "neutral")}">
+      <div class="smc-heading">
+        <span>Historical learning insight</span>
+        <strong>${Number(insight.adjustment || 0) > 0 ? "+" : ""}${Number(insight.adjustment || 0)} confidence</strong>
+      </div>
+      <p class="reasoning">${escapeHtml(insight.message)}</p>
+      <span class="muted">${formatInteger(insight.sampleSize || 0)} similar completed signal${Number(insight.sampleSize || 0) === 1 ? "" : "s"} considered. Educational context only.</span>
     </section>
   `;
 }
@@ -4541,6 +4565,7 @@ function renderAdminOperationsDashboard() {
   renderAdminStripe();
   renderAdminErrorLogs();
   renderAdminUserSearchResults();
+  renderLearningDashboard();
 }
 
 function renderAdminHealth(health = []) {
@@ -4749,6 +4774,50 @@ function renderValidationDashboard() {
   ]);
   renderValidationRows("#validation-top-markets", validation.marketsPassingMost, (item) => [
     item.symbol || "Unknown market",
+    item.count
+  ]);
+}
+
+function renderLearningDashboard() {
+  const learning = state.learningDashboard || {};
+  renderAdminCompactTable("#learning-best-strategies", ["Strategy", "Market", "TF", "Samples", "Win", "Avg R"], learning.bestStrategies || [], (item) => [
+    item.strategy,
+    item.market,
+    item.timeframe,
+    formatInteger(item.sampleSize),
+    `${Number(item.winRate || 0).toFixed(1)}%`,
+    `${Number(item.avgR || 0).toFixed(2)}R`
+  ]);
+  renderAdminCompactTable("#learning-worst-strategies", ["Strategy", "Market", "TF", "Samples", "Win", "Avg R"], learning.worstStrategies || [], (item) => [
+    item.strategy,
+    item.market,
+    item.timeframe,
+    formatInteger(item.sampleSize),
+    `${Number(item.winRate || 0).toFixed(1)}%`,
+    `${Number(item.avgR || 0).toFixed(2)}R`
+  ]);
+  renderAdminCompactTable("#learning-confidence-bands", ["Band", "Samples", "Win", "Avg R"], learning.confidenceBandPerformance || [], (item) => [
+    item.band,
+    formatInteger(item.sampleSize),
+    `${Number(item.winRate || 0).toFixed(1)}%`,
+    `${Number(item.avgR || 0).toFixed(2)}R`
+  ]);
+  renderAdminCompactTable("#learning-adjustments", ["Factor", "Value", "Samples", "Adj"], learning.learningAdjustments || [], (item) => [
+    item.factorName,
+    item.factorValue,
+    formatInteger(item.sampleSize),
+    `${Number(item.confidenceAdjustment || 0) > 0 ? "+" : ""}${Number(item.confidenceAdjustment || 0)}`
+  ]);
+  renderValidationRows("#learning-sl-reasons", learning.mostCommonSlReasons || [], (item) => [
+    titleCase(item.reason || "unknown"),
+    item.count
+  ]);
+  renderValidationRows("#learning-expired-reasons", learning.mostCommonExpiredReasons || [], (item) => [
+    titleCase(item.reason || "unknown"),
+    item.count
+  ]);
+  renderValidationRows("#learning-outcomes", learning.signalsByOutcome || [], (item) => [
+    `${item.outcome || "Unknown"} · ${Number(item.avgR || 0).toFixed(2)}R`,
     item.count
   ]);
 }
