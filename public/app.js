@@ -82,6 +82,8 @@ const state = {
   publicProfile: null,
   leaderboards: null,
   leaderboardTab: "topRMultiple",
+  support: { tickets: [], topics: {} },
+  adminSupport: { tickets: [], summary: {}, topics: {}, selectedTicketId: null },
   performance: null,
   paperPortfolio: {
     trades: [],
@@ -274,6 +276,7 @@ const usernameOnboardingMessage = document.querySelector("#username-onboarding-m
 const adminNavLink = document.querySelector("#admin-nav-link");
 const affiliateAdminNavLink = document.querySelector("#affiliate-admin-nav-link");
 const webhookEventsNavLink = document.querySelector("#webhook-events-nav-link");
+const adminSupportNavLink = document.querySelector("#admin-support-nav-link");
 const adminRequestList = document.querySelector("#admin-request-list");
 const adminRequestCount = document.querySelector("#admin-request-count");
 const verificationNote = document.querySelector("#verification-note");
@@ -314,6 +317,15 @@ const leaderboardTable = document.querySelector("#leaderboard-table");
 const leaderboardTitle = document.querySelector("#leaderboard-title");
 const leaderboardEyebrow = document.querySelector("#leaderboard-eyebrow");
 const leaderboardUpdated = document.querySelector("#leaderboard-updated");
+const supportForm = document.querySelector("#support-form");
+const supportTopic = document.querySelector("#support-topic");
+const supportIssue = document.querySelector("#support-issue");
+const supportFormStatus = document.querySelector("#support-form-status");
+const supportTicketList = document.querySelector("#support-ticket-list");
+const supportTicketCount = document.querySelector("#support-ticket-count");
+const adminSupportFilters = document.querySelector("#admin-support-filters");
+const adminSupportTicketList = document.querySelector("#admin-support-ticket-list");
+const adminSupportDetail = document.querySelector("#admin-support-detail");
 let marketRequestId = 0;
 let signalRefreshTimer = null;
 let marketLoadTimer = null;
@@ -347,6 +359,19 @@ const legalDocuments = {
       <p>Affiliate disclosure: Affiliates may earn commissions from paid subscriptions.</p>
     `
   }
+};
+
+const defaultSupportIssues = {
+  "Account / Login": ["Cannot sign in", "Google login issue", "Password reset issue", "Session keeps expiring", "Account settings issue"],
+  "Billing / Subscription": ["Payment failed", "Subscription not active", "Cancel subscription", "Refund question", "Invoice question"],
+  "Credits / Unlocks": ["Credits missing", "Signal charged twice", "Signal did not unlock", "Wrong credit balance"],
+  "Telegram Alerts": ["Not receiving alerts", "Telegram not connecting", "Unlock link not opening app", "Duplicate alerts"],
+  "Signals / Scanner": ["Signal looks wrong", "TP/SL issue", "Confidence issue", "Scanner not finding setups"],
+  "Paper Trading": ["Order did not open", "TP/SL tracking issue", "Balance or P/L issue", "Chart or market data issue"],
+  "Affiliate Program": ["Referral not tracked", "Commission missing", "Payout question", "Affiliate link issue"],
+  "Bug Report": ["Page error", "Mobile layout issue", "Data not loading", "Unexpected behavior"],
+  "Feature Request": ["Scanner improvement", "Alert improvement", "Paper trading improvement", "Other feature request"],
+  Other: ["General question", "Other issue"]
 };
 
 const api = {
@@ -648,6 +673,77 @@ profileSettingsForm?.addEventListener("submit", async (event) => {
 });
 
 settingsViewLeaderboard?.addEventListener("click", () => navigateTo("leaderboard"));
+document.querySelector("#settings-open-support")?.addEventListener("click", () => navigateTo("support"));
+document.querySelector("#admin-open-support")?.addEventListener("click", () => navigateTo("admin-support"));
+
+supportTopic?.addEventListener("change", renderSupportIssueOptions);
+
+supportForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = document.querySelector("#support-submit");
+  if (!supportForm.reportValidity()) return;
+  try {
+    button.disabled = true;
+    button.textContent = "Submitting...";
+    supportFormStatus.textContent = "Submitting your support request...";
+    const form = new FormData(supportForm);
+    const result = await api.request("/api/support", {
+      method: "POST",
+      body: JSON.stringify({
+        ...Object.fromEntries(form),
+        pageUrl: location.href
+      })
+    });
+    state.support.tickets = result.tickets || [];
+    supportForm.reset();
+    renderSupportTopicOptions();
+    renderSupportTickets();
+    supportFormStatus.textContent = result.message || "Support request submitted. We’ll review it as soon as possible.";
+    showToast("Support request submitted");
+  } catch (error) {
+    supportFormStatus.textContent = error.message;
+  } finally {
+    button.disabled = false;
+    button.textContent = "Submit support request";
+  }
+});
+
+adminSupportFilters?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await loadAdminSupport();
+});
+
+adminSupportTicketList?.addEventListener("click", (event) => {
+  const ticketId = event.target.closest("[data-admin-support-ticket]")?.dataset.adminSupportTicket;
+  if (!ticketId) return;
+  state.adminSupport.selectedTicketId = ticketId;
+  renderAdminSupportTickets();
+  renderAdminSupportDetail();
+});
+
+adminSupportDetail?.addEventListener("submit", async (event) => {
+  const form = event.target.closest("[data-admin-support-update]");
+  if (!form) return;
+  event.preventDefault();
+  const button = form.querySelector('button[type="submit"]');
+  try {
+    button.disabled = true;
+    button.textContent = "Saving...";
+    const payload = Object.fromEntries(new FormData(form));
+    const result = await api.request(`/api/admin/support/${encodeURIComponent(form.dataset.adminSupportUpdate)}`, {
+      method: "PUT",
+      body: JSON.stringify(payload)
+    });
+    state.adminSupport.selectedTicketId = result.ticket.id;
+    await loadAdminSupport();
+    showToast("Support request updated");
+  } catch (error) {
+    const status = form.querySelector("[data-admin-support-status]");
+    if (status) status.textContent = error.message;
+    button.disabled = false;
+    button.textContent = "Save changes";
+  }
+});
 
 usernameOnboardingForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -1851,6 +1947,7 @@ async function bootDashboard() {
   dashboard.classList.remove("hidden");
   document.querySelector("#user-name").textContent = getUserDisplayName();
   adminNavLink.classList.toggle("hidden", !state.user.isAdmin);
+  adminSupportNavLink.classList.toggle("hidden", !state.user.isAdmin);
   affiliateAdminNavLink.classList.toggle("hidden", !state.user.isAdmin);
   webhookEventsNavLink.classList.toggle("hidden", !state.user.isAdmin);
   testerAccountBadge.classList.toggle("hidden", state.user.role !== "tester");
@@ -2311,6 +2408,44 @@ async function loadLeaderboards() {
   renderLeaderboards();
 }
 
+async function loadSupport() {
+  const result = await api.request("/api/support");
+  state.support = {
+    topics: result.topics || defaultSupportIssues,
+    tickets: result.tickets || []
+  };
+  renderSupportTopicOptions();
+  renderSupportTickets();
+}
+
+async function loadAdminSupport() {
+  if (!state.user?.isAdmin) return;
+  const params = new URLSearchParams();
+  const mappings = [
+    ["status", "#admin-support-status"],
+    ["topic", "#admin-support-topic"],
+    ["priority", "#admin-support-priority"],
+    ["from", "#admin-support-from"],
+    ["to", "#admin-support-to"],
+    ["search", "#admin-support-search"]
+  ];
+  for (const [key, selector] of mappings) {
+    const value = document.querySelector(selector)?.value?.trim();
+    if (value) params.set(key, value);
+  }
+  const result = await api.request(`/api/admin/support${params.size ? `?${params}` : ""}`);
+  state.adminSupport = {
+    ...state.adminSupport,
+    tickets: result.tickets || [],
+    summary: result.summary || {},
+    topics: result.topics || defaultSupportIssues
+  };
+  renderAdminSupportFilters();
+  renderAdminSupportSummary();
+  renderAdminSupportTickets();
+  renderAdminSupportDetail();
+}
+
 async function loadAffiliate() {
   const { affiliate } = await api.request("/api/affiliates/me");
   state.affiliate = affiliate;
@@ -2333,11 +2468,12 @@ async function loadWebhookEvents() {
 
 async function loadAdminRequests() {
   if (!state.user.isAdmin) return;
-  const [{ requests }, { abuse }, { affiliateAdmin }, { analytics, validation, learning, dashboard }] = await Promise.all([
+  const [{ requests }, { abuse }, { affiliateAdmin }, { analytics, validation, learning, dashboard }, support] = await Promise.all([
     api.request("/api/admin/tester-access"),
     api.request("/api/admin/abuse"),
     api.request("/api/admin/affiliates"),
-    api.request("/api/admin/analytics")
+    api.request("/api/admin/analytics"),
+    api.request("/api/admin/support")
   ]);
   state.adminRequests = requests;
   state.abuseDashboard = abuse;
@@ -2346,10 +2482,18 @@ async function loadAdminRequests() {
   state.adminDashboard = dashboard;
   state.learningDashboard = learning;
   state.validationDashboard = validation;
+  state.adminSupport = {
+    ...state.adminSupport,
+    tickets: support.tickets || [],
+    summary: support.summary || {},
+    topics: support.topics || defaultSupportIssues
+  };
   renderAdminAnalytics();
   renderAdminRequests();
   renderAbuseDashboard();
   renderAffiliateAdmin();
+  renderAdminSupportFilters();
+  renderAdminSupportSummary();
 }
 
 function applyAlerts({ alerts, unreadCount }) {
@@ -2431,7 +2575,7 @@ function handleBrowserRouteChange() {
 
 function isRouteAllowed(route) {
   if (!Object.hasOwn(ROUTE_TO_VIEW, route)) return false;
-  return !["admin", "affiliate-admin", "webhook-events"].includes(route) || Boolean(state.user?.isAdmin);
+  return !["admin", "admin-support", "affiliate-admin", "webhook-events"].includes(route) || Boolean(state.user?.isAdmin);
 }
 
 function resolvePaperTradingRouteSymbol(value) {
@@ -2488,9 +2632,9 @@ function removeHashParams(names) {
 }
 
 function applyViewState(view, options = {}) {
-  const allowedViews = ["scanner", "watchlist", "alerts", "notifications", "signals", "paper-portfolio", "journal", "backtesting", "performance", "affiliate", "leaderboard", "profile", "settings", "billing"];
+  const allowedViews = ["scanner", "watchlist", "alerts", "notifications", "signals", "paper-portfolio", "journal", "backtesting", "performance", "affiliate", "leaderboard", "profile", "settings", "support", "billing"];
   if (state.user?.isAdmin) {
-    allowedViews.push("admin", "affiliate-admin", "webhook-events");
+    allowedViews.push("admin", "admin-support", "affiliate-admin", "webhook-events");
   }
   const normalizedView = allowedViews.includes(view) ? view : "scanner";
   state.activeView = normalizedView;
@@ -2524,7 +2668,9 @@ function applyViewState(view, options = {}) {
     leaderboard: ["Community rankings", "Leaderboard"],
     profile: ["Public identity", "Profile"],
     settings: ["Account", "Settings"],
+    support: ["Account support", "Support"],
     admin: ["Administration", "Tester access requests"],
+    "admin-support": ["Administration", "Support Tickets"],
     "affiliate-admin": ["Administration", "Affiliate Program"],
     "webhook-events": ["Stripe operations", "Webhook Events"],
     billing: ["Subscription", "Billing"]
@@ -2572,6 +2718,19 @@ function applyViewState(view, options = {}) {
   if (normalizedView === "affiliate-admin") {
     loadAffiliateAdmin().catch((error) => {
       document.querySelector("#affiliate-admin-summary").textContent = error.message;
+    });
+  }
+
+  if (normalizedView === "support") {
+    renderSupportTopicOptions();
+    loadSupport().catch((error) => {
+      supportFormStatus.textContent = error.message;
+    });
+  }
+
+  if (normalizedView === "admin-support") {
+    loadAdminSupport().catch((error) => {
+      adminSupportTicketList.innerHTML = `<div class="empty-state"><strong>Support queue unavailable</strong><p class="reasoning">${escapeHtml(error.message)}</p></div>`;
     });
   }
 
@@ -5601,6 +5760,160 @@ function renderMarketMetricRows(selector, rows = []) {
       <div class="metric-row"><span>${escapeHtml(row.symbol)}</span><strong>${formatInteger(row.count)}</strong></div>
     `).join("")
     : `<div class="empty-state"><span>No events yet.</span></div>`;
+}
+
+function renderSupportTopicOptions() {
+  if (!supportTopic) return;
+  const topics = state.support.topics && Object.keys(state.support.topics).length
+    ? state.support.topics
+    : defaultSupportIssues;
+  const current = supportTopic.value;
+  supportTopic.innerHTML = Object.keys(topics).map((topic) =>
+    `<option value="${escapeHtml(topic)}">${escapeHtml(topic)}</option>`
+  ).join("");
+  supportTopic.value = topics[current] ? current : Object.keys(topics)[0] || "";
+  renderSupportIssueOptions();
+}
+
+function renderSupportIssueOptions() {
+  if (!supportIssue) return;
+  const topics = state.support.topics && Object.keys(state.support.topics).length
+    ? state.support.topics
+    : defaultSupportIssues;
+  const issues = topics[supportTopic.value] || [];
+  const current = supportIssue.value;
+  supportIssue.innerHTML = issues.map((issue) =>
+    `<option value="${escapeHtml(issue)}">${escapeHtml(issue)}</option>`
+  ).join("");
+  supportIssue.value = issues.includes(current) ? current : issues[0] || "";
+}
+
+function renderSupportTickets() {
+  if (!supportTicketList) return;
+  const tickets = state.support.tickets || [];
+  supportTicketCount.textContent = `${tickets.length} request${tickets.length === 1 ? "" : "s"}`;
+  supportTicketList.innerHTML = tickets.length ? tickets.map((ticket) => `
+    <details class="support-ticket-card">
+      <summary>
+        <div>
+          <strong>${escapeHtml(ticket.subject)}</strong>
+          <span>${escapeHtml(ticket.topic)} · ${formatDateTime(ticket.createdAt)}</span>
+        </div>
+        <span class="status-pill ${getSupportStatusClass(ticket.status)}">${escapeHtml(formatSupportLabel(ticket.status))}</span>
+      </summary>
+      <div class="support-ticket-body">
+        <div class="support-ticket-meta">
+          <span>Issue<strong>${escapeHtml(ticket.issue)}</strong></span>
+          <span>Priority<strong>${escapeHtml(formatSupportLabel(ticket.priority))}</strong></span>
+          <span>Updated<strong>${formatDateTime(ticket.updatedAt)}</strong></span>
+          <span>Reference<strong>${escapeHtml(ticket.id)}</strong></span>
+        </div>
+        <div class="support-message-block"><span>Original message</span><p>${escapeHtml(ticket.message)}</p></div>
+        ${ticket.relatedSignalId ? `<p class="support-reference">Signal: ${escapeHtml(ticket.relatedSignalId)}</p>` : ""}
+      </div>
+    </details>
+  `).join("") : `
+    <div class="empty-state support-empty-state">
+      <strong>No support requests yet</strong>
+      <p class="reasoning">Submitted requests and their current status will appear here.</p>
+    </div>
+  `;
+}
+
+function renderAdminSupportFilters() {
+  const select = document.querySelector("#admin-support-topic");
+  if (!select) return;
+  const current = select.value;
+  const topics = Object.keys(state.adminSupport.topics || defaultSupportIssues);
+  select.innerHTML = `<option value="">All topics</option>${topics.map((topic) => `<option value="${escapeHtml(topic)}">${escapeHtml(topic)}</option>`).join("")}`;
+  select.value = topics.includes(current) ? current : "";
+}
+
+function renderAdminSupportSummary() {
+  if (!state.user?.isAdmin) return;
+  const summary = state.adminSupport.summary || {};
+  const markup = `
+    <div><span>Open tickets</span><strong>${formatInteger(summary.openTickets)}</strong></div>
+    <div><span>Urgent tickets</span><strong class="${Number(summary.urgentTickets) ? "negative" : ""}">${formatInteger(summary.urgentTickets)}</strong></div>
+    <div><span>New today</span><strong>${formatInteger(summary.newToday)}</strong></div>
+    <div><span>Oldest open</span><strong>${summary.oldestOpenAt ? formatDateTime(summary.oldestOpenAt) : "None"}</strong></div>
+  `;
+  const dashboardSummary = document.querySelector("#admin-support-summary");
+  const pageSummary = document.querySelector("#admin-support-stats");
+  if (dashboardSummary) dashboardSummary.innerHTML = markup;
+  if (pageSummary) pageSummary.innerHTML = markup;
+}
+
+function renderAdminSupportTickets() {
+  if (!adminSupportTicketList) return;
+  const tickets = state.adminSupport.tickets || [];
+  document.querySelector("#admin-support-count").textContent = `${tickets.length} ticket${tickets.length === 1 ? "" : "s"}`;
+  adminSupportTicketList.innerHTML = tickets.length ? tickets.map((ticket) => `
+    <button class="admin-support-ticket ${state.adminSupport.selectedTicketId === ticket.id ? "active" : ""}" type="button" data-admin-support-ticket="${escapeHtml(ticket.id)}">
+      <div class="admin-support-ticket-top">
+        <span class="status-pill ${getSupportStatusClass(ticket.status)}">${escapeHtml(formatSupportLabel(ticket.status))}</span>
+        <span class="support-priority priority-${escapeHtml(ticket.priority)}">${escapeHtml(formatSupportLabel(ticket.priority))}</span>
+      </div>
+      <strong>${escapeHtml(ticket.subject)}</strong>
+      <span>${escapeHtml(ticket.topic)} · ${escapeHtml(ticket.issue)}</span>
+      <small>${escapeHtml(ticket.user?.username || "No username")} · ${escapeHtml(ticket.user?.subscriptionTier || "free")} · ${formatDateTime(ticket.createdAt)}</small>
+    </button>
+  `).join("") : `<div class="empty-state"><strong>No matching support requests</strong><p class="reasoning">Adjust the queue filters to see other tickets.</p></div>`;
+}
+
+function renderAdminSupportDetail() {
+  if (!adminSupportDetail) return;
+  const ticket = state.adminSupport.tickets.find((item) => item.id === state.adminSupport.selectedTicketId);
+  if (!ticket) {
+    adminSupportDetail.innerHTML = `<div class="empty-state"><strong>Select a support request</strong><p class="reasoning">Open a ticket to review its message, account context, and internal notes.</p></div>`;
+    return;
+  }
+  adminSupportDetail.innerHTML = `
+    <div class="admin-support-detail-header">
+      <div><span class="eyebrow">${escapeHtml(ticket.topic)}</span><h3>${escapeHtml(ticket.subject)}</h3></div>
+      <span class="status-pill ${getSupportStatusClass(ticket.status)}">${escapeHtml(formatSupportLabel(ticket.status))}</span>
+    </div>
+    <div class="admin-support-context-grid">
+      <div><span>User</span><strong>${escapeHtml(ticket.user?.username || "No username")}</strong><small>${escapeHtml(ticket.user?.email || "")}</small></div>
+      <div><span>Plan</span><strong>${escapeHtml(String(ticket.user?.subscriptionTier || "free").toUpperCase())}</strong><small>${formatInteger(ticket.user?.creditBalance)} unlock credits</small></div>
+      <div><span>Issue</span><strong>${escapeHtml(ticket.issue)}</strong><small>${escapeHtml(formatSupportLabel(ticket.priority))} priority</small></div>
+      <div><span>Created</span><strong>${formatDateTime(ticket.createdAt)}</strong><small>Updated ${formatDateTime(ticket.updatedAt)}</small></div>
+    </div>
+    <div class="support-message-block"><span>Full message</span><p>${escapeHtml(ticket.message)}</p></div>
+    <div class="admin-support-references">
+      <p><strong>Ticket:</strong> ${escapeHtml(ticket.id)}</p>
+      <p><strong>User ID:</strong> ${escapeHtml(ticket.user?.id || "Unavailable")}</p>
+      <p><strong>Signal:</strong> ${escapeHtml(ticket.relatedSignalId || "Not supplied")}</p>
+      <p><strong>Subscription/payment:</strong> ${escapeHtml(ticket.relatedSubscriptionId || "Not supplied")}</p>
+      <p><strong>Page:</strong> ${escapeHtml(ticket.context?.pageUrl || "Not supplied")}</p>
+      <p><strong>User agent:</strong> ${escapeHtml(ticket.context?.userAgent || "Not supplied")}</p>
+    </div>
+    <form class="admin-support-update-form" data-admin-support-update="${escapeHtml(ticket.id)}">
+      <div class="support-form-grid">
+        <label>Status<select name="status">${renderSupportSelectOptions(["open", "in_review", "waiting_for_user", "resolved", "closed"], ticket.status)}</select></label>
+        <label>Priority<select name="priority">${renderSupportSelectOptions(["low", "normal", "high", "urgent"], ticket.priority)}</select></label>
+      </div>
+      <label>Internal admin notes<textarea name="adminNotes" rows="6" maxlength="10000" placeholder="Private notes. These are never shown to the user.">${escapeHtml(ticket.adminNotes || "")}</textarea></label>
+      <button type="submit">Save changes</button>
+      <p class="status-line" data-admin-support-status></p>
+    </form>
+  `;
+}
+
+function renderSupportSelectOptions(values, selected) {
+  return values.map((value) => `<option value="${value}" ${value === selected ? "selected" : ""}>${escapeHtml(formatSupportLabel(value))}</option>`).join("");
+}
+
+function getSupportStatusClass(status) {
+  if (status === "resolved") return "status-hit-tp";
+  if (status === "closed") return "status-closed";
+  if (status === "waiting_for_user") return "status-expired";
+  if (status === "in_review") return "status-review";
+  return "status-active";
+}
+
+function formatSupportLabel(value) {
+  return String(value || "").replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function renderAdminRequests() {

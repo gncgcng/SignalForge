@@ -133,6 +133,38 @@ export function sendAffiliateCommissionEmail(user, { plan, commissionCents }) {
   });
 }
 
+export function sendSupportConfirmationEmail(user, ticket) {
+  return sendTransactionalEmail({
+    to: user.email,
+    subject: `SignalForge support request ${ticket.id}`,
+    category: "support_confirmation",
+    html: buildButtonEmail({
+      title: "Support request received",
+      intro: `We received “${ticket.subject}”. Your request is open and the SignalForge team will review it as soon as possible.`,
+      buttonLabel: "View support requests",
+      buttonUrl: `${appConfig.appUrl || appConfig.abuseProtection.publicAppUrl}/#support`,
+      footer: `Reference: ${ticket.id}. This is a transactional support email.`
+    }),
+    text: `We received your SignalForge support request ${ticket.id}: ${ticket.subject}`
+  });
+}
+
+export function sendSupportAdminNotificationEmail(email, ticket) {
+  return sendTransactionalEmail({
+    to: email,
+    subject: `SignalForge ${String(ticket.priority).toUpperCase()} support request`,
+    category: "support_admin_notification",
+    html: buildButtonEmail({
+      title: "Support request needs review",
+      intro: `${ticket.topic}: ${ticket.subject}`,
+      buttonLabel: "Open support queue",
+      buttonUrl: `${appConfig.appUrl || appConfig.abuseProtection.publicAppUrl}/#admin-support`,
+      footer: `Reference: ${ticket.id}`
+    }),
+    text: `${ticket.priority} support request ${ticket.id}: ${ticket.subject}`
+  });
+}
+
 export function buildButtonEmail({ title, intro, buttonLabel, buttonUrl, footer }) {
   return `
     <div style="font-family:Inter,Arial,sans-serif;line-height:1.55;color:#111827">

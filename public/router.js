@@ -12,8 +12,10 @@ export const ROUTE_TO_VIEW = Object.freeze({
   leaderboard: "leaderboard",
   profile: "profile",
   settings: "settings",
+  support: "support",
   billing: "billing",
   admin: "admin",
+  "admin-support": "admin-support",
   "affiliate-admin": "affiliate-admin",
   "webhook-events": "webhook-events"
 });

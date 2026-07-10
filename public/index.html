@@ -561,7 +561,9 @@
                 <a href="#profile" data-view-link="profile">Profile</a>
                 <a href="#settings" data-view-link="settings">Settings</a>
                 <a href="#billing" data-view-link="billing">Billing</a>
+                <a href="#support" data-view-link="support">Support</a>
                 <a class="hidden" href="#admin" data-view-link="admin" id="admin-nav-link">Admin</a>
+                <a class="hidden" href="#admin-support" data-view-link="admin-support" id="admin-support-nav-link">Support Tickets</a>
                 <a class="hidden" href="#affiliate-admin" data-view-link="affiliate-admin" id="affiliate-admin-nav-link">Affiliate Admin</a>
                 <a class="hidden" href="#webhook-events" data-view-link="webhook-events" id="webhook-events-nav-link">Webhook Events</a>
               </div>
@@ -1377,6 +1379,14 @@
               <button id="request-tester-access" type="button">Request tester access</button>
               <p class="status-line" id="tester-access-message"></p>
             </article>
+            <article class="panel support-settings-panel">
+              <div>
+                <span class="eyebrow">Help and support</span>
+                <h3>Need help with SignalForge?</h3>
+                <p class="reasoning">Send a secure support request with your account context attached automatically.</p>
+              </div>
+              <button class="secondary-action" id="settings-open-support" type="button">Contact Support</button>
+            </article>
             <article class="panel profile-settings-panel">
               <div class="panel-header">
                 <div>
@@ -1415,6 +1425,60 @@
               </div>
               <p class="form-note" id="profile-settings-message">Usernames are unique and can be changed once every 30 days.</p>
             </article>
+          </section>
+
+          <section class="page-view hidden support-page" id="support-view" data-view="support">
+            <div class="support-hero">
+              <div>
+                <span class="eyebrow">SignalForge Support</span>
+                <h3>How can we help?</h3>
+                <p>Submit a request with the relevant details. Account and plan context is attached securely for faster review.</p>
+              </div>
+              <span class="status-pill status-active">Secure account support</span>
+            </div>
+            <div class="support-layout">
+              <article class="panel support-form-card">
+                <div class="panel-header">
+                  <div><span class="eyebrow">New request</span><h3>Contact support</h3></div>
+                </div>
+                <form id="support-form" class="support-form">
+                  <div class="support-form-grid">
+                    <label>Topic<select id="support-topic" name="topic" required></select></label>
+                    <label>Issue<select id="support-issue" name="issue" required></select></label>
+                  </div>
+                  <label>Subject<input name="subject" maxlength="160" minlength="4" required placeholder="Briefly describe the problem" /></label>
+                  <label>Message<textarea name="message" rows="7" maxlength="5000" minlength="10" required placeholder="Tell us what happened, what you expected, and any steps that reproduce the issue."></textarea></label>
+                  <div class="support-form-grid">
+                    <label>Related signal ID <span>Optional</span><input name="relatedSignalId" maxlength="200" placeholder="signal_..." /></label>
+                    <label>Payment or subscription ID <span>Optional</span><input name="relatedSubscriptionId" maxlength="200" placeholder="sub_... or invoice reference" /></label>
+                  </div>
+                  <div class="support-context-note">
+                    <strong>Context attached automatically</strong>
+                    <span>Account, plan, credit balance, browser, and current page. Never include passwords, API keys, or payment card details.</span>
+                  </div>
+                  <button id="support-submit" type="submit">Submit support request</button>
+                  <p class="status-line" id="support-form-status" aria-live="polite"></p>
+                </form>
+              </article>
+              <aside class="panel support-guidance-card">
+                <span class="eyebrow">Before submitting</span>
+                <h3>Include useful details</h3>
+                <ul>
+                  <li>What you were trying to do</li>
+                  <li>The market, timeframe, or signal ID</li>
+                  <li>Any error message you saw</li>
+                  <li>Whether the issue repeats after refresh</li>
+                </ul>
+                <p>For billing questions, never send full card information. Stripe payment references are enough.</p>
+              </aside>
+            </div>
+            <section class="support-history-section">
+              <div class="section-title">
+                <div><span class="eyebrow">Request history</span><h3>My support requests</h3></div>
+                <span id="support-ticket-count">0 requests</span>
+              </div>
+              <div class="support-ticket-list" id="support-ticket-list"></div>
+            </section>
           </section>
 
           <section class="page-view hidden leaderboard-page" id="leaderboard-view" data-view="leaderboard">
@@ -1577,6 +1641,10 @@
                 <article class="analytics-panel"><h3>Revenue</h3><div id="admin-overview-revenue"></div></article>
                 <article class="analytics-panel"><h3>Signals</h3><div id="admin-overview-signals"></div></article>
                 <article class="analytics-panel"><h3>System</h3><div id="admin-overview-system"></div></article>
+                <article class="analytics-panel admin-support-summary-card">
+                  <div class="admin-panel-header"><h3>Support</h3><button class="secondary-action" id="admin-open-support" type="button">Open queue</button></div>
+                  <div class="admin-support-summary" id="admin-support-summary"></div>
+                </article>
               </div>
               <div class="admin-analytics-grid compact">
                 <article class="analytics-panel"><h3>Growth funnel</h3><div id="analytics-signups"></div></article>
@@ -1705,6 +1773,29 @@
                 </div>
               </div>
             </section>
+          </section>
+
+          <section class="page-view hidden admin-support-page" id="admin-support-view" data-view="admin-support">
+            <div class="section-title">
+              <div><span class="eyebrow">Administration</span><h3>Support Tickets</h3></div>
+              <span id="admin-support-count">0 tickets</span>
+            </div>
+            <div class="admin-support-stats" id="admin-support-stats"></div>
+            <form class="admin-support-filters panel" id="admin-support-filters">
+              <label>Status<select id="admin-support-status"><option value="">All statuses</option><option value="open">Open</option><option value="in_review">In Review</option><option value="waiting_for_user">Waiting for User</option><option value="resolved">Resolved</option><option value="closed">Closed</option></select></label>
+              <label>Topic<select id="admin-support-topic"><option value="">All topics</option></select></label>
+              <label>Priority<select id="admin-support-priority"><option value="">All priorities</option><option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option><option value="urgent">Urgent</option></select></label>
+              <label>From<input id="admin-support-from" type="date" /></label>
+              <label>To<input id="admin-support-to" type="date" /></label>
+              <label class="admin-support-search">Search<input id="admin-support-search" type="search" placeholder="Username, email, subject, or message" /></label>
+              <button type="submit">Apply filters</button>
+            </form>
+            <div class="admin-support-layout">
+              <div class="admin-support-ticket-list" id="admin-support-ticket-list"></div>
+              <article class="panel admin-support-detail" id="admin-support-detail">
+                <div class="empty-state"><strong>Select a support request</strong><p class="reasoning">Open a ticket to review its message, account context, and internal notes.</p></div>
+              </article>
+            </div>
           </section>
 
           <section class="page-view hidden" id="affiliate-admin-view" data-view="affiliate-admin">
