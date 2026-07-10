@@ -2444,6 +2444,167 @@ export async function listPaperTradesByUser(userId) {
   return result.rows.map(mapPaperTrade);
 }
 
+export async function getPaperAccount(userId) {
+  await query(`
+    INSERT INTO paper_accounts (user_id)
+    VALUES ($1)
+    ON CONFLICT (user_id) DO NOTHING
+  `, [userId]);
+  const result = await query(`
+    SELECT * FROM paper_accounts WHERE user_id = $1
+  `, [userId]);
+  return mapPaperAccount(result.rows[0]);
+}
+
+export async function listPaperOrders(userId) {
+  const result = await query(`
+    SELECT *
+    FROM paper_orders
+    WHERE user_id = $1 AND archived_at IS NULL
+    ORDER BY created_at DESC
+    LIMIT 250
+  `, [userId]);
+  return result.rows.map(mapPaperOrder);
+}
+
+export async function findPaperOrder(userId, orderId) {
+  const result = await query(`
+    SELECT * FROM paper_orders
+    WHERE id = $1 AND user_id = $2 AND archived_at IS NULL
+    LIMIT 1
+  `, [orderId, userId]);
+  return result.rows[0] ? mapPaperOrder(result.rows[0]) : null;
+}
+
+export async function createPaperOrder(userId, order) {
+  try {
+    if (order.savedSignalId) {
+      const existing = await query(`
+        SELECT 1
+        FROM (
+          SELECT saved_signal_id FROM paper_orders
+          WHERE user_id = $1 AND saved_signal_id = $2 AND archived_at IS NULL AND status <> 'Cancelled'
+          UNION ALL
+          SELECT saved_signal_id FROM paper_trades
+          WHERE user_id = $1 AND saved_signal_id = $2
+        ) existing
+        LIMIT 1
+      `, [userId, order.savedSignalId]);
+      if (existing.rows[0]) return null;
+    }
+    const result = await query(`
+      INSERT INTO paper_orders (
+        id, user_id, saved_signal_id, symbol, timeframe, direction, order_type,
+        status, quantity, position_size_usd, entry_price, limit_price,
+        stop_loss, take_profit, notes, opened_at, filled_at
+      )
+      VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,
+        CASE WHEN $8 = 'Open' THEN now() ELSE NULL END,
+        CASE WHEN $8 = 'Open' THEN now() ELSE NULL END
+      )
+      RETURNING *
+    `, [
+      createId("porder"),
+      userId,
+      order.savedSignalId || null,
+      order.symbol,
+      order.timeframe,
+      order.direction,
+      order.orderType,
+      order.status,
+      order.quantity,
+      order.positionSizeUsd,
+      order.entryPrice,
+      order.limitPrice,
+      order.stopLoss,
+      order.takeProfit,
+      order.notes || ""
+    ]);
+    return mapPaperOrder(result.rows[0]);
+  } catch (error) {
+    if (error.code === "23505" && order.savedSignalId) return null;
+    throw error;
+  }
+}
+
+export async function fillPaperOrder(userId, orderId, entryPrice) {
+  const result = await query(`
+    UPDATE paper_orders
+    SET status = 'Open', entry_price = $3, opened_at = now(), filled_at = now(), updated_at = now()
+    WHERE id = $1 AND user_id = $2 AND status = 'Pending' AND archived_at IS NULL
+    RETURNING *
+  `, [orderId, userId, entryPrice]);
+  return result.rows[0] ? mapPaperOrder(result.rows[0]) : null;
+}
+
+export async function closePaperOrder(userId, orderId, close) {
+  return transaction(async (client) => {
+    const current = await client.query(`
+      SELECT * FROM paper_orders
+      WHERE id = $1 AND user_id = $2 AND status = 'Open' AND archived_at IS NULL
+      FOR UPDATE
+    `, [orderId, userId]);
+    if (!current.rows[0]) return null;
+
+    const result = await client.query(`
+      UPDATE paper_orders
+      SET status = $3, exit_price = $4, outcome = $5, realized_pnl = $6,
+        r_multiple = $7, closed_at = now(), updated_at = now()
+      WHERE id = $1 AND user_id = $2
+      RETURNING *
+    `, [
+      orderId,
+      userId,
+      close.status,
+      close.exitPrice,
+      close.outcome,
+      close.realizedPnl,
+      close.rMultiple
+    ]);
+    await client.query(`
+      INSERT INTO paper_accounts (user_id) VALUES ($1)
+      ON CONFLICT (user_id) DO NOTHING
+    `, [userId]);
+    await client.query(`
+      UPDATE paper_accounts
+      SET balance = balance + $2, realized_pnl = realized_pnl + $2, updated_at = now()
+      WHERE user_id = $1
+    `, [userId, close.realizedPnl]);
+    return mapPaperOrder(result.rows[0]);
+  });
+}
+
+export async function cancelPaperOrder(userId, orderId) {
+  const result = await query(`
+    UPDATE paper_orders
+    SET status = 'Cancelled', closed_at = now(), updated_at = now()
+    WHERE id = $1 AND user_id = $2 AND status = 'Pending' AND archived_at IS NULL
+    RETURNING *
+  `, [orderId, userId]);
+  return result.rows[0] ? mapPaperOrder(result.rows[0]) : null;
+}
+
+export async function resetPaperAccount(userId) {
+  return transaction(async (client) => {
+    await client.query(`
+      UPDATE paper_orders
+      SET archived_at = now(), updated_at = now()
+      WHERE user_id = $1 AND archived_at IS NULL
+    `, [userId]);
+    await client.query(`
+      INSERT INTO paper_accounts (user_id, starting_balance, balance, realized_pnl, reset_at)
+      VALUES ($1, 10000, 10000, 0, now())
+      ON CONFLICT (user_id) DO UPDATE SET
+        starting_balance = 10000,
+        balance = 10000,
+        realized_pnl = 0,
+        reset_at = now(),
+        updated_at = now()
+    `, [userId]);
+  });
+}
+
 export async function listJournalEntriesByUser(userId, filters = {}) {
   const values = [userId];
   const clauses = ["p.user_id = $1", "s.user_id = $1"];
@@ -3141,6 +3302,44 @@ function mapPaperTrade(row) {
     enteredAt: row.entered_at,
     resolvedAt: signal.resolvedAt,
     statusReason: signal.statusReason
+  };
+}
+
+function mapPaperAccount(row = {}) {
+  return {
+    startingBalance: Number(row.starting_balance || 10000),
+    balance: Number(row.balance || 10000),
+    realizedPnl: Number(row.realized_pnl || 0),
+    resetAt: row.reset_at || null,
+    updatedAt: row.updated_at || null
+  };
+}
+
+function mapPaperOrder(row = {}) {
+  return {
+    id: row.id,
+    savedSignalId: row.saved_signal_id || null,
+    symbol: row.symbol,
+    timeframe: row.timeframe,
+    direction: row.direction,
+    orderType: row.order_type,
+    status: row.status,
+    quantity: Number(row.quantity || 0),
+    positionSizeUsd: Number(row.position_size_usd || 0),
+    entryPrice: row.entry_price === null ? null : Number(row.entry_price),
+    limitPrice: row.limit_price === null ? null : Number(row.limit_price),
+    stopLoss: Number(row.stop_loss || 0),
+    takeProfit: Number(row.take_profit || 0),
+    notes: row.notes || "",
+    openedAt: row.opened_at || null,
+    filledAt: row.filled_at || null,
+    closedAt: row.closed_at || null,
+    exitPrice: row.exit_price === null ? null : Number(row.exit_price),
+    outcome: row.outcome || null,
+    realizedPnl: Number(row.realized_pnl || 0),
+    rMultiple: Number(row.r_multiple || 0),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
   };
 }
 

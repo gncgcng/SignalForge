@@ -52,7 +52,7 @@ const server = createServer(async (req, res) => {
       (await handleAffiliateRoutes(req, res, url.pathname)) ||
       (await handleAlertRoutes(req, res, url.pathname, url)) ||
       (await handleNotificationRoutes(req, res, url.pathname)) ||
-      (await handlePaperTradingRoutes(req, res, url.pathname)) ||
+      (await handlePaperTradingRoutes(req, res, url.pathname, url)) ||
       (await handleSubscriptionRoutes(req, res, url.pathname)) ||
       (await handleTesterAccessRoutes(req, res, url.pathname)) ||
       (await handleMarketDataRoutes(req, res, url.pathname, url)) ||

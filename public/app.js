@@ -74,6 +74,19 @@ const state = {
       bestTimeframe: null
     }
   },
+  paperTrading: {
+    selectedSymbol: "BTC-USD",
+    timeframe: "15m",
+    direction: "long",
+    activeTab: "positions",
+    indicators: getStoredPaperIndicators(),
+    markets: [],
+    orders: [],
+    account: null,
+    marketData: null,
+    marketError: null,
+    draftSignalId: null
+  },
   journal: {
     entries: [],
     stats: {
@@ -93,6 +106,7 @@ const TELEGRAM_UNLOCK_KEY = "signalforge-telegram-unlock";
 const UNLOCK_REVEAL_KEY = "signalforge-unlock-reveal";
 const ONBOARDING_SKIP_KEY = "signalforge-onboarding-skipped";
 const FIRST_SCAN_KEY = "signalforge-first-scan-complete";
+const PAPER_INDICATORS_KEY = "signalforge-paper-indicators";
 
 const authScreen = document.querySelector("#auth-screen");
 const landingPage = document.querySelector("#landing-page");
@@ -146,6 +160,28 @@ const statusLine = document.querySelector("#status-line");
 const signalsGrid = document.querySelector("#signals-grid");
 const paperPortfolioGrid = document.querySelector("#paper-portfolio-grid");
 const paperTradeCount = document.querySelector("#paper-trade-count");
+const paperMarketSearch = document.querySelector("#paper-market-search");
+const paperMarketList = document.querySelector("#paper-market-list");
+const paperTimeframes = document.querySelector("#paper-timeframes");
+const paperIndicatorControls = document.querySelector("#paper-indicator-controls");
+const paperChart = document.querySelector("#paper-candle-chart");
+const paperChartLoading = document.querySelector("#paper-chart-loading");
+const paperChartTooltip = document.querySelector("#paper-chart-tooltip");
+const paperOrderForm = document.querySelector("#paper-order-form");
+const paperOrderMarket = document.querySelector("#paper-order-market");
+const paperOrderType = document.querySelector("#paper-order-type");
+const paperLimitField = document.querySelector("#paper-limit-field");
+const paperLimitPrice = document.querySelector("#paper-limit-price");
+const paperOrderQuantity = document.querySelector("#paper-order-quantity");
+const paperOrderSize = document.querySelector("#paper-order-size");
+const paperOrderStop = document.querySelector("#paper-order-stop");
+const paperOrderTarget = document.querySelector("#paper-order-target");
+const paperOrderNotes = document.querySelector("#paper-order-notes");
+const paperOrderSignalId = document.querySelector("#paper-order-signal-id");
+const paperOrderWarning = document.querySelector("#paper-order-warning");
+const paperTerminalTabs = document.querySelector("#paper-terminal-tabs");
+const paperHistoryFilters = document.querySelector("#paper-history-filters");
+const paperResetAccount = document.querySelector("#paper-reset-account");
 const journalFilters = document.querySelector("#journal-filters");
 const journalFrom = document.querySelector("#journal-from");
 const journalTo = document.querySelector("#journal-to");
@@ -1276,14 +1312,57 @@ document.querySelectorAll('input[name="lab-preset"]').forEach((input) => {
   });
 });
 
-paperPortfolioGrid.addEventListener("click", (event) => {
+paperPortfolioGrid.addEventListener("click", async (event) => {
   const button = event.target.closest("[data-open-journal]");
-
-  if (!button) return;
-  journalMarket.value = button.dataset.journalSymbol;
-  journalTimeframe.value = button.dataset.journalTimeframe;
-  showView("journal");
+  if (button) {
+    journalMarket.value = button.dataset.journalSymbol;
+    journalTimeframe.value = button.dataset.journalTimeframe;
+    showView("journal");
+    return;
+  }
+  const closeButton = event.target.closest("[data-paper-close-order]");
+  if (closeButton) await performPaperOrderAction(closeButton, "close");
+  const cancelButton = event.target.closest("[data-paper-cancel-order]");
+  if (cancelButton) await performPaperOrderAction(cancelButton, "cancel");
 });
+
+paperMarketSearch.addEventListener("input", () => renderPaperMarketList());
+paperTimeframes.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-paper-timeframe]");
+  if (!button) return;
+  state.paperTrading.timeframe = button.dataset.paperTimeframe;
+  await loadPaperTradingTerminal();
+});
+paperIndicatorControls.addEventListener("change", () => {
+  state.paperTrading.indicators = new Set(
+    [...paperIndicatorControls.querySelectorAll("input:checked")].map((input) => input.value)
+  );
+  localStorage.setItem(PAPER_INDICATORS_KEY, JSON.stringify([...state.paperTrading.indicators]));
+  renderPaperTradingChart();
+});
+paperOrderMarket.addEventListener("change", async () => {
+  state.paperTrading.selectedSymbol = paperOrderMarket.value;
+  await loadPaperTradingTerminal();
+});
+document.querySelector("#paper-direction-control").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-paper-direction]");
+  if (!button) return;
+  state.paperTrading.direction = button.dataset.paperDirection;
+  renderPaperOrderTicket();
+});
+paperOrderType.addEventListener("change", renderPaperOrderTicket);
+[paperLimitPrice, paperOrderQuantity, paperOrderSize, paperOrderStop, paperOrderTarget]
+  .forEach((input) => input.addEventListener("input", renderPaperOrderCalculations));
+paperOrderForm.addEventListener("submit", placePaperTradingOrder);
+paperTerminalTabs.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-paper-tab]");
+  if (!button) return;
+  state.paperTrading.activeTab = button.dataset.paperTab;
+  renderPaperOrders();
+});
+paperHistoryFilters.addEventListener("input", renderPaperOrders);
+paperHistoryFilters.addEventListener("change", renderPaperOrders);
+paperResetAccount.addEventListener("click", resetPaperTrading);
 
 signalsGrid.addEventListener("click", async (event) => {
   const detailsButton = event.target.closest("[data-signal-details]");
@@ -1413,34 +1492,23 @@ async function unlockSignal(button, symbol, timeframe) {
 }
 
 async function enterPaperTrade(button) {
-  try {
-    button.disabled = true;
-    button.textContent = "Adding...";
-    const riskCard = button.closest(".signal-card, tr")?.querySelector(".risk-engine-card");
-    state.paperPortfolio = await api.request("/api/paper-trades", {
-      method: "POST",
-      body: JSON.stringify({
-        signalId: button.dataset.paperSignalId,
-        accountSize: Number(riskCard?.querySelector("[data-risk-account]")?.value || 10000),
-        riskPercent: Number(riskCard?.querySelector("[data-risk-percent]")?.value || 1)
-      })
-    });
-    renderPaperPortfolio();
-    renderSignals();
-    renderSignalsHistory();
-    statusLine.textContent = "Signal added to Paper Portfolio. No real order was placed.";
-    showToast("Added to Paper Portfolio");
-  } catch (error) {
-    statusLine.textContent = error.message;
-    if (error.message.includes("already in your Paper Portfolio")) {
-      await loadPaperPortfolio();
-      renderSignals();
-      renderSignalsHistory();
-      return;
-    }
-    button.disabled = false;
-    button.textContent = "Add to Paper Portfolio";
+  const signal = state.signals.find((item) => item.id === button.dataset.paperSignalId);
+  if (!signal) {
+    statusLine.textContent = "Unlocked signal not found.";
+    return;
   }
+  state.paperTrading.draftSignalId = signal.id;
+  state.paperTrading.selectedSymbol = signal.symbol;
+  state.paperTrading.timeframe = signal.timeframe;
+  state.paperTrading.direction = signal.direction;
+  unlockReveal.classList.add("hidden");
+  document.body.classList.remove("unlock-reveal-open");
+  state.unlockedRevealSignalId = null;
+  sessionStorage.removeItem(UNLOCK_REVEAL_KEY);
+  showView("paper-portfolio", { skipPaperLoad: true });
+  await loadPaperTradingTerminal();
+  prefillPaperOrderFromSignal(signal);
+  showToast("Paper order ticket pre-filled");
 }
 
 async function init() {
@@ -2021,6 +2089,28 @@ async function loadPaperPortfolio() {
   renderSignalsHistory();
 }
 
+async function loadPaperTradingTerminal() {
+  paperChartLoading.classList.remove("hidden");
+  const params = new URLSearchParams({
+    symbol: state.paperTrading.selectedSymbol,
+    timeframe: state.paperTrading.timeframe
+  });
+  const terminal = await api.request(`/api/paper-trades/terminal?${params}`);
+  state.paperTrading = {
+    ...state.paperTrading,
+    ...terminal,
+    markets: terminal.markets || [],
+    orders: terminal.orders || [],
+    account: terminal.account,
+    marketData: terminal.marketData,
+    marketError: terminal.marketError
+  };
+  paperChartLoading.classList.add("hidden");
+  renderPaperTradingTerminal();
+  renderSignals();
+  renderSignalsHistory();
+}
+
 async function loadJournal() {
   const params = new URLSearchParams();
   if (journalFrom.value) params.set("from", journalFrom.value);
@@ -2210,7 +2300,7 @@ function startSignalHistoryRefresh() {
 
     try {
       if (state.activeView === "paper-portfolio") {
-        await loadPaperPortfolio();
+        await loadPaperTradingTerminal();
       } else {
         await loadSignals();
       }
@@ -2220,7 +2310,7 @@ function startSignalHistoryRefresh() {
   }, 30000);
 }
 
-function showView(view) {
+function showView(view, options = {}) {
   const allowedViews = ["scanner", "watchlist", "alerts", "notifications", "signals", "paper-portfolio", "journal", "backtesting", "performance", "affiliate", "leaderboard", "profile", "settings", "billing"];
   if (state.user?.isAdmin) {
     allowedViews.push("admin", "affiliate-admin", "webhook-events");
@@ -2249,7 +2339,7 @@ function showView(view) {
     alerts: ["Detected setups", "In-app alerts"],
     notifications: ["Delivery channels", "Notifications"],
     signals: ["Signals history", "Saved signal desk"],
-    "paper-portfolio": ["Simulated execution", "Paper Portfolio"],
+    "paper-portfolio": ["Free simulated execution", "Paper Trading"],
     journal: ["Review and discipline", "Trade Journal"],
     backtesting: ["Historical strategy research", "Backtesting Lab"],
     performance: ["Outcome analytics", "Performance"],
@@ -2320,11 +2410,11 @@ function showView(view) {
     });
   }
 
-  if (normalizedView === "paper-portfolio") {
-    loadPaperPortfolio().catch((error) => {
+  if (normalizedView === "paper-portfolio" && !options.skipPaperLoad) {
+    loadPaperTradingTerminal().catch((error) => {
       paperPortfolioGrid.innerHTML = `
         <div class="empty-state">
-          <strong>Paper Portfolio unavailable</strong>
+          <strong>Paper Trading unavailable</strong>
           <p class="reasoning">${escapeHtml(error.message)}</p>
         </div>
       `;
@@ -2851,61 +2941,389 @@ function renderPerformanceStats() {
 }
 
 function renderPaperPortfolio() {
-  const { trades, stats } = state.paperPortfolio;
-  paperTradeCount.textContent = `${trades.length} trade${trades.length === 1 ? "" : "s"}`;
-  document.querySelector("#paper-stat-total").textContent = `${stats.totalPaperTrades || 0}`;
-  document.querySelector("#paper-stat-win-rate").textContent = `${stats.winRate || 0}%`;
-  document.querySelector("#paper-stat-average-r").textContent = `${formatR(stats.averageR || 0)}`;
-  document.querySelector("#paper-stat-best-market").textContent = stats.bestMarket
-    ? `${stats.bestMarket.label} · ${formatR(stats.bestMarket.netR)}`
-    : "--";
-  document.querySelector("#paper-stat-best-timeframe").textContent = stats.bestTimeframe
-    ? `${stats.bestTimeframe.label} · ${formatR(stats.bestTimeframe.netR)}`
-    : "--";
-  renderAccountGrowthCurve(document.querySelector("#paper-growth-curve"), stats.accountGrowthCurve || []);
+  if (state.paperTrading.account) renderPaperTradingTerminal();
+}
 
-  if (!trades.length) {
-    paperPortfolioGrid.innerHTML = `
-      <div class="empty-state">
-        <strong>No paper trades yet</strong>
-        <p class="reasoning">Open an active unlocked signal from the Scanner or Signals page, then add it to your Paper Portfolio.</p>
-      </div>
-    `;
+function renderPaperTradingTerminal() {
+  renderPaperMarketList();
+  renderPaperTerminalHeader();
+  renderPaperOrderTicket();
+  renderPaperAccount();
+  renderPaperTradingChart();
+  renderPaperOrders();
+}
+
+function renderPaperMarketList() {
+  const query = String(paperMarketSearch.value || "").toLowerCase().replaceAll("-", "");
+  const markets = state.paperTrading.markets.filter((market) => {
+    const haystack = `${market.displaySymbol} ${market.symbol} ${market.name} ${market.providerLabel}`.toLowerCase().replaceAll("-", "");
+    return !query || haystack.includes(query);
+  });
+  paperMarketList.innerHTML = markets.map((market) => `
+    <button class="paper-market-row ${market.symbol === state.paperTrading.selectedSymbol ? "active" : ""}" type="button" data-paper-market="${escapeHtml(market.symbol)}">
+      <span><strong>${escapeHtml(market.displaySymbol)}</strong><small>${escapeHtml(getProviderSymbolLabel(market))}</small></span>
+      <span class="paper-market-state">${market.symbol === state.paperTrading.selectedSymbol && state.paperTrading.marketData ? escapeHtml(state.paperTrading.marketData.marketStatus?.label || "Ready") : "Ready"}</span>
+    </button>
+  `).join("") || `<div class="empty-state"><span>No matching markets.</span></div>`;
+  paperMarketList.querySelectorAll("[data-paper-market]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      state.paperTrading.selectedSymbol = button.dataset.paperMarket;
+      await loadPaperTradingTerminal();
+    });
+  });
+  const options = state.paperTrading.markets.map((market) => `<option value="${escapeHtml(market.symbol)}">${escapeHtml(market.displaySymbol)} · ${escapeHtml(market.name)}</option>`).join("");
+  paperOrderMarket.innerHTML = options;
+  paperOrderMarket.value = state.paperTrading.selectedSymbol;
+  document.querySelector("#paper-filter-market").innerHTML = `<option value="">All markets</option>${options}`;
+}
+
+function renderPaperTerminalHeader() {
+  const data = state.paperTrading.marketData;
+  const pair = data?.pair || state.paperTrading.markets.find((item) => item.symbol === state.paperTrading.selectedSymbol);
+  const change = Number(pair?.change24h);
+  setText("#paper-top-market", getDisplaySymbol(pair || state.paperTrading.selectedSymbol));
+  setText("#paper-top-price", Number.isFinite(Number(pair?.lastPrice)) ? formatCurrency(Number(pair.lastPrice)) : "--");
+  setText("#paper-top-change", Number.isFinite(change) ? formatPercent(change) : "--");
+  setText("#paper-top-timeframe", state.paperTrading.timeframe);
+  setText("#paper-top-provider", getProviderLabel(pair));
+  setText("#paper-top-status", data?.marketStatus?.label || (state.paperTrading.marketError ? "Provider unavailable" : "Loading"));
+  document.querySelectorAll("[data-paper-timeframe]").forEach((button) => button.classList.toggle("active", button.dataset.paperTimeframe === state.paperTrading.timeframe));
+  paperIndicatorControls.querySelectorAll("input").forEach((input) => {
+    input.checked = state.paperTrading.indicators.has(input.value);
+  });
+}
+
+function renderPaperOrderTicket() {
+  const marketPrice = Number(state.paperTrading.marketData?.pair?.lastPrice || state.paperTrading.marketData?.candles?.at(-1)?.close || 0);
+  document.querySelectorAll("[data-paper-direction]").forEach((button) => button.classList.toggle("active", button.dataset.paperDirection === state.paperTrading.direction));
+  paperLimitField.classList.toggle("hidden", paperOrderType.value !== "limit");
+  if (paperOrderType.value === "limit" && !Number(paperLimitPrice.value) && marketPrice) paperLimitPrice.value = marketPrice;
+  document.querySelector("#paper-place-order").textContent = `Place Paper ${state.paperTrading.direction === "long" ? "Long" : "Short"}`;
+  renderPaperOrderCalculations();
+}
+
+function prefillPaperOrderFromSignal(signal) {
+  paperOrderSignalId.value = signal.id;
+  paperOrderMarket.value = signal.symbol;
+  paperOrderType.value = "limit";
+  paperLimitPrice.value = signal.entryPrice;
+  paperOrderStop.value = signal.stopLoss;
+  paperOrderTarget.value = signal.takeProfit;
+  paperOrderNotes.value = `${signal.setupType || "SignalForge setup"} · unlocked signal`;
+  state.paperTrading.direction = signal.direction;
+  renderPaperOrderTicket();
+  paperOrderForm.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function renderPaperOrderCalculations() {
+  const latest = Number(state.paperTrading.marketData?.pair?.lastPrice || 0);
+  const entry = paperOrderType.value === "limit" ? Number(paperLimitPrice.value) : latest;
+  const stop = Number(paperOrderStop.value);
+  const target = Number(paperOrderTarget.value);
+  const requestedQuantity = Number(paperOrderQuantity.value);
+  const size = Number(paperOrderSize.value);
+  const quantity = requestedQuantity > 0 ? requestedQuantity : entry > 0 ? size / entry : 0;
+  const effectiveSize = requestedQuantity > 0 ? quantity * entry : size;
+  const risk = Math.abs(entry - stop) * quantity;
+  const reward = Math.abs(target - entry) * quantity;
+  const rr = risk > 0 ? reward / risk : 0;
+  const riskPercent = effectiveSize > 0 ? (risk / effectiveSize) * 100 : 0;
+  const rewardPercent = effectiveSize > 0 ? (reward / effectiveSize) * 100 : 0;
+  document.querySelector("#paper-order-calculations").innerHTML = `
+    <div><span>Estimated entry</span><strong>${entry > 0 ? formatCurrency(entry) : "--"}</strong></div><div><span>Risk</span><strong>${risk > 0 ? `${formatCurrency(risk)} · ${riskPercent.toFixed(2)}%` : "--"}</strong></div>
+    <div><span>Potential loss</span><strong class="negative">${risk > 0 ? formatCurrency(-risk) : "--"}</strong></div><div><span>Potential profit</span><strong class="positive">${reward > 0 ? `${formatCurrency(reward)} · ${rewardPercent.toFixed(2)}%` : "--"}</strong></div><div><span>Reward / Risk</span><strong>${rr > 0 ? `${rr.toFixed(2)}R` : "--"}</strong></div>
+  `;
+  paperOrderWarning.textContent = rr > 0 && rr < 1.5 ? "Warning: reward/risk is below 1.5R." : "";
+}
+
+function renderPaperAccount() {
+  const account = state.paperTrading.account || {};
+  setText("#paper-account-balance", formatCurrency(account.balance || 10000));
+  setText("#paper-account-equity", formatCurrency(account.equity || account.balance || 10000));
+  setText("#paper-account-realized", formatCurrency(account.realizedPnl || 0));
+  setText("#paper-account-unrealized", formatCurrency(account.unrealizedPnl || 0));
+  setText("#paper-account-open", account.openPositions || 0);
+  setText("#paper-account-win-rate", `${account.winRate || 0}%`);
+  setText("#paper-account-net-r", formatR(account.netR || 0));
+  setText("#paper-account-average-r", formatR(account.averageR || 0));
+  paperTradeCount.textContent = `${account.openPositions || 0} open position${account.openPositions === 1 ? "" : "s"}`;
+}
+
+function renderPaperTradingChart() {
+  const data = state.paperTrading.marketData;
+  const candles = data?.candles || [];
+  if (!candles.length) {
+    paperChart.innerHTML = `<text x="460" y="235" fill="#8e9bb0" text-anchor="middle">${escapeHtml(state.paperTrading.marketError || "Not enough candles")}</text>`;
+    setText("#paper-chart-status", state.paperTrading.marketError || "Market data unavailable.");
     return;
   }
+  const visible = candles.slice(-120);
+  const width = 920;
+  const height = 480;
+  const left = 14;
+  const right = 76;
+  const top = 18;
+  const volumeHeight = state.paperTrading.indicators.has("volume") ? 72 : 0;
+  const bottom = 28 + volumeHeight;
+  const orders = state.paperTrading.orders.filter((order) => order.symbol === state.paperTrading.selectedSymbol);
+  const levelPrices = orders.flatMap((order) => [order.entryPrice, order.limitPrice, order.stopLoss, order.takeProfit]).filter(Number.isFinite);
+  const min = Math.min(...visible.map((candle) => Number(candle.low)), ...levelPrices);
+  const max = Math.max(...visible.map((candle) => Number(candle.high)), ...levelPrices);
+  const range = Math.max(max - min, max * 0.002, 0.000001);
+  const plotWidth = width - left - right;
+  const plotHeight = height - top - bottom;
+  const slot = plotWidth / visible.length;
+  const y = (price) => top + ((max - Number(price)) / range) * plotHeight;
+  const x = (index) => left + index * slot + slot / 2;
+  const grid = Array.from({ length: 6 }, (_, index) => {
+    const price = max - (range * index / 5);
+    const gridY = y(price);
+    return `<line class="paper-chart-grid" x1="${left}" x2="${width - right}" y1="${gridY}" y2="${gridY}"></line><text class="paper-price-label" x="${width - right + 8}" y="${gridY + 4}">${escapeHtml(formatCompactPrice(price))}</text>`;
+  }).join("");
+  const candleMarkup = visible.map((candle, index) => {
+    const candleX = x(index);
+    const openY = y(candle.open);
+    const closeY = y(candle.close);
+    const up = Number(candle.close) >= Number(candle.open);
+    return `<g class="paper-candle" data-paper-candle-index="${index}"><line class="candle-wick ${up ? "candle-up" : "candle-down"}" x1="${candleX}" x2="${candleX}" y1="${y(candle.high)}" y2="${y(candle.low)}"></line><rect class="candle-body ${up ? "candle-up" : "candle-down"}" x="${candleX - Math.max(1.5, slot * 0.28)}" y="${Math.min(openY, closeY)}" width="${Math.max(3, slot * 0.56)}" height="${Math.max(2, Math.abs(openY - closeY))}"></rect></g>`;
+  }).join("");
+  const overlays = renderPaperChartOverlays(visible, x, y);
+  const volume = state.paperTrading.indicators.has("volume") ? renderPaperVolume(visible, x, slot, height - 22, volumeHeight - 8) : "";
+  const tradeLines = orders.filter((order) => ["Open", "Pending"].includes(order.status)).map((order) => {
+    const entry = order.entryPrice || order.limitPrice;
+    return renderPaperPriceLine(y(entry), "entry", `ENTRY ${formatCompactPrice(entry)}`) +
+      renderPaperPriceLine(y(order.stopLoss), "stop", `SL ${formatCompactPrice(order.stopLoss)}`) +
+      renderPaperPriceLine(y(order.takeProfit), "target", `TP ${formatCompactPrice(order.takeProfit)}`);
+  }).join("");
+  const markers = orders.filter((order) => order.closedAt && order.exitPrice).slice(0, 20).map((order) => {
+    const markerX = width - right - 12;
+    const markerY = y(order.exitPrice);
+    return `<circle class="paper-trade-marker ${order.outcome === "Hit TP" ? "win" : "loss"}" cx="${markerX}" cy="${markerY}" r="5"></circle>`;
+  }).join("");
+  const positionMarkers = orders.filter((order) => order.status === "Open" && order.entryPrice).map((order) => `<circle class="paper-position-marker ${order.direction}" cx="${width - right - 18}" cy="${y(order.entryPrice)}" r="5"></circle>`).join("");
+  const timeAxis = Array.from({ length: 6 }, (_, tick) => {
+    const index = Math.min(visible.length - 1, Math.floor((visible.length - 1) * tick / 5));
+    return `<text class="paper-time-label" x="${x(index)}" y="${height - 7}" text-anchor="middle">${escapeHtml(formatTime(Number(visible[index].time) * 1000))}</text>`;
+  }).join("");
+  const latest = Number(visible.at(-1).close);
+  paperChart.innerHTML = `${grid}${volume}${candleMarkup}${overlays}${tradeLines}${renderPaperPriceLine(y(latest), "current", `NOW ${formatCompactPrice(latest)}`)}${markers}${positionMarkers}${timeAxis}<line id="paper-crosshair-x" class="paper-crosshair hidden" x1="0" x2="0" y1="${top}" y2="${height - bottom}"></line><line id="paper-crosshair-y" class="paper-crosshair hidden" x1="${left}" x2="${width - right}" y1="0" y2="0"></line>`;
+  bindPaperChartCrosshair(visible, { left, right, top, bottom, width, height, min, max, x, y });
+  renderPaperIndicatorReadout(visible);
+  setText("#paper-chart-status", `${candles.length} live candles · Last ${formatDateTime(data.lastCandleAt)} · ${data.marketStatus?.label || "Ready"}`);
+}
 
-  paperPortfolioGrid.innerHTML = trades.map((trade) => `
-    <article class="paper-trade-card">
-      <div class="paper-trade-header">
-        <div>
-          <strong>${escapeHtml(trade.symbol)} · ${escapeHtml(trade.timeframe)}</strong>
-          <span>${escapeHtml(trade.setupType || "Qualified setup")}</span>
-        </div>
-        <span class="status-pill ${getPaperStatusClass(trade.status)}">${escapeHtml(trade.status)}</span>
-      </div>
-      <div class="signal-metrics">
-        <div><span>Direction</span><strong class="direction ${trade.direction}">${trade.direction.toUpperCase()}</strong></div>
-        <div><span>Entry</span><strong>${formatCurrency(trade.entryPrice)}</strong></div>
-        <div><span>Stop</span><strong>${formatCurrency(trade.stopLoss)}</strong></div>
-        <div><span>Target</span><strong>${formatCurrency(trade.takeProfit)}</strong></div>
-        <div><span>Planned R/R</span><strong>${trade.riskRewardRatio}:1</strong></div>
-        <div><span>Paper P/L</span><strong class="${trade.realizedR > 0 ? "positive" : trade.realizedR < 0 ? "negative" : ""}">${formatR(trade.realizedR)}</strong></div>
-        <div><span>Position size</span><strong>${Number(trade.positionSize || 0).toFixed(4)}</strong></div>
-        <div><span>Risk amount</span><strong>${formatCurrency(trade.riskAmount || 0)}</strong></div>
-        <div><span>Effective risk</span><strong>${trade.effectiveRiskPercent || 0}%</strong></div>
-        <div><span>Potential profit</span><strong>${formatCurrency(trade.potentialProfit || 0)}</strong></div>
-        <div><span>Simulated P/L</span><strong class="${trade.realizedPnl > 0 ? "positive" : trade.realizedPnl < 0 ? "negative" : ""}">${formatCurrency(trade.realizedPnl || 0)}</strong></div>
-      </div>
-      <p class="reasoning">Entered ${formatDateTime(trade.enteredAt)}${trade.resolvedAt ? ` · Resolved ${formatDateTime(trade.resolvedAt)}` : ""}.</p>
-      <button
-        class="secondary-action"
-        data-open-journal
-        data-journal-symbol="${escapeHtml(trade.symbol)}"
-        data-journal-timeframe="${escapeHtml(trade.timeframe)}"
-        type="button"
-      >Open Journal</button>
-    </article>
-  `).join("");
+function renderPaperChartOverlays(candles, x, y) {
+  const enabled = state.paperTrading.indicators;
+  const lines = [];
+  if (enabled.has("ema20")) lines.push(renderIndicatorPath(calculateEmaSeries(candles, 20), x, y, "ema20"));
+  if (enabled.has("ema50")) lines.push(renderIndicatorPath(calculateEmaSeries(candles, 50), x, y, "ema50"));
+  if (enabled.has("ema200")) lines.push(renderIndicatorPath(calculateEmaSeries(candles, 200), x, y, "ema200"));
+  if (enabled.has("vwap")) lines.push(renderIndicatorPath(calculateVwapSeries(candles), x, y, "vwap"));
+  if (enabled.has("bollinger")) {
+    const bands = calculateBollingerSeries(candles, 20);
+    lines.push(renderIndicatorPath(bands.upper, x, y, "bollinger"), renderIndicatorPath(bands.lower, x, y, "bollinger"));
+  }
+  return lines.join("");
+}
+
+function renderIndicatorPath(values, x, y, className) {
+  const points = values.map((value, index) => Number.isFinite(value) ? `${x(index).toFixed(2)},${y(value).toFixed(2)}` : null).filter(Boolean);
+  return points.length > 1 ? `<polyline class="paper-indicator-line ${className}" points="${points.join(" ")}"></polyline>` : "";
+}
+
+function renderPaperVolume(candles, x, slot, baseline, availableHeight) {
+  const maxVolume = Math.max(...candles.map((candle) => Number(candle.volume || 0)), 1);
+  return candles.map((candle, index) => {
+    const barHeight = (Number(candle.volume || 0) / maxVolume) * availableHeight;
+    const up = Number(candle.close) >= Number(candle.open);
+    return `<rect class="paper-volume ${up ? "up" : "down"}" x="${x(index) - Math.max(1, slot * 0.3)}" y="${baseline - barHeight}" width="${Math.max(2, slot * 0.6)}" height="${barHeight}"></rect>`;
+  }).join("");
+}
+
+function renderPaperPriceLine(lineY, type, label) {
+  if (!Number.isFinite(lineY)) return "";
+  return `<line class="paper-trade-line ${type}" x1="14" x2="844" y1="${lineY}" y2="${lineY}"></line><text class="paper-trade-label ${type}" x="838" y="${lineY - 4}" text-anchor="end">${escapeHtml(label)}</text>`;
+}
+
+function bindPaperChartCrosshair(candles, dimensions) {
+  paperChart.onpointermove = (event) => {
+    const rect = paperChart.getBoundingClientRect();
+    const svgX = ((event.clientX - rect.left) / rect.width) * dimensions.width;
+    const svgY = ((event.clientY - rect.top) / rect.height) * dimensions.height;
+    const plotWidth = dimensions.width - dimensions.left - dimensions.right;
+    const index = Math.max(0, Math.min(candles.length - 1, Math.floor(((svgX - dimensions.left) / plotWidth) * candles.length)));
+    const candle = candles[index];
+    const crossX = paperChart.querySelector("#paper-crosshair-x");
+    const crossY = paperChart.querySelector("#paper-crosshair-y");
+    crossX.classList.remove("hidden"); crossY.classList.remove("hidden");
+    crossX.setAttribute("x1", dimensions.x(index)); crossX.setAttribute("x2", dimensions.x(index));
+    crossY.setAttribute("y1", svgY); crossY.setAttribute("y2", svgY);
+    paperChartTooltip.classList.remove("hidden");
+    paperChartTooltip.style.left = `${Math.min(rect.width - 190, Math.max(8, event.clientX - rect.left + 12))}px`;
+    paperChartTooltip.style.top = `${Math.max(8, event.clientY - rect.top - 68)}px`;
+    paperChartTooltip.textContent = `${formatDateTime(Number(candle.time) * 1000)} · O ${formatCompactPrice(candle.open)} H ${formatCompactPrice(candle.high)} L ${formatCompactPrice(candle.low)} C ${formatCompactPrice(candle.close)}`;
+  };
+  paperChart.onpointerleave = () => {
+    paperChart.querySelectorAll(".paper-crosshair").forEach((line) => line.classList.add("hidden"));
+    paperChartTooltip.classList.add("hidden");
+  };
+}
+
+function renderPaperIndicatorReadout(candles) {
+  const enabled = state.paperTrading.indicators;
+  const values = [];
+  if (enabled.has("rsi")) values.push(["RSI 14", calculateRsi(candles, 14)]);
+  if (enabled.has("atr")) values.push(["ATR 14", calculateAtr(candles, 14)]);
+  if (enabled.has("macd")) values.push(["MACD", calculateMacd(candles)]);
+  document.querySelector("#paper-indicator-readout").innerHTML = values.map(([label, value]) => `<span><strong>${label}</strong> ${Number(value || 0).toFixed(2)}</span>`).join("");
+}
+
+function renderPaperOrders() {
+  const tab = state.paperTrading.activeTab;
+  paperTerminalTabs.querySelectorAll("[data-paper-tab]").forEach((button) => button.classList.toggle("active", button.dataset.paperTab === tab));
+  paperHistoryFilters.classList.toggle("hidden", tab !== "history");
+  let orders = state.paperTrading.orders.filter((order) => tab === "positions" ? order.status === "Open" : tab === "pending" ? order.status === "Pending" : ["Hit TP", "Hit SL", "Expired", "Closed", "Cancelled"].includes(order.status));
+  if (tab === "history") orders = filterPaperHistory(orders);
+  if (!orders.length) {
+    const messages = { positions: "No open paper positions.", pending: "No pending limit orders.", history: "No completed paper trades yet." };
+    paperPortfolioGrid.innerHTML = `<div class="empty-state"><strong>${messages[tab]}</strong><p class="reasoning">Select a market and place a simulated trade to begin.</p></div>`;
+    return;
+  }
+  const columns = tab === "pending"
+    ? ["Market", "Side", "Limit", "Size", "Stop", "Target", "Created", "Action"]
+    : tab === "history"
+      ? ["Market", "Side", "Entry", "Exit", "Result", "P/L", "R", "Closed", "Notes"]
+      : ["Market", "Side", "Entry", "Current", "Stop", "Target", "Size", "P/L", "R", "Opened", "Action"];
+  paperPortfolioGrid.innerHTML = `<table><thead><tr>${columns.map((column) => `<th>${column}</th>`).join("")}</tr></thead><tbody>${orders.map((order) => renderPaperOrderRow(order, tab)).join("")}</tbody></table>`;
+}
+
+function renderPaperOrderRow(order, tab) {
+  const market = escapeHtml(getDisplaySymbol(order.symbol));
+  const side = `<strong class="direction ${order.direction}">${escapeHtml(order.direction.toUpperCase())}</strong>`;
+  if (tab === "pending") return `<tr><td data-label="Market">${market}</td><td data-label="Side">${side}</td><td data-label="Limit">${formatCurrency(order.limitPrice)}</td><td data-label="Size">${formatCurrency(order.positionSizeUsd)}</td><td data-label="Stop">${formatCurrency(order.stopLoss)}</td><td data-label="Target">${formatCurrency(order.takeProfit)}</td><td data-label="Created">${formatDateTime(order.createdAt)}</td><td data-label="Action"><button class="secondary-action" type="button" data-paper-cancel-order="${order.id}">Cancel</button></td></tr>`;
+  if (tab === "history") return `<tr><td data-label="Market">${market}</td><td data-label="Side">${side}</td><td data-label="Entry">${formatCurrency(order.entryPrice || order.limitPrice)}</td><td data-label="Exit">${order.exitPrice ? formatCurrency(order.exitPrice) : "--"}</td><td data-label="Result"><span class="status-pill ${getPaperStatusClass(order.status)}">${escapeHtml(order.status)}</span></td><td data-label="P/L" class="${order.realizedPnl >= 0 ? "positive" : "negative"}">${formatCurrency(order.realizedPnl)}</td><td data-label="R">${formatR(order.rMultiple)}</td><td data-label="Closed">${order.closedAt ? formatDateTime(order.closedAt) : "--"}</td><td data-label="Notes">${escapeHtml(order.notes || "--")}</td></tr>`;
+  return `<tr><td data-label="Market">${market}</td><td data-label="Side">${side}</td><td data-label="Entry">${formatCurrency(order.entryPrice)}</td><td data-label="Current">${formatCurrency(order.currentPrice)}</td><td data-label="Stop">${formatCurrency(order.stopLoss)}</td><td data-label="Target">${formatCurrency(order.takeProfit)}</td><td data-label="Size">${formatCurrency(order.positionSizeUsd)}</td><td data-label="P/L" class="${order.unrealizedPnl >= 0 ? "positive" : "negative"}">${formatCurrency(order.unrealizedPnl)}</td><td data-label="R">${formatR(order.unrealizedR)}</td><td data-label="Opened">${formatDateTime(order.openedAt)}</td><td data-label="Action"><button class="secondary-action" type="button" data-paper-close-order="${order.id}">Close</button></td></tr>`;
+}
+
+function filterPaperHistory(orders) {
+  const market = document.querySelector("#paper-filter-market").value;
+  const direction = document.querySelector("#paper-filter-direction").value;
+  const outcome = document.querySelector("#paper-filter-outcome").value;
+  const from = document.querySelector("#paper-filter-from").value;
+  const to = document.querySelector("#paper-filter-to").value;
+  return orders.filter((order) => (!market || order.symbol === market) && (!direction || order.direction === direction) && (!outcome || order.status === outcome) && (!from || new Date(order.closedAt) >= new Date(from)) && (!to || new Date(order.closedAt) < new Date(`${to}T23:59:59`)));
+}
+
+async function placePaperTradingOrder(event) {
+  event.preventDefault();
+  const button = document.querySelector("#paper-place-order");
+  try {
+    button.disabled = true;
+    button.textContent = "Placing simulated order...";
+    const payload = {
+      savedSignalId: paperOrderSignalId.value || null,
+      symbol: paperOrderMarket.value,
+      timeframe: state.paperTrading.timeframe,
+      direction: state.paperTrading.direction,
+      orderType: paperOrderType.value,
+      limitPrice: Number(paperLimitPrice.value),
+      quantity: Number(paperOrderQuantity.value),
+      positionSizeUsd: Number(paperOrderSize.value),
+      stopLoss: Number(paperOrderStop.value),
+      takeProfit: Number(paperOrderTarget.value),
+      notes: paperOrderNotes.value
+    };
+    const terminal = await api.request("/api/paper-trades/orders", { method: "POST", body: JSON.stringify(payload) });
+    Object.assign(state.paperTrading, terminal);
+    state.paperTrading.draftSignalId = null;
+    paperOrderSignalId.value = "";
+    renderPaperTradingTerminal();
+    showToast(payload.orderType === "market" ? "Paper position opened" : "Paper limit order placed");
+  } catch (error) {
+    paperOrderWarning.textContent = error.message;
+  } finally {
+    button.disabled = false;
+    renderPaperOrderTicket();
+  }
+}
+
+async function performPaperOrderAction(button, action) {
+  try {
+    button.disabled = true;
+    const orderId = action === "close" ? button.dataset.paperCloseOrder : button.dataset.paperCancelOrder;
+    const terminal = await api.request(`/api/paper-trades/orders/${encodeURIComponent(orderId)}/${action}`, { method: "POST", body: "{}" });
+    Object.assign(state.paperTrading, terminal);
+    renderPaperTradingTerminal();
+    showToast(action === "close" ? "Paper position closed" : "Pending order cancelled");
+  } catch (error) {
+    paperOrderWarning.textContent = error.message;
+    button.disabled = false;
+  }
+}
+
+async function resetPaperTrading() {
+  if (!window.confirm("Reset the paper account to $10,000 and archive all open positions and history?")) return;
+  try {
+    const terminal = await api.request("/api/paper-trades/reset", { method: "POST", body: JSON.stringify({ confirmation: "RESET" }) });
+    Object.assign(state.paperTrading, terminal);
+    renderPaperTradingTerminal();
+    showToast("Paper account reset");
+  } catch (error) {
+    paperOrderWarning.textContent = error.message;
+  }
+}
+
+function calculateEmaSeries(candles, period) {
+  const multiplier = 2 / (period + 1);
+  let current = Number(candles[0]?.close || 0);
+  return candles.map((candle) => current = Number(candle.close) * multiplier + current * (1 - multiplier));
+}
+
+function calculateVwapSeries(candles) {
+  let volume = 0; let priceVolume = 0;
+  return candles.map((candle) => {
+    const candleVolume = Number(candle.volume || 0);
+    volume += candleVolume;
+    priceVolume += ((Number(candle.high) + Number(candle.low) + Number(candle.close)) / 3) * candleVolume;
+    return volume ? priceVolume / volume : Number(candle.close);
+  });
+}
+
+function calculateBollingerSeries(candles, period) {
+  const upper = []; const lower = [];
+  candles.forEach((candle, index) => {
+    const values = candles.slice(Math.max(0, index - period + 1), index + 1).map((item) => Number(item.close));
+    if (values.length < period) { upper.push(NaN); lower.push(NaN); return; }
+    const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+    const deviation = Math.sqrt(values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / values.length);
+    upper.push(mean + deviation * 2); lower.push(mean - deviation * 2);
+  });
+  return { upper, lower };
+}
+
+function calculateRsi(candles, period) {
+  const changes = candles.slice(-(period + 1)).map((item, index, array) => index ? Number(item.close) - Number(array[index - 1].close) : 0).slice(1);
+  if (changes.length < period) return 0;
+  const gains = changes.reduce((sum, value) => sum + Math.max(0, value), 0) / period;
+  const losses = changes.reduce((sum, value) => sum + Math.max(0, -value), 0) / period;
+  return losses ? 100 - (100 / (1 + gains / losses)) : 100;
+}
+
+function calculateAtr(candles, period) {
+  const recent = candles.slice(-(period + 1));
+  if (recent.length <= period) return 0;
+  return recent.slice(1).reduce((sum, candle, index) => sum + Math.max(Number(candle.high) - Number(candle.low), Math.abs(Number(candle.high) - Number(recent[index].close)), Math.abs(Number(candle.low) - Number(recent[index].close))), 0) / period;
+}
+
+function calculateMacd(candles) {
+  const fast = calculateEmaSeries(candles, 12).at(-1) || 0;
+  const slow = calculateEmaSeries(candles, 26).at(-1) || 0;
+  return fast - slow;
+}
+
+function formatCompactPrice(value) {
+  const numeric = Number(value || 0);
+  return numeric >= 1000 ? numeric.toFixed(2) : numeric >= 1 ? numeric.toFixed(4) : numeric.toPrecision(5);
 }
 
 function renderJournal() {
@@ -2927,7 +3345,7 @@ function renderJournal() {
     journalList.innerHTML = `
       <div class="empty-state">
         <strong>No journal entries match these filters</strong>
-        <p class="reasoning">Add an unlocked signal to your Paper Portfolio, then record the plan, emotions, and review here.</p>
+        <p class="reasoning">Add an unlocked signal to Paper Trading, then record the plan, emotions, and review here.</p>
       </div>
     `;
     return;
@@ -3913,18 +4331,19 @@ function getAlignmentClass(badge) {
 }
 
 function renderPaperTradeAction(signal, primary = false) {
-  const existingTrade = state.paperPortfolio.trades.find((trade) => trade.signalId === signal.id);
+  const existingTrade = state.paperTrading.orders.find((order) => order.savedSignalId === signal.id) ||
+    state.paperPortfolio.trades.find((trade) => trade.signalId === signal.id);
   const className = primary ? "paper-trade-action primary-paper-action" : "secondary-action paper-trade-action";
 
   if (existingTrade) {
-    return `<button class="${className}" type="button" disabled>Added to Paper Portfolio</button>`;
+    return `<button class="${className}" type="button" disabled>Already added to Paper Trading</button>`;
   }
 
   if (signal.status !== "Active") {
     return `<button class="${className}" type="button" disabled>Signal ${signal.status}</button>`;
   }
 
-  return `<button class="${className}" data-paper-signal-id="${signal.id}" type="button">Add to Paper Portfolio</button>`;
+  return `<button class="${className}" data-paper-signal-id="${signal.id}" type="button">Add to Paper Trading</button>`;
 }
 
 function renderConfidenceSummary(signal) {
@@ -5537,6 +5956,15 @@ function getStoredAffiliateCode() {
 
 function getStoredScannerMode() {
   return localStorage.getItem("signalforge-scanner-mode") === "advanced" ? "advanced" : "basic";
+}
+
+function getStoredPaperIndicators() {
+  try {
+    const stored = JSON.parse(localStorage.getItem("signalforge-paper-indicators") || "[]");
+    return new Set(Array.isArray(stored) && stored.length ? stored : ["ema20", "ema50", "volume"]);
+  } catch {
+    return new Set(["ema20", "ema50", "volume"]);
+  }
 }
 
 function getStoredNavSections() {

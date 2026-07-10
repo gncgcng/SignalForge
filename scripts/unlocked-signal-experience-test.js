@@ -31,8 +31,9 @@ const checks = {
     unlockedDetails.indexOf("Checklist and validation details") < unlockedDetails.indexOf("Historical learning insight"),
   paperPortfolioAction:
     revealFunction.includes("renderPaperTradeAction(signal, true)") &&
-    app.includes("Added to Paper Portfolio") &&
-    app.includes('api.request("/api/paper-trades"'),
+    app.includes("Already added to Paper Trading") &&
+    app.includes("prefillPaperOrderFromSignal(signal)") &&
+    app.includes('showView("paper-portfolio", { skipPaperLoad: true })'),
   duplicatePaperBlocked:
     paperMigration.includes("UNIQUE (user_id, saved_signal_id)") &&
     repositories.includes("ON CONFLICT (user_id, saved_signal_id) DO NOTHING"),

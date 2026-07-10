@@ -230,7 +230,7 @@
           <div class="premium-feature-grid">
             <article class="premium-card feature-card fade-up"><span class="feature-icon">⌁</span><strong>Scanner</strong><p>Scans dozens of crypto markets and ranks qualifying opportunities.</p></article>
             <article class="premium-card feature-card fade-up"><span class="feature-icon">✉</span><strong>Telegram Alerts</strong><p>Receive signals instantly when setups match your timeframe, direction, and confidence rules.</p></article>
-            <article class="premium-card feature-card fade-up"><span class="feature-icon">◎</span><strong>Paper Portfolio</strong><p>Practice before risking capital. Paper trading journal notes and R-multiple outcomes stay linked.</p></article>
+            <article class="premium-card feature-card fade-up"><span class="feature-icon">◎</span><strong>Paper Trading</strong><p>Practice before risking capital. Paper trading journal notes and R-multiple outcomes stay linked.</p></article>
             <article class="premium-card feature-card fade-up"><span class="feature-icon">▦</span><strong>Performance Dashboard</strong><p>Review outcomes by market, timeframe, confluence, session, and risk filters.</p></article>
             <article class="premium-card feature-card fade-up"><span class="feature-icon">⌬</span><strong>Backtesting Lab</strong><p>Research historical setups with configurable rules and OHLCV-based testing.</p></article>
             <article class="premium-card feature-card fade-up"><span class="feature-icon">％</span><strong>Affiliate Program</strong><p>Earn recurring commissions by referring paid subscribers.</p></article>
@@ -539,7 +539,7 @@
             <section class="nav-section" data-nav-section="portfolio">
               <button class="nav-section-toggle" type="button" data-nav-section-toggle="portfolio" aria-expanded="true">Portfolio</button>
               <div class="nav-section-links">
-                <a href="#paper-portfolio" data-view-link="paper-portfolio">Paper Portfolio</a>
+                <a href="#paper-portfolio" data-view-link="paper-portfolio">Paper Trading</a>
                 <a href="#journal" data-view-link="journal">Journal</a>
               </div>
             </section>
@@ -945,29 +945,54 @@
           </section>
 
           <section class="page-view hidden" id="paper-portfolio-view" data-view="paper-portfolio">
-            <div class="section-title">
-              <div>
-                <span class="eyebrow">Simulated execution</span>
-                <h3>Paper Portfolio</h3>
-              </div>
-              <span id="paper-trade-count">0 trades</span>
+            <div class="section-title paper-terminal-title">
+              <div><span class="eyebrow">Free simulated execution</span><h3>Paper Trading</h3></div>
+              <div class="paper-title-actions"><span id="paper-trade-count">0 positions</span><button class="secondary-action" id="paper-reset-account" type="button">Reset Paper Account</button></div>
             </div>
-            <div class="paper-stats-grid">
-              <div><span>Total paper trades</span><strong id="paper-stat-total">0</strong></div>
-              <div><span>Win rate</span><strong id="paper-stat-win-rate">0%</strong></div>
-              <div><span>Average R</span><strong id="paper-stat-average-r">0R</strong></div>
-              <div><span>Best market</span><strong id="paper-stat-best-market">--</strong></div>
-              <div><span>Best timeframe</span><strong id="paper-stat-best-timeframe">--</strong></div>
-            </div>
-            <article class="analytics-panel">
-              <div class="panel-header"><div><span class="eyebrow">Simulated USD balance</span><h3>Account growth curve</h3></div></div>
-              <div class="line-chart" id="paper-growth-curve"></div>
-            </article>
             <div class="signal-disclaimer paper-disclaimer">
               <strong>Paper trading only. No real orders are placed.</strong>
-              <span>Results are simulated from SignalForge outcome tracking and shown in R-multiples, not dollars.</span>
+              <span>Simulated educational execution using live provider candles. Available free to every logged-in user.</span>
             </div>
-            <div class="paper-portfolio-grid" id="paper-portfolio-grid"></div>
+            <div class="paper-terminal-topbar" id="paper-terminal-topbar">
+              <div><span>Market</span><strong id="paper-top-market">BTCUSD</strong></div><div><span>Price</span><strong id="paper-top-price">--</strong></div>
+              <div><span>Change</span><strong id="paper-top-change">--</strong></div><div><span>Timeframe</span><strong id="paper-top-timeframe">15m</strong></div>
+              <div><span>Provider</span><strong id="paper-top-provider">Coinbase</strong></div><div><span>Status</span><strong id="paper-top-status">Loading</strong></div>
+            </div>
+            <div class="paper-terminal-layout">
+              <aside class="paper-market-panel terminal-panel">
+                <div class="terminal-panel-heading"><span class="eyebrow">Markets</span><strong>Watchlist</strong></div>
+                <label class="paper-market-search">Search markets<input id="paper-market-search" type="search" placeholder="BTCUSD, Bitcoin..." autocomplete="off" /></label>
+                <div class="paper-market-list" id="paper-market-list"></div>
+              </aside>
+              <section class="paper-chart-panel terminal-panel">
+                <div class="paper-chart-toolbar">
+                  <div class="paper-timeframes" id="paper-timeframes"><button type="button" disabled title="1m is not supported by current providers">1m</button><button type="button" data-paper-timeframe="5m">5m</button><button type="button" data-paper-timeframe="15m" class="active">15m</button><button type="button" data-paper-timeframe="1h">1h</button><button type="button" data-paper-timeframe="4h">4h</button></div>
+                  <details class="paper-indicator-menu"><summary>Indicators</summary><div id="paper-indicator-controls">
+                    <label><input type="checkbox" value="ema20" checked /> EMA 20</label><label><input type="checkbox" value="ema50" checked /> EMA 50</label><label><input type="checkbox" value="ema200" /> EMA 200</label><label><input type="checkbox" value="vwap" /> VWAP</label><label><input type="checkbox" value="bollinger" /> Bollinger Bands</label><label><input type="checkbox" value="macd" /> MACD</label><label><input type="checkbox" value="rsi" /> RSI</label><label><input type="checkbox" value="volume" checked /> Volume</label><label><input type="checkbox" value="atr" /> ATR</label>
+                  </div></details>
+                </div>
+                <div class="paper-chart-stage" id="paper-chart-stage"><div class="paper-chart-loading" id="paper-chart-loading">Loading live candles...</div><svg id="paper-candle-chart" viewBox="0 0 920 480" preserveAspectRatio="none" aria-label="Interactive paper trading candlestick chart"></svg><div class="paper-chart-tooltip hidden" id="paper-chart-tooltip"></div></div>
+                <div class="paper-indicator-readout" id="paper-indicator-readout"></div><p class="paper-chart-status" id="paper-chart-status">Loading market data...</p>
+              </section>
+              <aside class="paper-order-panel terminal-panel">
+                <div class="terminal-panel-heading"><span class="eyebrow">Simulated order</span><strong>Order Ticket</strong></div>
+                <form id="paper-order-form" class="paper-order-form">
+                  <input id="paper-order-signal-id" type="hidden" /><label>Market<select id="paper-order-market"></select></label>
+                  <div class="paper-segmented" id="paper-direction-control"><button type="button" class="active long" data-paper-direction="long">Long</button><button type="button" class="short" data-paper-direction="short">Short</button></div>
+                  <label>Order type<select id="paper-order-type"><option value="market">Market</option><option value="limit">Limit</option></select></label><label id="paper-limit-field" class="hidden">Limit price<input id="paper-limit-price" type="number" min="0" step="any" /></label>
+                  <div class="paper-order-grid"><label>Quantity<input id="paper-order-quantity" type="number" min="0" step="any" placeholder="0.01" /></label><label>Position size USD<input id="paper-order-size" type="number" min="1" step="1" value="1000" /></label><label>Stop loss<input id="paper-order-stop" type="number" min="0" step="any" required /></label><label>Take profit<input id="paper-order-target" type="number" min="0" step="any" required /></label></div>
+                  <label>Notes<textarea id="paper-order-notes" maxlength="1000" rows="2" placeholder="Optional trade plan"></textarea></label><div class="paper-order-calculations" id="paper-order-calculations"></div><p class="paper-order-warning" id="paper-order-warning"></p><button id="paper-place-order" type="submit">Place Paper Long</button>
+                </form>
+                <section class="paper-account-summary" id="paper-account-summary"><div class="terminal-panel-heading"><span class="eyebrow">Simulated account</span><strong>$10,000 Account</strong></div><div class="paper-account-grid">
+                  <div><span>Balance</span><strong id="paper-account-balance">$10,000</strong></div><div><span>Equity</span><strong id="paper-account-equity">$10,000</strong></div><div><span>Realized P/L</span><strong id="paper-account-realized">$0</strong></div><div><span>Unrealized P/L</span><strong id="paper-account-unrealized">$0</strong></div><div><span>Open positions</span><strong id="paper-account-open">0</strong></div><div><span>Win rate</span><strong id="paper-account-win-rate">0%</strong></div><div><span>Net R</span><strong id="paper-account-net-r">0R</strong></div><div><span>Average R</span><strong id="paper-account-average-r">0R</strong></div>
+                </div></section>
+              </aside>
+            </div>
+            <section class="paper-orders-terminal terminal-panel">
+              <div class="paper-terminal-tabs" id="paper-terminal-tabs"><button type="button" class="active" data-paper-tab="positions">Open Positions</button><button type="button" data-paper-tab="pending">Pending Orders</button><button type="button" data-paper-tab="history">Trade History</button></div>
+              <div class="paper-history-filters hidden" id="paper-history-filters"><select id="paper-filter-market"><option value="">All markets</option></select><select id="paper-filter-direction"><option value="">All directions</option><option value="long">Long</option><option value="short">Short</option></select><select id="paper-filter-outcome"><option value="">All outcomes</option><option>Hit TP</option><option>Hit SL</option><option>Expired</option><option>Closed</option></select><input id="paper-filter-from" type="date" aria-label="History from date" /><input id="paper-filter-to" type="date" aria-label="History to date" /></div>
+              <div class="paper-order-table" id="paper-portfolio-grid"><div class="empty-state"><strong>Select a market and place a simulated trade to begin.</strong></div></div>
+            </section>
           </section>
 
           <section class="page-view hidden" id="journal-view" data-view="journal">
