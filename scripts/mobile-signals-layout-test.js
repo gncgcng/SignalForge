@@ -30,7 +30,8 @@ const checks = {
     app.includes("<summary>Overview</summary>") &&
     app.includes("<summary>Why this signal?</summary>") &&
     app.includes("<summary>Risk levels</summary>") &&
-    app.includes("<summary>Advanced analysis</summary>") &&
+    app.includes("<summary>AI analyst explanation</summary>") &&
+    app.includes("<summary>Full analysis context</summary>") &&
     css.includes(".mobile-signal-accordion details"),
   longAnalysisSafe:
     app.includes('class="reasoning long-analysis"') &&
@@ -39,7 +40,8 @@ const checks = {
   telegramDeepLinkAnchors:
     app.includes('data-signal-key="${key}"') &&
     app.includes("processPendingTelegramUnlock") &&
-    app.includes("highlightSignalKey(unlockedKey)") &&
+    app.includes("state.unlockedRevealSignalId = unlockedSignal.id") &&
+    app.includes("if (key) highlightSignalKey(key)") &&
     app.includes("getPendingTelegramUnlockKey()") &&
     app.includes("Sign in to unlock this Telegram signal preview."),
   mobileHeaderPolish:

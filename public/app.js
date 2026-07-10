@@ -12,6 +12,7 @@ const state = {
   onboardingSkipped: getStoredOnboardingSkipped(),
   firstScanCompleted: getStoredFirstScanCompleted(),
   expandedSignalKeys: new Set(),
+  unlockedRevealSignalId: null,
   lastScanSummary: null,
   activeView: "scanner",
   historyFilters: {
@@ -89,6 +90,7 @@ const RESTORE_TOKEN_KEY = "signalforge-restore-token";
 const SCANNER_MODE_KEY = "signalforge-scanner-mode";
 const NAV_SECTIONS_KEY = "signalforge-nav-sections";
 const TELEGRAM_UNLOCK_KEY = "signalforge-telegram-unlock";
+const UNLOCK_REVEAL_KEY = "signalforge-unlock-reveal";
 const ONBOARDING_SKIP_KEY = "signalforge-onboarding-skipped";
 const FIRST_SCAN_KEY = "signalforge-first-scan-complete";
 
@@ -113,6 +115,8 @@ const legalConsent = document.querySelector("#legal-consent");
 const legalModal = document.querySelector("#legal-modal");
 const legalModalTitle = document.querySelector("#legal-modal-title");
 const legalModalBody = document.querySelector("#legal-modal-body");
+const unlockReveal = document.querySelector("#unlock-reveal");
+const unlockRevealCard = document.querySelector("#unlock-reveal-card");
 const googleAuthButton = document.querySelector("#google-auth-button");
 const viewDemoButton = document.querySelector("#view-demo-button");
 const livePreviewSection = document.querySelector("#live-preview");
@@ -1327,18 +1331,7 @@ signalsGrid.addEventListener("click", async (event) => {
       return;
     }
 
-    const unlockedKey = getSignalKey(signal);
-    state.scanResults = [];
-    state.expandedSignalKeys = new Set([unlockedKey]);
-    await loadSignals();
-    showView("signals");
-    renderSignals();
-    renderSignalsHistory();
-    statusLine.textContent = alreadyUnlocked
-      ? "Already unlocked. No additional credit was used."
-      : "Full signal unlocked and saved. Unlock credit deducted.";
-    showToast(alreadyUnlocked ? "Already unlocked" : "Signal unlocked");
-    highlightSignalKey(unlockedKey);
+    await completeSignalUnlock({ signal, subscription, alreadyUnlocked, source: "scanner" });
   } catch (error) {
     statusLine.textContent = error.message;
   } finally {
@@ -1364,6 +1357,35 @@ signalsHistory.addEventListener("click", async (event) => {
   }
 });
 
+unlockReveal.addEventListener("click", async (event) => {
+  if (event.target.closest("[data-unlock-reveal-close]")) {
+    closeUnlockReveal();
+    return;
+  }
+
+  const paperButton = event.target.closest("[data-paper-signal-id]");
+  if (paperButton) {
+    await enterPaperTrade(paperButton);
+    renderUnlockReveal();
+    return;
+  }
+
+  if (event.target.closest("[data-unlock-view-analysis]")) {
+    closeUnlockReveal();
+    return;
+  }
+
+  if (event.target.closest("[data-copy-signal-levels]")) {
+    await copyUnlockedSignalLevels();
+  }
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !unlockReveal.classList.contains("hidden")) {
+    closeUnlockReveal();
+  }
+});
+
 async function unlockSignal(button, symbol, timeframe) {
   try {
     button.disabled = true;
@@ -1382,14 +1404,7 @@ async function unlockSignal(button, symbol, timeframe) {
       return;
     }
 
-    state.scanResults = [];
-    state.expandedSignalKeys = new Set([getSignalKey(signal)]);
-    await loadSignals();
-    renderSignals();
-    statusLine.textContent = alreadyUnlocked
-      ? "Already unlocked. No additional credit was used."
-      : "Full signal unlocked and saved. Unlock credit deducted.";
-    scrollToSignalKey(getSignalKey(signal));
+    await completeSignalUnlock({ signal, subscription, alreadyUnlocked, source: "scanner" });
   } catch (error) {
     statusLine.textContent = error.message;
   } finally {
@@ -1414,10 +1429,13 @@ async function enterPaperTrade(button) {
     renderSignals();
     renderSignalsHistory();
     statusLine.textContent = "Signal added to Paper Portfolio. No real order was placed.";
+    showToast("Added to Paper Portfolio");
   } catch (error) {
     statusLine.textContent = error.message;
     if (error.message.includes("already in your Paper Portfolio")) {
       await loadPaperPortfolio();
+      renderSignals();
+      renderSignalsHistory();
       return;
     }
     button.disabled = false;
@@ -1745,6 +1763,7 @@ async function bootDashboard() {
   }
 
   await processPendingTelegramUnlock();
+  await restoreUnlockReveal();
 }
 
 function reportDashboardLoadFailures(results) {
@@ -1789,19 +1808,8 @@ async function processPendingTelegramUnlock() {
       return;
     }
 
-    const unlockedKey = getSignalKey(signal);
-    state.scanResults = [];
-    state.expandedSignalKeys = new Set([unlockedKey]);
-    await loadSignals();
-    showView("signals");
-    renderSignals();
-    renderSignalsHistory();
-    statusLine.textContent = alreadyUnlocked
-      ? "Already unlocked. No additional credit was used."
-      : "Signal unlocked from Telegram. Unlock credit deducted.";
-    showToast(alreadyUnlocked ? "Already unlocked" : "Signal unlocked");
     removeTelegramUnlockParam();
-    highlightSignalKey(unlockedKey);
+    await completeSignalUnlock({ signal, subscription, alreadyUnlocked, source: "telegram" });
   } catch (error) {
     statusLine.textContent = error.message;
     showView("signals");
@@ -2823,8 +2831,7 @@ function renderSignalsHistory() {
         ${renderSignalHistoryRow(signal)}
         <tr class="history-transparency">
           <td colspan="10">
-            ${renderSignalTransparency(signal)}
-            ${renderPaperTradeAction(signal)}
+            ${renderUnlockedSignalDetails(signal)}
           </td>
         </tr>
       `).join("")}</tbody>
@@ -3448,8 +3455,9 @@ function renderMobileSignalHistoryCard(signal) {
         ${renderMobileSignalValue("R/R", `${signal.riskRewardRatio}:1`)}
         ${renderMobileSignalValue("Confidence", `${signal.confidenceScore}%`)}
       </div>
-      ${renderMobileSignalAccordion(signal)}
       ${renderPaperTradeAction(signal)}
+      ${renderConfidenceSummary(signal)}
+      ${renderMobileSignalAccordion(signal)}
     </article>
   `;
 }
@@ -3495,11 +3503,32 @@ function renderMobileSignalAccordion(signal) {
         ${renderRiskEngineCard(signal)}
       </details>
       <details>
-        <summary>Advanced analysis</summary>
+        <summary>AI analyst explanation</summary>
+        ${renderAiAnalyst(signal)}
+      </details>
+      <details>
+        <summary>Full analysis context</summary>
         <p class="reasoning long-analysis">${escapeHtml(signal.reasoning || "Advanced signal context is based on rule alignment.")}</p>
         ${renderSignalConfluence(signal)}
         ${renderSmcExplanation(signal)}
         ${renderAdvancedStructureExplanation(signal)}
+        ${renderRiskEngineCard(signal)}
+      </details>
+      <details>
+        <summary>Checklist and validation</summary>
+        ${renderSignalValidation(signal)}
+        <div class="confirmation-list mobile-confirmations">
+          ${confirmations.map((item) => `
+            <div class="confirmation-item ${item.passed ? "passed" : "failed"}">
+              <strong>${item.passed ? "Passed" : "Failed"} · ${escapeHtml(item.name)}</strong>
+              <span>${escapeHtml(item.detail)}</span>
+            </div>
+          `).join("")}
+        </div>
+      </details>
+      <details>
+        <summary>Historical learning insight</summary>
+        ${renderLearningInsight(signal)}
       </details>
     </div>
   `;
@@ -3883,18 +3912,74 @@ function getAlignmentClass(badge) {
   return "partial";
 }
 
-function renderPaperTradeAction(signal) {
+function renderPaperTradeAction(signal, primary = false) {
   const existingTrade = state.paperPortfolio.trades.find((trade) => trade.signalId === signal.id);
+  const className = primary ? "paper-trade-action primary-paper-action" : "secondary-action paper-trade-action";
 
   if (existingTrade) {
-    return `<button class="secondary-action paper-trade-action" type="button" disabled>In Paper Portfolio · ${existingTrade.status}</button>`;
+    return `<button class="${className}" type="button" disabled>Added to Paper Portfolio</button>`;
   }
 
   if (signal.status !== "Active") {
-    return `<button class="secondary-action paper-trade-action" type="button" disabled>Signal ${signal.status}</button>`;
+    return `<button class="${className}" type="button" disabled>Signal ${signal.status}</button>`;
   }
 
-  return `<button class="secondary-action paper-trade-action" data-paper-signal-id="${signal.id}" type="button">Add to Paper Portfolio</button>`;
+  return `<button class="${className}" data-paper-signal-id="${signal.id}" type="button">Add to Paper Portfolio</button>`;
+}
+
+function renderConfidenceSummary(signal) {
+  const confirmations = normalizeConfirmations(signal.confirmations || [], signal.indicators || {});
+  const passed = confirmations.filter((item) => item.passed).length;
+  return `
+    <section class="unlocked-confidence-summary">
+      <span>Confidence summary</span>
+      <strong>${getConfidenceBand(signal.confidenceScore)} · ${Number(signal.confidenceScore || 0)}%</strong>
+      <small>${passed}/${confirmations.length} confirmations passed. Confidence measures rule alignment, not probability of profit.</small>
+    </section>
+  `;
+}
+
+function renderUnlockedSignalDetails(signal) {
+  const confirmations = normalizeConfirmations(signal.confirmations || [], signal.indicators || {});
+  return `
+    <div class="unlocked-signal-details">
+      ${renderPaperTradeAction(signal)}
+      ${renderConfidenceSummary(signal)}
+      <section class="unlocked-analysis-section">
+        <h4>Why this signal?</h4>
+        <p class="reasoning">${escapeHtml(getShortSignalReason(signal))}</p>
+      </section>
+      ${renderAiAnalyst(signal)}
+      <details class="unlocked-analysis-section">
+        <summary>Full analysis context</summary>
+        <p class="reasoning long-analysis">${escapeHtml(signal.reasoning || "Advanced signal context is based on rule alignment.")}</p>
+        ${renderSignalConfluence(signal)}
+        ${renderSmcExplanation(signal)}
+        ${renderAdvancedStructureExplanation(signal)}
+        ${renderRiskEngineCard(signal)}
+      </details>
+      <details class="unlocked-analysis-section">
+        <summary>Checklist and validation details</summary>
+        ${renderSignalValidation(signal)}
+        <div class="confirmation-list">
+          ${confirmations.map((item) => `
+            <div class="confirmation-item ${item.passed ? "passed" : "failed"}">
+              <strong>${item.passed ? "Passed" : "Failed"} · ${escapeHtml(item.name)}</strong>
+              <span>${escapeHtml(item.detail)}</span>
+            </div>
+          `).join("")}
+        </div>
+      </details>
+      <details class="unlocked-analysis-section">
+        <summary>Historical learning insight</summary>
+        ${renderLearningInsight(signal)}
+      </details>
+      <div class="signal-disclaimer">
+        <strong>Educational tool only. Not financial advice.</strong>
+        <span>Review the market and your own risk limits before making any decision.</span>
+      </div>
+    </div>
+  `;
 }
 
 function renderSignalTransparency(signal) {
@@ -5660,6 +5745,129 @@ function formatSuggestedScanTime() {
 
 function scrollToSignalDesk() {
   document.querySelector(".signals-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+async function completeSignalUnlock({ signal, subscription, alreadyUnlocked, source }) {
+  state.subscription = subscription || state.subscription;
+  renderSubscription();
+  state.scanResults = [];
+  await Promise.all([loadSignals(), loadPaperPortfolio()]);
+
+  const unlockedSignal = state.signals.find((item) => item.id === signal.id) ||
+    state.signals.find((item) => item.setupKey && item.setupKey === signal.setupKey) ||
+    signal;
+  const unlockedKey = getSignalKey(unlockedSignal);
+  state.expandedSignalKeys = new Set([unlockedKey]);
+  state.unlockedRevealSignalId = unlockedSignal.id;
+  sessionStorage.setItem(UNLOCK_REVEAL_KEY, unlockedSignal.id);
+
+  showView("signals");
+  renderSignals();
+  renderSignalsHistory();
+  renderUnlockReveal();
+
+  const sourceLabel = source === "telegram" ? " from Telegram" : "";
+  statusLine.textContent = alreadyUnlocked
+    ? "Already unlocked. No additional credit was used."
+    : `Signal unlocked${sourceLabel}. One unlock credit deducted.`;
+  showToast(alreadyUnlocked ? "Already unlocked" : "Signal unlocked");
+}
+
+async function restoreUnlockReveal() {
+  const signalId = sessionStorage.getItem(UNLOCK_REVEAL_KEY);
+  if (!signalId) return;
+  const signal = state.signals.find((item) => item.id === signalId);
+  if (!signal) {
+    sessionStorage.removeItem(UNLOCK_REVEAL_KEY);
+    return;
+  }
+  await loadPaperPortfolio();
+  state.unlockedRevealSignalId = signal.id;
+  showView("signals");
+  renderUnlockReveal();
+}
+
+function renderUnlockReveal() {
+  const signal = state.signals.find((item) => item.id === state.unlockedRevealSignalId);
+  if (!signal) {
+    unlockReveal.classList.add("hidden");
+    document.body.classList.remove("unlock-reveal-open");
+    return;
+  }
+
+  const confidenceBand = signal.confidenceBand || getConfidenceBand(signal.confidenceScore);
+  unlockRevealCard.innerHTML = `
+    <button class="unlock-reveal-close" type="button" aria-label="Close unlocked signal" data-unlock-reveal-close>×</button>
+    <header class="unlock-reveal-header">
+      <span class="unlock-reveal-kicker">Signal Unlocked</span>
+      <div class="unlock-reveal-identity">
+        <div>
+          <h2 id="unlock-reveal-title">${escapeHtml(getDisplaySymbol(signal.symbol))}</h2>
+          <span>${escapeHtml(getProviderSymbolLabel(signal.symbol))}</span>
+        </div>
+        <strong class="direction ${signal.direction}">${escapeHtml(String(signal.direction || "").toUpperCase())}</strong>
+      </div>
+      <div class="unlock-reveal-tags">
+        <span>${escapeHtml(signal.timeframe)}</span>
+        <span>${escapeHtml(confidenceBand)} · ${Number(signal.confidenceScore || 0)}%</span>
+        <span>${escapeHtml(signal.setupType || "Qualified setup")}</span>
+      </div>
+    </header>
+    <section class="unlock-critical-levels" aria-label="Critical trade levels">
+      <div class="entry"><span>Entry</span><strong>${formatCurrency(signal.entryPrice)}</strong></div>
+      <div class="stop"><span>Stop Loss</span><strong>${formatCurrency(signal.stopLoss)}</strong></div>
+      <div class="target"><span>Take Profit</span><strong>${formatCurrency(signal.takeProfit)}</strong></div>
+      <div class="reward"><span>Risk / Reward</span><strong>${Number(signal.riskRewardRatio || 0).toFixed(2)}R</strong></div>
+    </section>
+    <div class="unlock-reveal-primary">${renderPaperTradeAction(signal, true)}</div>
+    <div class="unlock-reveal-actions">
+      <button class="secondary-action" type="button" data-unlock-view-analysis>View full analysis</button>
+      <button class="secondary-action" type="button" data-copy-signal-levels>Copy levels</button>
+      <button class="text-action" type="button" data-unlock-reveal-close>Close</button>
+    </div>
+    <p class="unlock-reveal-disclaimer">Educational tool only. Not financial advice.</p>
+  `;
+  unlockReveal.classList.remove("hidden");
+  document.body.classList.add("unlock-reveal-open");
+  requestAnimationFrame(() => unlockRevealCard.focus?.());
+}
+
+function closeUnlockReveal() {
+  const signal = state.signals.find((item) => item.id === state.unlockedRevealSignalId);
+  const key = signal ? getSignalKey(signal) : null;
+  unlockReveal.classList.add("hidden");
+  document.body.classList.remove("unlock-reveal-open");
+  sessionStorage.removeItem(UNLOCK_REVEAL_KEY);
+  state.unlockedRevealSignalId = null;
+  if (key) highlightSignalKey(key);
+}
+
+async function copyUnlockedSignalLevels() {
+  const signal = state.signals.find((item) => item.id === state.unlockedRevealSignalId);
+  if (!signal) return;
+  const text = [
+    `${getDisplaySymbol(signal.symbol)} ${String(signal.direction || "").toUpperCase()} ${signal.timeframe}`,
+    `Entry: ${formatCurrency(signal.entryPrice)}`,
+    `Stop Loss: ${formatCurrency(signal.stopLoss)}`,
+    `Take Profit: ${formatCurrency(signal.takeProfit)}`,
+    `Risk/Reward: ${Number(signal.riskRewardRatio || 0).toFixed(2)}R`,
+    "Educational tool only. Not financial advice."
+  ].join("\n");
+
+  try {
+    await navigator.clipboard.writeText(text);
+    showToast("Signal levels copied");
+  } catch {
+    showToast("Copy unavailable. Select the levels manually.");
+  }
+}
+
+function getConfidenceBand(confidence) {
+  const value = Number(confidence || 0);
+  if (value >= 95) return "Elite";
+  if (value >= 90) return "Excellent";
+  if (value >= 80) return "Strong";
+  return "Good";
 }
 
 function scrollToSignalKey(key) {

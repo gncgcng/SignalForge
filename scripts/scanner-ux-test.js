@@ -75,7 +75,8 @@ const checks = {
   unlockExpandsUnlockedSignal:
     app.includes("state.expandedSignalKeys = new Set([unlockedKey])") &&
     app.includes('showView("signals")') &&
-    app.includes("highlightSignalKey(unlockedKey)") &&
+    app.includes("renderUnlockReveal()") &&
+    app.includes("if (key) highlightSignalKey(key)") &&
     app.includes("Signal unlocked"),
   basicAdvancedModePersists:
     html.includes('id="scanner-mode-toggle"') &&

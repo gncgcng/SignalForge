@@ -133,7 +133,8 @@ const result = {
     repositories.includes("INSERT INTO unlocked_signals") &&
     repositories.includes("INSERT INTO signal_outcomes") &&
     app.includes("showView(\"signals\")") &&
-    app.includes("highlightSignalKey(unlockedKey)"),
+    app.includes("state.unlockedRevealSignalId = unlockedSignal.id") &&
+    app.includes("if (key) highlightSignalKey(key)"),
   telegramUnlockFrontendPresent: app.includes("telegramUnlock") &&
     app.includes("/api/signals/telegram-unlock") &&
     app.includes("Sign in to unlock this Telegram signal preview."),
