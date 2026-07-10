@@ -314,7 +314,7 @@ if (
   stats.hitTpCount !== 2 ||
   stats.hitSlCount !== 1 ||
   stats.expiredCount !== 1 ||
-  stats.winRate !== 67 ||
+  stats.winRate !== 50 ||
   weakConfidence >= 70 ||
   mediumConfidence < 70 ||
   mediumConfidence > 89 ||

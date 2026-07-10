@@ -1988,7 +1988,7 @@ export async function findSignalById(signalId, userId) {
 
 export async function listSignalsByUser(userId, executeQuery = query) {
   const result = await executeQuery(
-    signalSelectSql("WHERE s.user_id = $1 ORDER BY s.created_at DESC LIMIT 100"),
+    signalSelectSql("WHERE s.user_id = $1 ORDER BY s.created_at DESC"),
     [userId]
   );
   return result.rows.map(mapSignal);

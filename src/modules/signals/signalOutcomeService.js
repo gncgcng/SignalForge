@@ -15,12 +15,13 @@ let trackingInProgress = false;
 
 export function calculateSignalStats(signals) {
   const totals = signals.reduce((stats, signal) => {
-    const status = signal.status || "Active";
+    const status = normalizeOutcomeStatus(signal.status || signal.outcome);
     stats.totalSignals += 1;
 
-    if (status === "Hit TP") stats.hitTpCount += 1;
-    if (status === "Hit SL") stats.hitSlCount += 1;
-    if (status === "Expired") stats.expiredCount += 1;
+    if (status === "hit-tp") stats.hitTpCount += 1;
+    if (status === "hit-sl") stats.hitSlCount += 1;
+    if (status === "expired") stats.expiredCount += 1;
+    if (["hit-tp", "hit-sl", "expired", "closed", "manually-closed"].includes(status)) stats.closedCount += 1;
 
     return stats;
   }, {
@@ -28,12 +29,22 @@ export function calculateSignalStats(signals) {
     hitTpCount: 0,
     hitSlCount: 0,
     expiredCount: 0,
+    closedCount: 0,
     winRate: 0
   });
 
-  const resolved = totals.hitTpCount + totals.hitSlCount;
-  totals.winRate = resolved === 0 ? 0 : Math.round((totals.hitTpCount / resolved) * 100);
+  totals.winRate = totals.closedCount === 0 ? 0 : Math.round((totals.hitTpCount / totals.closedCount) * 100);
   return totals;
+}
+
+function normalizeOutcomeStatus(value) {
+  const status = String(value || "active").trim().toLowerCase().replace(/[_\s]+/g, "-");
+  if (["hit-tp", "tp", "take-profit", "takeprofit"].includes(status)) return "hit-tp";
+  if (["hit-sl", "sl", "stop-loss", "stoploss"].includes(status)) return "hit-sl";
+  if (["expired", "expire", "timed-out", "timeout"].includes(status)) return "expired";
+  if (["manually-closed", "manual-close", "manual-closed"].includes(status)) return "manually-closed";
+  if (status === "closed") return "closed";
+  return "active";
 }
 
 export async function updateSignalsForUser(user) {

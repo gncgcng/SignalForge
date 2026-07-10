@@ -409,7 +409,7 @@ export async function listUserSignals(user) {
   const signals = await listSignalsByUser(user.id);
 
   return {
-    signals: signals.slice(0, 24),
+    signals,
     stats: calculateSignalStats(signals)
   };
 }

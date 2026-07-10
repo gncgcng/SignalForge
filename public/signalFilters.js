@@ -7,7 +7,7 @@ export const SIGNAL_STATUS_FILTERS = Object.freeze([
   ["closed", "Closed"]
 ]);
 
-const terminalStatuses = new Set(["hit-tp", "hit-sl", "expired", "closed", "manually-closed", "manual-close"]);
+const terminalStatuses = new Set(["hit-tp", "hit-sl", "expired", "closed", "manually-closed"]);
 const validStatuses = new Set(SIGNAL_STATUS_FILTERS.map(([value]) => value));
 const validDateRanges = new Set(["all", "today", "7d", "30d", "90d"]);
 const validSorts = new Set(["newest", "oldest", "confidence", "risk-reward", "best-result", "worst-result"]);
@@ -27,12 +27,26 @@ export function createSignalFilters(overrides = {}) {
 }
 
 export function getSignalStatusKey(signal) {
-  const raw = String(signal?.status || "Active").trim().toLowerCase().replaceAll("_", " ");
-  const normalized = raw.replace(/\s+/g, "-");
-  if (["hit-tp", "hit-sl", "expired", "closed", "manually-closed", "manual-close"].includes(normalized)) {
-    return normalized;
-  }
+  if (signal?.statusKey && terminalStatuses.has(signal.statusKey)) return signal.statusKey;
+  if (signal?.statusKey === "active") return "active";
+  return normalizeSignalStatus(signal?.status ?? signal?.outcome);
+}
+
+export function normalizeSignalStatus(value) {
+  const normalized = String(value || "active")
+    .trim()
+    .toLowerCase()
+    .replace(/[_\s]+/g, "-");
+  if (["hit-tp", "tp", "take-profit", "takeprofit"].includes(normalized)) return "hit-tp";
+  if (["hit-sl", "sl", "stop-loss", "stoploss"].includes(normalized)) return "hit-sl";
+  if (["expired", "expire", "timed-out", "timeout"].includes(normalized)) return "expired";
+  if (["manually-closed", "manual-close", "manual-closed"].includes(normalized)) return "manually-closed";
+  if (normalized === "closed") return "closed";
   return "active";
+}
+
+export function normalizeSignal(signal = {}) {
+  return { ...signal, statusKey: normalizeSignalStatus(signal.status ?? signal.outcome) };
 }
 
 export function getSignalStatusCounts(signals = []) {
@@ -46,6 +60,18 @@ export function getSignalStatusCounts(signals = []) {
     if (terminalStatuses.has(status)) counts.closed += 1;
   }
   return counts;
+}
+
+export function getSignalSummary(signals = []) {
+  const counts = getSignalStatusCounts(signals);
+  return {
+    totalSignals: counts.all,
+    winRate: counts.closed ? Math.round((counts["hit-tp"] / counts.closed) * 100) : 0,
+    hitTpCount: counts["hit-tp"],
+    hitSlCount: counts["hit-sl"],
+    expiredCount: counts.expired,
+    closedCount: counts.closed
+  };
 }
 
 export function filterAndSortSignals(signals = [], filters = {}, markets = [], now = new Date()) {
@@ -70,7 +96,7 @@ export function filterAndSortSignals(signals = [], filters = {}, markets = [], n
 export function filtersFromSignalParams(params, signals = []) {
   const activeDefault = signals.some((signal) => getSignalStatusKey(signal) === "active") ? "active" : "all";
   return createSignalFilters({
-    status: params.has("status") ? params.get("status") : activeDefault,
+    status: params.has("status") ? normalizeStatusFilter(params.get("status")) : activeDefault,
     pair: params.get("pair") || "all",
     timeframe: params.get("timeframe") || "all",
     direction: params.get("direction") || "all",
@@ -87,7 +113,8 @@ export function signalFiltersToParams(filters, existing = new URLSearchParams())
     params.delete(key);
   }
   const normalized = createSignalFilters(filters);
-  if (normalized.status !== "all") params.set("status", normalized.status);
+  // Keep status=all explicit so route re-processing never reapplies the initial Active default.
+  params.set("status", normalized.status.replaceAll("-", "_"));
   if (normalized.pair !== "all") params.set("pair", normalized.pair);
   if (normalized.timeframe !== "all") params.set("timeframe", normalized.timeframe);
   if (normalized.direction !== "all") params.set("direction", normalized.direction);
@@ -96,6 +123,11 @@ export function signalFiltersToParams(filters, existing = new URLSearchParams())
   if (normalized.sort !== "newest") params.set("sort", normalized.sort);
   if (normalized.search) params.set("q", normalized.search);
   return params;
+}
+
+function normalizeStatusFilter(value) {
+  const normalized = String(value || "").trim().toLowerCase().replaceAll("_", "-");
+  return validStatuses.has(normalized) ? normalized : "all";
 }
 
 export function getSignalResultR(signal) {

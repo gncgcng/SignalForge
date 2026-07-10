@@ -3,7 +3,10 @@ import { readFileSync } from "node:fs";
 import {
   filterAndSortSignals,
   filtersFromSignalParams,
+  getSignalSummary,
   getSignalStatusCounts,
+  normalizeSignal,
+  normalizeSignalStatus,
   signalFiltersToParams
 } from "../public/signalFilters.js";
 
@@ -61,7 +64,46 @@ assert.equal(loaded.sort, "confidence");
 assert.equal(loaded.search, "bitcoin");
 assert.equal(filtersFromSignalParams(new URLSearchParams(), signals).status, "active");
 assert.equal(filtersFromSignalParams(new URLSearchParams(), signals.filter((item) => item.status !== "Active")).status, "all");
-assert.equal(signalFiltersToParams(loaded).get("status"), "hit-tp");
+assert.equal(signalFiltersToParams(loaded).get("status"), "hit_tp");
+assert.equal(signalFiltersToParams({ status: "all" }).get("status"), "all");
+assert.equal(filtersFromSignalParams(new URLSearchParams("status=all"), signals).status, "all");
+assert.equal(filtersFromSignalParams(new URLSearchParams("status=hit_tp"), signals).status, "hit-tp");
+
+const statusVariants = [
+  ["ACTIVE", "active"],
+  ["Hit TP", "hit-tp"],
+  ["HIT_TP", "hit-tp"],
+  ["tp", "hit-tp"],
+  ["take_profit", "hit-tp"],
+  ["Hit SL", "hit-sl"],
+  ["HIT_SL", "hit-sl"],
+  ["sl", "hit-sl"],
+  ["stop_loss", "hit-sl"],
+  ["EXPIRED", "expired"],
+  ["closed", "closed"],
+  ["manually_closed", "manually-closed"]
+];
+for (const [input, expected] of statusVariants) assert.equal(normalizeSignalStatus(input), expected);
+
+const countFixture = [
+  signal("active", "BTC-USD", "15m", "long", "ACTIVE", "Breakout Retest", 80, 2, "2026-07-10T00:00:00Z"),
+  ...Array.from({ length: 5 }, (_, index) => signal(`tp-${index}`, "BTC-USD", "15m", "long", "take_profit", "Breakout Retest", 80, 2, "2026-07-09T00:00:00Z")),
+  ...Array.from({ length: 8 }, (_, index) => signal(`sl-${index}`, "ETH-USD", "1h", "short", "stop_loss", "Trend Continuation", 80, 2, "2026-07-08T00:00:00Z")),
+  ...Array.from({ length: 10 }, (_, index) => signal(`expired-${index}`, "ETH-USD", "4h", "short", "EXPIRED", "Range Bounce", 80, 2, "2026-07-07T00:00:00Z"))
+].map(normalizeSignal);
+assert.deepEqual(getSignalStatusCounts(countFixture), {
+  all: 24, active: 1, "hit-tp": 5, "hit-sl": 8, expired: 10, closed: 23
+});
+assert.deepEqual(getSignalSummary(countFixture), {
+  totalSignals: 24, winRate: 22, hitTpCount: 5, hitSlCount: 8, expiredCount: 10, closedCount: 23
+});
+
+const source = readFileSync("src/modules/signals/signalService.js", "utf8");
+const repository = readFileSync("src/db/repositories.js", "utf8");
+assert.doesNotMatch(source, /signals\.slice\(0,\s*24\)/, "API must not hide old or Telegram-unlocked signals");
+assert.doesNotMatch(repository, /s\.user_id = \$1 ORDER BY s\.created_at DESC LIMIT/, "repository must return complete user history");
+assert.match(app, /historyCount\.textContent = `\$\{counts\.all\} saved`/);
+assert.match(app, /state\.signals = \(signals \|\| \[\]\)\.map\(normalizeSignal\)/);
 
 for (const text of [
   "No active signals right now.",

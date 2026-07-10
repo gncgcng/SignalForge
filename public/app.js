@@ -4,8 +4,10 @@ import {
   createSignalFilters,
   filterAndSortSignals,
   filtersFromSignalParams,
+  getSignalSummary,
   getSignalStatusCounts,
   getSignalStatusKey,
+  normalizeSignal,
   signalFiltersToParams
 } from "./signalFilters.js";
 
@@ -2237,9 +2239,10 @@ async function loadSubscription() {
 }
 
 async function loadSignals() {
-  const { signals, stats } = await api.request("/api/signals");
-  state.signals = signals;
-  state.signalStats = stats || state.signalStats;
+  const { signals } = await api.request("/api/signals");
+  state.signals = (signals || []).map(normalizeSignal);
+  state.signalStats = getSignalSummary(state.signals);
+  logSignalHistoryDiagnostics("loaded");
   renderSignals();
   renderSignalsHistory();
   renderPerformanceStats();
@@ -3218,7 +3221,8 @@ function renderSignalsHistory() {
 
   renderSignalFilterControls(counts);
 
-  historyCount.textContent = `${filtered.length} saved`;
+  historyCount.textContent = `${counts.all} saved`;
+  logSignalHistoryDiagnostics("filter", filtered.length);
 
   if (state.signals.length === 0) {
     signalsHistory.innerHTML = `
@@ -3272,6 +3276,23 @@ function renderSignalsHistory() {
       ${filtered.map((signal) => renderMobileSignalHistoryCard(signal)).join("")}
     </div>
   `;
+}
+
+function logSignalHistoryDiagnostics(event, rendered = null) {
+  if (!isDevelopmentRuntime()) return;
+  const counts = getSignalStatusCounts(state.signals);
+  if (event === "loaded") {
+    console.debug(
+      `[signals] loaded total=${counts.all} active=${counts.active} tp=${counts["hit-tp"]} ` +
+      `sl=${counts["hit-sl"]} expired=${counts.expired} closed=${counts.closed} selected=${state.historyFilters.status}`
+    );
+    return;
+  }
+  console.debug(`[signals] filter selected=${state.historyFilters.status} rendered=${rendered ?? 0}`);
+}
+
+function isDevelopmentRuntime() {
+  return ["localhost", "127.0.0.1", "::1"].includes(location.hostname);
 }
 
 function renderSignalFilterControls(counts) {
