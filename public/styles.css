@@ -2717,6 +2717,80 @@ polyline {
   gap: 12px;
 }
 
+.signal-status-filters {
+  display: flex;
+  max-width: 100%;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 2px 0 6px;
+  scrollbar-width: thin;
+}
+
+.signal-status-filters button {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 8px;
+  min-height: 38px;
+  padding: 8px 11px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #0b1018;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+
+.signal-status-filters button strong {
+  display: grid;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 5px;
+  place-items: center;
+  border-radius: 999px;
+  background: rgba(142, 155, 176, 0.14);
+  color: #c9d2df;
+  font-size: 0.7rem;
+}
+
+.signal-status-filters button.active {
+  border-color: rgba(34, 211, 238, 0.52);
+  background: rgba(34, 211, 238, 0.11);
+  color: #e6fbff;
+}
+
+.signal-status-filters button.active strong {
+  background: rgba(34, 211, 238, 0.2);
+  color: var(--cyan);
+}
+
+.signals-filter-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.signals-search-field {
+  display: grid;
+  gap: 6px;
+}
+
+.signals-search-field span {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.signals-search-field input {
+  width: 100%;
+}
+
+.signal-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin-top: 8px;
+}
+
 .performance-grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(120px, 1fr));
@@ -3167,6 +3241,13 @@ polyline {
   color: var(--muted);
 }
 
+.status-closed,
+.status-manually-closed,
+.status-manual-close {
+  border-color: rgba(167, 139, 250, 0.42);
+  color: #c4b5fd;
+}
+
 .empty-state {
   display: grid;
   gap: 8px;
@@ -3361,6 +3442,24 @@ polyline {
 .history-transparency .signal-transparency {
   max-width: 900px;
   padding: 12px 0;
+}
+
+.history-provider-label {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.67rem;
+  font-weight: 650;
+}
+
+.history-details-button {
+  margin-top: 7px;
+  padding: 5px 7px;
+  border: 1px solid rgba(34, 211, 238, 0.25);
+  border-radius: 5px;
+  background: rgba(34, 211, 238, 0.06);
+  color: var(--cyan);
+  font-size: 0.68rem;
 }
 
 .mobile-signal-card {
@@ -3975,6 +4074,30 @@ polyline {
 
   .history-filters {
     grid-template-columns: 1fr;
+  }
+
+  .signal-status-filters {
+    margin-right: -16px;
+    padding-right: 16px;
+    overscroll-behavior-inline: contain;
+  }
+
+  .signals-filter-toolbar,
+  .history-filters,
+  .signals-search-field,
+  .signals-search-field input {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .signal-empty-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .signal-empty-actions button {
+    width: 100%;
+    min-height: 44px;
   }
 
   .signals-table-wrap {

@@ -41,6 +41,7 @@
     "test:expanded-crypto": "node scripts/expanded-crypto-test.js",
     "test:scanner-ux": "node scripts/scanner-ux-test.js",
     "test:mobile-signals": "node scripts/mobile-signals-layout-test.js",
+    "test:signal-filters": "node scripts/signal-history-filters-test.js",
     "test:unlock-experience": "node scripts/unlocked-signal-experience-test.js",
     "test:provider-routing": "node scripts/provider-routing-test.js",
     "test:session-migration": "node scripts/session-migration-test.js",

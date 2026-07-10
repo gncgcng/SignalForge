@@ -1,4 +1,13 @@
 import { ROUTE_TO_VIEW, buildRouteHash, normalizeAppRoute, parseAppHash } from "./router.js";
+import {
+  SIGNAL_STATUS_FILTERS,
+  createSignalFilters,
+  filterAndSortSignals,
+  filtersFromSignalParams,
+  getSignalStatusCounts,
+  getSignalStatusKey,
+  signalFiltersToParams
+} from "./signalFilters.js";
 
 const state = {
   user: null,
@@ -20,10 +29,16 @@ const state = {
   activeRoute: "scanner",
   lastAppliedRouteHash: "",
   historyFilters: {
+    status: "all",
     pair: "all",
     timeframe: "all",
-    direction: "all"
+    direction: "all",
+    strategy: "all",
+    dateRange: "all",
+    sort: "newest",
+    search: ""
   },
+  historyFiltersInitialized: false,
   signalStats: {
     totalSignals: 0,
     winRate: 0,
@@ -207,6 +222,11 @@ const signalsHistory = document.querySelector("#signals-history");
 const historyPairFilter = document.querySelector("#history-pair-filter");
 const historyTimeframeFilter = document.querySelector("#history-timeframe-filter");
 const historyDirectionFilter = document.querySelector("#history-direction-filter");
+const historyStrategyFilter = document.querySelector("#history-strategy-filter");
+const historyDateFilter = document.querySelector("#history-date-filter");
+const historySortFilter = document.querySelector("#history-sort-filter");
+const historySearchFilter = document.querySelector("#history-search-filter");
+const historyStatusFilters = document.querySelector("#history-status-filters");
 const statTotal = document.querySelector("#stat-total");
 const statWinRate = document.querySelector("#stat-win-rate");
 const statHitTp = document.querySelector("#stat-hit-tp");
@@ -789,15 +809,45 @@ document.querySelectorAll("[data-nav-section-toggle]").forEach((button) => {
   });
 });
 
-[historyPairFilter, historyTimeframeFilter, historyDirectionFilter].forEach((filter) => {
+[historyPairFilter, historyTimeframeFilter, historyDirectionFilter, historyStrategyFilter, historyDateFilter, historySortFilter].forEach((filter) => {
   filter.addEventListener("change", () => {
-    state.historyFilters = {
+    state.historyFilters = createSignalFilters({
+      ...state.historyFilters,
       pair: historyPairFilter.value,
       timeframe: historyTimeframeFilter.value,
-      direction: historyDirectionFilter.value
-    };
-    renderSignalsHistory();
+      direction: historyDirectionFilter.value,
+      strategy: historyStrategyFilter.value,
+      dateRange: historyDateFilter.value,
+      sort: historySortFilter.value
+    });
+    updateSignalFilterUrl();
   });
+});
+
+historyStatusFilters?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-history-status]");
+  if (!button) return;
+  state.historyFilters = createSignalFilters({ ...state.historyFilters, status: button.dataset.historyStatus });
+  updateSignalFilterUrl();
+});
+
+historySearchFilter?.addEventListener("input", () => {
+  state.historyFilters = createSignalFilters({ ...state.historyFilters, search: historySearchFilter.value });
+  updateSignalFilterUrl({ replace: true });
+});
+
+signalsHistory?.addEventListener("click", (event) => {
+  const detailButton = event.target.closest("[data-history-details]");
+  if (detailButton) {
+    const key = detailButton.dataset.historyDetails;
+    if (state.expandedSignalKeys.has(key)) state.expandedSignalKeys.delete(key);
+    else state.expandedSignalKeys.add(key);
+    renderSignalsHistory();
+    if (state.expandedSignalKeys.has(key)) scrollToSignalKey(key);
+    return;
+  }
+  const destination = event.target.closest("[data-signal-empty-action]")?.dataset.signalEmptyAction;
+  if (destination) navigateTo(destination);
 });
 
 pairSearch.addEventListener("input", async () => {
@@ -2395,15 +2445,38 @@ function resolvePaperTradingRouteSymbol(value) {
 }
 
 function consumeSignalRouteParams(params) {
+  applySignalFiltersFromRoute(params);
   const signalId = params.get("signalId");
   if (!signalId) return;
   const signal = state.signals.find((item) => item.id === signalId);
   if (!signal) return;
+  if (!filterAndSortSignals([signal], state.historyFilters, state.marketCatalog).length) {
+    state.historyFilters = createSignalFilters({ status: "all" });
+  }
   const key = getSignalKey(signal);
   state.expandedSignalKeys = new Set([key]);
   renderSignalsHistory();
   highlightSignalKey(key);
   removeHashParams(["signalId"]);
+}
+
+function applySignalFiltersFromRoute(params) {
+  const filters = filtersFromSignalParams(params, state.signals);
+  if (filters.pair !== "all") {
+    const normalized = filters.pair.toUpperCase().replace(/[^A-Z0-9]/g, "");
+    filters.pair = [...state.marketCatalog, ...state.signals]
+      .find((item) => String(item.symbol || "").toUpperCase().replace(/[^A-Z0-9]/g, "") === normalized)
+      ?.symbol || "all";
+  }
+  state.historyFilters = filters;
+  state.historyFiltersInitialized = true;
+  renderSignalsHistory();
+}
+
+function updateSignalFilterUrl({ replace = false } = {}) {
+  const current = parseAppHash(location.hash);
+  const params = signalFiltersToParams(state.historyFilters, current.route === "signals" ? current.params : undefined);
+  navigateTo("signals", params, { replace });
 }
 
 function removeHashParams(names) {
@@ -2977,11 +3050,14 @@ function renderSignals() {
 }
 
 function renderSignalsHistory() {
-  const filtered = state.signals.filter((signal) => {
-    return (state.historyFilters.pair === "all" || signal.symbol === state.historyFilters.pair) &&
-      (state.historyFilters.timeframe === "all" || signal.timeframe === state.historyFilters.timeframe) &&
-      (state.historyFilters.direction === "all" || signal.direction === state.historyFilters.direction);
-  });
+  if (!state.historyFiltersInitialized) {
+    state.historyFilters = filtersFromSignalParams(new URLSearchParams(), state.signals);
+    state.historyFiltersInitialized = true;
+  }
+  const counts = getSignalStatusCounts(state.signals);
+  const filtered = filterAndSortSignals(state.signals, state.historyFilters, state.marketCatalog);
+
+  renderSignalFilterControls(counts);
 
   historyCount.textContent = `${filtered.length} saved`;
 
@@ -2990,16 +3066,19 @@ function renderSignalsHistory() {
       <div class="empty-state">
         <strong>No saved signals yet</strong>
         <p class="reasoning">Unlock a setup from Scan All or Unlock Current to save it in your Signals history.</p>
+        ${renderSignalEmptyActions()}
       </div>
     `;
     return;
   }
 
   if (filtered.length === 0) {
+    const empty = getSignalFilterEmptyState(state.historyFilters.status);
     signalsHistory.innerHTML = `
       <div class="empty-state">
-        <strong>No signals match these filters</strong>
-        <p class="reasoning">Adjust pair, timeframe, or direction to see saved signals.</p>
+        <strong>${escapeHtml(empty.title)}</strong>
+        <p class="reasoning">${escapeHtml(empty.body)}</p>
+        ${renderSignalEmptyActions()}
       </div>
     `;
     return;
@@ -3023,15 +3102,73 @@ function renderSignalsHistory() {
       </thead>
       <tbody>${filtered.map((signal) => `
         ${renderSignalHistoryRow(signal)}
-        <tr class="history-transparency">
+        ${state.expandedSignalKeys.has(getSignalKey(signal)) ? `<tr class="history-transparency">
           <td colspan="10">
             ${renderUnlockedSignalDetails(signal)}
           </td>
-        </tr>
+        </tr>` : ""}
       `).join("")}</tbody>
     </table>
     <div class="mobile-signals-list">
       ${filtered.map((signal) => renderMobileSignalHistoryCard(signal)).join("")}
+    </div>
+  `;
+}
+
+function renderSignalFilterControls(counts) {
+  historyStatusFilters.innerHTML = SIGNAL_STATUS_FILTERS.map(([value, label]) => `
+    <button
+      class="${state.historyFilters.status === value ? "active" : ""}"
+      type="button"
+      role="tab"
+      aria-selected="${state.historyFilters.status === value}"
+      data-history-status="${value}"
+    >
+      <span>${label}</span><strong>${counts[value] || 0}</strong>
+    </button>
+  `).join("");
+
+  const pairValues = [...new Set([...state.marketCatalog, ...state.signals].map((item) => item.symbol).filter(Boolean))]
+    .sort((a, b) => getDisplaySymbol(a).localeCompare(getDisplaySymbol(b)));
+  historyPairFilter.innerHTML = `<option value="all">All pairs</option>${pairValues.map((symbol) => `
+    <option value="${escapeHtml(symbol)}">${escapeHtml(getDisplaySymbol(symbol))} · ${escapeHtml(symbol)}</option>
+  `).join("")}`;
+  historyPairFilter.value = pairValues.includes(state.historyFilters.pair) ? state.historyFilters.pair : "all";
+
+  const strategies = [...new Set([
+    ...state.signals.map((signal) => signal.setupType).filter(Boolean),
+    ...(state.historyFilters.strategy !== "all" ? [state.historyFilters.strategy] : [])
+  ])]
+    .sort((a, b) => a.localeCompare(b));
+  historyStrategyFilter.innerHTML = `<option value="all">All strategies</option>${strategies.map((strategy) => `
+    <option value="${escapeHtml(strategy)}">${escapeHtml(strategy)}</option>
+  `).join("")}`;
+  historyStrategyFilter.value = strategies.includes(state.historyFilters.strategy) ? state.historyFilters.strategy : "all";
+  historyTimeframeFilter.value = state.historyFilters.timeframe;
+  historyDirectionFilter.value = state.historyFilters.direction;
+  historyDateFilter.value = state.historyFilters.dateRange;
+  historySortFilter.value = state.historyFilters.sort;
+  if (historySearchFilter.value !== state.historyFilters.search) historySearchFilter.value = state.historyFilters.search;
+}
+
+function getSignalFilterEmptyState(status) {
+  const messages = {
+    active: ["No active signals right now.", "Run the scanner or wait for Telegram alerts to find new setups."],
+    "hit-tp": ["No take-profit signals yet.", "Closed winning signals will appear here."],
+    "hit-sl": ["No stop-loss signals yet.", "Signals that hit stop loss will appear here."],
+    expired: ["No expired signals yet.", "Signals that time out will appear here."],
+    closed: ["No closed signals yet.", "Completed, expired, and manually closed signals will appear here."],
+    all: ["No signals match these filters.", "Adjust the market, timeframe, direction, strategy, date, or search filters."]
+  };
+  const [title, body] = messages[status] || messages.all;
+  return { title, body };
+}
+
+function renderSignalEmptyActions() {
+  return `
+    <div class="signal-empty-actions">
+      <button type="button" data-signal-empty-action="scanner">Go to Scanner</button>
+      <button class="secondary-button" type="button" data-signal-empty-action="paper-trading">Open Paper Trading</button>
     </div>
   `;
 }
@@ -3938,7 +4075,13 @@ function renderSignalHistoryRow(signal) {
 
   return `
     <tr data-signal-key="${key}">
-      <td><strong>${signal.symbol}</strong></td>
+      <td>
+        <strong>${escapeHtml(getDisplaySymbol(signal.symbol))}</strong>
+        <small class="history-provider-label">${escapeHtml(getProviderSymbolLabel(signal.symbol))}</small>
+        <button class="history-details-button" type="button" data-history-details="${key}">
+          ${state.expandedSignalKeys.has(key) ? "Hide details" : "View details"}
+        </button>
+      </td>
       <td>${signal.timeframe}</td>
       <td><strong class="direction ${signal.direction}">${signal.direction}</strong></td>
       <td>${formatCurrency(signal.entryPrice)}</td>
@@ -4063,7 +4206,10 @@ function getDemoSignalStatus(signal) {
       active: "Active",
       "hit-tp": "Hit TP",
       "hit-sl": "Hit SL",
-      expired: "Expired"
+      expired: "Expired",
+      closed: "Closed",
+      "manually-closed": "Closed",
+      "manual-close": "Closed"
     };
 
     return {
@@ -4472,7 +4618,10 @@ function renderUnlockedSignalDetails(signal) {
         <h4>Why this signal?</h4>
         <p class="reasoning">${escapeHtml(getShortSignalReason(signal))}</p>
       </section>
-      ${renderAiAnalyst(signal)}
+      <details class="unlocked-analysis-section">
+        <summary>AI analyst explanation</summary>
+        ${renderAiAnalyst(signal)}
+      </details>
       <details class="unlocked-analysis-section">
         <summary>Full analysis context</summary>
         <p class="reasoning long-analysis">${escapeHtml(signal.reasoning || "Advanced signal context is based on rule alignment.")}</p>

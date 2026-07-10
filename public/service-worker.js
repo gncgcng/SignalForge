@@ -1,4 +1,4 @@
-const CACHE_VERSION = "signalforge-static-v13";
+const CACHE_VERSION = "signalforge-static-v14";
 const OFFLINE_URL = "/offline.html";
 const STATIC_ASSETS = [
   "/",
@@ -6,6 +6,7 @@ const STATIC_ASSETS = [
   "/styles.css",
   "/app.js",
   "/router.js",
+  "/signalFilters.js",
   "/manifest.json",
   OFFLINE_URL,
   "/icons/favicon-16x16.png",

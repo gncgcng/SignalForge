@@ -902,20 +902,25 @@
               <div><span>Hit SL</span><strong id="stat-hit-sl">0</strong></div>
               <div><span>Expired</span><strong id="stat-expired">0</strong></div>
             </div>
+            <div class="signal-status-filters" id="history-status-filters" role="tablist" aria-label="Filter signals by status"></div>
+            <div class="signals-filter-toolbar">
+              <label class="signals-search-field">
+                <span>Search signals</span>
+                <input id="history-search-filter" type="search" placeholder="Search pair, strategy, or notes…" autocomplete="off" />
+              </label>
+            </div>
             <div class="history-filters">
               <label>
                 Pair
                 <select id="history-pair-filter">
                   <option value="all">All pairs</option>
-                  <option value="BTC-USD">BTC-USD</option>
-                  <option value="ETH-USD">ETH-USD</option>
-                  <option value="SOL-USD">SOL-USD</option>
                 </select>
               </label>
               <label>
                 Timeframe
                 <select id="history-timeframe-filter">
                   <option value="all">All timeframes</option>
+                  <option value="1m">1m</option>
                   <option value="5m">5m</option>
                   <option value="15m">15m</option>
                   <option value="1h">1h</option>
@@ -930,12 +935,33 @@
                   <option value="short">Short</option>
                 </select>
               </label>
-            </div>
-            <div class="status-legend" aria-label="Signal status labels">
-              <span class="status-pill status-active">Active</span>
-              <span class="status-pill status-hit-tp">Hit TP</span>
-              <span class="status-pill status-hit-sl">Hit SL</span>
-              <span class="status-pill status-expired">Expired</span>
+              <label>
+                Strategy
+                <select id="history-strategy-filter">
+                  <option value="all">All strategies</option>
+                </select>
+              </label>
+              <label>
+                Date range
+                <select id="history-date-filter">
+                  <option value="all">All dates</option>
+                  <option value="today">Today</option>
+                  <option value="7d">Last 7 days</option>
+                  <option value="30d">Last 30 days</option>
+                  <option value="90d">Last 90 days</option>
+                </select>
+              </label>
+              <label>
+                Sort
+                <select id="history-sort-filter">
+                  <option value="newest">Newest first</option>
+                  <option value="oldest">Oldest first</option>
+                  <option value="confidence">Highest confidence</option>
+                  <option value="risk-reward">Highest R/R</option>
+                  <option value="best-result">Best result</option>
+                  <option value="worst-result">Worst result</option>
+                </select>
+              </label>
             </div>
             <div class="signal-disclaimer">
               <strong>Educational tool only. Not financial advice.</strong>
