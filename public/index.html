@@ -740,6 +740,17 @@
               </div>
             </section>
 
+            <section class="candidate-section panel">
+              <div class="section-title">
+                <div><span class="eyebrow">Live setup watcher</span><h3>Watching setups</h3></div>
+                <span id="candidate-count">0 watching</span>
+              </div>
+              <p class="reasoning">Promising ideas stay here until setup quality and entry readiness align. Watching candidates use no credits.</p>
+              <div class="candidate-grid" id="candidate-grid">
+                <div class="empty-state"><strong>No setups being watched</strong><p class="reasoning">The crypto watcher will add promising setups as they develop.</p></div>
+              </div>
+            </section>
+
             <section class="signals-section">
               <div class="section-title">
                 <div>
@@ -1007,7 +1018,7 @@
                 <form id="paper-order-form" class="paper-order-form">
                   <input id="paper-order-signal-id" type="hidden" /><label>Market<select id="paper-order-market"></select></label>
                   <div class="paper-segmented" id="paper-direction-control"><button type="button" class="active long" data-paper-direction="long">Long</button><button type="button" class="short" data-paper-direction="short">Short</button></div>
-                  <label>Order type<select id="paper-order-type"><option value="market">Market</option><option value="limit">Limit</option></select></label><label id="paper-limit-field" class="hidden">Limit price<input id="paper-limit-price" type="number" min="0" step="any" /></label>
+                  <label>Order type<select id="paper-order-type"><option value="market">Simulated entry now</option><option value="limit">Limit at signal entry</option><option value="watch">Watch only</option></select></label><label id="paper-limit-field" class="hidden">Limit price<input id="paper-limit-price" type="number" min="0" step="any" /><small>This order may remain pending until price reaches it.</small></label>
                   <div class="paper-order-grid"><label>Quantity<input id="paper-order-quantity" type="number" min="0" step="any" placeholder="0.01" /></label><label>Position size USD<input id="paper-order-size" type="number" min="1" step="1" value="1000" /></label><label>Stop loss<input id="paper-order-stop" type="number" min="0" step="any" required /></label><label>Take profit<input id="paper-order-target" type="number" min="0" step="any" required /></label></div>
                   <label>Notes<textarea id="paper-order-notes" maxlength="1000" rows="2" placeholder="Optional trade plan"></textarea></label><div class="paper-order-calculations" id="paper-order-calculations"></div><p class="paper-order-warning" id="paper-order-warning"></p><button id="paper-place-order" type="submit">Place Paper Long</button>
                 </form>
@@ -1711,6 +1722,18 @@
               <div class="section-title validation-dashboard-title">
                 <div><span class="eyebrow">Signal learning</span><h3>Learning Dashboard</h3></div>
                 <span>Shadow-mode calibration only</span>
+              </div>
+              <div class="admin-analytics-grid compact" id="candidate-quality-dashboard">
+                <article class="panel"><span>Candidates today</span><strong id="candidate-quality-created">0</strong></article>
+                <article class="panel"><span>Watching</span><strong id="candidate-quality-watching">0</strong></article>
+                <article class="panel"><span>Promoted</span><strong id="candidate-quality-promoted">0</strong></article>
+                <article class="panel"><span>Rejected / expired</span><strong id="candidate-quality-rejected">0</strong></article>
+                <article class="panel"><span>Promotion rate</span><strong id="candidate-quality-rate">0%</strong></article>
+                <article class="panel"><span>Expired unfilled today</span><strong id="candidate-quality-unfilled">0</strong></article>
+              </div>
+              <div class="admin-analytics-grid compact">
+                <article class="analytics-panel"><h3>Candidate rejection reasons</h3><div id="candidate-quality-reasons"></div></article>
+                <article class="analytics-panel"><h3>Entry quality distribution</h3><div id="candidate-quality-entry"></div></article>
               </div>
               <div class="admin-analytics-grid admin-ops-grid">
                 <article class="analytics-panel"><h3>Best strategies</h3><div id="learning-best-strategies"></div></article>

@@ -53,7 +53,7 @@ const checks = {
   limitWaitsForTouch: limit.status === "Pending" && service.includes('event.action === "fill"'),
   longAndShortOutcomes: service.includes('order.direction === "long" ? low <= order.stopLoss') && service.includes('order.direction === "long" ? high >= order.takeProfit'),
   invalidLevelsRejected: service.includes("validatePaperOrder(normalized)") && service.includes("LONG stop loss must be below entry"),
-  signalPrefill: app.includes("prefillPaperOrderFromSignal(signal)") && app.includes("paperOrderSignalId.value = signal.id") && app.includes('paperOrderType.value = "limit"'),
+  signalPrefill: app.includes("prefillPaperOrderFromSignal(signal)") && app.includes("paperOrderSignalId.value = signal.id") && app.includes('paperOrderType.value = closeToEntry ? "market" : "watch"'),
   duplicateSignalBlocked: migration.includes("idx_paper_orders_user_signal") && repository.includes("SELECT saved_signal_id FROM paper_trades") && repository.includes("ON CONFLICT"),
   legacyTradesPreserved: migration.includes("Migrated from SignalForge Paper Portfolio") && migration.includes("FROM paper_trades p") && migration.includes("ON CONFLICT DO NOTHING"),
   manualClosePersisted: controller.includes("closePaperPosition") && repository.includes("realized_pnl = $6") && repository.includes("balance = balance + $2"),

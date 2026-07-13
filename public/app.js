@@ -49,6 +49,7 @@ const state = {
     expiredCount: 0
   },
   signals: [],
+  candidates: [],
   scanResults: [],
   watchlist: [],
   alerts: [],
@@ -80,6 +81,7 @@ const state = {
   learningDashboard: null,
   adminUserSearchResults: [],
   validationDashboard: null,
+  candidateQuality: null,
   profile: null,
   publicProfile: null,
   leaderboards: null,
@@ -133,6 +135,8 @@ const PAPER_INDICATORS_KEY = "signalforge-paper-indicators";
 
 
 const authScreen = document.querySelector("#auth-screen");
+const candidateGrid = document.querySelector("#candidate-grid");
+const candidateCount = document.querySelector("#candidate-count");
 const landingPage = document.querySelector("#landing-page");
 const publicProfilePage = document.querySelector("#public-profile-page");
 const dashboard = document.querySelector("#dashboard");
@@ -984,6 +988,7 @@ scanAllButton.addEventListener("click", async () => {
     renderSubscription();
     updateScanProgress(total, total, "Market scan complete");
     await loadAlerts();
+    await loadCandidates();
     markFirstScanCompleted();
     renderScanResults(result.setups, result.errors, result.diagnostics);
   } catch (error) {
@@ -1014,6 +1019,7 @@ generateButton.addEventListener("click", async () => {
     });
     state.subscription = subscription;
     renderSubscription();
+    await loadCandidates();
 
     if (!signal) {
       markFirstScanCompleted();
@@ -1864,6 +1870,7 @@ function clearClientAuthState() {
   state.onboardingSkipped = false;
   state.firstScanCompleted = false;
   state.signals = [];
+  state.candidates = [];
   state.watchlist = [];
   state.alerts = [];
   state.unreadAlertCount = 0;
@@ -1960,6 +1967,7 @@ async function bootDashboard() {
     loadPairs(),
     loadSubscription(),
     loadSignals(),
+    loadCandidates(),
     loadWatchlist(),
     loadAlerts(),
     loadNotifications(),
@@ -1970,7 +1978,7 @@ async function bootDashboard() {
 
   if (state.user.isAdmin) {
     try {
-      await loadAdminRequests();
+      await Promise.all([loadAdminRequests(), loadCandidateQuality()]);
     } catch (error) {
       reportDashboardLoadFailures([{ status: "rejected", reason: error }]);
     }
@@ -2247,6 +2255,56 @@ async function loadSignals() {
   renderSignalsHistory();
   renderPerformanceStats();
   renderOnboarding();
+}
+
+async function loadCandidates() {
+  const { candidates } = await api.request("/api/signals/candidates");
+  state.candidates = candidates || [];
+  renderCandidates();
+}
+
+async function loadCandidateQuality() {
+  if (!state.user?.isAdmin) return;
+  const { quality } = await api.request("/api/signals/candidates/quality");
+  state.candidateQuality = quality;
+  setText("#candidate-quality-created", quality.candidatesCreatedToday || 0);
+  setText("#candidate-quality-watching", quality.candidatesWatching || 0);
+  setText("#candidate-quality-promoted", quality.candidatesPromoted || 0);
+  setText("#candidate-quality-rejected", Number(quality.candidatesRejected || 0) + Number(quality.candidatesExpired || 0));
+  setText("#candidate-quality-rate", `${quality.promotionRate || 0}%`);
+  setText("#candidate-quality-unfilled", quality.pendingOrdersExpiredUnfilled || 0);
+  document.querySelector("#candidate-quality-reasons").innerHTML = renderCandidateMetricRows(
+    quality.topRejectionReasons || [], "reason", "count"
+  );
+  document.querySelector("#candidate-quality-entry").innerHTML = renderCandidateMetricRows(
+    quality.entryQualityDistribution || [], "quality", "count"
+  );
+}
+
+function renderCandidateMetricRows(items, labelKey, valueKey) {
+  if (!items.length) return `<p class="reasoning">No candidate data yet.</p>`;
+  return items.map((item) => `<div class="analytics-list-row"><span>${escapeHtml(titleCase(item[labelKey]))}</span><strong>${Number(item[valueKey] || 0)}</strong></div>`).join("");
+}
+
+function renderCandidates() {
+  if (!candidateGrid || !candidateCount) return;
+  const active = state.candidates.filter((candidate) => ["watching", "ready"].includes(candidate.status));
+  candidateCount.textContent = `${active.length} watching`;
+  if (!state.candidates.length) {
+    candidateGrid.innerHTML = `<div class="empty-state"><strong>No setups being watched</strong><p class="reasoning">The crypto watcher will add promising setups as they develop.</p></div>`;
+    return;
+  }
+  candidateGrid.innerHTML = state.candidates.map((candidate) => {
+    const label = candidate.status === "watching" && Number(candidate.readinessScore) >= 70 ? "Almost ready" : titleCase(candidate.status);
+    const missing = candidate.missingConfirmations?.length
+      ? candidate.missingConfirmations.slice(0, 3).join(", ")
+      : candidate.reasonsForWatching?.[0] || "Entry timing is being monitored.";
+    return `<article class="candidate-card ${escapeHtml(candidate.status)}">
+      <header><div><strong>${escapeHtml(getDisplaySymbol(candidate.symbol))}</strong><span>${escapeHtml(candidate.timeframe)} · ${escapeHtml(candidate.setupType)}</span></div><span class="status-pill">${escapeHtml(label)}</span></header>
+      <div class="candidate-scores"><span>Direction<strong>${escapeHtml(String(candidate.direction).toUpperCase())}</strong></span><span>Quality<strong>${Number(candidate.candidateScore)}%</strong></span><span>Readiness<strong>${Number(candidate.readinessScore)}%</strong></span><span>Entry<strong>${escapeHtml(titleCase(candidate.entryQuality))}</strong></span></div>
+      <details><summary>Why not ready?</summary><p>${escapeHtml(missing)}</p></details>
+    </article>`;
+  }).join("");
 }
 
 async function loadPaperPortfolio() {
@@ -3419,20 +3477,28 @@ function renderPaperOrderTicket() {
   document.querySelectorAll("[data-paper-direction]").forEach((button) => button.classList.toggle("active", button.dataset.paperDirection === state.paperTrading.direction));
   paperLimitField.classList.toggle("hidden", paperOrderType.value !== "limit");
   if (paperOrderType.value === "limit" && !Number(paperLimitPrice.value) && marketPrice) paperLimitPrice.value = marketPrice;
-  document.querySelector("#paper-place-order").textContent = `Place Paper ${state.paperTrading.direction === "long" ? "Long" : "Short"}`;
+  document.querySelector("#paper-place-order").textContent = paperOrderType.value === "watch"
+    ? "Watch setup"
+    : `Place Paper ${state.paperTrading.direction === "long" ? "Long" : "Short"}`;
   renderPaperOrderCalculations();
 }
 
 function prefillPaperOrderFromSignal(signal) {
   paperOrderSignalId.value = signal.id;
   paperOrderMarket.value = signal.symbol;
-  paperOrderType.value = "limit";
+  const currentPrice = Number(state.paperTrading.marketData?.pair?.lastPrice || state.paperTrading.marketData?.candles?.at(-1)?.close || 0);
+  const atr = calculateAtr(state.paperTrading.marketData?.candles || [], 14);
+  const closeToEntry = atr > 0 && Math.abs(currentPrice - Number(signal.entryPrice)) <= atr * 0.25;
+  paperOrderType.value = closeToEntry ? "market" : "watch";
   paperLimitPrice.value = signal.entryPrice;
   paperOrderStop.value = signal.stopLoss;
   paperOrderTarget.value = signal.takeProfit;
   paperOrderNotes.value = `${signal.setupType || "SignalForge setup"} · unlocked signal`;
   state.paperTrading.direction = signal.direction;
   renderPaperOrderTicket();
+  paperOrderWarning.textContent = closeToEntry
+    ? "Current price is close to the signal entry zone. Simulated entry now is selected."
+    : "Signal entry is away from current price. Watch only is selected; choose Limit if you want an order that may remain pending.";
   paperOrderForm.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
@@ -3603,7 +3669,7 @@ function renderPaperOrders() {
   const tab = state.paperTrading.activeTab;
   paperTerminalTabs.querySelectorAll("[data-paper-tab]").forEach((button) => button.classList.toggle("active", button.dataset.paperTab === tab));
   paperHistoryFilters.classList.toggle("hidden", tab !== "history");
-  let orders = state.paperTrading.orders.filter((order) => tab === "positions" ? order.status === "Open" : tab === "pending" ? order.status === "Pending" : ["Hit TP", "Hit SL", "Expired", "Closed", "Cancelled"].includes(order.status));
+  let orders = state.paperTrading.orders.filter((order) => tab === "positions" ? order.status === "Open" : tab === "pending" ? order.status === "Pending" : ["Hit TP", "Hit SL", "Expired", "Expired unfilled", "Closed", "Cancelled"].includes(order.status));
   if (tab === "history") orders = filterPaperHistory(orders);
   if (!orders.length) {
     const messages = { positions: "No open paper positions.", pending: "No pending limit orders.", history: "No completed paper trades yet." };
@@ -3638,6 +3704,12 @@ function filterPaperHistory(orders) {
 async function placePaperTradingOrder(event) {
   event.preventDefault();
   const button = document.querySelector("#paper-place-order");
+  if (paperOrderType.value === "watch") {
+    state.paperTrading.draftSignalId = paperOrderSignalId.value || null;
+    showToast("Watch only selected. No paper order was placed.");
+    paperOrderWarning.textContent = "Watching only. The setup remains in Signals; no position or pending order was created.";
+    return;
+  }
   try {
     button.disabled = true;
     button.textContent = "Placing simulated order...";
@@ -7151,7 +7223,7 @@ function titleCase(value) {
 function getPaperStatusClass(status) {
   if (status === "Hit TP") return "status-hit-tp";
   if (status === "Hit SL") return "status-hit-sl";
-  if (status === "Expired") return "status-expired";
+  if (["Expired", "Expired unfilled"].includes(status)) return "status-expired";
   return "status-active";
 }
 

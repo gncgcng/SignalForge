@@ -13,6 +13,7 @@ import {
   telegramPreferenceMatchesSetup
 } from "../notifications/notificationService.js";
 import { scanMarketSetupDetailed } from "../signals/signalService.js";
+import { expireStaleCandidates, getCandidateQualitySummary, refreshCandidateLearningOutcomes, runCandidateMarketWatch } from "../signals/setupCandidateService.js";
 import { preferenceMatchesSetup } from "./alertService.js";
 
 let autoScanTimer = null;
@@ -53,6 +54,9 @@ export async function runAutoCryptoAlertScan() {
   const users = new Map();
 
   try {
+    const before = await getCandidateQualitySummary();
+    const expiredThisCycle = await expireStaleCandidates();
+    const watched = await runCandidateMarketWatch();
     const preferences = (await listAllEnabledAlertPreferences()).filter((preference) => {
       const pair = getPair(preference.symbol);
       return pair?.category === "Crypto" && pair.status === "active";
@@ -153,6 +157,14 @@ export async function runAutoCryptoAlertScan() {
     console.log(`[auto-scan] alerts created ${alertsCreated}`);
     console.log(`[auto-scan] telegram alerts queued ${telegramAlertsQueued}`);
     console.log(`[auto-scan] skipped duplicates ${skippedDuplicates}`);
+    const after = await getCandidateQualitySummary();
+    await refreshCandidateLearningOutcomes();
+    console.log(
+      `[scanner-watch] scanned markets=${watched.scanned} ` +
+      `candidates_created=${Math.max(0, after.candidatesCreatedToday - before.candidatesCreatedToday)} ` +
+      `updated=${watched.createdOrUpdated} promoted=${Math.max(0, after.candidatesPromoted - before.candidatesPromoted)} ` +
+      `rejected=${Math.max(0, after.candidatesRejected - before.candidatesRejected)} expired=${expiredThisCycle}`
+    );
 
     return { scanned, alertsCreated, telegramAlertsQueued, skippedDuplicates };
   } finally {

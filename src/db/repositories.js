@@ -2563,10 +2563,10 @@ export async function createPaperOrder(userId, order) {
       INSERT INTO paper_orders (
         id, user_id, saved_signal_id, symbol, timeframe, direction, order_type,
         status, quantity, position_size_usd, entry_price, limit_price,
-        stop_loss, take_profit, notes, opened_at, filled_at
+        stop_loss, take_profit, notes, expires_at, opened_at, filled_at
       )
       VALUES (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,
         CASE WHEN $8 = 'Open' THEN now() ELSE NULL END,
         CASE WHEN $8 = 'Open' THEN now() ELSE NULL END
       )
@@ -2586,13 +2586,25 @@ export async function createPaperOrder(userId, order) {
       order.limitPrice,
       order.stopLoss,
       order.takeProfit,
-      order.notes || ""
+      order.notes || "",
+      order.expiresAt || null
     ]);
     return mapPaperOrder(result.rows[0]);
   } catch (error) {
     if (error.code === "23505" && order.savedSignalId) return null;
     throw error;
   }
+}
+
+export async function expirePendingPaperOrders(userId) {
+  const result = await query(`
+    UPDATE paper_orders
+    SET status = 'Expired unfilled', outcome = 'Expired unfilled', closed_at = now(), updated_at = now()
+    WHERE user_id = $1 AND status = 'Pending' AND archived_at IS NULL
+      AND expires_at IS NOT NULL AND expires_at <= now()
+    RETURNING *
+  `, [userId]);
+  return result.rows.map(mapPaperOrder);
 }
 
 export async function fillPaperOrder(userId, orderId, entryPrice) {
@@ -3403,6 +3415,7 @@ function mapPaperOrder(row = {}) {
     closedAt: row.closed_at || null,
     exitPrice: row.exit_price === null ? null : Number(row.exit_price),
     outcome: row.outcome || null,
+    expiresAt: row.expires_at || null,
     realizedPnl: Number(row.realized_pnl || 0),
     rMultiple: Number(row.r_multiple || 0),
     createdAt: row.created_at,

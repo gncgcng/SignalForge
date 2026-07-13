@@ -3,6 +3,7 @@ import {
   closePaperOrder,
   createPaperOrder,
   createPaperTrade,
+  expirePendingPaperOrders,
   fillPaperOrder,
   findPaperOrder,
   findSignalById,
@@ -72,6 +73,7 @@ export async function getPaperTradingTerminal(user, input = {}) {
   const timeframe = supportedPaperTimeframes.includes(input.timeframe) ? input.timeframe : "15m";
   let marketData = null;
   let marketError = null;
+  await expirePendingPaperOrders(user.id);
 
   try {
     marketData = await getOhlcv(symbol, timeframe);
@@ -183,8 +185,23 @@ export function normalizePaperOrder(input, latestPrice) {
     stopLoss: Number(input.stopLoss),
     takeProfit: Number(input.takeProfit),
     notes: String(input.notes || "").trim().slice(0, 1000),
+    expiresAt: orderType === "limit" ? paperOrderExpiry(input.timeframe) : null,
     intendedEntry
   };
+}
+
+export function recommendSignalPaperAction(signal, currentPrice, atr) {
+  const distance = Math.abs(Number(currentPrice) - Number(signal.entryPrice));
+  const tolerance = Number(atr) > 0 ? Number(atr) * 0.25 : Math.abs(Number(signal.entryPrice) - Number(signal.stopLoss)) * 0.25;
+  if (Number.isFinite(distance) && Number.isFinite(tolerance) && tolerance > 0 && distance <= tolerance) {
+    return { action: "market", warning: "Current price is close to the signal entry zone. Simulated entry now is available." };
+  }
+  return { action: "watch", warning: "Signal entry is away from current price. Watch it or use a limit order that may remain pending until price reaches it." };
+}
+
+function paperOrderExpiry(timeframe) {
+  const hours = { "1m": 2, "5m": 2, "15m": 6, "1h": 24, "4h": 48 }[timeframe] || 6;
+  return new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
 }
 
 export function validatePaperOrder(order) {

@@ -116,6 +116,12 @@ export function buildPostMortemTags(signal) {
     confirmations.filter((item) => item.passed).forEach((item) => tags.add(`confirmed_${slug(item.name)}`));
   }
   if (signal.status === "Hit SL") {
+    if (String(indicators.entryQuality || signal.entryQuality || "").toLowerCase() === "fair") tags.add("entry_too_late");
+    if (Number(indicators.stopMultiplier || 0) > 0 && Number(indicators.stopMultiplier) < 0.8) tags.add("stop_too_tight");
+    if (String(signal.setupType || "").toLowerCase().includes("breakout")) tags.add("breakout_failed");
+    if (Number(indicators.volume || 0) > 0 && Number(indicators.volumeMa20 || 0) > 0 && Number(indicators.volume) < Number(indicators.volumeMa20)) tags.add("volume_faded");
+    if (indicators.regimeChanged) tags.add("market_regime_changed");
+    if (signal.alignmentBadge === "Countertrend" || indicators.alignmentBadge === "Countertrend") tags.add("higher_timeframe_conflict");
     if (Number(indicators.rsi14 || 0) > 68 || Number(indicators.rsi14 || 0) < 32) tags.add("rsi_too_extended");
     if (indicators.correlationConflict) tags.add("correlation_conflict");
     if (indicators.vwapAvailable && !indicators.vwapAligned) tags.add("vwap_conflict");
@@ -123,6 +129,10 @@ export function buildPostMortemTags(signal) {
     if (Number(signal.riskRewardRatio || 0) > 2.4) tags.add("target_too_aggressive");
   }
   if (signal.status === "Expired") {
+    tags.add("entry_never_developed");
+    if (String(indicators.regime || "").toLowerCase().includes("range")) tags.add("price_stayed_range_bound");
+    if (Number(signal.riskRewardRatio || 0) > 2.4) tags.add("target_too_far");
+    if (signal.resolvedAt && signal.generatedAt && new Date(signal.resolvedAt) - new Date(signal.generatedAt) > 20 * 60 * 60 * 1000) tags.add("setup_took_too_long");
     if (String(indicators.volatilityLevel || "").toLowerCase().includes("low")) tags.add("low_volatility");
     if (Number(indicators.atrRatio || 0) < 0.001) tags.add("atr_too_low");
     if (String(indicators.sessionLiquidity || "").toLowerCase() === "low") tags.add("session_liquidity_issue");

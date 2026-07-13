@@ -143,8 +143,14 @@ export const appConfig = {
   },
   autoScan: {
     enabled: process.env.AUTO_SCAN_ENABLED !== "false",
-    intervalMs: Number(process.env.AUTO_SCAN_INTERVAL_MS || 900000),
+    intervalMs: Number(process.env.AUTO_SCAN_INTERVAL_MS || 300000),
     duplicateCooldownMs: Number(process.env.AUTO_SCAN_DUPLICATE_COOLDOWN_MS || process.env.AUTO_SCAN_INTERVAL_MS || 900000)
+  },
+  candidates: {
+    candidateThreshold: Number(process.env.CANDIDATE_SCORE_THRESHOLD || 65),
+    readyQualityThreshold: Number(process.env.CANDIDATE_READY_QUALITY_THRESHOLD || 75),
+    readyThreshold: Number(process.env.CANDIDATE_READY_THRESHOLD || 80),
+    marketsPerCycle: Number(process.env.CANDIDATE_SCAN_MARKETS_PER_CYCLE || 4)
   },
   stripe: {
     publishableKey: process.env.STRIPE_PUBLISHABLE_KEY || "",

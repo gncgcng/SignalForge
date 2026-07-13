@@ -30,6 +30,7 @@ import {
   applyLearningAdjustment,
   recordLearningSnapshot
 } from "./signalLearningService.js";
+import { evaluateSetupReadiness, markCandidatePromoted, markCandidateRejected, observeSetupCandidate } from "./setupCandidateService.js";
 
 const scanTimeframes = ["1h", "4h", "15m", "5m"];
 
@@ -215,19 +216,50 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
   const marketData = await getMultiTimeframeMarketData(symbol, timeframe);
   const profile = analystProfile || await getUserAnalystProfile(user);
   const result = generateMarketDataSetup(marketData, timeframe, { analystProfile: profile });
-  const validation = result.valid
-    ? await validateSignalForPublication(result.signal, marketData, user, {
+  const readiness = result.valid ? evaluateSetupReadiness(result.signal, marketData) : null;
+  const candidate = result.valid ? await observeSetupCandidate(result.signal, marketData, readiness) : null;
+  const readySignal = result.valid && readiness?.ready
+    ? {
+      ...result.signal,
+      confidenceScore: Math.min(Number(result.signal.confidenceScore || 0), Number(candidate?.confidenceEstimate || 99)),
+      entryQuality: readiness.entryQuality,
+      readinessScore: readiness.readinessScore,
+      indicators: {
+        ...(result.signal.indicators || {}),
+        entryQuality: readiness.entryQuality,
+        readinessScore: readiness.readinessScore
+      }
+    }
+    : null;
+  const validation = readySignal
+    ? await validateSignalForPublication(readySignal, marketData, user, {
       source: "scanner",
       duplicate: true
     })
     : null;
-  const valid = Boolean(result.valid && validation?.passed);
-  const signal = valid
-    ? await applyLearningToValidatedSignal(applyValidationToSignal(result.signal, validation))
+  const valid = Boolean(readySignal && validation?.passed);
+  const learnedSignal = valid
+    ? await applyLearningToValidatedSignal(applyValidationToSignal(readySignal, validation))
     : null;
-  const analysis = result.valid && validation && !validation.passed
-    ? validationNoSetupAnalysis(result.signal, validation)
-    : result.analysis;
+  const signal = learnedSignal
+    ? { ...learnedSignal, confidenceScore: Math.min(learnedSignal.confidenceScore, candidate?.confidenceEstimate || 99) }
+    : null;
+  if (signal && candidate) await markCandidatePromoted(candidate, signal);
+  if (readySignal && validation && !validation.passed && candidate) {
+    await markCandidateRejected(candidate, validation.reasons?.[0]?.reason || "Final signal validation failed.");
+  }
+  const analysis = result.valid && !readiness?.ready
+    ? {
+      ...(result.analysis || {}),
+      message: readiness.rejected ? "Setup rejected because entry quality is poor." : "Promising setup is being watched for a better entry.",
+      rejectionSummary: readiness.reasons.join(" "),
+      rejectionReasons: readiness.reasons,
+      rejectionReasonCodes: readiness.reasons.map((reason) => reason.includes("entry") ? "entry_not_ready" : "readiness_pending"),
+      candidate: candidate ? toCandidatePreview(candidate) : null
+    }
+    : result.valid && validation && !validation.passed
+      ? validationNoSetupAnalysis(readySignal, validation)
+      : result.analysis;
 
   return {
     publicResult: {
@@ -235,10 +267,28 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
       timeframe,
       valid,
       setup: valid ? toScanPreview(signal) : null,
-      analysis
+      analysis,
+      candidate: candidate ? toCandidatePreview(candidate) : null
     },
     fullSetup: signal,
     analysis
+  };
+}
+
+function toCandidatePreview(candidate) {
+  return {
+    id: candidate.id,
+    symbol: candidate.symbol,
+    timeframe: candidate.timeframe,
+    direction: candidate.direction,
+    setupType: candidate.setupType,
+    status: candidate.status,
+    candidateScore: candidate.candidateScore,
+    readinessScore: candidate.readinessScore,
+    entryQuality: candidate.entryQuality,
+    reasonsForWatching: candidate.reasonsForWatching,
+    missingConfirmations: candidate.missingConfirmations,
+    expiresAt: candidate.expiresAt
   };
 }
 

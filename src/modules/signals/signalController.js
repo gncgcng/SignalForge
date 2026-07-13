@@ -8,6 +8,7 @@ import {
   scanMarketSetup,
   unlockTelegramSignal
 } from "./signalService.js";
+import { getCandidateQualitySummary, listSetupCandidates } from "./setupCandidateService.js";
 
 // scanMarketSetupDetailed stays service-private so Telegram receives full setups
 // without exposing locked price levels in scan responses.
@@ -23,6 +24,15 @@ export async function handleSignalRoutes(req, res, pathname) {
 
   if (pathname === "/api/signals" && req.method === "GET") {
     return sendJson(res, 200, await listUserSignals(req.user));
+  }
+
+  if (pathname === "/api/signals/candidates" && req.method === "GET") {
+    return sendJson(res, 200, { candidates: await listSetupCandidates() });
+  }
+
+  if (pathname === "/api/signals/candidates/quality" && req.method === "GET") {
+    if (!req.user.isAdmin) return sendError(res, 403, "Admin access required.");
+    return sendJson(res, 200, { quality: await getCandidateQualitySummary() });
   }
 
   if (pathname === "/api/signals/scan" && req.method === "POST") {

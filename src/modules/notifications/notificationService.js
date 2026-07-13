@@ -133,7 +133,7 @@ export function formatTelegramSignalMessage(setup) {
   const confidence = Number(setup.confidenceScore || 0);
 
   return [
-    "🚨 SignalForge Alert",
+    "🚨 SignalForge Setup Ready",
     "",
     `Market: ${getDisplaySymbol(setup.symbol)}`,
     `Provider: ${provider}`,
