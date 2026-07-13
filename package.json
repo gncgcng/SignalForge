@@ -64,6 +64,7 @@
     "test:trade-journal": "node scripts/trade-journal-test.js",
     "test:support": "node scripts/support-system-test.js",
     "test:setup-candidates": "node scripts/setup-candidate-system-test.js",
+    "test:form-controls": "node scripts/form-control-style-test.js",
     "test:backtesting": "node scripts/backtest-test.js",
     "test:backtesting-lab": "node scripts/backtesting-lab-test.js",
     "test:smart-money": "node scripts/smart-money-concepts-test.js",

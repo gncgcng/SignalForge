@@ -10,6 +10,16 @@
   --red: #fb7185;
   --cyan: #22d3ee;
   --amber: #f8c14a;
+  --control-bg: #090e16;
+  --control-bg-hover: #0c131e;
+  --control-border: #2b3a4f;
+  --control-border-hover: #3b526e;
+  --control-placeholder: #718097;
+  --control-focus: #22d3ee;
+  --control-radius: 8px;
+  --control-height: 44px;
+  --control-padding-x: 14px;
+  --control-shadow-focus: 0 0 0 3px rgba(34, 211, 238, 0.12);
 }
 
 * {
@@ -30,7 +40,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -1410,20 +1421,109 @@ label {
   font-weight: 700;
 }
 
-input,
-select {
+.sf-input,
+.sf-select,
+.sf-textarea,
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+select,
+textarea {
   width: 100%;
-  border: 1px solid var(--line);
-  background: #090d14;
+  min-width: 0;
+  border: 1px solid var(--control-border);
+  border-radius: var(--control-radius);
+  background: var(--control-bg);
   color: var(--text);
-  border-radius: 8px;
-  padding: 13px 14px;
-  outline: none;
+  font-size: 0.875rem;
+  line-height: 1.45;
+  transition: border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease, opacity 150ms ease;
 }
 
-input:focus,
-select:focus {
-  border-color: var(--cyan);
+.sf-input,
+.sf-select,
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+select {
+  min-height: var(--control-height);
+  padding: 10px var(--control-padding-x);
+}
+
+.sf-textarea,
+textarea {
+  min-height: 112px;
+  padding: 12px var(--control-padding-x);
+  resize: vertical;
+}
+
+.sf-input::placeholder,
+.sf-textarea::placeholder,
+input::placeholder,
+textarea::placeholder {
+  color: var(--control-placeholder);
+  opacity: 1;
+  font: inherit;
+}
+
+.sf-input:hover:not(:disabled),
+.sf-select:hover:not(:disabled),
+.sf-textarea:hover:not(:disabled),
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):hover:not(:disabled),
+select:hover:not(:disabled),
+textarea:hover:not(:disabled) {
+  border-color: var(--control-border-hover);
+  background: var(--control-bg-hover);
+}
+
+.sf-input:focus,
+.sf-select:focus,
+.sf-textarea:focus,
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--control-focus);
+  background: var(--control-bg-hover);
+  box-shadow: var(--control-shadow-focus);
+}
+
+.sf-input:focus-visible,
+.sf-select:focus-visible,
+.sf-textarea:focus-visible,
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+}
+
+.sf-input:disabled,
+.sf-select:disabled,
+.sf-textarea:disabled,
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):disabled,
+select:disabled,
+textarea:disabled {
+  cursor: not-allowed;
+  border-color: rgba(43, 58, 79, 0.58);
+  background: #080c12;
+  color: #667388;
+  opacity: 0.68;
+}
+
+select {
+  color-scheme: dark;
+}
+
+select option {
+  background: #0b111a;
+  color: var(--text);
+}
+
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill,
+select:-webkit-autofill {
+  -webkit-text-fill-color: var(--text);
+  box-shadow: 0 0 0 1000px var(--control-bg) inset;
+  caret-color: var(--text);
 }
 
 button {
@@ -2346,10 +2446,6 @@ polyline {
 .admin-panel-header select,
 .admin-user-search-form input {
   min-width: 0;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: rgba(5, 8, 13, 0.9);
-  color: var(--text);
 }
 
 .admin-user-search-form {
