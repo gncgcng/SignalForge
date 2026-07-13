@@ -38,6 +38,12 @@ import {
   withSignalValidity
 } from "./signalValidityService.js";
 import { toLockedSignalQuality, withSignalQuality } from "./signalQualityService.js";
+import {
+  SCANNER_RESULT_TYPES,
+  buildAvoidTradeResult,
+  classifyScannerResult
+} from "./avoidTradeService.js";
+import { recordAvoidTradeLearningEvent } from "./setupCandidateRepository.js";
 
 const scanTimeframes = ["1h", "4h", "15m", "5m"];
 
@@ -56,7 +62,11 @@ export async function createSignal(user, { symbol, timeframe, setupKey }) {
   if (!result.publicResult.valid) {
     return {
       signal: null,
-      analysis: result.publicResult.analysis,
+      analysis: {
+        ...(result.publicResult.analysis || {}),
+        avoidTrade: result.publicResult.avoidTrade || null,
+        resultType: result.publicResult.resultType
+      },
       subscription: getSubscriptionSummary(user)
     };
   }
@@ -318,15 +328,22 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
     : result.valid && validation && !validation.passed
       ? validationNoSetupAnalysis(readySignal, validation)
       : result.analysis;
+  const resultType = classifyScannerResult({ valid, candidate, analysis });
+  const avoidTrade = resultType === SCANNER_RESULT_TYPES.AVOID
+    ? buildAvoidTradeResult({ symbol, timeframe, analysis, candidate })
+    : null;
+  if (avoidTrade) await recordAvoidTradeSafely(avoidTrade);
 
   return {
     publicResult: {
       symbol,
       timeframe,
       valid,
+      resultType,
       setup: valid ? toScanPreview(signal) : null,
       analysis,
-      candidate: candidate ? toCandidatePreview(candidate) : null
+      candidate: candidate ? toCandidatePreview(candidate) : null,
+      avoidTrade
     },
     fullSetup: signal,
     analysis
@@ -351,7 +368,12 @@ function toCandidatePreview(candidate) {
     nextConditions: candidate.nextConditions,
     rejectionReason: candidate.rejectionReason,
     lastCheckedAt: candidate.lastCheckedAt,
-    expiresAt: candidate.expiresAt
+    expiresAt: candidate.expiresAt,
+    resultType: candidate.status === "expired"
+      ? SCANNER_RESULT_TYPES.EXPIRED
+      : candidate.status === "rejected"
+        ? SCANNER_RESULT_TYPES.REJECTED
+        : SCANNER_RESULT_TYPES.WATCHING
   };
 }
 
@@ -415,6 +437,7 @@ export async function scanAllMarketsDetailed(user) {
   const setups = [];
   const fullSetups = [];
   const candidatesById = new Map();
+  const avoidTrades = [];
   const errors = [];
   const diagnostics = {
     rejectionReasonCodes: {},
@@ -438,6 +461,7 @@ export async function scanAllMarketsDetailed(user) {
           symbol,
           timeframe,
           valid: result.valid,
+          resultType: result.resultType,
           rejectionReasonCodes: analysis.rejectionReasonCodes || [],
           rejectionReasons: analysis.rejectionReasons || []
         });
@@ -450,24 +474,42 @@ export async function scanAllMarketsDetailed(user) {
           setups.push(result.setup);
           fullSetups.push(detailed.fullSetup);
         } else {
+          if (result.avoidTrade) {
+            avoidTrades.push(result.avoidTrade);
+          }
           recordScanDiagnostics(diagnostics, symbol, timeframe, analysis);
         }
       } catch (error) {
         const publicReason = humanizeScanFailure(error);
+        const code = failureDiagnosticCode(error);
+        const failureAnalysis = {
+          message: publicReason,
+          rejectionSummary: publicReason,
+          rejectionReasonCodes: [code],
+          rejectionReasons: [publicReason]
+        };
+        const resultType = classifyScannerResult({
+          valid: false,
+          analysis: failureAnalysis,
+          providerError: true
+        });
         scanned.push({
           symbol,
           timeframe,
           valid: false,
           providerError: true,
-          rejectionReasonCodes: ["provider_unavailable"],
+          resultType,
+          rejectionReasonCodes: [code],
           rejectionReasons: [publicReason]
         });
-        recordScanDiagnostics(diagnostics, symbol, timeframe, {
-          message: publicReason,
-          rejectionSummary: publicReason,
-          rejectionReasonCodes: ["provider_unavailable"],
-          rejectionReasons: [publicReason]
-        });
+        if (resultType === SCANNER_RESULT_TYPES.AVOID) {
+          const avoidTrade = buildAvoidTradeResult({ symbol, timeframe, analysis: failureAnalysis });
+          if (avoidTrade) {
+            avoidTrades.push(avoidTrade);
+            await recordAvoidTradeSafely(avoidTrade);
+          }
+        }
+        recordScanDiagnostics(diagnostics, symbol, timeframe, failureAnalysis);
         errors.push({
           symbol,
           timeframe,
@@ -480,10 +522,10 @@ export async function scanAllMarketsDetailed(user) {
   rankSetups(setups);
   const candidates = [...candidatesById.values()];
   const finalizedDiagnostics = finalizeScanDiagnostics(diagnostics);
-  const scanSummary = summarizeScanBatch(scanned, setups, candidates, finalizedDiagnostics);
+  const scanSummary = summarizeScanBatch(scanned, setups, candidates, finalizedDiagnostics, avoidTrades);
   console.info(
     `[scanner] ready=${scanSummary.ready} watching=${scanSummary.watching} ` +
-    `rejected=${scanSummary.rejected} expired=${scanSummary.expired}`
+    `avoid=${scanSummary.avoidTrade} rejected=${scanSummary.rejected} expired=${scanSummary.expired}`
   );
   console.info(`[scanner] top_rejection_reason=${scanSummary.topRejectionCode}`);
 
@@ -491,6 +533,7 @@ export async function scanAllMarketsDetailed(user) {
     publicResult: {
       setups,
       candidates,
+      avoidTrades,
       scanned,
       errors,
       diagnostics: finalizedDiagnostics,
@@ -501,19 +544,31 @@ export async function scanAllMarketsDetailed(user) {
   };
 }
 
-export function summarizeScanBatch(scanned, setups, candidates, diagnostics) {
+export function summarizeScanBatch(scanned, setups, candidates, diagnostics, avoidTrades = []) {
   const watching = candidates.filter((candidate) => ["watching", "almost_ready"].includes(candidate.status)).length;
   const expired = candidates.filter((candidate) => candidate.status === "expired").length;
-  const explicitlyRejected = candidates.filter((candidate) => candidate.status === "rejected").length;
-  const evaluatedWithoutSignal = scanned.filter((item) => !item.valid && !item.providerError).length;
-  const rejected = Math.max(explicitlyRejected, evaluatedWithoutSignal - watching - expired);
+  const hasTypedResults = scanned.some((item) => item.resultType);
+  const rejected = hasTypedResults
+    ? scanned.filter((item) => item.resultType === SCANNER_RESULT_TYPES.REJECTED).length
+    : Math.max(
+      candidates.filter((candidate) => candidate.status === "rejected").length,
+      scanned.filter((item) => !item.valid && !item.providerError).length - watching - expired
+    );
+  const avoidTrade = avoidTrades.length || scanned.filter((item) => item.resultType === SCANNER_RESULT_TYPES.AVOID).length;
   const topReason = diagnostics.topReasons?.[0]?.reason || "strategy not matched";
+  const avoidReasonCounts = avoidTrades.reduce((counts, item) => {
+    counts[item.reason] = (counts[item.reason] || 0) + 1;
+    return counts;
+  }, {});
+  const topAvoidReason = Object.entries(avoidReasonCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
   return {
     ready: setups.length,
     watching,
     almostReady: candidates.filter((candidate) => candidate.status === "almost_ready").length,
+    avoidTrade,
     rejected,
     expired,
+    topAvoidReason,
     topRejectionReason: topReason,
     topRejectionCode: diagnostics.topCodes?.[0]?.code || slugDiagnostic(topReason)
   };
@@ -530,6 +585,23 @@ function humanizeScanFailure(error) {
   if (/not enough|insufficient.*candle/.test(message)) return "Not enough current candle data.";
   if (/unsupported|does not support/.test(message)) return "Market or timeframe is not supported by the provider.";
   return "Provider unavailable.";
+}
+
+function failureDiagnosticCode(error) {
+  const message = String(error?.message || "").toLowerCase();
+  if (/stale|outdated|last candle/.test(message)) return "stale_data";
+  if (/rate limit|too many requests|429/.test(message)) return "provider_rate_limit";
+  if (/unsupported|does not support/.test(message)) return "unsupported_market";
+  if (/not enough|insufficient.*candle/.test(message)) return "invalid_market_data";
+  return "provider_unavailable";
+}
+
+async function recordAvoidTradeSafely(avoidTrade) {
+  try {
+    await recordAvoidTradeLearningEvent(avoidTrade);
+  } catch (error) {
+    console.warn(`[scanner] avoid_learning_failed market=${avoidTrade.symbol} timeframe=${avoidTrade.timeframe} reason=${error.message}`);
+  }
 }
 
 function recordScanDiagnostics(diagnostics, symbol, timeframe, analysis = {}) {

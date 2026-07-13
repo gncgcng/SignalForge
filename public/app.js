@@ -54,6 +54,8 @@ const state = {
   },
   signals: [],
   candidates: [],
+  avoidTrades: [],
+  showAllAvoidTrades: false,
   scanResults: [],
   watchlist: [],
   alerts: [],
@@ -143,6 +145,10 @@ const RISK_PERCENT_KEY = "signalforge-risk-percent";
 const authScreen = document.querySelector("#auth-screen");
 const candidateGrid = document.querySelector("#candidate-grid");
 const candidateCount = document.querySelector("#candidate-count");
+const avoidTradeSection = document.querySelector("#avoid-trade-section");
+const avoidTradeGrid = document.querySelector("#avoid-trade-grid");
+const avoidTradeCount = document.querySelector("#avoid-trade-count");
+const avoidTradeMore = document.querySelector("#avoid-trade-more");
 const landingPage = document.querySelector("#landing-page");
 const publicProfilePage = document.querySelector("#public-profile-page");
 const accountRecoverySupportPage = document.querySelector("#account-recovery-support-page");
@@ -1100,10 +1106,10 @@ scanAllButton.addEventListener("click", async () => {
     await loadAlerts();
     await loadCandidates();
     markFirstScanCompleted();
-    renderScanResults(result.setups, result.errors, result.diagnostics, result.scanSummary);
+    renderScanResults(result.setups, result.errors, result.diagnostics, result.scanSummary, result.avoidTrades);
   } catch (error) {
     updateScanProgress(0, total, "Scan All failed");
-    renderScanResults([], [{ symbol: "Scan All", timeframe: "", message: error.message }], null);
+    renderScanResults([], [{ symbol: "Scan All", timeframe: "", message: error.message }], null, null, []);
   } finally {
     clearInterval(progressTimer);
     scanAllButton.disabled = false;
@@ -1334,6 +1340,11 @@ telegramEnabled.addEventListener("change", async () => {
     telegramEnabled.checked = !telegramEnabled.checked;
     telegramStatusLine.textContent = error.message;
   }
+});
+
+avoidTradeMore?.addEventListener("click", () => {
+  state.showAllAvoidTrades = !state.showAllAvoidTrades;
+  renderAvoidTrades();
 });
 
 requestTesterAccessButton.addEventListener("click", async () => {
@@ -2464,11 +2475,23 @@ async function loadCandidateQuality() {
   setText("#candidate-quality-rejected", Number(quality.candidatesRejected || 0) + Number(quality.candidatesExpired || 0));
   setText("#candidate-quality-rate", `${quality.promotionRate || 0}%`);
   setText("#candidate-quality-unfilled", quality.pendingOrdersExpiredUnfilled || 0);
+  setText("#candidate-quality-avoid", quality.avoidTradesToday || 0);
+  setText("#candidate-quality-avoid-promoted", quality.avoidTradesLaterPromoted || 0);
+  setText("#candidate-quality-avoid-failed", quality.avoidTradesWouldHaveFailed || 0);
   document.querySelector("#candidate-quality-reasons").innerHTML = renderCandidateMetricRows(
     quality.topRejectionReasons || [], "reason", "count"
   );
   document.querySelector("#candidate-quality-entry").innerHTML = renderCandidateMetricRows(
     quality.entryQualityDistribution || [], "quality", "count"
+  );
+  document.querySelector("#candidate-quality-avoid-reasons").innerHTML = renderCandidateMetricRows(
+    quality.topAvoidReasons || [], "reason", "count"
+  );
+  document.querySelector("#candidate-quality-avoid-markets").innerHTML = renderCandidateMetricRows(
+    quality.mostAvoidedMarkets || [], "market", "count"
+  );
+  document.querySelector("#candidate-quality-avoid-timeframes").innerHTML = renderCandidateMetricRows(
+    quality.mostAvoidedTimeframes || [], "timeframe", "count"
   );
 }
 
@@ -2514,6 +2537,36 @@ function renderCandidates() {
       </details>
     </article>`;
   }).join("");
+}
+
+function renderAvoidTrades() {
+  if (!avoidTradeSection || !avoidTradeGrid || !avoidTradeCount || !avoidTradeMore) return;
+  const avoidTrades = state.avoidTrades || [];
+  avoidTradeSection.classList.toggle("hidden", avoidTrades.length === 0);
+  avoidTradeCount.textContent = `${avoidTrades.length} avoid zone${avoidTrades.length === 1 ? "" : "s"}`;
+  if (!avoidTrades.length) {
+    avoidTradeGrid.innerHTML = "";
+    avoidTradeMore.classList.add("hidden");
+    return;
+  }
+
+  const visible = state.showAllAvoidTrades ? avoidTrades : avoidTrades.slice(0, 3);
+  avoidTradeGrid.innerHTML = visible.map((item) => `
+    <article class="avoid-trade-card" data-result-type="avoid_trade">
+      <header>
+        <div><strong>${escapeHtml(getDisplaySymbol(item.symbol))}</strong><span>${escapeHtml(item.timeframe)} · No Trade</span></div>
+        <span class="avoid-trade-badge">Avoid Trade</span>
+      </header>
+      <p class="avoid-trade-primary"><strong>Reason:</strong> ${escapeHtml(item.reason)}</p>
+      <div class="avoid-trade-columns">
+        <section><strong>Avoid because</strong><ul>${(item.reasons || []).map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul></section>
+        <section><strong>What would improve it</strong><ul>${(item.improvements || []).map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul></section>
+      </div>
+      <footer><span>${escapeHtml(item.marketCondition || "Confirmations not aligned")}</span><span>No credits used</span></footer>
+    </article>
+  `).join("");
+  avoidTradeMore.classList.toggle("hidden", avoidTrades.length <= 3);
+  avoidTradeMore.textContent = state.showAllAvoidTrades ? "Show top 3" : `View ${avoidTrades.length - 3} more`;
 }
 
 async function loadPaperPortfolio() {
@@ -4780,6 +4833,9 @@ function renderSignalValidity(signal, { compact = false } = {}) {
 }
 
 function renderNoSetup(analysis) {
+  state.avoidTrades = analysis?.avoidTrade ? [analysis.avoidTrade] : [];
+  state.showAllAvoidTrades = false;
+  renderAvoidTrades();
   const rejectionSummary = analysis?.rejectionSummary ||
     (analysis?.rejectionReasons?.length
       ? `No setup found because: ${analysis.rejectionReasons.slice(0, 3).join(", ")}.`
@@ -4822,16 +4878,17 @@ function updateScanProgress(done, total, message) {
 }
 
 function renderScanSummary(opportunitiesFound, marketsScanned, timeframesScanned, errors = [], diagnostics = null, summary = null) {
-  const counts = summary || { ready: opportunitiesFound, watching: 0, rejected: 0, expired: 0 };
+  const counts = summary || { ready: opportunitiesFound, watching: 0, avoidTrade: 0, rejected: 0, expired: 0 };
   scanSummaryPanel.classList.remove("hidden");
   document.querySelector("#scan-summary-title").textContent = opportunitiesFound > 0
     ? "Scan complete"
     : counts.watching > 0 ? "No ready signals yet" : "No clean setups right now.";
-  document.querySelector("#scan-summary-opportunities").textContent = `${counts.ready} ready · ${counts.watching} watching`;
+  document.querySelector("#scan-summary-opportunities").textContent = `${counts.ready} ready · ${counts.watching} watching · ${counts.avoidTrade || 0} avoid`;
   document.querySelector("#scan-summary-markets").textContent = `${marketsScanned} market${marketsScanned === 1 ? "" : "s"} scanned`;
   document.querySelector("#scan-summary-timeframes").textContent = `${timeframesScanned} timeframes scanned`;
   document.querySelector("#scan-summary-ready").textContent = counts.ready;
   document.querySelector("#scan-summary-watching").textContent = counts.watching;
+  document.querySelector("#scan-summary-avoid").textContent = counts.avoidTrade || 0;
   document.querySelector("#scan-summary-rejected").textContent = counts.rejected;
   document.querySelector("#scan-summary-expired").textContent = counts.expired;
   document.querySelector("#scan-summary-credits").textContent = opportunitiesFound > 0
@@ -4844,15 +4901,18 @@ function renderScanSummary(opportunitiesFound, marketsScanned, timeframesScanned
       ? "Probable setups were found, but confirmation or entry readiness is still incomplete. No credits used."
       : "SignalForge scanned the market but did not find enough confirmation for a valid setup. No credits used.";
   document.querySelector("#scan-summary-diagnostics-content").innerHTML = `
-    <p><strong>Most common reason:</strong> ${escapeHtml(summary?.topRejectionReason || diagnostics?.topReasons?.[0]?.reason || "Strategy not matched")}</p>
+    <p><strong>Most common avoid reason:</strong> ${escapeHtml(summary?.topAvoidReason || summary?.topRejectionReason || diagnostics?.topReasons?.[0]?.reason || "Strategy not matched")}</p>
     ${renderRejectionReasons((diagnostics?.topReasons || []).map((item) => `${item.reason} (${item.count})`))}
     ${renderDiagnosticSamples(diagnostics?.samples)}
     ${errors.length ? `<p>${errors.length} provider warning${errors.length === 1 ? "" : "s"} occurred during this scan.</p>` : ""}
   `;
 }
 
-function renderScanResults(setups, errors, diagnostics = null, scanSummary = null) {
+function renderScanResults(setups, errors, diagnostics = null, scanSummary = null, avoidTrades = []) {
   state.scanResults = setups;
+  state.avoidTrades = avoidTrades || [];
+  state.showAllAvoidTrades = false;
+  renderAvoidTrades();
   document.querySelector("#signal-count").textContent = `${setups.length} scan results`;
   const activePairs = state.pairs
     .concat(state.marketCatalog)
@@ -4865,6 +4925,7 @@ function renderScanResults(setups, errors, diagnostics = null, scanSummary = nul
     timeframesScanned: frames.length,
     opportunitiesFound: setups.length,
     watchingSetups: scanSummary?.watching || 0,
+    avoidTradeZones: scanSummary?.avoidTrade || 0,
     rejectedSetups: scanSummary?.rejected || 0,
     expiredSetups: scanSummary?.expired || 0,
     errors: errors.length

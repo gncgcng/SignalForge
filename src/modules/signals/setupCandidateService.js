@@ -4,6 +4,7 @@ import {
   getCandidateQualitySummary,
   listVisibleSetupCandidates,
   listCandidatesNeedingOutcome,
+  markRelatedAvoidTradesPromoted,
   promoteCandidate,
   rejectCandidate,
   recordCandidateLearningEvent,
@@ -114,7 +115,9 @@ export async function listSetupCandidates() {
 
 export async function markCandidatePromoted(candidate, signal) {
   if (!candidate?.id || !signal?.id) return null;
-  return promoteCandidate(candidate.id, signal.id);
+  const promoted = await promoteCandidate(candidate.id, signal.id);
+  await markRelatedAvoidTradesPromoted(candidate.symbol, candidate.timeframe);
+  return promoted;
 }
 
 export async function markCandidateRejected(candidate, reason) {

@@ -57,7 +57,7 @@ const checks = {
   unsupportedPairsHandled:
     coinbaseProvider.includes("PROVIDER_UNSUPPORTED_MARKET") &&
     coinbaseProvider.includes("Coinbase does not support") &&
-    app.includes("renderScanResults(result.setups, result.errors, result.diagnostics, result.scanSummary)"),
+    app.includes("renderScanResults(result.setups, result.errors, result.diagnostics, result.scanSummary"),
   scanSummaryVisible:
     html.includes('id="scan-summary-panel"') &&
     html.includes('id="view-opportunities-button"') &&

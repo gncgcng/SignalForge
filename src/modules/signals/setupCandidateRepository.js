@@ -139,6 +139,17 @@ export async function recordCandidateLearningEvent(candidate, outcome = {}) {
     candidate.rejectionReason || outcome.reasonNotPromoted || null
   ]);
   await updateCandidateShadowAdjustment(candidate.id);
+  if (outcome.wouldHaveHitSl === true) {
+    await query(`
+      UPDATE avoid_trade_learning_events
+      SET would_have_failed = true,
+        resolved_at = COALESCE(resolved_at, now())
+      WHERE market = $1
+        AND timeframe = $2
+        AND would_have_failed IS DISTINCT FROM true
+        AND last_observed_at >= now() - interval '72 hours'
+    `, [candidate.symbol, candidate.timeframe]);
+  }
 }
 
 async function updateCandidateShadowAdjustment(candidateId) {
@@ -181,7 +192,7 @@ export async function listCandidatesNeedingOutcome(limit = 20) {
 }
 
 export async function getCandidateQualitySummary() {
-  const [result, reasons, entryQuality] = await Promise.all([query(`
+  const [result, reasons, entryQuality, avoidSummary, avoidReasons, avoidMarkets, avoidTimeframes] = await Promise.all([query(`
     SELECT
       COUNT(*) FILTER (WHERE created_at::date = current_date)::integer AS created_today,
       COUNT(*) FILTER (WHERE status = 'promoted_to_signal' AND updated_at::date = current_date)::integer AS promoted,
@@ -197,6 +208,24 @@ export async function getCandidateQualitySummary() {
   `), query(`
     SELECT entry_quality, COUNT(*)::integer AS count
     FROM setup_candidates GROUP BY entry_quality ORDER BY count DESC
+  `), query(`
+    SELECT
+      COUNT(*) FILTER (WHERE created_at::date = current_date)::integer AS today,
+      COUNT(*) FILTER (WHERE became_good_signal IS TRUE)::integer AS became_signal,
+      COUNT(*) FILTER (WHERE would_have_failed IS TRUE)::integer AS would_fail
+    FROM avoid_trade_learning_events
+  `), query(`
+    SELECT reason, COUNT(*)::integer AS count
+    FROM avoid_trade_learning_events
+    GROUP BY reason ORDER BY count DESC LIMIT 6
+  `), query(`
+    SELECT market, COUNT(*)::integer AS count
+    FROM avoid_trade_learning_events
+    GROUP BY market ORDER BY count DESC LIMIT 6
+  `), query(`
+    SELECT timeframe, COUNT(*)::integer AS count
+    FROM avoid_trade_learning_events
+    GROUP BY timeframe ORDER BY count DESC LIMIT 6
   `)]);
   const row = result.rows[0] || {};
   const total = Number(row.created_today || 0);
@@ -209,8 +238,51 @@ export async function getCandidateQualitySummary() {
     pendingOrdersExpiredUnfilled: Number(row.expired_unfilled || 0),
     promotionRate: total ? Number(((Number(row.promoted || 0) / total) * 100).toFixed(1)) : 0,
     topRejectionReasons: reasons.rows.map((item) => ({ reason: item.reason, count: Number(item.count || 0) })),
-    entryQualityDistribution: entryQuality.rows.map((item) => ({ quality: item.entry_quality, count: Number(item.count || 0) }))
+    entryQualityDistribution: entryQuality.rows.map((item) => ({ quality: item.entry_quality, count: Number(item.count || 0) })),
+    avoidTradesToday: Number(avoidSummary.rows[0]?.today || 0),
+    avoidTradesLaterPromoted: Number(avoidSummary.rows[0]?.became_signal || 0),
+    avoidTradesWouldHaveFailed: Number(avoidSummary.rows[0]?.would_fail || 0),
+    topAvoidReasons: avoidReasons.rows.map((item) => ({ reason: item.reason, count: Number(item.count || 0) })),
+    mostAvoidedMarkets: avoidMarkets.rows.map((item) => ({ market: item.market, count: Number(item.count || 0) })),
+    mostAvoidedTimeframes: avoidTimeframes.rows.map((item) => ({ timeframe: item.timeframe, count: Number(item.count || 0) }))
   };
+}
+
+export async function recordAvoidTradeLearningEvent(avoidTrade) {
+  const observedAt = new Date(avoidTrade.createdAt || Date.now());
+  const bucket = Math.floor(observedAt.getTime() / (5 * 60 * 1000));
+  const eventKey = [avoidTrade.symbol, avoidTrade.timeframe, avoidTrade.reason, bucket]
+    .map((value) => String(value || "unknown").toLowerCase().replace(/[^a-z0-9]+/g, "-"))
+    .join(":");
+  await query(`
+    INSERT INTO avoid_trade_learning_events (
+      id, event_key, market, timeframe, reason, reasons, market_condition,
+      setup_quality_score, entry_readiness_score, created_at, last_observed_at
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10)
+    ON CONFLICT (event_key) DO UPDATE SET
+      reasons = EXCLUDED.reasons,
+      market_condition = EXCLUDED.market_condition,
+      setup_quality_score = EXCLUDED.setup_quality_score,
+      entry_readiness_score = EXCLUDED.entry_readiness_score,
+      last_observed_at = EXCLUDED.last_observed_at
+  `, [
+    createId("avoid"), eventKey, avoidTrade.symbol, avoidTrade.timeframe,
+    avoidTrade.reason, JSON.stringify(avoidTrade.reasons || []), avoidTrade.marketCondition,
+    avoidTrade.setupQualityScore || 0, avoidTrade.entryReadinessScore || 0, observedAt
+  ]);
+}
+
+export async function markRelatedAvoidTradesPromoted(symbol, timeframe) {
+  const result = await query(`
+    UPDATE avoid_trade_learning_events
+    SET became_good_signal = true,
+      resolved_at = COALESCE(resolved_at, now())
+    WHERE market = $1
+      AND timeframe = $2
+      AND became_good_signal IS DISTINCT FROM true
+      AND last_observed_at >= now() - interval '72 hours'
+  `, [symbol, timeframe]);
+  return result.rowCount;
 }
 
 function mapCandidate(row) {

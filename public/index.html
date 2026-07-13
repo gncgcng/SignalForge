@@ -676,12 +676,14 @@
                     <div><span>Timeframes</span><strong id="scan-summary-timeframes">0</strong></div>
                     <div><span>Ready signals</span><strong id="scan-summary-ready">0</strong></div>
                     <div><span>Watching</span><strong id="scan-summary-watching">0</strong></div>
+                    <div><span>Avoid trade</span><strong id="scan-summary-avoid">0</strong></div>
                     <div><span>Rejected</span><strong id="scan-summary-rejected">0</strong></div>
                     <div><span>Expired</span><strong id="scan-summary-expired">0</strong></div>
                     <div><span>Credits</span><strong id="scan-summary-credits">No credits used</strong></div>
                     <div><span>Next scan</span><strong id="scan-summary-next">When ready</strong></div>
                   </div>
                   <p class="reasoning" id="scan-summary-reason">Run Scan All to find high-quality setups.</p>
+                  <p class="scan-trust-copy">SignalForge filters out weak setups instead of forcing trades.</p>
                   <details class="scan-summary-diagnostics" id="scan-summary-diagnostics">
                     <summary>View scan diagnostics</summary>
                     <div id="scan-summary-diagnostics-content"></div>
@@ -817,6 +819,16 @@
               <div class="candidate-grid" id="candidate-grid">
                 <div class="empty-state"><strong>No setups being watched</strong><p class="reasoning">The crypto watcher will add promising setups as they develop.</p></div>
               </div>
+            </section>
+
+            <section class="avoid-trade-section panel hidden" id="avoid-trade-section">
+              <div class="section-title">
+                <div><span class="eyebrow">No-trade intelligence</span><h3>Markets to Avoid Right Now</h3></div>
+                <span id="avoid-trade-count">0 avoid zones</span>
+              </div>
+              <p class="reasoning">Avoid Trade means SignalForge does not see a clean setup right now. These warnings are free and are never sent to Telegram by default.</p>
+              <div class="avoid-trade-grid" id="avoid-trade-grid"></div>
+              <button class="secondary-action hidden" id="avoid-trade-more" type="button">View more</button>
             </section>
           </section>
 
@@ -1784,10 +1796,16 @@
                 <article class="panel"><span>Rejected / expired</span><strong id="candidate-quality-rejected">0</strong></article>
                 <article class="panel"><span>Promotion rate</span><strong id="candidate-quality-rate">0%</strong></article>
                 <article class="panel"><span>Expired unfilled today</span><strong id="candidate-quality-unfilled">0</strong></article>
+                <article class="panel"><span>Avoid trades today</span><strong id="candidate-quality-avoid">0</strong></article>
+                <article class="panel"><span>Avoid → later signal</span><strong id="candidate-quality-avoid-promoted">0</strong></article>
+                <article class="panel"><span>Avoided likely failures</span><strong id="candidate-quality-avoid-failed">0</strong></article>
               </div>
               <div class="admin-analytics-grid compact">
                 <article class="analytics-panel"><h3>Candidate rejection reasons</h3><div id="candidate-quality-reasons"></div></article>
                 <article class="analytics-panel"><h3>Entry quality distribution</h3><div id="candidate-quality-entry"></div></article>
+                <article class="analytics-panel"><h3>Avoid trade reasons</h3><div id="candidate-quality-avoid-reasons"></div></article>
+                <article class="analytics-panel"><h3>Most avoided markets</h3><div id="candidate-quality-avoid-markets"></div></article>
+                <article class="analytics-panel"><h3>Most avoided timeframes</h3><div id="candidate-quality-avoid-timeframes"></div></article>
               </div>
               <div class="admin-analytics-grid admin-ops-grid">
                 <article class="analytics-panel"><h3>Best strategies</h3><div id="learning-best-strategies"></div></article>

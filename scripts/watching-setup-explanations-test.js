@@ -30,8 +30,10 @@ assert.deepEqual(summary, {
   ready: 1,
   watching: 2,
   almostReady: 1,
+  avoidTrade: 0,
   rejected: 1,
   expired: 0,
+  topAvoidReason: null,
   topRejectionReason: "poor RR",
   topRejectionCode: "poor_rr"
 });
