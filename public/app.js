@@ -1094,7 +1094,7 @@ scanAllButton.addEventListener("click", async () => {
     await loadAlerts();
     await loadCandidates();
     markFirstScanCompleted();
-    renderScanResults(result.setups, result.errors, result.diagnostics);
+    renderScanResults(result.setups, result.errors, result.diagnostics, result.scanSummary);
   } catch (error) {
     updateScanProgress(0, total, "Scan All failed");
     renderScanResults([], [{ symbol: "Scan All", timeframe: "", message: error.message }], null);
@@ -1639,6 +1639,10 @@ paperHistoryFilters.addEventListener("change", renderPaperOrders);
 paperResetAccount.addEventListener("click", resetPaperTrading);
 
 signalsGrid.addEventListener("click", async (event) => {
+  if (event.target.closest("[data-scan-again]")) {
+    scanAllButton.click();
+    return;
+  }
   const detailsButton = event.target.closest("[data-signal-details]");
 
   if (detailsButton) {
@@ -2420,19 +2424,33 @@ function renderCandidates() {
   if (!candidateGrid || !candidateCount) return;
   const active = state.candidates.filter((candidate) => ["watching", "almost_ready", "ready"].includes(candidate.status));
   candidateCount.textContent = `${active.length} watching`;
-  if (!state.candidates.length) {
+  if (!active.length) {
     candidateGrid.innerHTML = `<div class="empty-state"><strong>No setups being watched</strong><p class="reasoning">The crypto watcher will add promising setups as they develop.</p></div>`;
     return;
   }
-  candidateGrid.innerHTML = state.candidates.map((candidate) => {
+  candidateGrid.innerHTML = active.map((candidate) => {
     const label = titleCase(candidate.status);
-    const missing = candidate.missingConfirmations?.length
-      ? candidate.missingConfirmations.slice(0, 3).join(", ")
-      : candidate.reasonsForWatching?.[0] || "Entry timing is being monitored.";
+    const reasons = candidate.reasonsForWatching?.length
+      ? candidate.reasonsForWatching
+      : ["Entry timing is still being evaluated."];
+    const missing = candidate.missingConfirmations || [];
+    const nextConditions = candidate.nextConditions?.length
+      ? candidate.nextConditions
+      : ["Waiting for the remaining rule confirmations to align."];
     return `<article class="candidate-card ${escapeHtml(candidate.status)}">
-      <header><div><strong>${escapeHtml(getDisplaySymbol(candidate.symbol))}</strong><span>${escapeHtml(candidate.timeframe)} · ${escapeHtml(candidate.setupType)}</span></div><span class="status-pill">${escapeHtml(label)}</span></header>
-      <div class="candidate-scores"><span>Direction<strong>${escapeHtml(String(candidate.direction).toUpperCase())}</strong></span><span>Quality<strong>${Number(candidate.setupQualityScore ?? candidate.candidateScore)}%</strong></span><span>Readiness<strong>${Number(candidate.entryReadinessScore ?? candidate.readinessScore)}%</strong></span><span>Entry<strong>${escapeHtml(titleCase(candidate.entryQuality))}</strong></span></div>
-      <details><summary>Why not ready?</summary><p>${escapeHtml(missing)}</p></details>
+      <header><div><strong>${escapeHtml(getDisplaySymbol(candidate.symbol))}</strong><span>${escapeHtml(candidate.timeframe)} · ${escapeHtml(String(candidate.direction || "").toUpperCase())} · ${escapeHtml(candidate.setupType)}</span></div><span class="status-pill">${escapeHtml(label)}</span></header>
+      <div class="candidate-scores"><span>Setup quality<strong>${Number(candidate.setupQualityScore ?? candidate.candidateScore)}%</strong></span><span>Entry readiness<strong>${Number(candidate.entryReadinessScore ?? candidate.readinessScore)}%</strong></span></div>
+      <p class="candidate-primary-reason"><strong>Why not a signal yet:</strong> ${escapeHtml(reasons[0])}</p>
+      <p class="candidate-next-condition"><strong>Next:</strong> ${escapeHtml(nextConditions[0])}</p>
+      <small>Last checked ${escapeHtml(formatDateTime(candidate.lastCheckedAt || candidate.firstDetectedAt))}</small>
+      <details><summary>View explanation</summary>
+        <div class="candidate-explanation">
+          <section><strong>Why not a signal?</strong><ul>${reasons.map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul></section>
+          <section><strong>Missing confirmations</strong>${missing.length ? `<ul>${missing.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : `<p>No named confirmation is missing; entry timing is still being monitored.</p>`}</section>
+          <section><strong>Next condition needed</strong><ul>${nextConditions.map((condition) => `<li>${escapeHtml(condition)}</li>`).join("")}</ul></section>
+          <section><strong>Technical status</strong><p>Entry quality: ${escapeHtml(titleCase(candidate.entryQuality))}. Monitoring expires ${escapeHtml(formatDateTime(candidate.expiresAt))}.</p></section>
+        </div>
+      </details>
     </article>`;
   }).join("");
 }
@@ -4673,24 +4691,37 @@ function updateScanProgress(done, total, message) {
   statusLine.textContent = message;
 }
 
-function renderScanSummary(opportunitiesFound, marketsScanned, timeframesScanned, errors = [], diagnostics = null) {
+function renderScanSummary(opportunitiesFound, marketsScanned, timeframesScanned, errors = [], diagnostics = null, summary = null) {
+  const counts = summary || { ready: opportunitiesFound, watching: 0, rejected: 0, expired: 0 };
   scanSummaryPanel.classList.remove("hidden");
   document.querySelector("#scan-summary-title").textContent = opportunitiesFound > 0
-    ? "Scan Summary"
-    : "No high-quality setups right now.";
-  document.querySelector("#scan-summary-opportunities").textContent = `${opportunitiesFound} opportunity${opportunitiesFound === 1 ? "" : "ies"} found`;
+    ? "Scan complete"
+    : counts.watching > 0 ? "No ready signals yet" : "No clean setups right now.";
+  document.querySelector("#scan-summary-opportunities").textContent = `${counts.ready} ready · ${counts.watching} watching`;
   document.querySelector("#scan-summary-markets").textContent = `${marketsScanned} market${marketsScanned === 1 ? "" : "s"} scanned`;
   document.querySelector("#scan-summary-timeframes").textContent = `${timeframesScanned} timeframes scanned`;
+  document.querySelector("#scan-summary-ready").textContent = counts.ready;
+  document.querySelector("#scan-summary-watching").textContent = counts.watching;
+  document.querySelector("#scan-summary-rejected").textContent = counts.rejected;
+  document.querySelector("#scan-summary-expired").textContent = counts.expired;
   document.querySelector("#scan-summary-credits").textContent = opportunitiesFound > 0
     ? "No unlock credits used yet"
     : "No credits used";
   document.querySelector("#scan-summary-next").textContent = `Suggested next scan: ${formatSuggestedScanTime()}`;
   document.querySelector("#scan-summary-reason").textContent = opportunitiesFound > 0
-    ? "Open Signal Desk to unlock or inspect compact opportunities."
-    : diagnostics?.summary || `No setup met the confidence and risk filters.${errors.length ? ` ${errors.length} provider warning${errors.length === 1 ? "" : "s"} logged.` : ""}`;
+    ? `Ready signals appear below. ${counts.watching ? `${counts.watching} additional setup${counts.watching === 1 ? " is" : "s are"} still being monitored.` : "No additional setups are being watched."}`
+    : counts.watching > 0
+      ? "Probable setups were found, but confirmation or entry readiness is still incomplete. No credits used."
+      : "SignalForge scanned the market but did not find enough confirmation for a valid setup. No credits used.";
+  document.querySelector("#scan-summary-diagnostics-content").innerHTML = `
+    <p><strong>Most common reason:</strong> ${escapeHtml(summary?.topRejectionReason || diagnostics?.topReasons?.[0]?.reason || "Strategy not matched")}</p>
+    ${renderRejectionReasons((diagnostics?.topReasons || []).map((item) => `${item.reason} (${item.count})`))}
+    ${renderDiagnosticSamples(diagnostics?.samples)}
+    ${errors.length ? `<p>${errors.length} provider warning${errors.length === 1 ? "" : "s"} occurred during this scan.</p>` : ""}
+  `;
 }
 
-function renderScanResults(setups, errors, diagnostics = null) {
+function renderScanResults(setups, errors, diagnostics = null, scanSummary = null) {
   state.scanResults = setups;
   document.querySelector("#signal-count").textContent = `${setups.length} scan results`;
   const activePairs = state.pairs
@@ -4703,28 +4734,32 @@ function renderScanResults(setups, errors, diagnostics = null) {
     marketsScanned: scannedMarkets.length,
     timeframesScanned: frames.length,
     opportunitiesFound: setups.length,
+    watchingSetups: scanSummary?.watching || 0,
+    rejectedSetups: scanSummary?.rejected || 0,
+    expiredSetups: scanSummary?.expired || 0,
     errors: errors.length
   };
-  renderScanSummary(setups.length, scannedMarkets.length, frames.length, errors, diagnostics);
+  renderScanSummary(setups.length, scannedMarkets.length, frames.length, errors, diagnostics, scanSummary);
 
   if (setups.length === 0) {
     signalsGrid.innerHTML = `
       <article class="signal-card compact-signal-card expanded">
         <div class="signal-top">
           <div>
-            <strong>No high-quality setups right now.</strong>
+            <strong>No clean setups right now.</strong>
             <span>${scannedMarkets.slice(0, 12).join(" · ")}${scannedMarkets.length > 12 ? " · ..." : ""}</span>
           </div>
         </div>
-        <p class="reasoning">${escapeHtml(diagnostics?.summary || "No setup found because: weak confirmation, poor RR, or trend conflict.")} No credits used.</p>
+        <p class="reasoning">SignalForge scanned the market but did not find enough confirmation for a valid setup. No credits used.</p>
         ${renderRejectionReasons((diagnostics?.topReasons || []).map((item) => `${item.reason} (${item.count})`))}
-        ${renderDiagnosticSamples(diagnostics?.samples)}
+        <details class="scan-diagnostics"><summary>View scan diagnostics</summary>${renderDiagnosticSamples(diagnostics?.samples)}</details>
         <div class="signal-metrics">
           <div><span>Markets scanned</span><strong>${scannedMarkets.length}</strong></div>
           <div><span>Timeframes</span><strong>${frames.join(", ")}</strong></div>
           <div><span>Provider errors</span><strong>${errors.length}</strong></div>
           <div><span>Suggested next scan</span><strong>${formatSuggestedScanTime()}</strong></div>
         </div>
+        <div class="compact-actions"><button type="button" data-scan-again>Scan again</button></div>
       </article>
     `;
     statusLine.textContent = "No high-probability setups right now. Trial credits were not used.";

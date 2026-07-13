@@ -674,10 +674,18 @@
                   <div class="scan-summary-grid">
                     <div><span>Markets scanned</span><strong id="scan-summary-markets">0</strong></div>
                     <div><span>Timeframes</span><strong id="scan-summary-timeframes">0</strong></div>
+                    <div><span>Ready signals</span><strong id="scan-summary-ready">0</strong></div>
+                    <div><span>Watching</span><strong id="scan-summary-watching">0</strong></div>
+                    <div><span>Rejected</span><strong id="scan-summary-rejected">0</strong></div>
+                    <div><span>Expired</span><strong id="scan-summary-expired">0</strong></div>
                     <div><span>Credits</span><strong id="scan-summary-credits">No credits used</strong></div>
                     <div><span>Next scan</span><strong id="scan-summary-next">When ready</strong></div>
                   </div>
                   <p class="reasoning" id="scan-summary-reason">Run Scan All to find high-quality setups.</p>
+                  <details class="scan-summary-diagnostics" id="scan-summary-diagnostics">
+                    <summary>View scan diagnostics</summary>
+                    <div id="scan-summary-diagnostics-content"></div>
+                  </details>
                   <button class="secondary-action" id="view-opportunities-button" type="button">View Opportunities</button>
                 </article>
                 <p class="status-line" id="status-line">Select a market and timeframe to generate a setup.</p>
@@ -771,17 +779,6 @@
               </div>
             </section>
 
-            <section class="candidate-section panel">
-              <div class="section-title">
-                <div><span class="eyebrow">Live setup watcher</span><h3>Watching setups</h3></div>
-                <span id="candidate-count">0 watching</span>
-              </div>
-              <p class="reasoning">Watching setups are not signals yet. SignalForge is waiting for better confirmation or entry quality. They use no credits.</p>
-              <div class="candidate-grid" id="candidate-grid">
-                <div class="empty-state"><strong>No setups being watched</strong><p class="reasoning">The crypto watcher will add promising setups as they develop.</p></div>
-              </div>
-            </section>
-
             <section class="signals-section">
               <div class="section-title">
                 <div>
@@ -802,6 +799,24 @@
                 <span>Confidence reflects rule alignment, not the probability of profit.</span>
               </div>
               <div class="signals-grid" id="signals-grid"></div>
+            </section>
+
+            <section class="candidate-section panel">
+              <div class="section-title">
+                <div><span class="eyebrow">Live setup watcher</span><h3>Watching Setups</h3></div>
+                <span id="candidate-count">0 watching</span>
+              </div>
+              <p class="reasoning">Watching setups are not signals yet. SignalForge is waiting for better confirmation, entry quality, or risk/reward before alerting. They use no credits.</p>
+              <div class="candidate-status-legend" aria-label="Watching setup status definitions">
+                <span><strong>Watching</strong> Confirmations incomplete</span>
+                <span><strong>Almost Ready</strong> One or two key checks remain</span>
+                <span><strong>Ready</strong> Validation passed</span>
+                <span><strong>Rejected</strong> Setup invalidated</span>
+                <span><strong>Expired</strong> Monitoring window ended</span>
+              </div>
+              <div class="candidate-grid" id="candidate-grid">
+                <div class="empty-state"><strong>No setups being watched</strong><p class="reasoning">The crypto watcher will add promising setups as they develop.</p></div>
+              </div>
             </section>
           </section>
 

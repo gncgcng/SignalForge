@@ -9,8 +9,8 @@ export async function upsertSetupCandidate(candidate) {
       confidence_estimate, entry_quality, current_price, ideal_entry, ideal_entry_zone,
       ideal_entry_zone_low, ideal_entry_zone_high, invalidation_level, potential_stop_loss,
       potential_take_profit, potential_rr, reasons_for_watching, missing_confirmations,
-      rejection_reason, promoted_signal_id, metadata
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30)
+      next_conditions, rejection_reason, promoted_signal_id, metadata
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31)
     ON CONFLICT (setup_key) DO UPDATE SET
       status = CASE
         WHEN setup_candidates.status IN ('promoted_to_signal', 'rejected', 'expired') THEN setup_candidates.status
@@ -35,6 +35,7 @@ export async function upsertSetupCandidate(candidate) {
       potential_rr = EXCLUDED.potential_rr,
       reasons_for_watching = EXCLUDED.reasons_for_watching,
       missing_confirmations = EXCLUDED.missing_confirmations,
+      next_conditions = EXCLUDED.next_conditions,
       rejection_reason = COALESCE(EXCLUDED.rejection_reason, setup_candidates.rejection_reason),
       promoted_signal_id = COALESCE(EXCLUDED.promoted_signal_id, setup_candidates.promoted_signal_id),
       metadata = EXCLUDED.metadata,
@@ -50,6 +51,7 @@ export async function upsertSetupCandidate(candidate) {
     candidate.idealEntryZone?.high ?? null, candidate.invalidationLevel,
     candidate.potentialStopLoss, candidate.potentialTakeProfit, candidate.potentialRr,
     JSON.stringify(candidate.reasonsForWatching || []), JSON.stringify(candidate.missingConfirmations || []),
+    JSON.stringify(candidate.nextConditions || []),
     candidate.rejectionReason || null, candidate.promotedSignalId || null,
     JSON.stringify(candidate.metadata || {})
   ]);
@@ -228,7 +230,8 @@ function mapCandidate(row) {
     invalidationLevel: Number(row.invalidation_level || 0),
     potentialStopLoss: Number(row.potential_stop_loss || 0), potentialTakeProfit: Number(row.potential_take_profit || 0),
     potentialRr: Number(row.potential_rr || 0), reasonsForWatching: row.reasons_for_watching || [],
-    missingConfirmations: row.missing_confirmations || [], rejectionReason: row.rejection_reason,
+    missingConfirmations: row.missing_confirmations || [], nextConditions: row.next_conditions || [],
+    rejectionReason: row.rejection_reason,
     promotedSignalId: row.promoted_signal_id || null
   };
 }

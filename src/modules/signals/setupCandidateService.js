@@ -44,23 +44,26 @@ export function evaluateSetupReadiness(signal, marketData) {
     ? currentPrice <= Number(signal.stopLoss)
     : currentPrice >= Number(signal.stopLoss);
   if (invalidated) {
-    return { ready: false, rejected: true, candidateScore: quality, readinessScore: 0, entryQuality: "poor", currentPrice, missingConfirmations: missing, reasons: ["Price crossed the setup invalidation level."], rejectionReason: "Candidate invalidated before promotion." };
+    return { ready: false, rejected: true, candidateScore: quality, readinessScore: 0, entryQuality: "poor", currentPrice, missingConfirmations: missing, reasons: ["Setup invalidated."], rejectionReason: "Setup invalidated." };
   }
-  if (distanceAtr > 0.75) { readiness -= 35; reasons.push("Price is too far from the ideal entry; avoid chasing."); }
-  else if (distanceAtr > 0.25) { readiness -= 18; reasons.push("Price has not reached the ideal entry zone."); }
-  if (rr < 1.5) { readiness -= 50; reasons.push("Potential reward/risk is below 1.5R."); }
-  else if (rr < 1.8) { readiness -= 15; reasons.push("Potential reward/risk is marginal."); }
-  if (stopDistance < atr * 0.45) { readiness -= 25; reasons.push("Stop distance is too tight relative to ATR."); }
-  if (stopDistance > atr * 3) { readiness -= 20; reasons.push("Stop distance is too wide relative to ATR."); }
-  if (candleRangeAtr > 1.8) { readiness -= 22; reasons.push("Latest candle is extended; wait for price to settle."); }
-  if (!candleConfirmed) { readiness -= 12; reasons.push("Waiting for candle confirmation."); }
-  if (cryptoVolumeMissing) { readiness -= 14; reasons.push("Waiting for volume confirmation."); }
+  if (distanceAtr > 0.75) { readiness -= 35; reasons.push("Price is too far from ideal entry."); }
+  else if (distanceAtr > 0.25) { readiness -= 18; reasons.push("Price is outside the ideal entry zone."); }
+  if (rr < 1.5) { readiness -= 50; reasons.push("Risk/reward is below minimum."); }
+  else if (rr < 1.8) { readiness -= 15; reasons.push("Risk/reward is not strong enough yet."); }
+  if (stopDistance < atr * 0.45) { readiness -= 25; reasons.push("Stop loss would be too tight."); }
+  if (stopDistance > atr * 3) { readiness -= 20; reasons.push("Stop distance is too wide for the available target."); }
+  if (candleRangeAtr > 1.8) { readiness -= 22; reasons.push("Price is overextended."); }
+  if (!candleConfirmed) { readiness -= 12; reasons.push("Candle confirmation is missing."); }
+  if (cryptoVolumeMissing) { readiness -= 14; reasons.push("Volume confirmation is missing."); }
   if (missing.length) readiness -= Math.min(18, missing.length * 4);
-  if (signal?.alignmentBadge === "Countertrend") { readiness -= 25; reasons.push("Higher timeframe structure conflicts strongly."); }
+  if (signal?.alignmentBadge === "Countertrend") { readiness -= 25; reasons.push("Higher timeframe conflicts with this setup."); }
   if (signal?.newsRisk?.level === "Danger") return { ready: false, rejected: true, candidateScore: quality, readinessScore: 0, entryQuality: "poor", currentPrice, missingConfirmations: missing, reasons: ["Dangerous news lock is active."], rejectionReason: "News lock active." };
 
   readiness = clamp(Math.round(readiness), 0, 100);
   const entryQuality = readiness >= 90 ? "excellent" : readiness >= 80 ? "good" : readiness >= 60 ? "fair" : "poor";
+  const publicReasons = reasons.length
+    ? reasons
+    : missing.map((item) => `${item} confirmation is missing.`);
   return {
     ready: quality >= appConfig.candidates.readyQualityThreshold && readiness >= appConfig.candidates.readyThreshold && ["excellent", "good"].includes(entryQuality) && candleConfirmed && !cryptoVolumeMissing,
     rejected: entryQuality === "poor" || rr < 1.5,
@@ -72,7 +75,8 @@ export function evaluateSetupReadiness(signal, marketData) {
     candleConfirmed,
     idealEntryZone: { low: entry - atr * 0.25, high: entry + atr * 0.25 },
     missingConfirmations: missing,
-    reasons: reasons.length ? reasons : ["Setup quality is constructive and entry conditions are aligned."],
+    reasons: publicReasons.length ? publicReasons : ["Setup quality is constructive and entry conditions are aligned."],
+    nextConditions: buildNextConditions(publicReasons, missing, signal.timeframe),
     rejectionReason: entryQuality === "poor" ? reasons[0] || "Entry quality is poor." : null
   };
 }
@@ -94,7 +98,8 @@ export async function observeSetupCandidate(signal, marketData, readiness) {
     invalidationLevel: signal.stopLoss,
     potentialStopLoss: signal.stopLoss, potentialTakeProfit: signal.takeProfit,
     potentialRr: signal.riskRewardRatio, reasonsForWatching: readiness.reasons,
-    missingConfirmations: readiness.missingConfirmations, rejectionReason: readiness.rejectionReason,
+    missingConfirmations: readiness.missingConfirmations, nextConditions: readiness.nextConditions,
+    rejectionReason: readiness.rejectionReason,
     promotedSignalId: null,
     metadata: { distanceAtr: readiness.distanceAtr, setupKey: signal.setupKey }
   });
@@ -223,6 +228,24 @@ function isCryptoMarket(signal, marketData) {
 
 function displayPair(symbol) {
   return String(symbol || "").toUpperCase().replace(/[-/]/g, "");
+}
+
+export function buildNextConditions(reasons = [], missingConfirmations = [], timeframe = "current") {
+  const text = [...reasons, ...missingConfirmations].join(" ").toLowerCase();
+  const conditions = [];
+  if (/far from|outside the ideal entry/.test(text)) conditions.push("Waiting for price to return closer to the ideal entry zone.");
+  if (/volume/.test(text)) conditions.push("Waiting for volume to rise above its recent average.");
+  if (/candle/.test(text)) conditions.push(`Waiting for the ${timeframe} candle to close with directional confirmation.`);
+  if (/risk\/reward|reward\/risk/.test(text)) conditions.push("Waiting for risk/reward to improve to at least the minimum threshold.");
+  if (/higher timeframe|alignment|confluence/.test(text)) conditions.push("Waiting for higher-timeframe structure to align.");
+  if (/overextended/.test(text)) conditions.push("Waiting for the move to cool down or pull back.");
+  if (/stop/.test(text)) conditions.push("Waiting for volatility and structure to support a safer stop distance.");
+  if (/trend/.test(text)) conditions.push("Waiting for trend confirmation to strengthen.");
+  if (/vwap/.test(text)) conditions.push("Waiting for price to reclaim or reject VWAP with confirmation.");
+  if (/volatility|atr/.test(text)) conditions.push("Waiting for volatility to return to a tradable range.");
+  return [...new Set(conditions)].slice(0, 4).length
+    ? [...new Set(conditions)].slice(0, 4)
+    : ["Waiting for the remaining rule confirmations to align."];
 }
 
 function clamp(value, min, max) { return Math.min(max, Math.max(min, Number(value || 0))); }

@@ -217,7 +217,7 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
   const profile = analystProfile || await getUserAnalystProfile(user);
   const result = generateMarketDataSetup(marketData, timeframe, { analystProfile: profile });
   const readiness = result.valid ? evaluateSetupReadiness(result.signal, marketData) : null;
-  const candidate = result.valid ? await observeSetupCandidate(result.signal, marketData, readiness) : null;
+  let candidate = result.valid ? await observeSetupCandidate(result.signal, marketData, readiness) : null;
   const readySignal = result.valid && readiness?.ready
     ? {
       ...result.signal,
@@ -244,9 +244,15 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
   const signal = learnedSignal
     ? { ...learnedSignal, confidenceScore: Math.min(learnedSignal.confidenceScore, candidate?.confidenceEstimate || 99) }
     : null;
-  if (signal && candidate) await markCandidatePromoted(candidate, signal);
+  if (signal && candidate) {
+    candidate = await markCandidatePromoted(candidate, signal) || { ...candidate, status: "promoted_to_signal" };
+  }
   if (readySignal && validation && !validation.passed && candidate) {
-    await markCandidateRejected(candidate, validation.reasons?.[0]?.reason || "Final signal validation failed.");
+    candidate = await markCandidateRejected(candidate, validation.reasons?.[0]?.reason || "Final signal validation failed.") || {
+      ...candidate,
+      status: "rejected",
+      rejectionReason: validation.reasons?.[0]?.reason || "Final signal validation failed."
+    };
   }
   const analysis = result.valid && !readiness?.ready
     ? {
@@ -284,10 +290,15 @@ function toCandidatePreview(candidate) {
     setupType: candidate.setupType,
     status: candidate.status,
     candidateScore: candidate.candidateScore,
+    setupQualityScore: candidate.setupQualityScore,
     readinessScore: candidate.readinessScore,
+    entryReadinessScore: candidate.entryReadinessScore,
     entryQuality: candidate.entryQuality,
     reasonsForWatching: candidate.reasonsForWatching,
     missingConfirmations: candidate.missingConfirmations,
+    nextConditions: candidate.nextConditions,
+    rejectionReason: candidate.rejectionReason,
+    lastCheckedAt: candidate.lastCheckedAt,
     expiresAt: candidate.expiresAt
   };
 }
@@ -351,6 +362,7 @@ export async function scanAllMarketsDetailed(user) {
   const scanned = [];
   const setups = [];
   const fullSetups = [];
+  const candidatesById = new Map();
   const errors = [];
   const diagnostics = {
     rejectionReasonCodes: {},
@@ -378,6 +390,10 @@ export async function scanAllMarketsDetailed(user) {
           rejectionReasons: analysis.rejectionReasons || []
         });
 
+        if (result.candidate && !result.valid) {
+          candidatesById.set(result.candidate.id, result.candidate);
+        }
+
         if (result.valid) {
           setups.push(result.setup);
           fullSetups.push(detailed.fullSetup);
@@ -385,28 +401,83 @@ export async function scanAllMarketsDetailed(user) {
           recordScanDiagnostics(diagnostics, symbol, timeframe, analysis);
         }
       } catch (error) {
-        scanned.push({ symbol, timeframe, valid: false });
+        const publicReason = humanizeScanFailure(error);
+        scanned.push({
+          symbol,
+          timeframe,
+          valid: false,
+          providerError: true,
+          rejectionReasonCodes: ["provider_unavailable"],
+          rejectionReasons: [publicReason]
+        });
+        recordScanDiagnostics(diagnostics, symbol, timeframe, {
+          message: publicReason,
+          rejectionSummary: publicReason,
+          rejectionReasonCodes: ["provider_unavailable"],
+          rejectionReasons: [publicReason]
+        });
         errors.push({
           symbol,
           timeframe,
-          message: error.message
+          message: publicReason
         });
       }
     }
   }
 
   rankSetups(setups);
+  const candidates = [...candidatesById.values()];
+  const finalizedDiagnostics = finalizeScanDiagnostics(diagnostics);
+  const scanSummary = summarizeScanBatch(scanned, setups, candidates, finalizedDiagnostics);
+  console.info(
+    `[scanner] ready=${scanSummary.ready} watching=${scanSummary.watching} ` +
+    `rejected=${scanSummary.rejected} expired=${scanSummary.expired}`
+  );
+  console.info(`[scanner] top_rejection_reason=${scanSummary.topRejectionCode}`);
 
   return {
     publicResult: {
       setups,
+      candidates,
       scanned,
       errors,
-      diagnostics: finalizeScanDiagnostics(diagnostics),
+      diagnostics: finalizedDiagnostics,
+      scanSummary,
       message: setups.length ? "Valid setups found." : "No high-probability setups right now"
     },
     fullSetups
   };
+}
+
+export function summarizeScanBatch(scanned, setups, candidates, diagnostics) {
+  const watching = candidates.filter((candidate) => ["watching", "almost_ready"].includes(candidate.status)).length;
+  const expired = candidates.filter((candidate) => candidate.status === "expired").length;
+  const explicitlyRejected = candidates.filter((candidate) => candidate.status === "rejected").length;
+  const evaluatedWithoutSignal = scanned.filter((item) => !item.valid && !item.providerError).length;
+  const rejected = Math.max(explicitlyRejected, evaluatedWithoutSignal - watching - expired);
+  const topReason = diagnostics.topReasons?.[0]?.reason || "strategy not matched";
+  return {
+    ready: setups.length,
+    watching,
+    almostReady: candidates.filter((candidate) => candidate.status === "almost_ready").length,
+    rejected,
+    expired,
+    topRejectionReason: topReason,
+    topRejectionCode: diagnostics.topCodes?.[0]?.code || slugDiagnostic(topReason)
+  };
+}
+
+function slugDiagnostic(value) {
+  return String(value || "unknown").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+}
+
+function humanizeScanFailure(error) {
+  const message = String(error?.message || "").toLowerCase();
+  if (/stale|outdated|last candle/.test(message)) return "Data is stale.";
+  if (/rate limit|too many requests|429/.test(message)) return "Provider rate limit reached.";
+  if (/not enough|insufficient.*candle/.test(message)) return "Not enough current candle data.";
+  if (/unsupported|does not support/.test(message)) return "Market or timeframe is not supported by the provider.";
+  return "Provider unavailable.";
 }
 
 function recordScanDiagnostics(diagnostics, symbol, timeframe, analysis = {}) {

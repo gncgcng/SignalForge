@@ -27,7 +27,7 @@ assert.equal(watching.entryQuality, "fair");
 
 const noCandleConfirmation = evaluateSetupReadiness(baseSignal, market(100, 100.4, 99.6, 100.2));
 assert.equal(noCandleConfirmation.ready, false, "a candidate must wait for directional candle confirmation");
-assert.ok(noCandleConfirmation.reasons.includes("Waiting for candle confirmation."));
+assert.ok(noCandleConfirmation.reasons.includes("Candle confirmation is missing."));
 
 const noVolume = evaluateSetupReadiness({
   ...baseSignal,
@@ -37,7 +37,7 @@ assert.equal(noVolume.ready, false, "crypto candidates must wait for volume conf
 
 const rejected = evaluateSetupReadiness({ ...baseSignal, riskRewardRatio: 1.2 }, market(100));
 assert.equal(rejected.rejected, true, "poor RR must reject candidate");
-assert.equal(evaluateSetupReadiness(baseSignal, market(97.5)).rejectionReason, "Candidate invalidated before promotion.");
+assert.equal(evaluateSetupReadiness(baseSignal, market(97.5)).rejectionReason, "Setup invalidated.");
 
 const invalidated = evaluateCandidateOutcome({
   id: "candidate", direction: "long", currentPrice: 100,

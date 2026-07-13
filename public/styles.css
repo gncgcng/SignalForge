@@ -7014,6 +7014,7 @@ polyline {
 }
 
 .candidate-card.ready { border-color: rgba(50, 220, 164, 0.52); }
+.candidate-card.almost_ready { border-color: rgba(75, 214, 255, 0.48); }
 .candidate-card.rejected, .candidate-card.expired { opacity: 0.72; }
 .candidate-card header, .candidate-card header div { display: flex; justify-content: space-between; gap: 8px; }
 .candidate-card header div { flex-direction: column; }
@@ -7022,12 +7023,28 @@ polyline {
 .candidate-scores span { display: flex; flex-direction: column; gap: 3px; font-size: 0.75rem; color: var(--muted); }
 .candidate-scores strong { color: var(--text); font-size: 0.92rem; }
 .candidate-card summary { cursor: pointer; color: var(--cyan); }
+.candidate-card small { display: block; margin: 10px 0; color: var(--muted); }
+.candidate-primary-reason, .candidate-next-condition { margin: 10px 0 0; line-height: 1.45; overflow-wrap: anywhere; }
+.candidate-primary-reason { color: var(--text); }
+.candidate-next-condition { color: var(--muted); }
+.candidate-explanation { display: grid; gap: 12px; padding-top: 12px; }
+.candidate-explanation section { min-width: 0; padding-top: 10px; border-top: 1px solid rgba(142, 155, 176, 0.14); }
+.candidate-explanation ul { margin: 7px 0 0; padding-left: 18px; color: var(--muted); }
+.candidate-explanation li, .candidate-explanation p { margin: 4px 0; line-height: 1.45; overflow-wrap: anywhere; }
+.candidate-status-legend { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 16px; }
+.candidate-status-legend span { display: inline-flex; gap: 5px; padding: 6px 8px; border: 1px solid rgba(75, 214, 255, 0.16); border-radius: 7px; color: var(--muted); font-size: 0.72rem; }
+.candidate-status-legend strong { color: var(--text); }
+.scan-summary-diagnostics, .scan-diagnostics { margin-top: 12px; min-width: 0; }
+.scan-summary-diagnostics summary, .scan-diagnostics summary { cursor: pointer; color: var(--cyan); font-weight: 700; }
+.scan-summary-diagnostics > div, .scan-diagnostics > div { min-width: 0; padding-top: 10px; overflow-wrap: anywhere; }
 .analytics-list-row { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid rgba(142, 155, 176, 0.14); }
 .analytics-list-row span { color: var(--muted); overflow-wrap: anywhere; }
 
 @media (max-width: 767px) {
   .candidate-grid { grid-template-columns: 1fr; }
   .candidate-section { margin-inline: 0; }
+  .candidate-card, .candidate-explanation, .scan-summary-diagnostics { max-width: 100%; overflow-x: hidden; }
+  .candidate-status-legend { display: grid; grid-template-columns: 1fr; }
 }
 .public-recovery-page {
   min-height: 100vh;
