@@ -50,10 +50,12 @@ export async function submitSupportTicket(user, input, context = {}) {
     pageUrl: validatePageUrl(input.pageUrl)
   });
 
-  void sendSupportConfirmationEmail(user, ticket).catch((error) => {
-    console.warn(`[support] confirmation email failed ticket=${ticket.id} error=${safeError(error)}`);
-  });
-  if (["high", "urgent"].includes(ticket.priority)) {
+  if (appConfig.email.featuresEnabled) {
+    void sendSupportConfirmationEmail(user, ticket).catch((error) => {
+      console.warn(`[support] confirmation email failed ticket=${ticket.id} error=${safeError(error)}`);
+    });
+  }
+  if (appConfig.email.featuresEnabled && ["high", "urgent"].includes(ticket.priority)) {
     void Promise.all([...appConfig.adminEmails].map((email) =>
       sendSupportAdminNotificationEmail(email, ticket)
     )).catch((error) => {
@@ -62,7 +64,7 @@ export async function submitSupportTicket(user, input, context = {}) {
   }
 
   return {
-    message: "Support request submitted. We’ll review it as soon as possible.",
+    message: "Support request submitted. You can check the status here inside SignalForge.",
     ticket,
     tickets: await listSupportTicketsByUser(user.id)
   };

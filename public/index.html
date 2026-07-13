@@ -487,13 +487,17 @@
         <form class="auth-card hidden" id="password-reset-request-form">
           <span class="eyebrow">Account recovery</span>
           <h2>Reset password</h2>
-          <label>
+          <div class="auth-recovery-unavailable hidden" id="password-reset-unavailable">
+            <p>Password reset by email is not available yet. Please contact support if you need help accessing your account.</p>
+            <a class="primary-action" href="#support" id="password-reset-contact-support">Contact Support</a>
+          </div>
+          <label id="password-reset-email-field">
             Email
             <input name="email" type="email" autocomplete="email" placeholder="alex@signalforge.app" required />
           </label>
-          <button type="submit">Send reset link</button>
+          <button id="password-reset-submit" type="submit">Send reset link</button>
           <button class="secondary-action" id="back-to-login-button" type="button">Back to sign in</button>
-          <p class="form-note" id="password-reset-request-note">We will email a reset link if the account exists.</p>
+          <p class="form-note" id="password-reset-request-note">Password recovery availability is checked securely.</p>
         </form>
         <form class="auth-card hidden" id="password-reset-confirm-form">
           <span class="eyebrow">Secure reset</span>
@@ -1641,6 +1645,14 @@
               </div>
               <span id="admin-request-count">0 pending</span>
             </div>
+            <article class="analytics-panel admin-email-warning hidden" id="admin-email-warning">
+              <div class="panel-header"><div><span class="eyebrow">System notice</span><h3>Email features are currently disabled.</h3></div></div>
+              <div class="stat-grid compact-stats">
+                <div><span>Password reset emails</span><strong>Disabled</strong></div>
+                <div><span>Support notification emails</span><strong>Disabled</strong></div>
+                <div><span>Welcome emails</span><strong>Disabled</strong></div>
+              </div>
+            </article>
             <section class="admin-analytics-section">
               <div class="section-title">
                 <div><span class="eyebrow">Operations</span><h3>SignalForge Admin Dashboard</h3></div>

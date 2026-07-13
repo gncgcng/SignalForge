@@ -75,6 +75,9 @@ export const appConfig = {
   freeSignalAllowance: 3,
   adminEmails,
   testerCreditAllowance: 1000000,
+  email: {
+    featuresEnabled: process.env.EMAIL_FEATURES_ENABLED === "true"
+  },
   affiliate: {
     commissionRate: 0.2,
     minimumPayoutCents: 2500,
@@ -249,4 +252,8 @@ export function logStripeConfiguration() {
     `missing=${status.missing.join(",") || "none"} ` +
     `app_url=${status.appUrlConfigured ? "configured" : "missing"}`
   );
+}
+
+export function logEmailConfiguration() {
+  console.info(`[email] features_enabled=${appConfig.email.featuresEnabled}`);
 }

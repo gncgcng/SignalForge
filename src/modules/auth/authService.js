@@ -268,6 +268,10 @@ export async function verifyEmail(token) {
 }
 
 export async function requestPasswordReset(email) {
+  if (!appConfig.email.featuresEnabled) {
+    return passwordResetUnavailableResult();
+  }
+
   const normalizedEmail = String(email || "").trim().toLowerCase();
   if (!normalizedEmail) {
     return passwordResetRequestResult();
@@ -401,6 +405,10 @@ export function isAdminUser(user) {
 }
 
 async function issueVerification(user, { enforceCooldown = false } = {}) {
+  if (!appConfig.email.featuresEnabled) {
+    return { delivered: false, unavailable: true, developmentUrl: null };
+  }
+
   const token = createVerificationToken();
   await createEmailVerificationToken(
     user.id,
@@ -437,6 +445,14 @@ function passwordResetRequestResult(developmentResetUrl = null) {
     ok: true,
     message: "If an account exists for that email, a password reset link has been sent.",
     developmentResetUrl
+  };
+}
+
+function passwordResetUnavailableResult() {
+  return {
+    ok: false,
+    available: false,
+    message: "Password reset by email is not available yet. Please contact support if you need help accessing your account."
   };
 }
 

@@ -49,7 +49,8 @@ export async function handleAuthRoutes(req, res, pathname) {
         appConfig.googleOAuth.clientId &&
         appConfig.googleOAuth.clientSecret &&
         appConfig.googleOAuth.redirectUri
-      )
+      ),
+      emailFeaturesEnabled: appConfig.email.featuresEnabled
     }, {
       "cache-control": "no-store"
     });
@@ -170,6 +171,7 @@ export async function handleAuthRoutes(req, res, pathname) {
       return sendJson(res, 200, {
         user: result.user,
         verificationRequired: result.verificationRequired,
+        verificationUnavailable: Boolean(result.verification?.unavailable),
         developmentVerificationUrl: result.verification?.developmentUrl || null,
         restore
       }, {
@@ -196,6 +198,7 @@ export async function handleAuthRoutes(req, res, pathname) {
       const result = await resendVerification(req.user);
       return sendJson(res, 200, {
         verificationRequired: result.verificationRequired,
+        verificationUnavailable: Boolean(result.verification?.unavailable),
         developmentVerificationUrl: result.verification?.developmentUrl || null
       }, authResponseHeaders());
     } catch (error) {

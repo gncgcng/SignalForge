@@ -152,6 +152,11 @@ const passwordResetRequestForm = document.querySelector("#password-reset-request
 const passwordResetConfirmForm = document.querySelector("#password-reset-confirm-form");
 const passwordResetRequestNote = document.querySelector("#password-reset-request-note");
 const passwordResetConfirmNote = document.querySelector("#password-reset-confirm-note");
+const passwordResetUnavailable = document.querySelector("#password-reset-unavailable");
+const passwordResetEmailField = document.querySelector("#password-reset-email-field");
+const passwordResetSubmit = document.querySelector("#password-reset-submit");
+const adminEmailWarning = document.querySelector("#admin-email-warning");
+let emailFeaturesEnabled = false;
 const backToLoginButton = document.querySelector("#back-to-login-button");
 const legalConsent = document.querySelector("#legal-consent");
 const legalModal = document.querySelector("#legal-modal");
@@ -545,7 +550,9 @@ authForm.addEventListener("submit", async (event) => {
     saveRestoreToken(result.restore);
     state.user = result.user;
     if (result.verificationRequired) {
-      authNote.textContent = result.developmentVerificationUrl
+      authNote.textContent = result.verificationUnavailable
+        ? "Email verification is temporarily unavailable. Your account is saved; contact support for account help."
+        : result.developmentVerificationUrl
         ? `Verify your email to activate free signals. Development link: ${result.developmentVerificationUrl}`
         : "Check your email to activate your free signals.";
     }
@@ -565,6 +572,10 @@ backToLoginButton?.addEventListener("click", () => {
 
 passwordResetRequestForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (!emailFeaturesEnabled) {
+    passwordResetRequestNote.textContent = "Password reset by email is not available yet. Please contact support if you need help accessing your account.";
+    return;
+  }
   const submitButton = passwordResetRequestForm.querySelector("button[type='submit']");
   const form = new FormData(passwordResetRequestForm);
 
@@ -644,7 +655,9 @@ resendVerificationButton.addEventListener("click", async () => {
   try {
     resendVerificationButton.disabled = true;
     const result = await api.request("/api/auth/resend-verification", { method: "POST" });
-    verificationNote.textContent = result.developmentVerificationUrl
+    verificationNote.textContent = result.verificationUnavailable
+      ? "Email verification is temporarily unavailable. Contact support for account help."
+      : result.developmentVerificationUrl
       ? `Development verification link: ${result.developmentVerificationUrl}`
       : "Verification email sent.";
   } catch (error) {
@@ -704,7 +717,7 @@ supportForm?.addEventListener("submit", async (event) => {
     supportForm.reset();
     renderSupportTopicOptions();
     renderSupportTickets();
-    supportFormStatus.textContent = result.message || "Support request submitted. We’ll review it as soon as possible.";
+    supportFormStatus.textContent = result.message || "Support request submitted. You can check the status here inside SignalForge.";
     showToast("Support request submitted");
   } catch (error) {
     supportFormStatus.textContent = error.message;
@@ -1713,6 +1726,11 @@ async function init() {
     loadStartupSession(),
     loadAuthConfig()
   ]);
+  emailFeaturesEnabled = Boolean(authConfig.emailFeaturesEnabled);
+  passwordResetUnavailable?.classList.toggle("hidden", emailFeaturesEnabled);
+  passwordResetEmailField?.classList.toggle("hidden", !emailFeaturesEnabled);
+  passwordResetSubmit?.classList.toggle("hidden", !emailFeaturesEnabled);
+  adminEmailWarning?.classList.toggle("hidden", emailFeaturesEnabled);
   viewDemoButton.classList.remove("hidden");
   googleAuthButton.classList.toggle("hidden", !authConfig.googleEnabled);
   const user = session.user;
@@ -1782,7 +1800,8 @@ async function loadAuthConfig() {
     console.warn(`[auth] Auth config failed to load: ${error.message}`);
     return {
       demoEnabled: false,
-      googleEnabled: false
+      googleEnabled: false,
+      emailFeaturesEnabled: false
     };
   }
 }

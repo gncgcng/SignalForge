@@ -12,6 +12,7 @@
     "test:google-oauth": "node scripts/google-oauth-test.js",
     "test:email-verification": "node scripts/email-verification-test.js",
     "test:transactional-emails": "node scripts/transactional-emails-test.js",
+    "test:email-feature-flag": "node scripts/email-feature-flag-test.js",
     "test:legal-consent": "node scripts/legal-consent-test.js",
     "test:landing-seo": "node scripts/landing-page-seo-test.js",
     "test:product-analytics": "node scripts/product-analytics-test.js",

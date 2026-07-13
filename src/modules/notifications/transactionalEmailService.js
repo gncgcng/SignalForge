@@ -8,6 +8,11 @@ export async function sendTransactionalEmail({ to, subject, html, text, category
     return { delivered: false, skipped: true, reason: "missing_email_fields" };
   }
 
+  if (!appConfig.email.featuresEnabled) {
+    console.info(`[email] skipped category=${safeCategory(category)} features_enabled=false`);
+    return { delivered: false, skipped: true, reason: "email_features_disabled" };
+  }
+
   if (!appConfig.abuseProtection.resendApiKey) {
     if (!appConfig.isProduction) {
       console.info(`[email] Development ${category} email to=${maskEmail(recipient)} subject=${safeSubject(subject)}`);
