@@ -3455,6 +3455,226 @@ polyline {
   color: #a5f3fc;
 }
 
+.signal-quality-summary,
+.signal-quality-card {
+  min-width: 0;
+  border: 1px solid rgba(34, 211, 238, 0.18);
+  border-radius: 8px;
+  background: rgba(5, 13, 23, 0.82);
+}
+
+.signal-quality-summary {
+  display: grid;
+  gap: 8px;
+  padding: 11px 12px;
+}
+
+.signal-quality-summary > div,
+.signal-quality-heading,
+.candidate-quality-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.signal-quality-summary > div > span,
+.signal-quality-summary p,
+.confidence-explanation {
+  color: var(--muted);
+}
+
+.signal-quality-summary p,
+.confidence-explanation,
+.signal-quality-row p,
+.signal-quality-explanation p {
+  margin: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+
+.signal-quality-card {
+  display: grid;
+  gap: 14px;
+  padding: 15px;
+}
+
+.signal-quality-card.compact {
+  padding: 12px;
+}
+
+.signal-quality-card.compact > summary {
+  cursor: pointer;
+  color: #d8f9ff;
+  font-weight: 800;
+  list-style-position: inside;
+}
+
+.signal-quality-card.compact[open] > summary {
+  margin-bottom: 14px;
+}
+
+.signal-quality-heading h4 {
+  margin: 3px 0 0;
+  font-size: 1rem;
+}
+
+.quality-chip {
+  display: inline-flex;
+  align-items: center;
+  width: max-content;
+  max-width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 850;
+  line-height: 1.2;
+}
+
+.quality-chip.strong,
+.quality-chip.good {
+  border-color: rgba(45, 212, 191, 0.4);
+  background: rgba(45, 212, 191, 0.08);
+  color: #79f2d0;
+}
+
+.quality-chip.fair {
+  border-color: rgba(250, 204, 21, 0.42);
+  background: rgba(250, 204, 21, 0.07);
+  color: #fde68a;
+}
+
+.quality-chip.weak,
+.quality-chip.missing,
+.quality-chip.limited {
+  border-color: rgba(148, 163, 184, 0.3);
+  color: #aab7c9;
+}
+
+.quality-chip.failed {
+  border-color: rgba(251, 113, 133, 0.42);
+  background: rgba(251, 113, 133, 0.07);
+  color: #fda4af;
+}
+
+.signal-quality-rows {
+  display: grid;
+  gap: 0;
+  border-top: 1px solid var(--line);
+}
+
+.signal-quality-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.signal-quality-row > div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.signal-quality-row strong {
+  color: #e5edf8;
+  font-size: 0.8rem;
+}
+
+.signal-quality-row p,
+.confidence-explanation {
+  font-size: 0.72rem;
+}
+
+.signal-quality-explanation {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.signal-quality-explanation section {
+  min-width: 0;
+  padding: 11px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgba(7, 12, 20, 0.7);
+}
+
+.signal-quality-explanation ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+
+.candidate-quality-summary {
+  justify-content: flex-start;
+  margin-bottom: 10px;
+}
+
+.admin-signal-quality-debug {
+  margin-top: 7px;
+  min-width: 0;
+}
+
+.admin-signal-quality-debug summary {
+  cursor: pointer;
+  color: var(--cyan);
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+.admin-signal-quality-debug > div,
+.admin-signal-quality-debug p {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.admin-signal-quality-debug p {
+  margin: 8px 0 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+
+.admin-signal-quality-debug small {
+  color: var(--muted);
+  white-space: normal;
+}
+
+@media (max-width: 767px) {
+  .signal-quality-card,
+  .signal-quality-card.compact,
+  .signal-quality-summary,
+  .signal-quality-row,
+  .signal-quality-explanation {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .signal-quality-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+  }
+
+  .signal-quality-explanation {
+    grid-template-columns: 1fr;
+  }
+
+  .signal-quality-row p,
+  .signal-quality-explanation li,
+  .confidence-explanation {
+    overflow-wrap: anywhere;
+  }
+}
+
 .support-page,
 .admin-support-page {
   min-width: 0;

@@ -518,7 +518,7 @@ export async function getAdminOperationsDashboard() {
     query(`
       SELECT s.id, s.symbol, s.timeframe, s.direction, s.setup_type AS strategy,
         s.confidence_score, s.risk_reward_ratio, s.validation_score,
-        s.validation_passed, COALESCE(o.status, 'Active') AS status,
+        s.validation_passed, s.indicators, COALESCE(o.status, 'Active') AS status,
         NULL::jsonb AS rejected_reasons, s.created_at
       FROM saved_signals s
       LEFT JOIN signal_outcomes o ON o.saved_signal_id = s.id
@@ -3516,6 +3516,7 @@ function signalSelectSql(whereClause) {
 
 function mapAdminSignalMonitorRow(row) {
   const rejectedReasons = Array.isArray(row.rejected_reasons) ? row.rejected_reasons : [];
+  const signalQuality = row.indicators?.signalQuality || null;
   return {
     id: row.id,
     market: row.symbol,
@@ -3529,6 +3530,7 @@ function mapAdminSignalMonitorRow(row) {
     status: row.status || (row.validation_passed === false ? "Rejected" : "Generated"),
     rejectedReason: rejectedReasons[0]?.reason || null,
     rejectedReasons,
+    signalQualityDebug: signalQuality?.debug || null,
     createdAt: row.created_at
   };
 }
@@ -3770,6 +3772,7 @@ function mapSignal(row) {
       adjustment: Number(row.indicators?.learningAdjustment || 0),
       sampleSize: Number(row.indicators?.learningSampleSize || 0)
     },
+    signalQuality: row.indicators?.signalQuality || null,
     reasoning: row.reasoning,
     confirmations: row.confirmations || [],
     indicators: row.indicators || {},

@@ -2497,6 +2497,10 @@ function renderCandidates() {
     return `<article class="candidate-card ${escapeHtml(candidate.status)}">
       <header><div><strong>${escapeHtml(getDisplaySymbol(candidate.symbol))}</strong><span>${escapeHtml(candidate.timeframe)} · ${escapeHtml(String(candidate.direction || "").toUpperCase())} · ${escapeHtml(candidate.setupType)}</span></div><span class="status-pill">${escapeHtml(label)}</span></header>
       <div class="candidate-scores"><span>Setup quality<strong>${Number(candidate.setupQualityScore ?? candidate.candidateScore)}%</strong></span><span>Entry readiness<strong>${Number(candidate.entryReadinessScore ?? candidate.readinessScore)}%</strong></span></div>
+      <div class="candidate-quality-summary">
+        <span class="quality-chip ${qualityStatusFromScore(candidate.setupQualityScore ?? candidate.candidateScore)}">Setup ${qualityLabel(qualityStatusFromScore(candidate.setupQualityScore ?? candidate.candidateScore))}</span>
+        <span class="quality-chip ${qualityStatusFromScore(candidate.entryReadinessScore ?? candidate.readinessScore)}">Entry ${qualityLabel(qualityStatusFromScore(candidate.entryReadinessScore ?? candidate.readinessScore))}</span>
+      </div>
       <p class="candidate-primary-reason"><strong>Why not a signal yet:</strong> ${escapeHtml(reasons[0])}</p>
       <p class="candidate-next-condition"><strong>Next:</strong> ${escapeHtml(nextConditions[0])}</p>
       <small>Last checked ${escapeHtml(formatDateTime(candidate.lastCheckedAt || candidate.firstDetectedAt))}</small>
@@ -4667,6 +4671,7 @@ function renderMobileSignalHistoryCard(signal) {
       ${renderRiskCalculator(signal)}
       ${renderPaperTradeAction(signal)}
       ${renderConfidenceSummary(signal)}
+      ${renderSignalQuality(signal, { compact: true })}
       ${renderMobileSignalAccordion(signal)}
     </article>
   `;
@@ -4945,6 +4950,7 @@ function renderScanCard(setup) {
         <div><span>Validation</span><strong>${setup.validationPassed === false ? "Rejected" : "Passed"}</strong></div>
         <div><span>Validation score</span><strong>${Number(setup.validationScore || 100)}/100</strong></div>
       </div>
+      ${renderLockedSignalQuality(setup)}
       <div class="compact-actions">
         <button data-unlock-symbol="${setup.symbol}" data-unlock-timeframe="${setup.timeframe}" data-unlock-setup-key="${escapeHtml(setup.setupKey || "")}" type="button" ${getSignalValidityState(setup).status === "expired" ? "disabled" : ""}>${getSignalValidityState(setup).status === "expired" ? "Expired" : "Unlock Signal"}</button>
         <button class="secondary-action" data-signal-details="${key}" type="button">${expanded ? "Hide Details" : "View Details"}</button>
@@ -5012,6 +5018,7 @@ function renderModeDetails(signal, locked = false) {
             <span>Review risk and market context before making any decision.</span>
           </div>
         </section>
+        ${locked ? "" : renderSignalQuality(signal)}
         ${renderSignalValidation(signal)}
         ${locked ? "" : renderRiskEngineCard(signal)}
       </section>
@@ -5022,6 +5029,7 @@ function renderModeDetails(signal, locked = false) {
     <section class="advanced-signal-details">
       <p class="reasoning">${escapeHtml(signal.reasoning || "Advanced signal context is based on rule alignment.")}</p>
       ${renderSignalTransparency(signal)}
+      ${locked ? "" : renderSignalQuality(signal)}
       ${renderSignalValidation(signal)}
       ${renderSignalConfluence(signal)}
       ${renderRiskEngineCard(signal, locked)}
@@ -5335,6 +5343,117 @@ function renderConfidenceSummary(signal) {
   `;
 }
 
+function renderLockedSignalQuality(signal) {
+  const quality = signal.signalQuality || {};
+  const overall = normalizeQualityStatus(quality.overall || qualityStatusFromScore(signal.qualityScore));
+  return `
+    <section class="signal-quality-summary" data-locked-quality-summary>
+      <div><span>Signal quality</span><strong class="quality-chip ${overall}">${qualityLabel(overall)}</strong></div>
+      <p>${escapeHtml(quality.mainReason || "Core confirmations and risk rules passed validation.")}</p>
+    </section>
+  `;
+}
+
+function renderSignalQuality(signal, { compact = false } = {}) {
+  const quality = getSignalQualityData(signal);
+  const categories = Object.values(quality.categories || {});
+  const content = `
+    <div class="signal-quality-heading">
+      <div><span class="eyebrow">Rule transparency</span><h4>Signal Quality</h4></div>
+      <span class="quality-chip ${normalizeQualityStatus(quality.overall)}">${qualityLabel(quality.overall)}</span>
+    </div>
+    <p class="confidence-explanation">${escapeHtml(quality.confidenceExplanation)}</p>
+    <div class="signal-quality-rows">
+      ${categories.map((item) => `
+        <div class="signal-quality-row">
+          <div><strong>${escapeHtml(item.label)}</strong><p>${escapeHtml(item.reason || "Not enough data")}</p></div>
+          <span class="quality-chip ${normalizeQualityStatus(item.status)}">${qualityLabel(item.status)}</span>
+        </div>
+      `).join("")}
+    </div>
+    <div class="signal-quality-explanation">
+      <section><strong>Why confidence is high</strong>${renderQualityReasonList(quality.strengths, "No strong category explanation is available yet.")}</section>
+      <section><strong>Risk factors</strong>${renderQualityReasonList(quality.risks, "No material weak category was recorded.")}</section>
+    </div>
+  `;
+  return compact
+    ? `<details class="signal-quality-card compact"><summary>Signal Quality · ${qualityLabel(quality.overall)}</summary>${content}</details>`
+    : `<section class="signal-quality-card">${content}</section>`;
+}
+
+function renderQualityReasonList(items = [], emptyText) {
+  return items.length
+    ? `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`
+    : `<p>${escapeHtml(emptyText)}</p>`;
+}
+
+function getSignalQualityData(signal) {
+  const stored = signal.signalQuality || signal.indicators?.signalQuality;
+  if (stored?.categories) return stored;
+  const definitions = [
+    ["trendAlignment", "Trend alignment", ["trend", "ema structure"]],
+    ["momentum", "Momentum", ["rsi", "momentum"]],
+    ["volumeConfirmation", "Volume confirmation", ["volume"]],
+    ["entryTiming", "Entry timing", []],
+    ["riskReward", "Risk/reward", []],
+    ["marketStructure", "Market structure", ["structure"]],
+    ["supportResistance", "Support/resistance context", ["support", "resistance"]],
+    ["volatilityAtr", "Volatility / ATR", ["atr", "volatility"]],
+    ["higherTimeframe", "Higher timeframe alignment", []],
+    ["learningHistory", "Learning history", []]
+  ];
+  const confirmations = signal.confirmations || [];
+  const categories = Object.fromEntries(definitions.map(([key, label, names]) => {
+    const confirmation = confirmations.find((item) => names.some((name) => String(item.name || "").toLowerCase().includes(name)));
+    let category = confirmation
+      ? { status: confirmation.passed ? "good" : "failed", reason: confirmation.detail || (confirmation.passed ? `${label} passed.` : `${label} failed.`) }
+      : { status: "missing", reason: "Not enough data" };
+    if (key === "entryTiming" && signal.indicators?.entryQuality) {
+      const entry = String(signal.indicators.entryQuality).toLowerCase();
+      category = { status: entry === "excellent" ? "strong" : normalizeQualityStatus(entry), reason: `Entry timing was classified as ${entry}.` };
+    }
+    if (key === "riskReward" && Number.isFinite(Number(signal.riskRewardRatio))) {
+      const rr = Number(signal.riskRewardRatio);
+      category = { status: rr >= 2.5 ? "strong" : rr >= 2 ? "good" : rr >= 1.5 ? "fair" : "failed", reason: `${rr.toFixed(2)}R was evaluated against the minimum risk/reward rule.` };
+    }
+    if (key === "higherTimeframe" && Number(signal.confluenceScore || signal.indicators?.confluenceScore)) {
+      category = { status: qualityStatusFromScore(signal.confluenceScore || signal.indicators.confluenceScore), reason: signal.alignmentBadge === "Full Alignment" ? "Higher timeframes are aligned." : "Higher timeframe alignment is partial." };
+    }
+    if (key === "learningHistory") {
+      const samples = Number(signal.learningInsight?.sampleSize || signal.indicators?.learningSampleSize || 0);
+      category = samples ? { status: samples >= 20 ? "good" : "fair", reason: `${samples} comparable closed signals informed calibration.` } : { status: "limited", reason: "Not enough closed signals yet for strong learning confidence." };
+    }
+    return [key, { key, label, ...category }];
+  }));
+  const list = Object.values(categories);
+  return {
+    overall: qualityStatusFromScore(signal.qualityScore || signal.confidenceScore),
+    categories,
+    strengths: list.filter((item) => ["strong", "good"].includes(item.status)).map((item) => item.reason).slice(0, 4),
+    risks: list.filter((item) => ["fair", "weak", "missing", "failed", "limited"].includes(item.status)).map((item) => item.reason).slice(0, 4),
+    confidenceExplanation: "Confidence reflects rule alignment and setup quality. It is not a guarantee or probability of profit."
+  };
+}
+
+function qualityStatusFromScore(value) {
+  const score = Number(value || 0);
+  if (score >= 88) return "strong";
+  if (score >= 75) return "good";
+  if (score >= 60) return "fair";
+  if (score > 0) return "weak";
+  return "missing";
+}
+
+function normalizeQualityStatus(value) {
+  const status = String(value || "missing").toLowerCase();
+  return ["strong", "good", "fair", "weak", "missing", "failed", "limited"].includes(status) ? status : "missing";
+}
+
+function qualityLabel(value) {
+  const status = normalizeQualityStatus(value);
+  return status.charAt(0).toUpperCase() + status.slice(1);
+}
+
 function renderUnlockedSignalDetails(signal) {
   const confirmations = normalizeConfirmations(signal.confirmations || [], signal.indicators || {});
   return `
@@ -5342,6 +5461,7 @@ function renderUnlockedSignalDetails(signal) {
       ${renderRiskCalculator(signal)}
       ${renderPaperTradeAction(signal)}
       ${renderConfidenceSummary(signal)}
+      ${renderSignalQuality(signal)}
       <section class="unlocked-analysis-section">
         <h4>Why this signal?</h4>
         <p class="reasoning">${escapeHtml(getShortSignalReason(signal))}</p>
@@ -6097,7 +6217,7 @@ function renderAdminSignalMonitor() {
             <span>${Number(signal.riskReward || 0).toFixed(2)}R</span>
             <span>${Number(signal.validationScore || 0).toFixed(0)}</span>
             <span><em class="status-pill ${signal.validationPassed ? "status-hit-tp" : "status-hit-sl"}">${escapeHtml(signal.status || "Unknown")}</em></span>
-            <span>${escapeHtml(signal.rejectedReason || "None")}</span>
+            <span>${escapeHtml(signal.rejectedReason || "None")}${renderAdminSignalQualityDebug(signal.signalQualityDebug)}</span>
           </div>
         `).join("")}
       </div>
@@ -6108,6 +6228,22 @@ function renderAdminSignalMonitor() {
 function renderAdminRejectionAnalytics() {
   const rows = state.adminDashboard?.rejectionAnalytics || [];
   renderAdminBarList("#admin-rejection-pie", rows, (item) => item.reason, (item) => item.count);
+}
+
+function renderAdminSignalQualityDebug(debug) {
+  if (!debug?.categories?.length) return "";
+  return `
+    <details class="admin-signal-quality-debug">
+      <summary>Raw quality scores</summary>
+      <div>
+        ${debug.categories.map((item) => `
+          <p><strong>${escapeHtml(item.label)}</strong><span>${item.score === null ? "n/a" : Number(item.score)} · ${escapeHtml(item.status)} · ${item.confidenceImpact === null ? "impact n/a" : `${Number(item.confidenceImpact) >= 0 ? "+" : ""}${Number(item.confidenceImpact)} confidence`}</span><small>${escapeHtml(item.ruleSource || "unknown rule")} · ${escapeHtml(item.reason || "No reason recorded")}</small></p>
+        `).join("")}
+        ${debug.penaltiesApplied?.length ? `<p><strong>Penalties</strong><small>${debug.penaltiesApplied.map((item) => `${escapeHtml(item.category)} ${Number(item.points)}: ${escapeHtml(item.reason)}`).join(" · ")}</small></p>` : ""}
+        ${debug.confidenceCapsApplied?.length ? `<p><strong>Confidence caps</strong><small>${debug.confidenceCapsApplied.map((item) => `${Number(item.cap)}: ${escapeHtml(item.reason)}`).join(" · ")}</small></p>` : ""}
+      </div>
+    </details>
+  `;
 }
 
 function renderAdminStrategyAnalytics() {
@@ -7478,6 +7614,7 @@ function renderUnlockReveal() {
       <div class="target"><span>Take Profit</span><strong>${formatCurrency(signal.takeProfit)}</strong></div>
       <div class="reward"><span>Risk / Reward</span><strong>${Number(signal.riskRewardRatio || 0).toFixed(2)}R</strong></div>
     </section>
+    ${renderSignalQuality(signal, { compact: true })}
     ${renderRiskCalculator(signal, { compact: true })}
     <div class="unlock-reveal-primary">${renderPaperTradeAction(signal, true)}</div>
     <div class="unlock-reveal-actions">

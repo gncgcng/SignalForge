@@ -37,6 +37,7 @@ import {
   isSignalExpired,
   withSignalValidity
 } from "./signalValidityService.js";
+import { toLockedSignalQuality, withSignalQuality } from "./signalQualityService.js";
 
 const scanTimeframes = ["1h", "4h", "15m", "5m"];
 
@@ -66,7 +67,7 @@ export async function createSignal(user, { symbol, timeframe, setupKey }) {
     if (existing) {
       existing.alreadyUnlocked = true;
       return {
-        signal: existing,
+        signal: toUserSignal(existing),
         alreadyUnlocked: true,
         analysis: result.analysis,
         subscription: getSubscriptionSummary(user)
@@ -100,7 +101,7 @@ export async function createSignal(user, { symbol, timeframe, setupKey }) {
     applyValidationToSignal(fullSetup, unlockValidation)
   );
   const signal = {
-    ...withSignalValidity(learningAdjusted),
+    ...withSignalQuality(withSignalValidity(learningAdjusted)),
     id: createId("sig"),
     userId: user.id,
     status: "Active",
@@ -127,7 +128,7 @@ export async function createSignal(user, { symbol, timeframe, setupKey }) {
   }
 
   return {
-    signal: savedSignal,
+    signal: toUserSignal(savedSignal),
     alreadyUnlocked: Boolean(savedSignal?.alreadyUnlocked),
     analysis: result.analysis,
     subscription: getSubscriptionSummary(user)
@@ -156,7 +157,7 @@ export async function unlockTelegramSignal(user, { setupKey }) {
   if (existing) {
     existing.alreadyUnlocked = true;
     return {
-      signal: existing,
+      signal: toUserSignal(existing),
       alreadyUnlocked: true,
       subscription: getSubscriptionSummary(user)
     };
@@ -194,9 +195,10 @@ export async function unlockTelegramSignal(user, { setupKey }) {
     };
   }
 
-  const validatedSignal = await applyLearningToValidatedSignal(
+  const learningAdjustedSignal = await applyLearningToValidatedSignal(
     applyValidationToSignal(signal, validation)
   );
+  const validatedSignal = withSignalQuality(withSignalValidity(learningAdjustedSignal));
   const savedSignal = await saveUnlockedSignal(user.id, validatedSignal);
   if (!savedSignal?.alreadyUnlocked) {
     await recordLearningSnapshot({ saveSignalSnapshot }, user.id, validatedSignal, freshMarketData);
@@ -220,7 +222,7 @@ export async function unlockTelegramSignal(user, { setupKey }) {
   }
 
   return {
-    signal: savedSignal,
+    signal: toUserSignal(savedSignal),
     alreadyUnlocked: Boolean(savedSignal?.alreadyUnlocked),
     subscription: getSubscriptionSummary(user)
   };
@@ -292,7 +294,7 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
     ? withSignalValidity(await applyLearningToValidatedSignal(applyValidationToSignal(readySignal, validation)))
     : null;
   const signal = learnedSignal
-    ? { ...learnedSignal, confidenceScore: Math.min(learnedSignal.confidenceScore, candidate?.confidenceEstimate || 99) }
+    ? withSignalQuality({ ...learnedSignal, confidenceScore: Math.min(learnedSignal.confidenceScore, candidate?.confidenceEstimate || 99) })
     : null;
   if (signal && candidate) {
     candidate = await markCandidatePromoted(candidate, signal) || { ...candidate, status: "promoted_to_signal" };
@@ -580,8 +582,21 @@ export async function listUserSignals(user) {
   const signals = await listSignalsByUser(user.id);
 
   return {
-    signals,
+    signals: signals.map(toUserSignal),
     stats: calculateSignalStats(signals)
+  };
+}
+
+function toUserSignal(signal) {
+  if (!signal?.signalQuality) return signal;
+  const signalQuality = { ...signal.signalQuality, debug: undefined };
+  return {
+    ...signal,
+    signalQuality,
+    indicators: {
+      ...(signal.indicators || {}),
+      signalQuality
+    }
   };
 }
 
@@ -606,12 +621,13 @@ function toScanPreview(signal) {
     confidenceScore: signal.confidenceScore,
     confidenceBand: signal.confidenceBand,
     qualityScore: signal.qualityScore,
+    signalQuality: toLockedSignalQuality(signal.signalQuality),
     validationPassed: signal.validationPassed,
     validationScore: signal.validationScore,
     rejectedReasons: signal.rejectedReasons || [],
     reasoning: signal.reasoning,
     confirmations: signal.confirmations,
-    indicators: signal.indicators,
+    indicators: { ...(signal.indicators || {}), signalQuality: undefined },
     generatedAt: signal.generatedAt,
     validUntil: signal.validUntil,
     validityDurationMs: signal.validityDurationMs,
