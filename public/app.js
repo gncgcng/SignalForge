@@ -10,6 +10,7 @@ import {
   normalizeSignal,
   signalFiltersToParams
 } from "./signalFilters.js";
+import { calculateRiskPosition } from "./riskCalculator.js";
 
 const state = {
   user: null,
@@ -26,6 +27,7 @@ const state = {
   firstScanCompleted: getStoredFirstScanCompleted(),
   expandedSignalKeys: new Set(),
   unlockedRevealSignalId: null,
+  riskCalculations: new Map(),
   lastScanSummary: null,
   activeView: "scanner",
   activeRoute: "scanner",
@@ -132,6 +134,8 @@ const UNLOCK_REVEAL_KEY = "signalforge-unlock-reveal";
 const ONBOARDING_SKIP_KEY = "signalforge-onboarding-skipped";
 const FIRST_SCAN_KEY = "signalforge-first-scan-complete";
 const PAPER_INDICATORS_KEY = "signalforge-paper-indicators";
+const RISK_ACCOUNT_SIZE_KEY = "signalforge-risk-account-size";
+const RISK_PERCENT_KEY = "signalforge-risk-percent";
 
 
 const authScreen = document.querySelector("#auth-screen");
@@ -1704,6 +1708,32 @@ signalsGrid.addEventListener("input", (event) => {
 signalsGrid.addEventListener("change", (event) => {
   const control = event.target.closest("[data-risk-account], [data-risk-percent]");
   if (control) updateRiskCard(control.closest(".risk-engine-card"));
+});
+
+document.addEventListener("input", (event) => {
+  const control = event.target.closest("[data-calculator-account], [data-calculator-percent], [data-calculator-custom]");
+  if (!control) return;
+  const calculator = control.closest("[data-risk-calculator]");
+  updateRiskCalculator(calculator, { persist: !control.matches("[data-calculator-custom]") });
+});
+
+document.addEventListener("click", (event) => {
+  const quickRisk = event.target.closest("[data-risk-quick]");
+  if (quickRisk) {
+    const calculator = quickRisk.closest("[data-risk-calculator]");
+    const percentInput = calculator?.querySelector("[data-calculator-percent]");
+    const customInput = calculator?.querySelector("[data-calculator-custom]");
+    if (!calculator || !percentInput || !customInput) return;
+    percentInput.value = quickRisk.dataset.riskQuick;
+    customInput.value = "";
+    updateRiskCalculator(calculator, { persist: true });
+    return;
+  }
+
+  const customRisk = event.target.closest("[data-risk-custom-focus]");
+  if (customRisk) {
+    customRisk.closest("[data-risk-calculator]")?.querySelector("[data-calculator-custom]")?.focus();
+  }
 });
 
 signalsHistory.addEventListener("click", async (event) => {
@@ -3663,12 +3693,20 @@ function prefillPaperOrderFromSignal(signal) {
   paperLimitPrice.value = signal.entryPrice;
   paperOrderStop.value = signal.stopLoss;
   paperOrderTarget.value = signal.takeProfit;
+  const sizing = getSignalRiskCalculation(signal);
+  if (sizing.valid) {
+    paperOrderQuantity.value = formatCalculatorNumber(sizing.quantity, 8);
+    paperOrderSize.value = formatCalculatorNumber(sizing.positionSize, 2);
+  }
   paperOrderNotes.value = `${signal.setupType || "SignalForge setup"} · unlocked signal`;
   state.paperTrading.direction = signal.direction;
   renderPaperOrderTicket();
   paperOrderWarning.textContent = closeToEntry
     ? "Current price is close to the signal entry zone. Simulated entry now is selected."
     : "Signal entry is away from current price. Watch only is selected; choose Limit if you want an order that may remain pending.";
+  if (sizing.valid) {
+    paperOrderWarning.textContent += ` Estimated risk: ${formatCurrency(sizing.riskAmount)} (${formatCalculatorNumber(sizing.riskPercent, 2)}%).`;
+  }
   paperOrderForm.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
@@ -4542,6 +4580,7 @@ function renderMobileSignalHistoryCard(signal) {
         ${renderMobileSignalValue("R/R", `${signal.riskRewardRatio}:1`)}
         ${renderMobileSignalValue("Confidence", `${signal.confidenceScore}%`)}
       </div>
+      ${renderRiskCalculator(signal)}
       ${renderPaperTradeAction(signal)}
       ${renderConfidenceSummary(signal)}
       ${renderMobileSignalAccordion(signal)}
@@ -4853,6 +4892,7 @@ function renderSignalCard(signal) {
         <div><span>Validation</span><strong>${signal.validationPassed === false ? "Rejected" : "Passed"}</strong></div>
         <div><span>Validation score</span><strong>${Number(signal.validationScore || 100)}/100</strong></div>
       </div>
+      ${renderRiskCalculator(signal)}
       <div class="compact-actions">
         <button class="secondary-action" data-signal-details="${key}" type="button">${expanded ? "Hide Details" : "View Details"}</button>
         ${renderPaperTradeAction(signal)}
@@ -4916,6 +4956,153 @@ function renderSignalValidation(signal) {
       ` : `<p class="reasoning">Final validation passed before publication, unlock, history, and performance tracking.</p>`}
     </section>
   `;
+}
+
+function getRiskCalculatorDefaults() {
+  const readPositive = (key, fallback) => {
+    try {
+      const value = Number(localStorage.getItem(key));
+      return Number.isFinite(value) && value > 0 ? value : fallback;
+    } catch {
+      return fallback;
+    }
+  };
+  return {
+    accountSize: readPositive(RISK_ACCOUNT_SIZE_KEY, 10000),
+    riskPercent: readPositive(RISK_PERCENT_KEY, 1)
+  };
+}
+
+function saveRiskCalculatorDefaults(accountSize, riskPercent) {
+  try {
+    if (Number.isFinite(accountSize) && accountSize > 0) {
+      localStorage.setItem(RISK_ACCOUNT_SIZE_KEY, String(accountSize));
+    }
+    if (Number.isFinite(riskPercent) && riskPercent > 0) {
+      localStorage.setItem(RISK_PERCENT_KEY, String(riskPercent));
+    }
+  } catch (error) {
+    console.warn(`[risk-calculator] Could not save preferences: ${error.message}`);
+  }
+}
+
+function formatCalculatorNumber(value, maximumFractionDigits = 4) {
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits,
+    useGrouping: false
+  }).format(Number(value || 0));
+}
+
+function calculateSignalRisk(signal, values = {}) {
+  const defaults = getRiskCalculatorDefaults();
+  return calculateRiskPosition({
+    direction: signal.direction,
+    entryPrice: signal.entryPrice,
+    stopLoss: signal.stopLoss,
+    takeProfit: signal.takeProfit,
+    accountSize: values.accountSize ?? defaults.accountSize,
+    riskPercent: values.riskPercent ?? defaults.riskPercent,
+    customRiskAmount: values.customRiskAmount ?? ""
+  });
+}
+
+function renderRiskCalculator(signal, { compact = false } = {}) {
+  const defaults = getRiskCalculatorDefaults();
+  const calculation = calculateSignalRisk(signal, defaults);
+  const signalId = escapeHtml(String(signal.id || getSignalKey(signal)));
+  const invalid = !calculation.valid;
+
+  return `
+    <section
+      class="signal-risk-calculator ${compact ? "compact" : ""}"
+      data-risk-calculator
+      data-signal-id="${signalId}"
+      data-direction="${escapeHtml(String(signal.direction || ""))}"
+      data-entry="${Number(signal.entryPrice)}"
+      data-stop="${Number(signal.stopLoss)}"
+      data-target="${Number(signal.takeProfit)}"
+    >
+      <div class="risk-calculator-heading">
+        <div><span class="eyebrow">Position sizing</span><h4>Risk Calculator</h4></div>
+        <span>Estimate only</span>
+      </div>
+      <div class="risk-calculator-inputs">
+        <label>Account size
+          <span class="currency-input"><span>$</span><input class="sf-input" data-calculator-account type="number" min="0.01" step="any" inputmode="decimal" value="${defaults.accountSize}" /></span>
+        </label>
+        <label>Risk per trade %
+          <input class="sf-input" data-calculator-percent type="number" min="0.01" step="0.1" inputmode="decimal" value="${defaults.riskPercent}" />
+        </label>
+        <label>Custom risk amount <small>Optional</small>
+          <span class="currency-input"><span>$</span><input class="sf-input" data-calculator-custom type="number" min="0.01" step="any" inputmode="decimal" placeholder="Use percentage" /></span>
+        </label>
+      </div>
+      <div class="risk-quick-buttons" aria-label="Quick risk percentages">
+        ${[0.5, 1, 2].map((percent) => `<button type="button" data-risk-quick="${percent}">${percent}%</button>`).join("")}
+        <button type="button" data-risk-custom-focus>Custom</button>
+      </div>
+      <p class="risk-calculator-warning ${defaults.riskPercent > 3 ? "" : "hidden"}" data-calculator-warning>High risk per trade. Many traders risk 1–2% or less per setup.</p>
+      <p class="risk-calculator-error ${invalid ? "" : "hidden"}" data-calculator-error>${escapeHtml(invalid ? `Risk calculator unavailable because signal levels are invalid. ${calculation.reason || ""}` : "")}</p>
+      <div class="risk-calculator-results ${invalid ? "hidden" : ""}" data-calculator-results>
+        <div><span>Risk amount</span><strong data-calculator-risk>${invalid ? "--" : formatCurrency(calculation.riskAmount)}</strong></div>
+        <div><span>Estimated position size</span><strong data-calculator-size>${invalid ? "--" : formatCurrency(calculation.positionSize)}</strong></div>
+        <div><span>Quantity</span><strong data-calculator-quantity>${invalid ? "--" : formatCalculatorNumber(calculation.quantity, 8)}</strong></div>
+        <div><span>Potential loss</span><strong class="negative" data-calculator-loss>${invalid ? "--" : formatCurrency(calculation.potentialLoss)}</strong></div>
+        <div><span>Potential profit</span><strong class="positive" data-calculator-profit>${invalid ? "--" : formatCurrency(calculation.potentialProfit)}</strong></div>
+        <div><span>Risk / reward</span><strong data-calculator-rr>${invalid ? "--" : `${calculation.riskReward.toFixed(2)}R`}</strong></div>
+        <div><span>Distance to stop</span><strong data-calculator-stop-distance>${invalid ? "--" : `${formatCurrency(calculation.stopDistance)} · ${calculation.stopDistancePercent.toFixed(2)}%`}</strong></div>
+        <div><span>Distance to target</span><strong data-calculator-target-distance>${invalid ? "--" : `${formatCurrency(calculation.targetDistance)} · ${calculation.targetDistancePercent.toFixed(2)}%`}</strong></div>
+      </div>
+      <p class="risk-calculator-note">Position sizing is a risk management estimate. SignalForge is an educational tool and does not provide financial advice.</p>
+    </section>
+  `;
+}
+
+function updateRiskCalculator(calculator, { persist = false } = {}) {
+  if (!calculator) return;
+  const accountSize = Number(calculator.querySelector("[data-calculator-account]")?.value);
+  const riskPercent = Number(calculator.querySelector("[data-calculator-percent]")?.value);
+  const customRiskAmount = calculator.querySelector("[data-calculator-custom]")?.value ?? "";
+  const calculation = calculateRiskPosition({
+    direction: calculator.dataset.direction,
+    entryPrice: calculator.dataset.entry,
+    stopLoss: calculator.dataset.stop,
+    takeProfit: calculator.dataset.target,
+    accountSize,
+    riskPercent,
+    customRiskAmount
+  });
+  if (persist) saveRiskCalculatorDefaults(accountSize, riskPercent);
+
+  const error = calculator.querySelector("[data-calculator-error]");
+  const results = calculator.querySelector("[data-calculator-results]");
+  const warning = calculator.querySelector("[data-calculator-warning]");
+  warning?.classList.toggle("hidden", !(calculation.valid && calculation.riskPercent > 3));
+  error?.classList.toggle("hidden", calculation.valid);
+  results?.classList.toggle("hidden", !calculation.valid);
+  if (!calculation.valid) {
+    if (error) error.textContent = `Risk calculator unavailable. ${calculation.reason || "Check the entered values."}`;
+    state.riskCalculations.delete(calculator.dataset.signalId);
+    return;
+  }
+
+  state.riskCalculations.set(calculator.dataset.signalId, calculation);
+  const set = (selector, value) => {
+    const node = calculator.querySelector(selector);
+    if (node) node.textContent = value;
+  };
+  set("[data-calculator-risk]", formatCurrency(calculation.riskAmount));
+  set("[data-calculator-size]", formatCurrency(calculation.positionSize));
+  set("[data-calculator-quantity]", formatCalculatorNumber(calculation.quantity, 8));
+  set("[data-calculator-loss]", formatCurrency(calculation.potentialLoss));
+  set("[data-calculator-profit]", formatCurrency(calculation.potentialProfit));
+  set("[data-calculator-rr]", `${calculation.riskReward.toFixed(2)}R`);
+  set("[data-calculator-stop-distance]", `${formatCurrency(calculation.stopDistance)} · ${calculation.stopDistancePercent.toFixed(2)}%`);
+  set("[data-calculator-target-distance]", `${formatCurrency(calculation.targetDistance)} · ${calculation.targetDistancePercent.toFixed(2)}%`);
+}
+
+function getSignalRiskCalculation(signal) {
+  return state.riskCalculations.get(String(signal.id || getSignalKey(signal))) || calculateSignalRisk(signal);
 }
 
 function renderRiskEngineCard(signal, locked = false) {
@@ -5051,6 +5238,7 @@ function renderUnlockedSignalDetails(signal) {
   const confirmations = normalizeConfirmations(signal.confirmations || [], signal.indicators || {});
   return `
     <div class="unlocked-signal-details">
+      ${renderRiskCalculator(signal)}
       ${renderPaperTradeAction(signal)}
       ${renderConfidenceSummary(signal)}
       <section class="unlocked-analysis-section">
@@ -7188,6 +7376,7 @@ function renderUnlockReveal() {
       <div class="target"><span>Take Profit</span><strong>${formatCurrency(signal.takeProfit)}</strong></div>
       <div class="reward"><span>Risk / Reward</span><strong>${Number(signal.riskRewardRatio || 0).toFixed(2)}R</strong></div>
     </section>
+    ${renderRiskCalculator(signal, { compact: true })}
     <div class="unlock-reveal-primary">${renderPaperTradeAction(signal, true)}</div>
     <div class="unlock-reveal-actions">
       <button class="secondary-action" type="button" data-unlock-view-analysis>View full analysis</button>
