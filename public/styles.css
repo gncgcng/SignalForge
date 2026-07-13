@@ -3323,6 +3323,12 @@ polyline {
   color: var(--cyan);
 }
 
+.status-expiring-soon {
+  border-color: rgba(250, 204, 21, 0.5);
+  background: rgba(250, 204, 21, 0.07);
+  color: #fde68a;
+}
+
 .status-hit-tp {
   border-color: rgba(74, 222, 128, 0.45);
   color: var(--green);
@@ -3335,6 +3341,105 @@ polyline {
 
 .status-expired {
   color: var(--muted);
+}
+
+.signal-validity {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid rgba(34, 211, 238, 0.16);
+  border-radius: 8px;
+  background: rgba(4, 12, 21, 0.7);
+}
+
+.signal-validity > div {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.signal-validity strong {
+  color: #d9f8ff;
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.signal-validity small {
+  color: var(--muted);
+  font-size: 0.7rem;
+  line-height: 1.45;
+}
+
+.signal-validity.compact {
+  display: inline-grid;
+  padding: 7px 9px;
+}
+
+.signal-expiry-warning,
+.expired-paper-action small {
+  display: block;
+  margin: 0 0 8px;
+  color: #fde68a;
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.expired-paper-action {
+  display: grid;
+  min-width: 0;
+  gap: 7px;
+}
+
+.expired-signal-notice {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 15px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 8px;
+  background: rgba(9, 14, 22, 0.96);
+}
+
+.expired-signal-notice > div:first-child {
+  display: grid;
+  gap: 7px;
+}
+
+.expired-signal-notice p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.expired-history-details {
+  grid-column: 1 / -1;
+  min-width: 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 767px) {
+  .signal-validity,
+  .signal-validity.compact,
+  .expired-paper-action,
+  .expired-signal-notice {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .expired-signal-notice {
+    grid-template-columns: 1fr;
+  }
+
+  .expired-signal-notice button,
+  .expired-paper-action button {
+    width: 100%;
+    min-height: 44px;
+  }
 }
 
 .status-closed,

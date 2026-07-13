@@ -9,6 +9,7 @@ import {
   formatTelegramSignalReplyMarkup
 } from "./notificationService.js";
 import { sendTelegramMessage } from "./telegramClient.js";
+import { isSignalExpired } from "../signals/signalValidityService.js";
 
 let queueTimer = null;
 let processing = false;
@@ -34,6 +35,11 @@ export async function processTelegramQueue() {
 
     while ((delivery = await claimNextTelegramNotification())) {
       try {
+        if (isSignalExpired(delivery.payload)) {
+          await markTelegramNotificationFailed(delivery.id, "Signal expired before Telegram delivery.", false);
+          console.info(`[telegram] expired alert skipped queue_id=${delivery.id} user=${delivery.userId}`);
+          continue;
+        }
         console.log(`[telegram] sending alert queue_id=${delivery.id} user=${delivery.userId} chat=${maskChatId(delivery.chatId)}`);
         await sendTelegramMessage(
           delivery.chatId,

@@ -7,6 +7,7 @@ import {
   upsertTelegramSettings
 } from "../../db/repositories.js";
 import { sendTelegramMessage } from "./telegramClient.js";
+import { formatSignalValidityWindow } from "../signals/signalValidityService.js";
 
 const directions = new Set(["long", "short", "both"]);
 const timeframes = new Set(["5m", "15m", "1h", "4h"]);
@@ -141,11 +142,13 @@ export function formatTelegramSignalMessage(setup) {
     `Direction: ${setup.direction.toUpperCase()}`,
     `Confidence: ${confidence}% (${getConfidenceTier(confidence)})`,
     `Setup: ${setup.setupType || "Qualified setup"}`,
+    `Valid for: ${formatSignalValidityWindow(setup.timeframe)}`,
     "",
     "Preview reason:",
     reason,
     "",
     "Preview only. Unlock to view full levels.",
+    "Market conditions may change before the validity window ends.",
     "Educational tool only. Not financial advice."
   ].join("\n");
 }

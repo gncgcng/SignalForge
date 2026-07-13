@@ -74,6 +74,7 @@
     "test:smart-money": "node scripts/smart-money-concepts-test.js",
     "test:dynamic-risk": "node scripts/dynamic-risk-engine-test.js",
     "test:risk-calculator": "node scripts/risk-calculator-test.js",
+    "test:signal-validity": "node scripts/signal-validity-test.js",
     "test:advanced-structure": "node scripts/advanced-market-structure-test.js"
   },
   "dependencies": {

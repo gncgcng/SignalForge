@@ -11,6 +11,7 @@ import {
   signalFiltersToParams
 } from "./signalFilters.js";
 import { calculateRiskPosition } from "./riskCalculator.js";
+import { formatSignalCountdown, getSignalValidityState } from "./signalValidity.js";
 
 const state = {
   user: null,
@@ -27,6 +28,7 @@ const state = {
   firstScanCompleted: getStoredFirstScanCompleted(),
   expandedSignalKeys: new Set(),
   unlockedRevealSignalId: null,
+  telegramExpiredNotice: null,
   riskCalculations: new Map(),
   lastScanSummary: null,
   activeView: "scanner",
@@ -1122,7 +1124,8 @@ generateButton.addEventListener("click", async () => {
       method: "POST",
       body: JSON.stringify({
         symbol: state.selectedPair.symbol,
-        timeframe: state.timeframe
+        timeframe: state.timeframe,
+        setupKey: state.scanResults.find((setup) => setup.symbol === state.selectedPair.symbol && setup.timeframe === state.timeframe)?.setupKey
       })
     });
     state.subscription = subscription;
@@ -1679,7 +1682,8 @@ signalsGrid.addEventListener("click", async (event) => {
       method: "POST",
       body: JSON.stringify({
         symbol: button.dataset.unlockSymbol,
-        timeframe: button.dataset.unlockTimeframe
+        timeframe: button.dataset.unlockTimeframe,
+        setupKey: button.dataset.unlockSetupKey
       })
     });
 
@@ -1737,6 +1741,11 @@ document.addEventListener("click", (event) => {
 });
 
 signalsHistory.addEventListener("click", async (event) => {
+  const historicalButton = event.target.closest("[data-expired-history]");
+  if (historicalButton) {
+    signalsHistory.querySelector("[data-expired-history-details]")?.classList.toggle("hidden");
+    return;
+  }
   const button = event.target.closest("[data-paper-signal-id]");
 
   if (button) {
@@ -1779,7 +1788,7 @@ async function unlockSignal(button, symbol, timeframe) {
     statusLine.textContent = `Unlocking ${symbol} ${timeframe}...`;
     const { signal, subscription, analysis, alreadyUnlocked } = await api.request("/api/signals/generate", {
       method: "POST",
-      body: JSON.stringify({ symbol, timeframe })
+      body: JSON.stringify({ symbol, timeframe, setupKey: button.dataset.unlockSetupKey })
     });
 
     state.subscription = subscription;
@@ -1804,6 +1813,15 @@ async function enterPaperTrade(button) {
   if (!signal) {
     statusLine.textContent = "Unlocked signal not found.";
     return;
+  }
+  const validity = getSignalValidityState(signal);
+  if (validity.status === "expired") {
+    statusLine.textContent = "This signal is expired. You can view it for learning, but it should not be treated as a current setup.";
+    showToast("Expired signals cannot be opened as fresh paper trades");
+    return;
+  }
+  if (validity.status === "expiring-soon") {
+    showToast("This signal is close to expiring. Price conditions may have changed.");
   }
   state.paperTrading.draftSignalId = signal.id;
   state.paperTrading.selectedSymbol = signal.symbol;
@@ -2181,13 +2199,22 @@ async function processPendingTelegramUnlock() {
 
   try {
     statusLine.textContent = "Unlocking Telegram signal preview...";
-    const { signal, subscription, alreadyUnlocked } = await api.request("/api/signals/telegram-unlock", {
+    const { signal, subscription, alreadyUnlocked, expired, message, historicalAnalysis } = await api.request("/api/signals/telegram-unlock", {
       method: "POST",
       body: JSON.stringify({ setupKey })
     });
 
     state.subscription = subscription;
     renderSubscription();
+
+    if (expired) {
+      state.telegramExpiredNotice = { message, signal: historicalAnalysis };
+      removeTelegramUnlockParam();
+      navigateTo("signals", {}, { replace: true });
+      renderSignalsHistory();
+      statusLine.textContent = message;
+      return;
+    }
 
     if (!signal) {
       statusLine.textContent = "Telegram signal preview could not be unlocked.";
@@ -2749,6 +2776,7 @@ function startSignalHistoryRefresh() {
   }
 
   signalRefreshTimer = setInterval(async () => {
+    refreshSignalValidityTimers();
     if (!state.user || !["signals", "paper-portfolio"].includes(state.activeView)) {
       return;
     }
@@ -2763,6 +2791,37 @@ function startSignalHistoryRefresh() {
       // Keep the current table visible if a demo refresh fails.
     }
   }, 30000);
+}
+
+function refreshSignalValidityTimers() {
+  document.querySelectorAll("[data-signal-validity]").forEach((element) => {
+    const signal = {
+      validUntil: element.dataset.validUntil,
+      generatedAt: element.dataset.generatedAt,
+      validityDurationMs: Number(element.dataset.validityDurationMs || 0),
+      status: element.dataset.signalStatus
+    };
+    const validity = getSignalValidityState(signal);
+    const status = getDemoSignalStatus(signal);
+    const badge = element.querySelector("[data-validity-badge]");
+    const countdown = element.querySelector("[data-validity-countdown]");
+    if (badge) {
+      badge.className = `status-pill ${status.className}`;
+      badge.textContent = status.label;
+    }
+    if (countdown) {
+      countdown.textContent = ["active", "expiring-soon"].includes(validity.status)
+        ? `Expires in: ${formatSignalCountdown(signal)}`
+        : status.label;
+    }
+    if (validity.status === "expired") {
+      element.closest("[data-signal-key]")?.querySelectorAll("[data-unlock-symbol], [data-paper-signal-id]")
+        .forEach((button) => {
+          button.disabled = true;
+          button.textContent = button.matches("[data-paper-signal-id]") ? "Expired · Historical only" : "Expired";
+        });
+    }
+  });
 }
 
 function navigateTo(routeOrView, params = {}, options = {}) {
@@ -3467,6 +3526,7 @@ function renderSignalsHistory() {
 
   if (state.signals.length === 0) {
     signalsHistory.innerHTML = `
+      ${renderTelegramExpiredNotice()}
       <div class="empty-state">
         <strong>No saved signals yet</strong>
         <p class="reasoning">Unlock a setup from Scan All or Unlock Current to save it in your Signals history.</p>
@@ -3479,6 +3539,7 @@ function renderSignalsHistory() {
   if (filtered.length === 0) {
     const empty = getSignalFilterEmptyState(state.historyFilters.status);
     signalsHistory.innerHTML = `
+      ${renderTelegramExpiredNotice()}
       <div class="empty-state">
         <strong>${escapeHtml(empty.title)}</strong>
         <p class="reasoning">${escapeHtml(empty.body)}</p>
@@ -3489,6 +3550,7 @@ function renderSignalsHistory() {
   }
 
   signalsHistory.innerHTML = `
+    ${renderTelegramExpiredNotice()}
     <table class="signals-table">
       <thead>
         <tr>
@@ -3516,6 +3578,27 @@ function renderSignalsHistory() {
     <div class="mobile-signals-list">
       ${filtered.map((signal) => renderMobileSignalHistoryCard(signal)).join("")}
     </div>
+  `;
+}
+
+function renderTelegramExpiredNotice() {
+  const notice = state.telegramExpiredNotice;
+  if (!notice) return "";
+  const signal = notice.signal || {};
+  return `
+    <section class="expired-signal-notice" role="status">
+      <div>
+        <span class="status-pill status-expired">Expired</span>
+        <strong>${escapeHtml(notice.message || "This signal has expired and is no longer valid as a fresh setup.")}</strong>
+        <p>It was not unlocked and no credit was charged.</p>
+      </div>
+      <button class="secondary-action" type="button" data-expired-history>View historical analysis</button>
+      <div class="expired-history-details hidden" data-expired-history-details>
+        <span>${escapeHtml(getDisplaySymbol(signal.symbol || "Signal"))} · ${escapeHtml(signal.timeframe || "")}</span>
+        <strong>${escapeHtml(signal.setupType || "Historical setup")}</strong>
+        <p>${escapeHtml(signal.reasoning || "This setup is retained for learning context only. Entry levels are not available without a valid unlock.")}</p>
+      </div>
+    </section>
   `;
 }
 
@@ -4549,7 +4632,7 @@ function renderSignalHistoryRow(signal) {
       <td>${formatCurrency(signal.takeProfit)}</td>
       <td>${signal.riskRewardRatio}:1</td>
       <td>${signal.confidenceScore}%</td>
-      <td><span class="status-pill ${status.className}">${status.label}</span></td>
+      <td>${renderSignalValidity(signal, { compact: true })}</td>
       <td>${formatDateTime(signal.generatedAt)}</td>
     </tr>
   `;
@@ -4573,6 +4656,7 @@ function renderMobileSignalHistoryCard(signal) {
         <strong class="direction ${signal.direction}">${escapeHtml(signal.direction || "")}</strong>
         <span>${formatDateTime(signal.generatedAt)}</span>
       </div>
+      ${renderSignalValidity(signal)}
       <div class="mobile-signal-values">
         ${renderMobileSignalValue("Entry", formatCurrency(signal.entryPrice))}
         ${renderMobileSignalValue("Stop", formatCurrency(signal.stopLoss))}
@@ -4661,31 +4745,33 @@ function renderMobileSignalAccordion(signal) {
 }
 
 function getDemoSignalStatus(signal) {
-  if (signal.status) {
-    const normalized = signal.status.toLowerCase().replaceAll(" ", "-");
-    const labels = {
-      active: "Active",
-      "hit-tp": "Hit TP",
-      "hit-sl": "Hit SL",
-      expired: "Expired",
-      closed: "Closed",
-      "manually-closed": "Closed",
-      "manual-close": "Closed"
-    };
+  const key = getSignalValidityState(signal).status;
+  const labels = {
+    active: "Active",
+    "expiring-soon": "Expiring Soon",
+    "hit-tp": "Hit TP",
+    "hit-sl": "Hit SL",
+    expired: "Expired",
+    closed: "Closed",
+    "manually-closed": "Closed"
+  };
+  return { label: labels[key] || "Active", className: `status-${key}`, key };
+}
 
-    return {
-      label: labels[normalized] || "Active",
-      className: `status-${normalized}`
-    };
-  }
-
-  const ageMinutes = (Date.now() - new Date(signal.generatedAt).getTime()) / 60000;
-
-  if (ageMinutes > 240) {
-    return { label: "Expired", className: "status-expired" };
-  }
-
-  return { label: "Active", className: "status-active" };
+function renderSignalValidity(signal, { compact = false } = {}) {
+  const status = getDemoSignalStatus(signal);
+  const validity = getSignalValidityState(signal);
+  const active = ["active", "expiring-soon"].includes(validity.status);
+  const timer = active ? `Expires in: ${formatSignalCountdown(signal)}` : status.label;
+  return `
+    <section class="signal-validity ${compact ? "compact" : ""}" data-signal-validity data-valid-until="${escapeHtml(signal.validUntil || "")}" data-generated-at="${escapeHtml(signal.generatedAt || signal.createdAt || "")}" data-validity-duration-ms="${Number(signal.validityDurationMs || 0)}" data-signal-status="${escapeHtml(signal.status || "Active")}">
+      <div>
+        <span class="status-pill ${status.className}" data-validity-badge>${status.label}</span>
+        <strong data-validity-countdown>${escapeHtml(timer)}</strong>
+      </div>
+      ${compact ? "" : `<small>Signal validity means the setup conditions were current when generated. Market conditions can change quickly.</small>`}
+    </section>
+  `;
 }
 
 function renderNoSetup(analysis) {
@@ -4851,6 +4937,7 @@ function renderScanCard(setup) {
         </div>
         <strong class="direction ${setup.direction}">${setup.direction}</strong>
       </div>
+      ${renderSignalValidity(setup)}
       <div class="signal-metrics">
         <div><span>Setup type</span><strong>${setup.setupType || "Qualified setup"}</strong></div>
         <div><span>Confidence</span><strong>${setup.confidenceScore}%</strong></div>
@@ -4859,7 +4946,7 @@ function renderScanCard(setup) {
         <div><span>Validation score</span><strong>${Number(setup.validationScore || 100)}/100</strong></div>
       </div>
       <div class="compact-actions">
-        <button data-unlock-symbol="${setup.symbol}" data-unlock-timeframe="${setup.timeframe}" type="button">Unlock Signal</button>
+        <button data-unlock-symbol="${setup.symbol}" data-unlock-timeframe="${setup.timeframe}" data-unlock-setup-key="${escapeHtml(setup.setupKey || "")}" type="button" ${getSignalValidityState(setup).status === "expired" ? "disabled" : ""}>${getSignalValidityState(setup).status === "expired" ? "Expired" : "Unlock Signal"}</button>
         <button class="secondary-action" data-signal-details="${key}" type="button">${expanded ? "Hide Details" : "View Details"}</button>
       </div>
       <div class="signal-details ${expanded ? "" : "hidden"}">
@@ -4882,6 +4969,7 @@ function renderSignalCard(signal) {
         </div>
         <strong class="direction ${signal.direction}">${signal.direction}</strong>
       </div>
+      ${renderSignalValidity(signal)}
       <div class="signal-metrics">
         <div><span>Setup type</span><strong>${signal.setupType || "Qualified setup"}</strong></div>
         <div><span>Entry</span><strong>${formatCurrency(signal.entryPrice)}</strong></div>
@@ -5215,11 +5303,24 @@ function renderPaperTradeAction(signal, primary = false) {
     return `<button class="${className}" type="button" disabled>Already added to Paper Trading</button>`;
   }
 
+  const validity = getSignalValidityState(signal);
+  if (validity.status === "expired") {
+    return `
+      <div class="expired-paper-action">
+        <button class="${className}" type="button" disabled>Expired · Historical only</button>
+        <small>This signal is expired. You can view it for learning, but it should not be treated as a current setup.</small>
+      </div>
+    `;
+  }
+
   if (signal.status !== "Active") {
     return `<button class="${className}" type="button" disabled>Signal ${signal.status}</button>`;
   }
 
-  return `<button class="${className}" data-paper-signal-id="${signal.id}" type="button">Add to Paper Trading</button>`;
+  return `
+    ${validity.status === "expiring-soon" ? `<p class="signal-expiry-warning">This signal is close to expiring. Price conditions may have changed.</p>` : ""}
+    <button class="${className}" data-paper-signal-id="${signal.id}" type="button">Add to Paper Trading</button>
+  `;
 }
 
 function renderConfidenceSummary(signal) {
@@ -7369,6 +7470,7 @@ function renderUnlockReveal() {
         <span>${escapeHtml(confidenceBand)} · ${Number(signal.confidenceScore || 0)}%</span>
         <span>${escapeHtml(signal.setupType || "Qualified setup")}</span>
       </div>
+      ${renderSignalValidity(signal, { compact: true })}
     </header>
     <section class="unlock-critical-levels" aria-label="Critical trade levels">
       <div class="entry"><span>Entry</span><strong>${formatCurrency(signal.entryPrice)}</strong></div>

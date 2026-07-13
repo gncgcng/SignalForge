@@ -1763,6 +1763,13 @@ export async function saveUnlockedSignal(userId, signal) {
       return mapped;
     }
 
+    if (!signal.validUntil || new Date(signal.validUntil).getTime() <= Date.now()) {
+      const error = new Error("This signal has expired and is no longer valid as a fresh setup.");
+      error.code = "SIGNAL_EXPIRED";
+      error.statusCode = 410;
+      throw error;
+    }
+
     const account = await client.query(`
       SELECT u.role, u.email_verified_at, c.unlock_credits_balance
       FROM users u
@@ -1790,9 +1797,10 @@ export async function saveUnlockedSignal(userId, signal) {
       INSERT INTO saved_signals (
         id, user_id, setup_key, symbol, timeframe, direction, entry_price, stop_loss, take_profit,
         risk_reward_ratio, confidence_score, quality_score, setup_type, reasoning,
-        confirmations, indicators, market_source, generated_at, validation_score, validation_passed
+        confirmations, indicators, market_source, generated_at, validation_score, validation_passed,
+        valid_until
       )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
     `, [
       signal.id,
       userId,
@@ -1813,7 +1821,8 @@ export async function saveUnlockedSignal(userId, signal) {
       signal.marketSource,
       signal.generatedAt,
       signal.validationScore ?? signal.validation?.score ?? 100,
-      signal.validationPassed !== false
+      signal.validationPassed !== false,
+      signal.validUntil
     ]);
 
     await client.query(`
@@ -1875,6 +1884,7 @@ export async function findActiveDuplicateSignal(userId, signal) {
       AND s.setup_type = $5
       AND s.setup_key = $6
       AND COALESCE(o.status, 'Active') = 'Active'
+      AND s.valid_until > now()
     LIMIT 1
   `, [
     userId,
@@ -1986,6 +1996,14 @@ export async function findSignalById(signalId, userId) {
   return result.rows[0] ? mapSignal(result.rows[0]) : null;
 }
 
+export async function findSignalBySetupKey(userId, setupKey) {
+  const result = await query(
+    signalSelectSql("WHERE s.user_id = $1 AND s.setup_key = $2 LIMIT 1"),
+    [userId, setupKey]
+  );
+  return result.rows[0] ? mapSignal(result.rows[0]) : null;
+}
+
 export async function listSignalsByUser(userId, executeQuery = query) {
   const result = await executeQuery(
     signalSelectSql("WHERE s.user_id = $1 ORDER BY s.created_at DESC"),
@@ -2052,6 +2070,45 @@ export async function listPerformanceSignalsByUser(userId, filters = {}) {
 export async function listActiveSignals() {
   const result = await query(signalSelectSql("WHERE COALESCE(o.status, 'Active') = 'Active' ORDER BY s.created_at DESC"), []);
   return result.rows.map(mapSignal);
+}
+
+export async function expireActiveSignalsPastValidity() {
+  return transaction(async (client) => {
+    await client.query(`
+      INSERT INTO signal_outcomes (saved_signal_id, status, updated_at)
+      SELECT s.id, 'Active', now()
+      FROM saved_signals s
+      WHERE s.valid_until <= now()
+      ON CONFLICT (saved_signal_id) DO NOTHING
+    `);
+    const expired = await client.query(`
+      WITH expired_outcomes AS (
+        UPDATE signal_outcomes o
+        SET status = 'Expired',
+          status_reason = 'Signal validity window ended before TP or SL was recorded.',
+          resolved_at = COALESCE(o.resolved_at, now()),
+          last_tracking_attempt_at = now(),
+          updated_at = now()
+        FROM saved_signals s
+        WHERE o.saved_signal_id = s.id
+          AND o.status = 'Active'
+          AND s.valid_until <= now()
+        RETURNING o.saved_signal_id, o.resolved_at
+      )
+      UPDATE saved_signals s
+      SET expired_at = COALESCE(s.expired_at, e.resolved_at)
+      FROM expired_outcomes e
+      WHERE s.id = e.saved_signal_id
+      RETURNING s.id
+    `);
+    const ids = expired.rows.map((row) => row.id);
+    if (!ids.length) return [];
+    const result = await client.query(
+      signalSelectSql("WHERE s.id = ANY($1::text[])"),
+      [ids]
+    );
+    return result.rows.map(mapSignal);
+  });
 }
 
 export async function updateSignalOutcome(signal) {
@@ -3718,6 +3775,12 @@ function mapSignal(row) {
     indicators: row.indicators || {},
     marketSource: row.market_source,
     generatedAt: row.generated_at,
+    createdAt: row.created_at,
+    validUntil: row.valid_until,
+    expiredAt: row.expired_at,
+    validityDurationMs: row.valid_until && row.generated_at
+      ? Math.max(0, new Date(row.valid_until).getTime() - new Date(row.generated_at).getTime())
+      : null,
     status: row.status || "Active",
     statusReason: row.status_reason,
     resolvedAt: row.resolved_at,

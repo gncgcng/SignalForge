@@ -37,6 +37,7 @@ assert.deepEqual(filterAndSortSignals(signals, { status: "closed" }, markets, no
 assert.deepEqual(getSignalStatusCounts(signals), {
   all: 6,
   active: 2,
+  "expiring-soon": 0,
   "hit-tp": 1,
   "hit-sl": 1,
   expired: 1,
@@ -92,7 +93,7 @@ const countFixture = [
   ...Array.from({ length: 10 }, (_, index) => signal(`expired-${index}`, "ETH-USD", "4h", "short", "EXPIRED", "Range Bounce", 80, 2, "2026-07-07T00:00:00Z"))
 ].map(normalizeSignal);
 assert.deepEqual(getSignalStatusCounts(countFixture), {
-  all: 24, active: 1, "hit-tp": 5, "hit-sl": 8, expired: 10, closed: 23
+  all: 24, active: 1, "expiring-soon": 0, "hit-tp": 5, "hit-sl": 8, expired: 10, closed: 23
 });
 assert.deepEqual(getSignalSummary(countFixture), {
   totalSignals: 24, winRate: 22, hitTpCount: 5, hitSlCount: 8, expiredCount: 10, closedCount: 23

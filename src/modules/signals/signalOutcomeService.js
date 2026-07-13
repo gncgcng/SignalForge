@@ -1,5 +1,6 @@
 import { appConfig } from "../../config/appConfig.js";
 import {
+  expireActiveSignalsPastValidity,
   listActiveSignals,
   listSignalsByUser,
   recordSignalLearningEvent,
@@ -8,6 +9,7 @@ import {
 } from "../../db/repositories.js";
 import { getCachedOhlcv, getOhlcv, getPair } from "../market-data/marketDataService.js";
 import { runSignalPostMortem } from "./signalLearningService.js";
+import { getSignalValidUntil } from "./signalValidityService.js";
 
 const terminalStatuses = new Set(["Hit TP", "Hit SL", "Expired"]);
 let trackingTimer = null;
@@ -48,19 +50,34 @@ function normalizeOutcomeStatus(value) {
 }
 
 export async function updateSignalsForUser(user) {
+  await expireSignalsPastValidity();
   const signals = await listSignalsByUser(user.id);
   await updateSignalOutcomes(signals);
-  return signals;
+  return listSignalsByUser(user.id);
 }
 
 export async function updateAllActiveSignalOutcomes() {
+  await expireSignalsPastValidity();
   await updateSignalOutcomes(await listActiveSignals());
+}
+
+export async function expireSignalsPastValidity() {
+  const expiredSignals = await expireActiveSignalsPastValidity();
+  for (const signal of expiredSignals) {
+    await runSignalPostMortem({ recordSignalLearningEvent, refreshLearningStats }, signal);
+  }
+  console.info(`[signals] expired=${expiredSignals.length}`);
+  return expiredSignals;
 }
 
 export function startSignalOutcomeTracker() {
   if (!appConfig.signalTracking.enabled || trackingTimer) {
     return;
   }
+
+  updateAllActiveSignalOutcomes().catch((error) => {
+    console.warn(`[signal-outcome-tracker] Startup cycle skipped: ${error.message}`);
+  });
 
   trackingTimer = setInterval(async () => {
     if (trackingInProgress) {
@@ -95,7 +112,7 @@ async function updateSignalOutcomes(signals) {
 
 async function updateSingleSignalOutcome(signal) {
   const createdAt = new Date(signal.generatedAt);
-  const expiresAt = new Date(createdAt.getTime() + appConfig.signalTracking.expirationHours * 60 * 60 * 1000);
+  const expiresAt = new Date(getSignalValidUntil(signal));
 
   if (Date.now() > expiresAt.getTime()) {
     await markSignal(signal, "Expired", "Signal expired before TP or SL was detected.");

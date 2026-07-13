@@ -15,6 +15,7 @@ import {
 import { updateSignalsForUser } from "../signals/signalOutcomeService.js";
 import { calculatePositionSizing } from "../risk/riskEngineService.js";
 import { getCachedOhlcv, getOhlcv, getPair, listPairs } from "../market-data/marketDataService.js";
+import { isSignalExpired } from "../signals/signalValidityService.js";
 
 const supportedPaperTimeframes = ["5m", "15m", "1h", "4h"];
 
@@ -41,7 +42,10 @@ export async function enterPaperTrade(user, signalId, input = {}) {
   }
 
   if (signal.status !== "Active") {
-    throw validationError("Only active unlocked signals can be entered as paper trades.");
+    throw expiredSignalError();
+  }
+  if (isSignalExpired(signal)) {
+    throw expiredSignalError();
   }
 
   const sizing = calculatePositionSizing({
@@ -116,10 +120,17 @@ export async function placePaperOrder(user, input = {}) {
   if (!supportedPaperTimeframes.includes(timeframe)) {
     throw validationError(`${timeframe} is not supported by the selected market data provider.`);
   }
-  if (input.savedSignalId && !await findSignalById(String(input.savedSignalId), user.id)) {
-    const error = validationError("Unlocked signal not found for this account.");
-    error.statusCode = 403;
-    throw error;
+  if (input.savedSignalId) {
+    await updateSignalsForUser(user);
+    const savedSignal = await findSignalById(String(input.savedSignalId), user.id);
+    if (!savedSignal) {
+      const error = validationError("Unlocked signal not found for this account.");
+      error.statusCode = 403;
+      throw error;
+    }
+    if (savedSignal.status !== "Active" || isSignalExpired(savedSignal)) {
+      throw expiredSignalError();
+    }
   }
 
   const marketData = await getOhlcv(symbol, timeframe);
@@ -400,5 +411,11 @@ function round(value) {
 function validationError(message) {
   const error = new Error(message);
   error.statusCode = 400;
+  return error;
+}
+
+function expiredSignalError() {
+  const error = validationError("This signal is expired. You can view it for learning, but it should not be treated as a current setup.");
+  error.statusCode = 410;
   return error;
 }

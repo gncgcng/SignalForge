@@ -1,6 +1,9 @@
+import { getSignalValidityState } from "./signalValidity.js";
+
 export const SIGNAL_STATUS_FILTERS = Object.freeze([
   ["all", "All"],
   ["active", "Active"],
+  ["expiring-soon", "Expiring Soon"],
   ["hit-tp", "Hit TP"],
   ["hit-sl", "Hit SL"],
   ["expired", "Expired"],
@@ -28,8 +31,9 @@ export function createSignalFilters(overrides = {}) {
 
 export function getSignalStatusKey(signal) {
   if (signal?.statusKey && terminalStatuses.has(signal.statusKey)) return signal.statusKey;
-  if (signal?.statusKey === "active") return "active";
-  return normalizeSignalStatus(signal?.status ?? signal?.outcome);
+  const outcome = normalizeSignalStatus(signal?.status ?? signal?.outcome);
+  if (terminalStatuses.has(outcome)) return outcome;
+  return getSignalValidityState(signal).status;
 }
 
 export function normalizeSignalStatus(value) {
@@ -46,14 +50,15 @@ export function normalizeSignalStatus(value) {
 }
 
 export function normalizeSignal(signal = {}) {
-  return { ...signal, statusKey: normalizeSignalStatus(signal.status ?? signal.outcome) };
+  return { ...signal, statusKey: getSignalStatusKey(signal) };
 }
 
 export function getSignalStatusCounts(signals = []) {
-  const counts = { all: signals.length, active: 0, "hit-tp": 0, "hit-sl": 0, expired: 0, closed: 0 };
+  const counts = { all: signals.length, active: 0, "expiring-soon": 0, "hit-tp": 0, "hit-sl": 0, expired: 0, closed: 0 };
   for (const signal of signals) {
     const status = getSignalStatusKey(signal);
-    if (status === "active") counts.active += 1;
+    if (["active", "expiring-soon"].includes(status)) counts.active += 1;
+    if (status === "expiring-soon") counts["expiring-soon"] += 1;
     if (status === "hit-tp") counts["hit-tp"] += 1;
     if (status === "hit-sl") counts["hit-sl"] += 1;
     if (status === "expired") counts.expired += 1;
@@ -94,7 +99,7 @@ export function filterAndSortSignals(signals = [], filters = {}, markets = [], n
 }
 
 export function filtersFromSignalParams(params, signals = []) {
-  const activeDefault = signals.some((signal) => getSignalStatusKey(signal) === "active") ? "active" : "all";
+  const activeDefault = signals.some((signal) => ["active", "expiring-soon"].includes(getSignalStatusKey(signal))) ? "active" : "all";
   return createSignalFilters({
     status: params.has("status") ? normalizeStatusFilter(params.get("status")) : activeDefault,
     pair: params.get("pair") || "all",
@@ -142,6 +147,7 @@ export function getSignalResultR(signal) {
 
 function matchesStatus(status, filter) {
   if (filter === "all") return true;
+  if (filter === "active") return ["active", "expiring-soon"].includes(status);
   if (filter === "closed") return terminalStatuses.has(status);
   return status === filter;
 }

@@ -1,6 +1,7 @@
 import {
   cacheScanResult,
   findActiveDuplicateSignal,
+  findSignalBySetupKey,
   findTelegramNotificationPayload,
   getLearningContextForSignal,
   getCachedScanResult,
@@ -31,10 +32,15 @@ import {
   recordLearningSnapshot
 } from "./signalLearningService.js";
 import { evaluateSetupReadiness, markCandidatePromoted, markCandidateRejected, observeSetupCandidate } from "./setupCandidateService.js";
+import {
+  assertSignalFresh,
+  isSignalExpired,
+  withSignalValidity
+} from "./signalValidityService.js";
 
 const scanTimeframes = ["1h", "4h", "15m", "5m"];
 
-export async function createSignal(user, { symbol, timeframe }) {
+export async function createSignal(user, { symbol, timeframe, setupKey }) {
   const scanKey = `single:${symbol}:${timeframe}`;
   const cached = await getCachedScanResult(user.id, scanKey);
   let result = cached;
@@ -54,8 +60,30 @@ export async function createSignal(user, { symbol, timeframe }) {
     };
   }
 
+  const requestedSetupKey = String(setupKey || "").trim();
+  if (requestedSetupKey) {
+    const existing = await findSignalBySetupKey(user.id, requestedSetupKey);
+    if (existing) {
+      existing.alreadyUnlocked = true;
+      return {
+        signal: existing,
+        alreadyUnlocked: true,
+        analysis: result.analysis,
+        subscription: getSubscriptionSummary(user)
+      };
+    }
+    if (result.fullSetup?.setupKey !== requestedSetupKey) {
+      const error = new Error("This setup is no longer the current scanner result. Run a fresh scan.");
+      error.statusCode = 409;
+      throw error;
+    }
+  }
+
+  const fullSetup = withSignalValidity(result.fullSetup);
+  assertSignalFresh(fullSetup);
+
   const freshMarketData = await getMultiTimeframeMarketData(symbol, timeframe);
-  const unlockValidation = await validateSignalForPublication(result.fullSetup, freshMarketData, user, {
+  const unlockValidation = await validateSignalForPublication(fullSetup, freshMarketData, user, {
     source: "unlock",
     duplicate: false
   });
@@ -69,10 +97,10 @@ export async function createSignal(user, { symbol, timeframe }) {
   }
 
   const learningAdjusted = await applyLearningToValidatedSignal(
-    applyValidationToSignal(result.fullSetup, unlockValidation)
+    applyValidationToSignal(fullSetup, unlockValidation)
   );
   const signal = {
-    ...learningAdjusted,
+    ...withSignalValidity(learningAdjusted),
     id: createId("sig"),
     userId: user.id,
     status: "Active",
@@ -123,8 +151,30 @@ export async function unlockTelegramSignal(user, { setupKey }) {
     throw error;
   }
 
+
+  const existing = await findSignalBySetupKey(user.id, key);
+  if (existing) {
+    existing.alreadyUnlocked = true;
+    return {
+      signal: existing,
+      alreadyUnlocked: true,
+      subscription: getSubscriptionSummary(user)
+    };
+  }
+
+  const queuedSignal = withSignalValidity(queuedSetup);
+  if (isSignalExpired(queuedSignal)) {
+    return {
+      signal: null,
+      expired: true,
+      message: "This signal has expired and is no longer valid as a fresh setup.",
+      historicalAnalysis: toScanPreview(queuedSignal),
+      subscription: getSubscriptionSummary(user)
+    };
+  }
+
   const signal = {
-    ...queuedSetup,
+    ...queuedSignal,
     id: queuedSetup.id || createId("sig"),
     userId: user.id,
     status: "Active",
@@ -239,7 +289,7 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
     : null;
   const valid = Boolean(readySignal && validation?.passed);
   const learnedSignal = valid
-    ? await applyLearningToValidatedSignal(applyValidationToSignal(readySignal, validation))
+    ? withSignalValidity(await applyLearningToValidatedSignal(applyValidationToSignal(readySignal, validation)))
     : null;
   const signal = learnedSignal
     ? { ...learnedSignal, confidenceScore: Math.min(learnedSignal.confidenceScore, candidate?.confidenceEstimate || 99) }
@@ -563,6 +613,8 @@ function toScanPreview(signal) {
     confirmations: signal.confirmations,
     indicators: signal.indicators,
     generatedAt: signal.generatedAt,
+    validUntil: signal.validUntil,
+    validityDurationMs: signal.validityDurationMs,
     locked: true
   };
 }
