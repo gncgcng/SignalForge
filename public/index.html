@@ -429,6 +429,32 @@
     </div>
   </section>
 
+  <section class="public-recovery-page hidden" id="account-recovery-support-page" aria-live="polite">
+    <div class="public-recovery-shell">
+      <a class="brand-mark public-profile-brand" href="/" aria-label="SignalForge home">
+        <img src="/icons/android-chrome-192x192.png" alt="" />
+        <span>SignalForge</span>
+      </a>
+      <article class="panel public-recovery-card">
+        <span class="eyebrow">Public account help</span>
+        <h1>Account Recovery Support</h1>
+        <p>Submit an account recovery request for admin review. This form does not confirm whether an account exists.</p>
+        <form id="account-recovery-support-form" class="support-form">
+          <label>Email address used for the account<input name="email" type="email" autocomplete="email" maxlength="254" required /></label>
+          <label>Username if known<input name="username" autocomplete="username" maxlength="20" placeholder="Optional" /></label>
+          <label>Issue type<select name="issueType">
+            <option>Can’t sign in</option><option>Forgot password</option><option>Email reset unavailable</option><option>Account locked</option><option>Other</option>
+          </select></label>
+          <label>Subject<input name="subject" minlength="4" maxlength="160" required placeholder="Briefly describe the access issue" /></label>
+          <label>Message<textarea name="message" minlength="10" maxlength="5000" rows="6" required placeholder="Describe what happened without including passwords or security codes."></textarea></label>
+          <button id="account-recovery-submit" type="submit">Submit recovery request</button>
+          <a class="secondary-action recovery-back-link" href="#" id="recovery-back-to-sign-in">Back to sign in</a>
+          <p class="form-note" id="account-recovery-status">Your request will be saved for admin review. Do not include your password.</p>
+        </form>
+      </article>
+    </div>
+  </section>
+
   <section class="auth-screen hidden" id="auth-screen">
         <div class="brand-panel">
           <img class="brand-logo auth-logo" src="/icons/android-chrome-192x192.png" alt="SignalForge" />
@@ -488,8 +514,8 @@
           <span class="eyebrow">Account recovery</span>
           <h2>Reset password</h2>
           <div class="auth-recovery-unavailable hidden" id="password-reset-unavailable">
-            <p>Password reset by email is not available yet. Please contact support if you need help accessing your account.</p>
-            <a class="primary-action" href="#support" id="password-reset-contact-support">Contact Support</a>
+            <p>Password reset by email is not available yet. If you can’t access your account, submit an account recovery request below.</p>
+            <a class="primary-action" href="#account-recovery-support" id="password-reset-contact-support">Contact Support</a>
           </div>
           <label id="password-reset-email-field">
             Email

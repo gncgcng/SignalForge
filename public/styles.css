@@ -7029,3 +7029,39 @@ polyline {
   .candidate-grid { grid-template-columns: 1fr; }
   .candidate-section { margin-inline: 0; }
 }
+.public-recovery-page {
+  min-height: 100vh;
+  padding: 24px;
+  background: var(--bg, #050a12);
+}
+
+.public-recovery-shell {
+  width: min(100%, 620px);
+  margin: 0 auto;
+}
+
+.public-recovery-card {
+  margin-top: 28px;
+  padding: clamp(20px, 4vw, 32px);
+}
+
+.public-recovery-card h1 {
+  margin: 8px 0 10px;
+  font-size: clamp(1.65rem, 5vw, 2.25rem);
+}
+
+.public-recovery-card .support-form {
+  margin-top: 24px;
+}
+
+.recovery-back-link {
+  display: flex;
+  justify-content: center;
+  text-decoration: none;
+}
+
+@media (max-width: 767px) {
+  .public-recovery-page { padding: 16px; }
+  .public-recovery-card { margin-top: 18px; width: 100%; overflow: hidden; }
+  .public-recovery-card button { width: 100%; min-height: 48px; }
+}

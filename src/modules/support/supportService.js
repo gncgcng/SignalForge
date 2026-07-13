@@ -1,4 +1,6 @@
+import { createHmac } from "node:crypto";
 import { appConfig } from "../../config/appConfig.js";
+import { getSignupContext } from "../auth/abuseProtectionService.js";
 import { isAdminUser } from "../auth/authService.js";
 import {
   sendSupportAdminNotificationEmail,
@@ -6,6 +8,7 @@ import {
 } from "../notifications/transactionalEmailService.js";
 import {
   createSupportTicketRecord,
+  createPublicRecoveryTicketRecord,
   findSupportTicketByUser,
   findSupportTicketForAdmin,
   getSupportTicketSummary,
@@ -13,6 +16,8 @@ import {
   listSupportTicketsByUser,
   updateSupportTicketRecord
 } from "./supportRepository.js";
+
+const recoveryIssues = new Set(["Can’t sign in", "Forgot password", "Email reset unavailable", "Account locked", "Other"]);
 
 export const supportIssues = Object.freeze({
   "Account / Login": ["Cannot sign in", "Google login issue", "Password reset issue", "Session keeps expiring", "Account settings issue"],
@@ -68,6 +73,39 @@ export async function submitSupportTicket(user, input, context = {}) {
     ticket,
     tickets: await listSupportTicketsByUser(user.id)
   };
+}
+
+export async function submitPublicRecoveryTicket(input, req, context = {}) {
+  const ticketInput = validatePublicRecoveryInput(input);
+  const ipHash = getSignupContext(req, "").ipHash;
+  const userAgent = cleanText(context.userAgent, 500);
+  const requesterFingerprintHash = createHmac("sha256", appConfig.abuseProtection.hashSecret)
+    .update(`account-recovery:${ipHash}:${userAgent}`)
+    .digest("hex");
+  await createPublicRecoveryTicketRecord(ticketInput, {
+    requesterFingerprintHash,
+    userAgent,
+    pageUrl: validatePageUrl(input.pageUrl)
+  });
+  return {
+    ok: true,
+    message: "Request submitted for review.",
+    detail: "Your request has been saved for admin review. Check back later or contact us through any official SignalForge support channel when available."
+  };
+}
+
+export function validatePublicRecoveryInput(input = {}) {
+  const email = String(input.email || "").trim().toLowerCase();
+  const username = cleanText(input.username, 20);
+  const issueType = cleanText(input.issueType || "Other", 80);
+  const subject = cleanText(input.subject, 160);
+  const message = cleanText(input.message, 5000, { multiline: true });
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) throw httpError(400, "Enter a valid email address.");
+  if (username && !/^[A-Za-z0-9_]{3,20}$/.test(username)) throw httpError(400, "Username must use 3-20 letters, numbers, or underscores.");
+  if (!recoveryIssues.has(issueType)) throw httpError(400, "Choose a valid account recovery issue.");
+  if (subject.length < 4) throw httpError(400, "Subject must be at least 4 characters.");
+  if (message.length < 10) throw httpError(400, "Message must be at least 10 characters.");
+  return { email, username: username || null, issueType, subject, message: `[${issueType}] ${message}` };
 }
 
 export async function getAdminSupportTickets(admin, input = {}) {

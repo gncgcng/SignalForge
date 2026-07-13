@@ -57,6 +57,41 @@ export async function createSupportTicketRecord(user, input, context) {
   });
 }
 
+export async function createPublicRecoveryTicketRecord(input, context) {
+  return transaction(async (client) => {
+    const fingerprint = context.requesterFingerprintHash;
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`recovery:${fingerprint}`]);
+    const limits = await client.query(`
+      SELECT COUNT(*) AS hourly
+      FROM support_tickets
+      WHERE source = 'public_account_recovery'
+        AND requester_fingerprint_hash = $1
+        AND created_at >= now() - interval '1 hour'
+    `, [fingerprint]);
+    assertPublicRecoverySubmissionAllowed(Number(limits.rows[0]?.hourly || 0));
+
+    const result = await client.query(`
+      INSERT INTO support_tickets (
+        id, user_id, username_snapshot, email_snapshot,
+        topic, issue, subject, message, priority,
+        user_agent, page_url, source, requester_fingerprint_hash
+      )
+      VALUES ($1,NULL,$2,$3,'Account / Login','Account recovery',$4,$5,'normal',$6,$7,'public_account_recovery',$8)
+      RETURNING *
+    `, [
+      createId("ticket"),
+      input.username || null,
+      input.email,
+      input.subject,
+      input.message,
+      context.userAgent || null,
+      context.pageUrl || null,
+      fingerprint
+    ]);
+    return mapTicket(result.rows[0], { admin: false });
+  });
+}
+
 export async function listSupportTicketsByUser(userId) {
   const result = await query(`
     SELECT * FROM support_tickets
@@ -166,7 +201,8 @@ function mapTicket(row, { admin }) {
     relatedSubscriptionId: row.related_subscription_id || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    resolvedAt: row.resolved_at || null
+    resolvedAt: row.resolved_at || null,
+    source: row.source || "authenticated_support"
   };
   if (!admin) return ticket;
   return {
@@ -175,7 +211,7 @@ function mapTicket(row, { admin }) {
     assignedTo: row.assigned_to || null,
     user: {
       id: row.user_id,
-      username: row.current_username || row.username_snapshot || "No username",
+      username: row.current_username || row.username_snapshot || (row.user_id ? "No username" : "Logged-out user"),
       email: row.current_email || row.email_snapshot,
       subscriptionTier: row.current_plan || row.subscription_tier_snapshot || "free",
       creditBalance: Number(row.current_credit_balance ?? row.credit_balance_snapshot ?? 0)
@@ -185,6 +221,16 @@ function mapTicket(row, { admin }) {
       pageUrl: row.page_url || ""
     }
   };
+}
+
+export function assertPublicRecoverySubmissionAllowed(hourly) {
+  if (Number(hourly) >= 3) {
+    const error = new Error("Account recovery request limit reached. Please wait before submitting another request.");
+    error.statusCode = 429;
+    error.code = "RECOVERY_RATE_LIMIT";
+    throw error;
+  }
+  return true;
 }
 
 export function assertSupportSubmissionAllowed(hourly, daily) {

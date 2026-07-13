@@ -5,11 +5,22 @@ import {
   getMySupportTicket,
   getMySupportTickets,
   submitSupportTicket,
+  submitPublicRecoveryTicket,
   updateAdminSupportTicket
 } from "./supportService.js";
 
 export async function handleSupportRoutes(req, res, pathname, url) {
   if (!pathname.startsWith("/api/support") && !pathname.startsWith("/api/admin/support")) return false;
+  if (pathname === "/api/support/account-recovery" && req.method === "POST") {
+    try {
+      const body = await readJson(req);
+      return sendJson(res, 201, await submitPublicRecoveryTicket(body, req, {
+        userAgent: req.headers["user-agent"] || ""
+      }), { "cache-control": "no-store" });
+    } catch (error) {
+      return sendError(res, error.statusCode || 400, error.message);
+    }
+  }
   if (!req.user) return sendError(res, 401, "Authentication required.");
 
   try {

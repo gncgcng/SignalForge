@@ -139,6 +139,9 @@ const candidateGrid = document.querySelector("#candidate-grid");
 const candidateCount = document.querySelector("#candidate-count");
 const landingPage = document.querySelector("#landing-page");
 const publicProfilePage = document.querySelector("#public-profile-page");
+const accountRecoverySupportPage = document.querySelector("#account-recovery-support-page");
+const accountRecoverySupportForm = document.querySelector("#account-recovery-support-form");
+const accountRecoveryStatus = document.querySelector("#account-recovery-status");
 const dashboard = document.querySelector("#dashboard");
 const appSplash = document.querySelector("#app-splash");
 const appSplashStatus = document.querySelector("#app-splash-status");
@@ -156,6 +159,7 @@ const passwordResetUnavailable = document.querySelector("#password-reset-unavail
 const passwordResetEmailField = document.querySelector("#password-reset-email-field");
 const passwordResetSubmit = document.querySelector("#password-reset-submit");
 const adminEmailWarning = document.querySelector("#admin-email-warning");
+const passwordResetContactSupport = document.querySelector("#password-reset-contact-support");
 let emailFeaturesEnabled = false;
 const backToLoginButton = document.querySelector("#back-to-login-button");
 const legalConsent = document.querySelector("#legal-consent");
@@ -564,6 +568,43 @@ authForm.addEventListener("submit", async (event) => {
 
 forgotPasswordButton?.addEventListener("click", () => {
   showPasswordResetRequest();
+});
+
+passwordResetContactSupport?.addEventListener("click", (event) => {
+  event.preventDefault();
+  history.pushState({}, "", "#account-recovery-support");
+  showAccountRecoverySupport();
+});
+
+document.querySelector("#recovery-back-to-sign-in")?.addEventListener("click", (event) => {
+  event.preventDefault();
+  history.pushState({}, "", location.pathname);
+  showAuth();
+});
+
+accountRecoverySupportForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!accountRecoverySupportForm.reportValidity()) return;
+  const button = document.querySelector("#account-recovery-submit");
+  try {
+    button.disabled = true;
+    button.textContent = "Submitting...";
+    accountRecoveryStatus.textContent = "Saving your account recovery request...";
+    const result = await api.request("/api/support/account-recovery", {
+      method: "POST",
+      body: JSON.stringify({
+        ...Object.fromEntries(new FormData(accountRecoverySupportForm)),
+        pageUrl: location.href
+      })
+    });
+    accountRecoverySupportForm.reset();
+    accountRecoveryStatus.textContent = `Account recovery request submitted. We’ll review it inside SignalForge support. ${result.detail}`;
+  } catch (error) {
+    accountRecoveryStatus.textContent = error.message;
+  } finally {
+    button.disabled = false;
+    button.textContent = "Submit recovery request";
+  }
 });
 
 backToLoginButton?.addEventListener("click", () => {
@@ -1696,6 +1737,11 @@ async function enterPaperTrade(button) {
 
 async function init() {
   setSplashStatus("Restoring your session");
+  if (isAccountRecoveryRoute()) {
+    setSplashStatus("Opening account recovery support");
+    showAccountRecoverySupport();
+    return;
+  }
   if (isPublicProfileRoute()) {
     setSplashStatus("Loading public profile");
     await loadPublicProfileRoute();
@@ -2094,6 +2140,7 @@ function showAuth() {
 }
 
 function showAuthForm() {
+  accountRecoverySupportPage?.classList.add("hidden");
   authForm?.classList.remove("hidden");
   passwordResetRequestForm?.classList.add("hidden");
   passwordResetConfirmForm?.classList.add("hidden");
@@ -2104,7 +2151,21 @@ function showPasswordResetRequest() {
   authForm?.classList.add("hidden");
   passwordResetRequestForm?.classList.remove("hidden");
   passwordResetConfirmForm?.classList.add("hidden");
-  passwordResetRequestNote.textContent = "We will email a reset link if the account exists.";
+  passwordResetRequestNote.textContent = emailFeaturesEnabled
+    ? "Password recovery availability is checked securely."
+    : "Email password reset is not available yet. Submit an account recovery request.";
+}
+
+function isAccountRecoveryRoute() {
+  return String(location.hash || "").split("?")[0].toLowerCase() === "#account-recovery-support";
+}
+
+function showAccountRecoverySupport() {
+  publicProfilePage?.classList.add("hidden");
+  landingPage.classList.add("hidden");
+  authScreen.classList.add("hidden");
+  dashboard.classList.add("hidden");
+  accountRecoverySupportPage?.classList.remove("hidden");
 }
 
 function showPasswordResetConfirm() {
@@ -2650,6 +2711,10 @@ function syncRouteFromLocation({ force = false, replaceInvalid = false, viewOpti
 }
 
 function handleBrowserRouteChange() {
+  if (isAccountRecoveryRoute()) {
+    showAccountRecoverySupport();
+    return;
+  }
   syncRouteFromLocation({ replaceInvalid: true });
 }
 
@@ -5994,6 +6059,7 @@ function renderAdminSupportDetail() {
     <div class="support-message-block"><span>Full message</span><p>${escapeHtml(ticket.message)}</p></div>
     <div class="admin-support-references">
       <p><strong>Ticket:</strong> ${escapeHtml(ticket.id)}</p>
+      <p><strong>Source:</strong> ${escapeHtml(ticket.source === "public_account_recovery" ? "Account recovery" : "Authenticated support")}</p>
       <p><strong>User ID:</strong> ${escapeHtml(ticket.user?.id || "Unavailable")}</p>
       <p><strong>Signal:</strong> ${escapeHtml(ticket.relatedSignalId || "Not supplied")}</p>
       <p><strong>Subscription/payment:</strong> ${escapeHtml(ticket.relatedSubscriptionId || "Not supplied")}</p>
