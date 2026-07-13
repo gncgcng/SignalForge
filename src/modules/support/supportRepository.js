@@ -7,7 +7,12 @@ const ticketSelect = `
     COALESCE(u.username, t.username_snapshot) AS current_username,
     COALESCE(u.email, t.email_snapshot) AS current_email,
     COALESCE(u.plan, t.subscription_tier_snapshot) AS current_plan,
-    COALESCE(c.unlock_credits_balance, t.credit_balance_snapshot) AS current_credit_balance
+    COALESCE(c.unlock_credits_balance, t.credit_balance_snapshot) AS current_credit_balance,
+    CASE WHEN t.source = 'public_account_recovery' THEN EXISTS (
+      SELECT 1 FROM users ru
+      WHERE lower(ru.email) = lower(t.email_snapshot)
+        OR (t.username_snapshot IS NOT NULL AND ru.username_normalized = lower(t.username_snapshot))
+    ) ELSE false END AS recovery_account_found
   FROM support_tickets t
   LEFT JOIN users u ON u.id = t.user_id
   LEFT JOIN credit_balances c ON c.user_id = t.user_id
@@ -122,6 +127,7 @@ export async function listAllSupportTickets(filters = {}) {
   if (filters.status) clauses.push(`t.status = ${add(filters.status)}`);
   if (filters.topic) clauses.push(`t.topic = ${add(filters.topic)}`);
   if (filters.priority) clauses.push(`t.priority = ${add(filters.priority)}`);
+  if (filters.source) clauses.push(`t.source = ${add(filters.source)}`);
   if (filters.from) clauses.push(`t.created_at >= ${add(filters.from)}`);
   if (filters.to) clauses.push(`t.created_at < ${add(filters.to)}`);
   if (filters.search) {
@@ -153,21 +159,77 @@ export async function findSupportTicketForAdmin(ticketId) {
 }
 
 export async function updateSupportTicketRecord(ticketId, adminId, update) {
-  const result = await query(`
-    UPDATE support_tickets
-    SET status = $2,
-      priority = $3,
-      admin_notes = $4,
-      assigned_to = $5,
-      resolved_at = CASE
-        WHEN $2 IN ('resolved', 'closed') THEN COALESCE(resolved_at, now())
-        ELSE NULL
-      END,
-      updated_at = now()
-    WHERE id = $1
-    RETURNING id
-  `, [ticketId, update.status, update.priority, update.adminNotes, adminId]);
-  return result.rows[0] ? findSupportTicketForAdmin(ticketId) : null;
+  const updated = await transaction(async (client) => {
+    const current = await client.query("SELECT status, priority FROM support_tickets WHERE id = $1 FOR UPDATE", [ticketId]);
+    if (!current.rows[0]) return false;
+    await client.query(`
+      UPDATE support_tickets
+      SET status = $2, priority = $3, admin_notes = $4, public_response = $5,
+        assigned_to = $6,
+        resolved_at = CASE WHEN $2 IN ('resolved', 'closed') THEN COALESCE(resolved_at, now()) ELSE NULL END,
+        updated_at = now()
+      WHERE id = $1
+    `, [ticketId, update.status, update.priority, update.adminNotes, update.publicResponse, adminId]);
+    const changes = [];
+    if (current.rows[0].status !== update.status) changes.push("status_changed");
+    if (current.rows[0].priority !== update.priority) changes.push("priority_changed");
+    for (const action of changes) await insertAudit(client, { adminId, ticketId, action });
+    return true;
+  });
+  return updated ? findSupportTicketForAdmin(ticketId) : null;
+}
+
+export async function lookupRecoveryAccount(ticketId, adminId) {
+  return transaction(async (client) => {
+    const ticketResult = await client.query("SELECT * FROM support_tickets WHERE id = $1", [ticketId]);
+    const ticket = ticketResult.rows[0];
+    if (!ticket) return null;
+    if (ticket.source !== "public_account_recovery") {
+      const error = new Error("Account recovery tools are only available for recovery tickets.");
+      error.statusCode = 400;
+      throw error;
+    }
+    const accountResult = await client.query(`
+      SELECT u.id, u.username, u.email, u.plan, u.created_at,
+        CASE WHEN lower(u.email) = lower($1) THEN 'email' ELSE 'username_only' END AS match_type,
+        (SELECT MAX(s.created_at) FROM sessions s WHERE s.user_id = u.id) AS last_login_at,
+        (SELECT COUNT(*)::integer FROM sessions s WHERE s.user_id = u.id AND s.expires_at > now()) AS active_sessions,
+        (SELECT COUNT(*)::integer FROM auth_restore_tokens r WHERE r.user_id = u.id AND r.revoked_at IS NULL AND r.expires_at > now()) AS active_restore_tokens
+      FROM users u
+      WHERE lower(u.email) = lower($1)
+        OR ($2 IS NOT NULL AND u.username_normalized = lower($2))
+      ORDER BY CASE WHEN lower(u.email) = lower($1) THEN 0 ELSE 1 END
+      LIMIT 1
+    `, [ticket.email_snapshot, ticket.username_snapshot || null]);
+    const account = accountResult.rows[0] || null;
+    await insertAudit(client, { adminId, targetUserId: account?.id, ticketId, action: "account_lookup", metadata: { matched: Boolean(account) } });
+    return { ticket, account: account ? mapRecoveryAccount(account) : null };
+  });
+}
+
+export async function setRecoveryTemporaryPassword({ ticketId, adminId, targetUserId, password }) {
+  return transaction(async (client) => {
+    await assertRecoveryTarget(client, ticketId, targetUserId);
+    const recent = await client.query(`SELECT COUNT(*)::integer AS count FROM admin_support_audit_log WHERE admin_user_id = $1 AND action = 'temporary_password_set' AND created_at >= now() - interval '1 hour'`, [adminId]);
+    if (Number(recent.rows[0]?.count || 0) >= 10) throw rateLimitError("Temporary password action limit reached.");
+    await client.query("UPDATE users SET password_salt = $2, password_hash = $3, updated_at = now() WHERE id = $1", [targetUserId, password.salt, password.hash]);
+    await client.query("DELETE FROM sessions WHERE user_id = $1", [targetUserId]);
+    await client.query("UPDATE auth_restore_tokens SET revoked_at = COALESCE(revoked_at, now()), updated_at = now() WHERE user_id = $1 AND revoked_at IS NULL", [targetUserId]);
+    await client.query(`UPDATE support_tickets SET status = 'waiting_for_user', admin_notes = concat_ws(E'\n', nullif(admin_notes, ''), $2), assigned_to = $3, updated_at = now() WHERE id = $1`, [ticketId, `Temporary password set by admin at ${new Date().toISOString()}. Sessions revoked.`, adminId]);
+    await insertAudit(client, { adminId, targetUserId, ticketId, action: "temporary_password_set", metadata: { sessionsRevoked: true } });
+    return true;
+  });
+}
+
+export async function revokeRecoveryAccountSessions({ ticketId, adminId, targetUserId }) {
+  return transaction(async (client) => {
+    await assertRecoveryTarget(client, ticketId, targetUserId);
+    await client.query("DELETE FROM sessions WHERE user_id = $1", [targetUserId]);
+    await client.query("UPDATE auth_restore_tokens SET revoked_at = COALESCE(revoked_at, now()), updated_at = now() WHERE user_id = $1 AND revoked_at IS NULL", [targetUserId]);
+    await client.query(`UPDATE support_tickets SET admin_notes = concat_ws(E'\n', nullif(admin_notes, ''), $2), assigned_to = $3, updated_at = now() WHERE id = $1`, [ticketId, `User sessions revoked by admin at ${new Date().toISOString()}.`, adminId]);
+    await insertAudit(client, { adminId, targetUserId, ticketId, action: "sessions_revoked" });
+    return true;
+  });
 }
 
 export async function getSupportTicketSummary() {
@@ -202,7 +264,8 @@ function mapTicket(row, { admin }) {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     resolvedAt: row.resolved_at || null,
-    source: row.source || "authenticated_support"
+    source: row.source || "authenticated_support",
+    publicResponse: row.public_response || ""
   };
   if (!admin) return ticket;
   return {
@@ -219,8 +282,36 @@ function mapTicket(row, { admin }) {
     context: {
       userAgent: row.user_agent || "",
       pageUrl: row.page_url || ""
-    }
+    },
+    accountMatchStatus: row.source === "public_account_recovery" ? Boolean(row.recovery_account_found) : null
   };
+}
+
+async function assertRecoveryTarget(client, ticketId, targetUserId) {
+  const result = await client.query(`SELECT t.id FROM support_tickets t JOIN users u ON u.id = $2 WHERE t.id = $1 AND t.source = 'public_account_recovery' AND lower(u.email) = lower(t.email_snapshot)`, [ticketId, targetUserId]);
+  if (!result.rows[0]) {
+    const error = new Error("Account does not match this recovery request.");
+    error.statusCode = 409;
+    throw error;
+  }
+}
+
+async function insertAudit(client, { adminId, targetUserId = null, ticketId, action, metadata = {} }) {
+  await client.query(`INSERT INTO admin_support_audit_log (id, admin_user_id, target_user_id, ticket_id, action, metadata) VALUES ($1,$2,$3,$4,$5,$6)`, [createId("audit"), adminId, targetUserId, ticketId, action, JSON.stringify(metadata)]);
+}
+
+function mapRecoveryAccount(row) {
+  return {
+    id: row.id, username: row.username || "", email: row.email, plan: row.plan || "free",
+    createdAt: row.created_at, lastLoginAt: row.last_login_at, matchType: row.match_type,
+    activeSessions: Number(row.active_sessions || 0), activeRestoreTokens: Number(row.active_restore_tokens || 0)
+  };
+}
+
+function rateLimitError(message) {
+  const error = new Error(message);
+  error.statusCode = 429;
+  return error;
 }
 
 export function assertPublicRecoverySubmissionAllowed(hourly) {

@@ -598,7 +598,7 @@ accountRecoverySupportForm?.addEventListener("submit", async (event) => {
       })
     });
     accountRecoverySupportForm.reset();
-    accountRecoveryStatus.textContent = `Account recovery request submitted. We’ll review it inside SignalForge support. ${result.detail}`;
+    accountRecoveryStatus.textContent = `Recovery request submitted for admin review. ${result.detail}`;
   } catch (error) {
     accountRecoveryStatus.textContent = error.message;
   } finally {
@@ -782,6 +782,26 @@ adminSupportTicketList?.addEventListener("click", (event) => {
 });
 
 adminSupportDetail?.addEventListener("submit", async (event) => {
+  const temporaryPasswordForm = event.target.closest("[data-recovery-temp-password]");
+  if (temporaryPasswordForm) {
+    event.preventDefault();
+    if (!confirm("Set this temporary password and revoke all existing sessions for the matched user?")) return;
+    const button = temporaryPasswordForm.querySelector('button[type="submit"]');
+    try {
+      button.disabled = true;
+      const payload = Object.fromEntries(new FormData(temporaryPasswordForm));
+      await api.request(`/api/admin/support/${encodeURIComponent(temporaryPasswordForm.dataset.recoveryTempPassword)}/account-recovery/temporary-password`, { method: "POST", body: JSON.stringify(payload) });
+      temporaryPasswordForm.reset();
+      await loadAdminSupport();
+      await lookupRecoveryAccount(temporaryPasswordForm.dataset.recoveryTempPassword);
+      showToast("Temporary password set; sessions revoked");
+    } catch (error) {
+      temporaryPasswordForm.querySelector("[data-recovery-tool-status]").textContent = error.message;
+    } finally {
+      button.disabled = false;
+    }
+    return;
+  }
   const form = event.target.closest("[data-admin-support-update]");
   if (!form) return;
   event.preventDefault();
@@ -802,6 +822,36 @@ adminSupportDetail?.addEventListener("submit", async (event) => {
     if (status) status.textContent = error.message;
     button.disabled = false;
     button.textContent = "Save changes";
+  }
+});
+
+adminSupportDetail?.addEventListener("click", async (event) => {
+  const lookupButton = event.target.closest("[data-recovery-account-lookup]");
+  if (lookupButton) {
+    await lookupRecoveryAccount(lookupButton.dataset.recoveryAccountLookup);
+    return;
+  }
+  const generateButton = event.target.closest("[data-generate-temp-password]");
+  if (generateButton) {
+    const input = adminSupportDetail.querySelector('input[name="temporaryPassword"]');
+    if (input) input.value = generateTemporaryPassword();
+    return;
+  }
+  const revokeButton = event.target.closest("[data-recovery-revoke-sessions]");
+  if (!revokeButton || !confirm("Revoke all active sessions and restore tokens for this matched account?")) return;
+  try {
+    revokeButton.disabled = true;
+    await api.request(`/api/admin/support/${encodeURIComponent(revokeButton.dataset.ticketId)}/account-recovery/revoke-sessions`, {
+      method: "POST",
+      body: JSON.stringify({ targetUserId: revokeButton.dataset.recoveryRevokeSessions })
+    });
+    await loadAdminSupport();
+    await lookupRecoveryAccount(revokeButton.dataset.ticketId);
+    showToast("User sessions revoked");
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    revokeButton.disabled = false;
   }
 });
 
@@ -2566,6 +2616,7 @@ async function loadAdminSupport() {
     ["status", "#admin-support-status"],
     ["topic", "#admin-support-topic"],
     ["priority", "#admin-support-priority"],
+    ["source", "#admin-support-source"],
     ["from", "#admin-support-from"],
     ["to", "#admin-support-to"],
     ["search", "#admin-support-search"]
@@ -5986,6 +6037,7 @@ function renderSupportTickets() {
           <span>Reference<strong>${escapeHtml(ticket.id)}</strong></span>
         </div>
         <div class="support-message-block"><span>Original message</span><p>${escapeHtml(ticket.message)}</p></div>
+        ${ticket.publicResponse ? `<div class="support-message-block"><span>Support response</span><p>${escapeHtml(ticket.publicResponse)}</p></div>` : ""}
         ${ticket.relatedSignalId ? `<p class="support-reference">Signal: ${escapeHtml(ticket.relatedSignalId)}</p>` : ""}
       </div>
     </details>
@@ -6031,6 +6083,8 @@ function renderAdminSupportTickets() {
         <span class="status-pill ${getSupportStatusClass(ticket.status)}">${escapeHtml(formatSupportLabel(ticket.status))}</span>
         <span class="support-priority priority-${escapeHtml(ticket.priority)}">${escapeHtml(formatSupportLabel(ticket.priority))}</span>
       </div>
+      <span class="support-source-badge">${ticket.source === "public_account_recovery" ? "Account recovery" : "In-app support"}</span>
+      ${ticket.source === "public_account_recovery" ? `<span class="support-source-badge">${ticket.accountMatchStatus ? "Matched account found" : "No matched account"}</span>` : ""}
       <strong>${escapeHtml(ticket.subject)}</strong>
       <span>${escapeHtml(ticket.topic)} · ${escapeHtml(ticket.issue)}</span>
       <small>${escapeHtml(ticket.user?.username || "No username")} · ${escapeHtml(ticket.user?.subscriptionTier || "free")} · ${formatDateTime(ticket.createdAt)}</small>
@@ -6066,16 +6120,57 @@ function renderAdminSupportDetail() {
       <p><strong>Page:</strong> ${escapeHtml(ticket.context?.pageUrl || "Not supplied")}</p>
       <p><strong>User agent:</strong> ${escapeHtml(ticket.context?.userAgent || "Not supplied")}</p>
     </div>
+    ${ticket.source === "public_account_recovery" ? renderAccountRecoveryTools(ticket) : ""}
     <form class="admin-support-update-form" data-admin-support-update="${escapeHtml(ticket.id)}">
       <div class="support-form-grid">
         <label>Status<select name="status">${renderSupportSelectOptions(["open", "in_review", "waiting_for_user", "resolved", "closed"], ticket.status)}</select></label>
         <label>Priority<select name="priority">${renderSupportSelectOptions(["low", "normal", "high", "urgent"], ticket.priority)}</select></label>
       </div>
+      <label>Public response<textarea name="publicResponse" rows="4" maxlength="5000" placeholder="Visible to the user in My support requests. No email is sent.">${escapeHtml(ticket.publicResponse || "")}</textarea></label>
       <label>Internal admin notes<textarea name="adminNotes" rows="6" maxlength="10000" placeholder="Private notes. These are never shown to the user.">${escapeHtml(ticket.adminNotes || "")}</textarea></label>
       <button type="submit">Save changes</button>
       <p class="status-line" data-admin-support-status></p>
     </form>
   `;
+}
+
+function renderAccountRecoveryTools(ticket) {
+  const account = ticket.recoveryAccount;
+  return `<section class="account-recovery-tools">
+    <header><div><span class="eyebrow">Admin only</span><h3>Account Recovery Tools</h3></div><button class="secondary-action" type="button" data-recovery-account-lookup="${escapeHtml(ticket.id)}">${account === undefined ? "Look up account" : "Refresh lookup"}</button></header>
+    ${account === undefined ? `<p class="reasoning">Search securely using the submitted email and username.</p>` : account === null ? `<div class="empty-state"><strong>No matching account found</strong><p class="reasoning">The submitted details did not match an account. This result is admin-only.</p></div>` : `
+      <div class="recovery-account-grid">
+        <div><span>User ID</span><strong>${escapeHtml(account.id)}</strong></div><div><span>Username</span><strong>${escapeHtml(account.username || "None")}</strong></div>
+        <div><span>Email</span><strong>${escapeHtml(account.email)}</strong></div><div><span>Plan</span><strong>${escapeHtml(String(account.plan).toUpperCase())}</strong></div>
+        <div><span>Created</span><strong>${formatDateTime(account.createdAt)}</strong></div><div><span>Last login</span><strong>${account.lastLoginAt ? formatDateTime(account.lastLoginAt) : "Unavailable"}</strong></div>
+        <div><span>Active sessions</span><strong>${formatInteger(account.activeSessions)}</strong></div><div><span>Restore tokens</span><strong>${formatInteger(account.activeRestoreTokens)}</strong></div>
+      </div>
+      ${account.matchType !== "email" ? `<p class="recovery-tool-warning">Username-only match. Credential actions are disabled until the submitted email matches the account.</p>` : `<form class="recovery-temp-form" data-recovery-temp-password="${escapeHtml(ticket.id)}">
+        <input type="hidden" name="targetUserId" value="${escapeHtml(account.id)}" />
+        <label>Temporary password<input name="temporaryPassword" type="text" minlength="12" maxlength="128" autocomplete="off" required /></label>
+        <div class="recovery-tool-actions"><button class="secondary-action" type="button" data-generate-temp-password>Generate password</button><button type="submit">Set temporary password</button><button class="secondary-action" type="button" data-ticket-id="${escapeHtml(ticket.id)}" data-recovery-revoke-sessions="${escapeHtml(account.id)}">Revoke user sessions</button></div>
+        <p class="recovery-tool-warning">Only share this temporary password through a trusted private channel. Ask the user to change it after login. It is never stored or shown again.</p>
+        <p class="status-line" data-recovery-tool-status></p>
+      </form>`}`}
+  </section>`;
+}
+
+async function lookupRecoveryAccount(ticketId) {
+  const ticket = state.adminSupport.tickets.find((item) => item.id === ticketId);
+  if (!ticket) return;
+  try {
+    const result = await api.request(`/api/admin/support/${encodeURIComponent(ticketId)}/account-recovery/lookup`);
+    ticket.recoveryAccount = result.account || null;
+  } catch (error) {
+    showToast(error.message);
+  }
+  renderAdminSupportDetail();
+}
+
+function generateTemporaryPassword() {
+  const bytes = new Uint32Array(3);
+  crypto.getRandomValues(bytes);
+  return `SF-${bytes[0].toString(36)}-${bytes[1].toString(36)}-${bytes[2].toString(36)}aA1`;
 }
 
 function renderSupportSelectOptions(values, selected) {

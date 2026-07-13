@@ -7031,8 +7031,11 @@ polyline {
 }
 .public-recovery-page {
   min-height: 100vh;
-  padding: 24px;
+  display: grid;
+  place-items: center;
+  padding: 32px 20px;
   background: var(--bg, #050a12);
+  overflow-x: hidden;
 }
 
 .public-recovery-shell {
@@ -7041,9 +7044,25 @@ polyline {
 }
 
 .public-recovery-card {
-  margin-top: 28px;
+  width: 100%;
   padding: clamp(20px, 4vw, 32px);
+  border-color: rgba(82, 198, 229, 0.22);
+  background: #0d131d;
 }
+
+.recovery-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  width: max-content;
+  margin-bottom: 24px;
+  color: var(--text);
+  font-size: 1rem;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.recovery-brand img { width: 38px; height: 38px; border-radius: 7px; object-fit: contain; }
 
 .public-recovery-card h1 {
   margin: 8px 0 10px;
@@ -7052,7 +7071,12 @@ polyline {
 
 .public-recovery-card .support-form {
   margin-top: 24px;
+  gap: 16px;
 }
+
+.recovery-description, .recovery-safety-note { color: var(--muted); line-height: 1.55; }
+.recovery-safety-note { margin: 0; font-size: 0.78rem; }
+.public-recovery-card #account-recovery-submit { width: 100%; min-height: 48px; }
 
 .recovery-back-link {
   display: flex;
@@ -7062,6 +7086,16 @@ polyline {
 
 @media (max-width: 767px) {
   .public-recovery-page { padding: 16px; }
-  .public-recovery-card { margin-top: 18px; width: 100%; overflow: hidden; }
+  .public-recovery-card { width: 100%; overflow: hidden; }
   .public-recovery-card button { width: 100%; min-height: 48px; }
 }
+
+.account-recovery-tools { margin-top: 18px; padding: 16px; border: 1px solid rgba(34, 211, 238, 0.22); border-radius: 8px; background: rgba(4, 16, 25, 0.72); }
+.account-recovery-tools header, .recovery-tool-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.recovery-account-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 14px 0; }
+.recovery-account-grid div { min-width: 0; padding: 10px; border: 1px solid var(--line); border-radius: 7px; }
+.recovery-account-grid span, .recovery-account-grid small { display: block; color: var(--muted); overflow-wrap: anywhere; }
+.recovery-temp-form { display: grid; gap: 12px; margin-top: 14px; }
+.recovery-tool-warning { color: #f6c76e; font-size: 0.78rem; line-height: 1.5; }
+.support-source-badge { color: var(--cyan); font-size: 0.7rem; font-weight: 800; text-transform: uppercase; }
+@media (max-width: 767px) { .recovery-account-grid { grid-template-columns: 1fr; } .recovery-tool-actions, .account-recovery-tools header { align-items: stretch; flex-direction: column; } }

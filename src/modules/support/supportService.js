@@ -1,7 +1,7 @@
 import { createHmac } from "node:crypto";
 import { appConfig } from "../../config/appConfig.js";
 import { getSignupContext } from "../auth/abuseProtectionService.js";
-import { isAdminUser } from "../auth/authService.js";
+import { hashPassword, isAdminUser } from "../auth/authService.js";
 import {
   sendSupportAdminNotificationEmail,
   sendSupportConfirmationEmail
@@ -12,8 +12,11 @@ import {
   findSupportTicketByUser,
   findSupportTicketForAdmin,
   getSupportTicketSummary,
+  lookupRecoveryAccount,
   listAllSupportTickets,
   listSupportTicketsByUser,
+  revokeRecoveryAccountSessions,
+  setRecoveryTemporaryPassword,
   updateSupportTicketRecord
 } from "./supportRepository.js";
 
@@ -133,6 +136,29 @@ export async function updateAdminSupportTicket(admin, ticketId, input) {
   return { ticket, message: "Support request updated." };
 }
 
+export async function getRecoveryAccountMatch(admin, ticketId) {
+  assertAdmin(admin);
+  const result = await lookupRecoveryAccount(cleanId(ticketId), admin.id);
+  if (!result) throw httpError(404, "Support request not found.");
+  return { account: result.account };
+}
+
+export async function setAdminTemporaryPassword(admin, ticketId, input = {}) {
+  assertAdmin(admin);
+  const password = String(input.temporaryPassword || "");
+  const targetUserId = cleanId(input.targetUserId);
+  if (password.length < 12 || password.length > 128) throw httpError(400, "Temporary password must be 12-128 characters.");
+  if (!/[A-Z]/.test(password) || !/[a-z]/.test(password) || !/\d/.test(password)) throw httpError(400, "Temporary password must include uppercase, lowercase, and a number.");
+  await setRecoveryTemporaryPassword({ ticketId: cleanId(ticketId), adminId: admin.id, targetUserId, password: hashPassword(password) });
+  return { ok: true, message: "Temporary password set. Existing sessions and restore tokens were revoked." };
+}
+
+export async function revokeAdminRecoverySessions(admin, ticketId, input = {}) {
+  assertAdmin(admin);
+  await revokeRecoveryAccountSessions({ ticketId: cleanId(ticketId), adminId: admin.id, targetUserId: cleanId(input.targetUserId) });
+  return { ok: true, message: "User sessions and restore tokens revoked." };
+}
+
 export function validateSupportTicketInput(input = {}) {
   const topic = cleanText(input.topic, 80);
   const issue = cleanText(input.issue, 120);
@@ -161,7 +187,8 @@ export function validateAdminTicketUpdate(input = {}) {
   return {
     status,
     priority,
-    adminNotes: cleanText(input.adminNotes, 10000, { multiline: true })
+    adminNotes: cleanText(input.adminNotes, 10000, { multiline: true }),
+    publicResponse: cleanText(input.publicResponse, 5000, { multiline: true })
   };
 }
 
@@ -178,6 +205,10 @@ function validateAdminFilters(input) {
   if (input.priority) {
     if (!priorities.has(input.priority)) throw httpError(400, "Invalid support priority filter.");
     filters.priority = input.priority;
+  }
+  if (input.source) {
+    if (!["public_account_recovery", "authenticated_support"].includes(input.source)) throw httpError(400, "Invalid support source filter.");
+    filters.source = input.source;
   }
   if (input.search) filters.search = cleanText(input.search, 120);
   if (input.from) filters.from = parseDate(input.from, false);

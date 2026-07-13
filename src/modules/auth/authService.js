@@ -42,7 +42,7 @@ import {
   sendWelcomeEmail
 } from "../notifications/transactionalEmailService.js";
 
-function hashPassword(password, salt = randomBytes(16).toString("hex")) {
+export function hashPassword(password, salt = randomBytes(16).toString("hex")) {
   const hash = createHash("sha256").update(`${salt}:${password}`).digest("hex");
   return { salt, hash };
 }

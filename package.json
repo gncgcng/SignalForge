@@ -65,6 +65,7 @@
     "test:trade-journal": "node scripts/trade-journal-test.js",
     "test:support": "node scripts/support-system-test.js",
     "test:account-recovery": "node scripts/public-account-recovery-test.js",
+    "test:admin-account-recovery": "node scripts/admin-account-recovery-tools-test.js",
     "test:setup-candidates": "node scripts/setup-candidate-system-test.js",
     "test:form-controls": "node scripts/form-control-style-test.js",
     "test:backtesting": "node scripts/backtest-test.js",

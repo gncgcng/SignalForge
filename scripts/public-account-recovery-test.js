@@ -45,7 +45,7 @@ assert.match(html, /Account Recovery Support/);
 assert.doesNotMatch(html, /We will email a reset link if the account exists/);
 assert.match(app, /showAccountRecoverySupport/);
 assert.match(app, /\/api\/support\/account-recovery/);
-assert.match(app, /Request submitted for review|Account recovery request submitted/);
+assert.match(app, /Recovery request submitted for admin review/);
 assert.doesNotMatch(app, /showPasswordResetRequest[\s\S]{0,500}We will email a reset link if the account exists/);
 
 console.log("Public account recovery tests passed.");

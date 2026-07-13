@@ -2,10 +2,13 @@ import { readJson, sendError, sendJson } from "../../shared/http.js";
 import {
   getAdminSupportTicket,
   getAdminSupportTickets,
+  getRecoveryAccountMatch,
   getMySupportTicket,
   getMySupportTickets,
   submitSupportTicket,
   submitPublicRecoveryTicket,
+  revokeAdminRecoverySessions,
+  setAdminTemporaryPassword,
   updateAdminSupportTicket
 } from "./supportService.js";
 
@@ -43,11 +46,19 @@ export async function handleSupportRoutes(req, res, pathname, url) {
         status: url.searchParams.get("status") || "",
         topic: url.searchParams.get("topic") || "",
         priority: url.searchParams.get("priority") || "",
+        source: url.searchParams.get("source") || "",
         from: url.searchParams.get("from") || "",
         to: url.searchParams.get("to") || "",
         search: url.searchParams.get("search") || "",
         limit: url.searchParams.get("limit") || 100
       }), { "cache-control": "no-store" });
+    }
+    const recoveryToolMatch = pathname.match(/^\/api\/admin\/support\/([^/]+)\/account-recovery\/(lookup|temporary-password|revoke-sessions)$/);
+    if (recoveryToolMatch) {
+      const [, ticketId, action] = recoveryToolMatch;
+      if (action === "lookup" && req.method === "GET") return sendJson(res, 200, await getRecoveryAccountMatch(req.user, ticketId), { "cache-control": "no-store" });
+      if (action === "temporary-password" && req.method === "POST") return sendJson(res, 200, await setAdminTemporaryPassword(req.user, ticketId, await readJson(req)));
+      if (action === "revoke-sessions" && req.method === "POST") return sendJson(res, 200, await revokeAdminRecoverySessions(req.user, ticketId, await readJson(req)));
     }
     const adminMatch = pathname.match(/^\/api\/admin\/support\/([^/]+)$/);
     if (adminMatch && req.method === "GET") {

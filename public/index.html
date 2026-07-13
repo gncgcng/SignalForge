@@ -431,14 +431,14 @@
 
   <section class="public-recovery-page hidden" id="account-recovery-support-page" aria-live="polite">
     <div class="public-recovery-shell">
-      <a class="brand-mark public-profile-brand" href="/" aria-label="SignalForge home">
-        <img src="/icons/android-chrome-192x192.png" alt="" />
-        <span>SignalForge</span>
-      </a>
       <article class="panel public-recovery-card">
+        <a class="recovery-brand" href="/" aria-label="SignalForge home">
+          <img src="/icons/android-chrome-192x192.png" alt="" />
+          <span>SignalForge</span>
+        </a>
         <span class="eyebrow">Public account help</span>
         <h1>Account Recovery Support</h1>
-        <p>Submit an account recovery request for admin review. This form does not confirm whether an account exists.</p>
+        <p class="recovery-description">Submit an account recovery request for admin review. This form does not confirm whether an account exists.</p>
         <form id="account-recovery-support-form" class="support-form">
           <label>Email address used for the account<input name="email" type="email" autocomplete="email" maxlength="254" required /></label>
           <label>Username if known<input name="username" autocomplete="username" maxlength="20" placeholder="Optional" /></label>
@@ -449,7 +449,8 @@
           <label>Message<textarea name="message" minlength="10" maxlength="5000" rows="6" required placeholder="Describe what happened without including passwords or security codes."></textarea></label>
           <button id="account-recovery-submit" type="submit">Submit recovery request</button>
           <a class="secondary-action recovery-back-link" href="#" id="recovery-back-to-sign-in">Back to sign in</a>
-          <p class="form-note" id="account-recovery-status">Your request will be saved for admin review. Do not include your password.</p>
+          <p class="recovery-safety-note">Do not include your password or security codes.</p>
+          <p class="form-note" id="account-recovery-status">Your request will be saved for admin review.</p>
         </form>
       </article>
     </div>
@@ -1846,6 +1847,7 @@
               <label>Status<select id="admin-support-status"><option value="">All statuses</option><option value="open">Open</option><option value="in_review">In Review</option><option value="waiting_for_user">Waiting for User</option><option value="resolved">Resolved</option><option value="closed">Closed</option></select></label>
               <label>Topic<select id="admin-support-topic"><option value="">All topics</option></select></label>
               <label>Priority<select id="admin-support-priority"><option value="">All priorities</option><option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option><option value="urgent">Urgent</option></select></label>
+              <label>Source<select id="admin-support-source"><option value="">All sources</option><option value="public_account_recovery">Account Recovery</option><option value="authenticated_support">In-app Support</option></select></label>
               <label>From<input id="admin-support-from" type="date" /></label>
               <label>To<input id="admin-support-to" type="date" /></label>
               <label class="admin-support-search">Search<input id="admin-support-search" type="search" placeholder="Username, email, subject, or message" /></label>

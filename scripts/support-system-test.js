@@ -53,7 +53,8 @@ assert.doesNotMatch(sanitized.message, /[<>]/);
 assert.deepEqual(validateAdminTicketUpdate({ status: "resolved", priority: "urgent", adminNotes: "Investigated internally" }), {
   status: "resolved",
   priority: "urgent",
-  adminNotes: "Investigated internally"
+  adminNotes: "Investigated internally",
+  publicResponse: ""
 });
 assert.throws(() => validateAdminTicketUpdate({ status: "deleted", priority: "normal" }), /valid ticket status/);
 assert.equal(assertSupportSubmissionAllowed(4, 19), true);
@@ -79,7 +80,7 @@ assert.match(repository, /SELECT pg_advisory_xact_lock\(hashtext\(\$1\)\)/);
 assert.match(repository, /Number\(hourly\) >= 5 \|\| Number\(daily\) >= 20/);
 assert.match(repository, /if \(!admin\) return ticket/);
 assert.match(repository, /updateSupportTicketRecord/);
-assert.match(repository, /assigned_to = \$5/);
+assert.match(repository, /assigned_to = \$6/);
 assert.match(service, /assertAdmin\(admin\)/);
 assert.match(controller, /pathname === "\/api\/support" && req\.method === "POST"/);
 assert.match(controller, /pathname === "\/api\/admin\/support"/);
