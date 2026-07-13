@@ -160,7 +160,7 @@ export async function runAutoCryptoAlertScan() {
     const after = await getCandidateQualitySummary();
     await refreshCandidateLearningOutcomes();
     console.log(
-      `[scanner-watch] scanned markets=${watched.scanned} ` +
+      `[crypto-watch] scanned=${watched.scanned} ` +
       `candidates_created=${Math.max(0, after.candidatesCreatedToday - before.candidatesCreatedToday)} ` +
       `updated=${watched.createdOrUpdated} promoted=${Math.max(0, after.candidatesPromoted - before.candidatesPromoted)} ` +
       `rejected=${Math.max(0, after.candidatesRejected - before.candidatesRejected)} expired=${expiredThisCycle}`

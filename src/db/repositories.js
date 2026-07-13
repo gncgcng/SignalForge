@@ -2604,6 +2604,16 @@ export async function expirePendingPaperOrders(userId) {
       AND expires_at IS NOT NULL AND expires_at <= now()
     RETURNING *
   `, [userId]);
+  await query(`
+    UPDATE candidate_learning_events e
+    SET entry_never_filled = true,
+      reason_not_promoted = COALESCE(e.reason_not_promoted, 'Signal entry never filled in Paper Trading.'),
+      resolved_at = now()
+    FROM setup_candidates c
+    JOIN paper_orders p ON p.saved_signal_id = c.promoted_signal_id
+    WHERE e.candidate_id = c.id AND p.user_id = $1
+      AND p.status = 'Expired unfilled' AND p.archived_at IS NULL
+  `, [userId]);
   return result.rows.map(mapPaperOrder);
 }
 

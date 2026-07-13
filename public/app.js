@@ -2418,20 +2418,20 @@ function renderCandidateMetricRows(items, labelKey, valueKey) {
 
 function renderCandidates() {
   if (!candidateGrid || !candidateCount) return;
-  const active = state.candidates.filter((candidate) => ["watching", "ready"].includes(candidate.status));
+  const active = state.candidates.filter((candidate) => ["watching", "almost_ready", "ready"].includes(candidate.status));
   candidateCount.textContent = `${active.length} watching`;
   if (!state.candidates.length) {
     candidateGrid.innerHTML = `<div class="empty-state"><strong>No setups being watched</strong><p class="reasoning">The crypto watcher will add promising setups as they develop.</p></div>`;
     return;
   }
   candidateGrid.innerHTML = state.candidates.map((candidate) => {
-    const label = candidate.status === "watching" && Number(candidate.readinessScore) >= 70 ? "Almost ready" : titleCase(candidate.status);
+    const label = titleCase(candidate.status);
     const missing = candidate.missingConfirmations?.length
       ? candidate.missingConfirmations.slice(0, 3).join(", ")
       : candidate.reasonsForWatching?.[0] || "Entry timing is being monitored.";
     return `<article class="candidate-card ${escapeHtml(candidate.status)}">
       <header><div><strong>${escapeHtml(getDisplaySymbol(candidate.symbol))}</strong><span>${escapeHtml(candidate.timeframe)} · ${escapeHtml(candidate.setupType)}</span></div><span class="status-pill">${escapeHtml(label)}</span></header>
-      <div class="candidate-scores"><span>Direction<strong>${escapeHtml(String(candidate.direction).toUpperCase())}</strong></span><span>Quality<strong>${Number(candidate.candidateScore)}%</strong></span><span>Readiness<strong>${Number(candidate.readinessScore)}%</strong></span><span>Entry<strong>${escapeHtml(titleCase(candidate.entryQuality))}</strong></span></div>
+      <div class="candidate-scores"><span>Direction<strong>${escapeHtml(String(candidate.direction).toUpperCase())}</strong></span><span>Quality<strong>${Number(candidate.setupQualityScore ?? candidate.candidateScore)}%</strong></span><span>Readiness<strong>${Number(candidate.entryReadinessScore ?? candidate.readinessScore)}%</strong></span><span>Entry<strong>${escapeHtml(titleCase(candidate.entryQuality))}</strong></span></div>
       <details><summary>Why not ready?</summary><p>${escapeHtml(missing)}</p></details>
     </article>`;
   }).join("");
@@ -3616,6 +3616,23 @@ function renderPaperOrderTicket() {
     ? "Watch setup"
     : `Place Paper ${state.paperTrading.direction === "long" ? "Long" : "Short"}`;
   renderPaperOrderCalculations();
+  renderSignalEntryDistanceWarning();
+}
+
+function renderSignalEntryDistanceWarning() {
+  if (!paperOrderSignalId.value) return;
+  const currentPrice = Number(state.paperTrading.marketData?.pair?.lastPrice || state.paperTrading.marketData?.candles?.at(-1)?.close || 0);
+  const signalEntry = Number(paperLimitPrice.value);
+  const atr = calculateAtr(state.paperTrading.marketData?.candles || [], 14);
+  if (!(currentPrice > 0 && signalEntry > 0 && atr > 0)) return;
+  const closeToEntry = Math.abs(currentPrice - signalEntry) <= atr * 0.25;
+  if (paperOrderType.value === "watch") {
+    paperOrderWarning.textContent = "This entry is away from current price and may remain pending. Watch only creates no paper order.";
+  } else if (paperOrderType.value === "limit" && !closeToEntry) {
+    paperOrderWarning.textContent = "This entry is away from current price and may remain pending until price reaches it.";
+  } else if (paperOrderType.value === "market" && !closeToEntry) {
+    paperOrderWarning.textContent = "Simulated market entry uses the current price, which is away from the signal entry.";
+  }
 }
 
 function prefillPaperOrderFromSignal(signal) {

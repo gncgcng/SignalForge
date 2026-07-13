@@ -29,6 +29,10 @@ export function evaluateSetupReadiness(signal, marketData) {
   const candleRangeAtr = atr > 0 ? (Number(latest.high) - Number(latest.low)) / atr : Infinity;
   const confirmations = signal?.confirmations || [];
   const missing = confirmations.filter((item) => !item.passed).map((item) => item.name);
+  const cryptoVolumeMissing = isCryptoMarket(signal, marketData) && missing.some((item) => /volume/i.test(item));
+  const candleConfirmed = signal?.direction === "short"
+    ? Number(latest.close) < Number(latest.open)
+    : Number(latest.close) > Number(latest.open);
   const quality = clamp(Number(signal?.qualityScore || signal?.confidenceScore || 0), 0, 99);
   let readiness = 100;
   const reasons = [];
@@ -49,6 +53,8 @@ export function evaluateSetupReadiness(signal, marketData) {
   if (stopDistance < atr * 0.45) { readiness -= 25; reasons.push("Stop distance is too tight relative to ATR."); }
   if (stopDistance > atr * 3) { readiness -= 20; reasons.push("Stop distance is too wide relative to ATR."); }
   if (candleRangeAtr > 1.8) { readiness -= 22; reasons.push("Latest candle is extended; wait for price to settle."); }
+  if (!candleConfirmed) { readiness -= 12; reasons.push("Waiting for candle confirmation."); }
+  if (cryptoVolumeMissing) { readiness -= 14; reasons.push("Waiting for volume confirmation."); }
   if (missing.length) readiness -= Math.min(18, missing.length * 4);
   if (signal?.alignmentBadge === "Countertrend") { readiness -= 25; reasons.push("Higher timeframe structure conflicts strongly."); }
   if (signal?.newsRisk?.level === "Danger") return { ready: false, rejected: true, candidateScore: quality, readinessScore: 0, entryQuality: "poor", currentPrice, missingConfirmations: missing, reasons: ["Dangerous news lock is active."], rejectionReason: "News lock active." };
@@ -56,13 +62,14 @@ export function evaluateSetupReadiness(signal, marketData) {
   readiness = clamp(Math.round(readiness), 0, 100);
   const entryQuality = readiness >= 90 ? "excellent" : readiness >= 80 ? "good" : readiness >= 60 ? "fair" : "poor";
   return {
-    ready: quality >= appConfig.candidates.readyQualityThreshold && readiness >= appConfig.candidates.readyThreshold && ["excellent", "good"].includes(entryQuality),
+    ready: quality >= appConfig.candidates.readyQualityThreshold && readiness >= appConfig.candidates.readyThreshold && ["excellent", "good"].includes(entryQuality) && candleConfirmed && !cryptoVolumeMissing,
     rejected: entryQuality === "poor" || rr < 1.5,
     candidateScore: quality,
     readinessScore: readiness,
     entryQuality,
     currentPrice,
     distanceAtr,
+    candleConfirmed,
     idealEntryZone: { low: entry - atr * 0.25, high: entry + atr * 0.25 },
     missingConfirmations: missing,
     reasons: reasons.length ? reasons : ["Setup quality is constructive and entry conditions are aligned."],
@@ -72,16 +79,19 @@ export function evaluateSetupReadiness(signal, marketData) {
 
 export async function observeSetupCandidate(signal, marketData, readiness) {
   if (!signal || readiness.candidateScore < appConfig.candidates.candidateThreshold) return null;
-  const status = readiness.ready ? "ready" : readiness.rejected ? "rejected" : "watching";
+  const status = readiness.ready ? "ready" : readiness.rejected ? "rejected" : readiness.readinessScore >= 70 ? "almost_ready" : "watching";
   const candidate = await upsertSetupCandidate({
     setupKey: candidateSetupKey(signal), symbol: signal.symbol,
     provider: signal.marketSource || marketData?.source || "unknown", timeframe: signal.timeframe,
     direction: signal.direction, setupType: signal.setupType || "Unknown strategy", status,
     expiresAt: new Date(Date.now() + (timeframeExpiryHours[signal.timeframe] || 12) * 3600000),
-    candidateScore: readiness.candidateScore, readinessScore: readiness.readinessScore,
+    displayPair: displayPair(signal.symbol), setupQualityScore: readiness.candidateScore,
+    candidateScore: readiness.candidateScore, entryReadinessScore: readiness.readinessScore,
+    readinessScore: readiness.readinessScore,
     confidenceEstimate: Math.min(confidenceCap(signal, readiness), Number(signal.confidenceScore || 0)),
     entryQuality: readiness.entryQuality, currentPrice: readiness.currentPrice,
-    idealEntryZone: readiness.idealEntryZone, invalidationLevel: signal.stopLoss,
+    idealEntry: Number(signal.entryPrice), idealEntryZone: readiness.idealEntryZone,
+    invalidationLevel: signal.stopLoss,
     potentialStopLoss: signal.stopLoss, potentialTakeProfit: signal.takeProfit,
     potentialRr: signal.riskRewardRatio, reasonsForWatching: readiness.reasons,
     missingConfirmations: readiness.missingConfirmations, rejectionReason: readiness.rejectionReason,
@@ -120,7 +130,7 @@ export async function refreshCandidateLearningOutcomes() {
       await recordCandidateLearningEvent(candidate, evaluateCandidateOutcome(candidate, candles));
       learned += 1;
     } catch (error) {
-      console.warn(`[scanner-watch] candidate_learning_skipped id=${candidate.id} reason=${error.message}`);
+      console.warn(`[crypto-watch] candidate_learning_skipped id=${candidate.id} reason=${error.message}`);
     }
   }
   return learned;
@@ -143,7 +153,7 @@ export async function runCandidateMarketWatch() {
         const readiness = evaluateSetupReadiness(result.signal, marketData);
         if (await observeSetupCandidate(result.signal, marketData, readiness)) createdOrUpdated += 1;
       } catch (error) {
-        console.warn(`[scanner-watch] ${pair.symbol} ${timeframe} skipped: ${error.message}`);
+        console.warn(`[crypto-watch] ${pair.symbol} ${timeframe} skipped: ${error.message}`);
       }
     }
   }
@@ -178,6 +188,7 @@ export function evaluateCandidateOutcome(candidate, candles = []) {
     wouldHaveHitTp: tp,
     wouldHaveHitSl: sl,
     wentNowhere: !tp && !sl,
+    entryNeverFilled: !entryTouched,
     maxFavorableExcursion: Number((maxFavorable / risk).toFixed(3)),
     maxAdverseExcursion: Number((maxAdverse / risk).toFixed(3)),
     reasonNotPromoted: !entryTouched ? "Entry never filled." : candidate.rejectionReason
@@ -197,10 +208,21 @@ function candidateSetupKey(signal) {
 
 function confidenceCap(signal, readiness) {
   if (readiness.entryQuality === "fair") return 85;
-  if (signal.alignmentBadge !== "Full Alignment") return 88;
   if (readiness.missingConfirmations.some((item) => /volume/i.test(item))) return 82;
+  if (String(signal?.indicators?.sessionLiquidity || signal?.session?.liquidity || "").toLowerCase() === "low") return 84;
+  if (signal.alignmentBadge !== "Full Alignment") return 88;
   if (!Number(signal.learningInsight?.sampleSize || signal.indicators?.learningSampleSize || 0)) return 92;
   return 99;
+}
+
+function isCryptoMarket(signal, marketData) {
+  return marketData?.pair?.category === "Crypto" ||
+    String(signal?.marketSource || marketData?.source || "").toLowerCase().includes("coinbase") ||
+    /^[A-Z0-9]+-USD$/i.test(String(signal?.symbol || ""));
+}
+
+function displayPair(symbol) {
+  return String(symbol || "").toUpperCase().replace(/[-/]/g, "");
 }
 
 function clamp(value, min, max) { return Math.min(max, Math.max(min, Number(value || 0))); }

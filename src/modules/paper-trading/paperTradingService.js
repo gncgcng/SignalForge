@@ -319,11 +319,12 @@ function buildPaperAccountSummary(account, orders) {
 }
 
 export function calculatePaperStats(trades) {
-  const totalPaperTrades = trades.length;
+  const executedTrades = trades.filter((trade) => !["Pending", "Cancelled", "Expired unfilled"].includes(trade.status));
+  const totalPaperTrades = executedTrades.length;
   const wins = trades.filter((trade) => trade.status === "Hit TP").length;
   const losses = trades.filter((trade) => trade.status === "Hit SL").length;
   const resolved = wins + losses;
-  const closedTrades = trades.filter((trade) => trade.status !== "Open");
+  const closedTrades = executedTrades.filter((trade) => trade.status !== "Open");
   const averageR = closedTrades.length
     ? round(closedTrades.reduce((sum, trade) => sum + Number(trade.realizedR || 0), 0) / closedTrades.length)
     : 0;
@@ -332,9 +333,9 @@ export function calculatePaperStats(trades) {
     totalPaperTrades,
     winRate: resolved ? Math.round((wins / resolved) * 100) : 0,
     averageR,
-    bestMarket: findBestGroup(trades, (trade) => trade.symbol),
-    bestTimeframe: findBestGroup(trades, (trade) => trade.timeframe),
-    accountGrowthCurve: calculateAccountGrowthCurve(trades)
+    bestMarket: findBestGroup(executedTrades, (trade) => trade.symbol),
+    bestTimeframe: findBestGroup(executedTrades, (trade) => trade.timeframe),
+    accountGrowthCurve: calculateAccountGrowthCurve(executedTrades)
   };
 }
 

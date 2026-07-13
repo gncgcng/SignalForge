@@ -4,12 +4,13 @@ import { createId } from "../../shared/ids.js";
 export async function upsertSetupCandidate(candidate) {
   const result = await query(`
     INSERT INTO setup_candidates (
-      id, setup_key, symbol, provider, timeframe, direction, setup_type, status,
-      expires_at, candidate_score, readiness_score, confidence_estimate, entry_quality,
-      current_price, ideal_entry_zone, invalidation_level, potential_stop_loss,
+      id, setup_key, symbol, display_pair, provider, timeframe, direction, setup_type, status,
+      expires_at, candidate_score, setup_quality_score, readiness_score, entry_readiness_score,
+      confidence_estimate, entry_quality, current_price, ideal_entry, ideal_entry_zone,
+      ideal_entry_zone_low, ideal_entry_zone_high, invalidation_level, potential_stop_loss,
       potential_take_profit, potential_rr, reasons_for_watching, missing_confirmations,
       rejection_reason, promoted_signal_id, metadata
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30)
     ON CONFLICT (setup_key) DO UPDATE SET
       status = CASE
         WHEN setup_candidates.status IN ('promoted_to_signal', 'rejected', 'expired') THEN setup_candidates.status
@@ -18,11 +19,16 @@ export async function upsertSetupCandidate(candidate) {
       last_checked_at = now(),
       expires_at = EXCLUDED.expires_at,
       candidate_score = EXCLUDED.candidate_score,
+      setup_quality_score = EXCLUDED.setup_quality_score,
       readiness_score = EXCLUDED.readiness_score,
+      entry_readiness_score = EXCLUDED.entry_readiness_score,
       confidence_estimate = EXCLUDED.confidence_estimate,
       entry_quality = EXCLUDED.entry_quality,
       current_price = EXCLUDED.current_price,
+      ideal_entry = EXCLUDED.ideal_entry,
       ideal_entry_zone = EXCLUDED.ideal_entry_zone,
+      ideal_entry_zone_low = EXCLUDED.ideal_entry_zone_low,
+      ideal_entry_zone_high = EXCLUDED.ideal_entry_zone_high,
       invalidation_level = EXCLUDED.invalidation_level,
       potential_stop_loss = EXCLUDED.potential_stop_loss,
       potential_take_profit = EXCLUDED.potential_take_profit,
@@ -35,11 +41,13 @@ export async function upsertSetupCandidate(candidate) {
       updated_at = now()
     RETURNING *
   `, [
-    candidate.id || createId("cand"), candidate.setupKey, candidate.symbol, candidate.provider,
-    candidate.timeframe, candidate.direction, candidate.setupType, candidate.status,
-    candidate.expiresAt, candidate.candidateScore, candidate.readinessScore,
-    candidate.confidenceEstimate, candidate.entryQuality, candidate.currentPrice,
-    JSON.stringify(candidate.idealEntryZone || {}), candidate.invalidationLevel,
+    candidate.id || createId("cand"), candidate.setupKey, candidate.symbol, candidate.displayPair,
+    candidate.provider, candidate.timeframe, candidate.direction, candidate.setupType, candidate.status,
+    candidate.expiresAt, candidate.candidateScore, candidate.setupQualityScore,
+    candidate.readinessScore, candidate.entryReadinessScore, candidate.confidenceEstimate,
+    candidate.entryQuality, candidate.currentPrice, candidate.idealEntry,
+    JSON.stringify(candidate.idealEntryZone || {}), candidate.idealEntryZone?.low ?? null,
+    candidate.idealEntryZone?.high ?? null, candidate.invalidationLevel,
     candidate.potentialStopLoss, candidate.potentialTakeProfit, candidate.potentialRr,
     JSON.stringify(candidate.reasonsForWatching || []), JSON.stringify(candidate.missingConfirmations || []),
     candidate.rejectionReason || null, candidate.promotedSignalId || null,
@@ -51,9 +59,9 @@ export async function upsertSetupCandidate(candidate) {
 export async function listVisibleSetupCandidates(limit = 40) {
   const result = await query(`
     SELECT * FROM setup_candidates
-    WHERE status IN ('watching', 'ready', 'rejected', 'expired')
+    WHERE status IN ('watching', 'almost_ready', 'ready', 'rejected', 'expired')
       AND updated_at >= now() - interval '72 hours'
-    ORDER BY CASE status WHEN 'ready' THEN 0 WHEN 'watching' THEN 1 ELSE 2 END,
+    ORDER BY CASE status WHEN 'ready' THEN 0 WHEN 'almost_ready' THEN 1 WHEN 'watching' THEN 2 ELSE 3 END,
       readiness_score DESC, updated_at DESC
     LIMIT $1
   `, [Math.min(100, Math.max(1, Number(limit || 40)))]);
@@ -65,7 +73,7 @@ export async function expireStaleCandidates() {
     UPDATE setup_candidates
     SET status = 'expired', rejection_reason = COALESCE(rejection_reason, 'Setup did not become ready before expiry.'),
       last_checked_at = now(), updated_at = now()
-    WHERE status IN ('watching', 'ready') AND expires_at <= now()
+    WHERE status IN ('watching', 'almost_ready', 'ready') AND expires_at <= now()
     RETURNING *
   `);
   for (const row of result.rows) await recordCandidateLearningEvent(mapCandidate(row));
@@ -77,10 +85,12 @@ export async function promoteCandidate(candidateId, signalId) {
     UPDATE setup_candidates
     SET status = 'promoted_to_signal', promoted_signal_id = $2,
       last_checked_at = now(), updated_at = now()
-    WHERE id = $1 AND status IN ('watching', 'ready')
+    WHERE id = $1 AND status IN ('watching', 'almost_ready', 'ready')
     RETURNING *
   `, [candidateId, signalId]);
-  return result.rows[0] ? mapCandidate(result.rows[0]) : null;
+  const candidate = result.rows[0] ? mapCandidate(result.rows[0]) : null;
+  if (candidate) await recordCandidateLearningEvent(candidate);
+  return candidate;
 }
 
 export async function rejectCandidate(candidateId, reason) {
@@ -88,7 +98,7 @@ export async function rejectCandidate(candidateId, reason) {
     UPDATE setup_candidates
     SET status = 'rejected', rejection_reason = $2,
       last_checked_at = now(), updated_at = now()
-    WHERE id = $1 AND status IN ('watching', 'ready')
+    WHERE id = $1 AND status IN ('watching', 'almost_ready', 'ready')
     RETURNING *
   `, [candidateId, reason]);
   const candidate = result.rows[0] ? mapCandidate(result.rows[0]) : null;
@@ -100,27 +110,59 @@ export async function recordCandidateLearningEvent(candidate, outcome = {}) {
   await query(`
     INSERT INTO candidate_learning_events (
       id, candidate_id, market, timeframe, direction, setup_type, initial_score,
-      readiness_score, final_status, would_have_hit_tp, would_have_hit_sl,
+      initial_setup_score, readiness_score, initial_readiness_score, final_status,
+      would_have_hit_tp, would_have_hit_sl,
       went_nowhere, max_favorable_excursion, max_adverse_excursion,
-      reason_not_promoted, resolved_at
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,now())
+      entry_never_filled, reason_not_promoted, resolved_at
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,now())
     ON CONFLICT (candidate_id) DO UPDATE SET
       readiness_score = EXCLUDED.readiness_score,
+      initial_readiness_score = COALESCE(candidate_learning_events.initial_readiness_score, EXCLUDED.initial_readiness_score),
       final_status = EXCLUDED.final_status,
       would_have_hit_tp = COALESCE(EXCLUDED.would_have_hit_tp, candidate_learning_events.would_have_hit_tp),
       would_have_hit_sl = COALESCE(EXCLUDED.would_have_hit_sl, candidate_learning_events.would_have_hit_sl),
       went_nowhere = COALESCE(EXCLUDED.went_nowhere, candidate_learning_events.went_nowhere),
       max_favorable_excursion = COALESCE(EXCLUDED.max_favorable_excursion, candidate_learning_events.max_favorable_excursion),
       max_adverse_excursion = COALESCE(EXCLUDED.max_adverse_excursion, candidate_learning_events.max_adverse_excursion),
+      entry_never_filled = COALESCE(EXCLUDED.entry_never_filled, candidate_learning_events.entry_never_filled),
       reason_not_promoted = EXCLUDED.reason_not_promoted,
       resolved_at = now()
   `, [
     createId("clearn"), candidate.id, candidate.symbol, candidate.timeframe, candidate.direction,
-    candidate.setupType, candidate.candidateScore, candidate.readinessScore, candidate.status,
+    candidate.setupType, candidate.candidateScore, candidate.setupQualityScore || candidate.candidateScore,
+    candidate.readinessScore, candidate.entryReadinessScore || candidate.readinessScore, candidate.status,
     outcome.wouldHaveHitTp ?? null, outcome.wouldHaveHitSl ?? null, outcome.wentNowhere ?? null,
     outcome.maxFavorableExcursion ?? null, outcome.maxAdverseExcursion ?? null,
+    outcome.entryNeverFilled ?? null,
     candidate.rejectionReason || outcome.reasonNotPromoted || null
   ]);
+  await updateCandidateShadowAdjustment(candidate.id);
+}
+
+async function updateCandidateShadowAdjustment(candidateId) {
+  await query(`
+    WITH candidate_group AS (
+      SELECT market, timeframe, setup_type
+      FROM candidate_learning_events
+      WHERE candidate_id = $1
+    ), stats AS (
+      SELECT COUNT(*) FILTER (
+          WHERE would_have_hit_tp IS NOT NULL OR would_have_hit_sl IS NOT NULL
+        )::integer AS sample_size,
+        AVG(CASE WHEN would_have_hit_tp THEN 1.0 WHEN would_have_hit_sl THEN 0.0 END) AS observed_win_rate
+      FROM candidate_learning_events e
+      JOIN candidate_group g USING (market, timeframe, setup_type)
+    )
+    UPDATE candidate_learning_events e
+    SET shadow_confidence_adjustment = CASE
+          WHEN stats.observed_win_rate >= 0.60 THEN 2
+          WHEN stats.observed_win_rate < 0.40 THEN -2
+          ELSE 0
+        END,
+        shadow_adjustment_applied = false
+    FROM stats
+    WHERE e.candidate_id = $1
+  `, [candidateId]);
 }
 
 export async function listCandidatesNeedingOutcome(limit = 20) {
@@ -143,7 +185,7 @@ export async function getCandidateQualitySummary() {
       COUNT(*) FILTER (WHERE status = 'promoted_to_signal' AND updated_at::date = current_date)::integer AS promoted,
       COUNT(*) FILTER (WHERE status = 'rejected' AND updated_at::date = current_date)::integer AS rejected,
       COUNT(*) FILTER (WHERE status = 'expired' AND updated_at::date = current_date)::integer AS expired,
-      COUNT(*) FILTER (WHERE status IN ('watching','ready'))::integer AS watching,
+      COUNT(*) FILTER (WHERE status IN ('watching','almost_ready','ready'))::integer AS watching,
       (SELECT COUNT(*)::integer FROM paper_orders WHERE status = 'Expired unfilled' AND closed_at::date = current_date) AS expired_unfilled
     FROM setup_candidates
   `), query(`
@@ -172,13 +214,18 @@ export async function getCandidateQualitySummary() {
 function mapCandidate(row) {
   if (!row) return null;
   return {
-    id: row.id, setupKey: row.setup_key, symbol: row.symbol, provider: row.provider,
+    id: row.id, setupKey: row.setup_key, symbol: row.symbol,
+    displayPair: row.display_pair || String(row.symbol || "").replace(/[-/]/g, ""), provider: row.provider,
     timeframe: row.timeframe, direction: row.direction, setupType: row.setup_type,
     status: row.status, firstDetectedAt: row.first_detected_at, lastCheckedAt: row.last_checked_at,
     expiresAt: row.expires_at, candidateScore: Number(row.candidate_score || 0),
-    readinessScore: Number(row.readiness_score || 0), confidenceEstimate: Number(row.confidence_estimate || 0),
+    setupQualityScore: Number(row.setup_quality_score ?? row.candidate_score ?? 0),
+    readinessScore: Number(row.readiness_score || 0),
+    entryReadinessScore: Number(row.entry_readiness_score ?? row.readiness_score ?? 0),
+    confidenceEstimate: Number(row.confidence_estimate || 0),
     entryQuality: row.entry_quality, currentPrice: Number(row.current_price || 0),
-    idealEntryZone: row.ideal_entry_zone || {}, invalidationLevel: Number(row.invalidation_level || 0),
+    idealEntry: Number(row.ideal_entry || 0), idealEntryZone: row.ideal_entry_zone || {},
+    invalidationLevel: Number(row.invalidation_level || 0),
     potentialStopLoss: Number(row.potential_stop_loss || 0), potentialTakeProfit: Number(row.potential_take_profit || 0),
     potentialRr: Number(row.potential_rr || 0), reasonsForWatching: row.reasons_for_watching || [],
     missingConfirmations: row.missing_confirmations || [], rejectionReason: row.rejection_reason,

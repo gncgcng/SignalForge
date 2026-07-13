@@ -12,9 +12,9 @@ const baseSignal = {
   ], indicators: { atr14: 2 }
 };
 
-const market = (price, high = price + 0.4, low = price - 0.4) => ({
-  pair: { lastPrice: price }, source: "coinbase-exchange",
-  candles: [{ time: 1, open: price, high, low, close: price, volume: 100 }]
+const market = (price, high = price + 0.4, low = price - 0.4, open = price - 0.1) => ({
+  pair: { lastPrice: price, category: "Crypto" }, source: "coinbase-exchange",
+  candles: [{ time: 1, open, high, low, close: price, volume: 100 }]
 });
 
 const ready = evaluateSetupReadiness(baseSignal, market(100));
@@ -24,6 +24,16 @@ assert.ok(["excellent", "good"].includes(ready.entryQuality));
 const watching = evaluateSetupReadiness(baseSignal, market(101.6));
 assert.equal(watching.ready, false, "promising setup away from entry must remain watching");
 assert.equal(watching.entryQuality, "fair");
+
+const noCandleConfirmation = evaluateSetupReadiness(baseSignal, market(100, 100.4, 99.6, 100.2));
+assert.equal(noCandleConfirmation.ready, false, "a candidate must wait for directional candle confirmation");
+assert.ok(noCandleConfirmation.reasons.includes("Waiting for candle confirmation."));
+
+const noVolume = evaluateSetupReadiness({
+  ...baseSignal,
+  confirmations: [{ name: "Trend", passed: true }, { name: "Volume", passed: false }]
+}, market(100));
+assert.equal(noVolume.ready, false, "crypto candidates must wait for volume confirmation");
 
 const rejected = evaluateSetupReadiness({ ...baseSignal, riskRewardRatio: 1.2 }, market(100));
 assert.equal(rejected.rejected, true, "poor RR must reject candidate");
@@ -48,8 +58,11 @@ const paperStats = calculatePaperStats([
   { status: "Expired unfilled", realizedR: 0, symbol: "ETH-USD", timeframe: "1h" }
 ]);
 assert.equal(paperStats.winRate, 50, "unfilled pending orders must not affect win rate");
+assert.equal(paperStats.averageR, 0.5, "unfilled pending orders must not dilute average R");
+assert.equal(paperStats.totalPaperTrades, 2, "unfilled pending orders are not executed trades");
 
 const migration = readFileSync("migrations/032_setup_candidates.sql", "utf8");
+const readinessMigration = readFileSync("migrations/035_crypto_candidate_readiness.sql", "utf8");
 const service = readFileSync("src/modules/signals/signalService.js", "utf8");
 const watcher = readFileSync("src/modules/alerts/autoScanService.js", "utf8");
 const repository = readFileSync("src/modules/signals/setupCandidateRepository.js", "utf8");
@@ -59,17 +72,27 @@ const html = readFileSync("public/index.html", "utf8");
 
 assert.match(migration, /CREATE TABLE IF NOT EXISTS setup_candidates/);
 assert.match(migration, /CREATE TABLE IF NOT EXISTS candidate_learning_events/);
+assert.match(readinessMigration, /almost_ready/);
+assert.match(readinessMigration, /ADD COLUMN IF NOT EXISTS setup_quality_score/);
+assert.match(readinessMigration, /ADD COLUMN IF NOT EXISTS entry_never_filled/);
+assert.match(readinessMigration, /shadow_adjustment_applied/);
 assert.match(service, /readiness\?\.ready/);
 assert.match(service, /validation\?\.passed/);
 assert.match(service, /markCandidatePromoted/);
-assert.match(watcher, /\[scanner-watch\] scanned markets=/);
+assert.match(watcher, /\[crypto-watch\] scanned=/);
 assert.match(watcher, /category === "Crypto"/);
 assert.doesNotMatch(watcher, /category === "Commodities"/);
 assert.match(repository, /ON CONFLICT \(candidate_id\) DO UPDATE/);
+assert.match(repository, /entry_never_filled/);
+assert.match(repository, /shadow_confidence_adjustment/);
+assert.match(repository, /shadow_adjustment_applied = false/);
+assert.match(repository, /if \(candidate\) await recordCandidateLearningEvent\(candidate\)/);
 assert.match(repository, /status = 'expired'/);
 assert.match(repository, /recordCandidateLearningEvent\(candidate\)/);
 assert.match(paperRepository, /status = 'Expired unfilled'/);
+assert.match(paperRepository, /Signal entry never filled in Paper Trading/);
 assert.match(app, /paperOrderType\.value = closeToEntry \? "market" : "watch"/);
+assert.match(app, /This entry is away from current price and may remain pending/);
 assert.match(html, /Watching setups/);
 assert.match(html, /Confidence reflects rule alignment, not the probability of profit/);
 
