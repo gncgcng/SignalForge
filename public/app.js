@@ -132,7 +132,7 @@ const state = {
 };
 
 const RESTORE_TOKEN_KEY = "signalforge-restore-token";
-const AUTH_RESTORE_TIMEOUT_MS = 7000;
+const AUTH_RESTORE_TIMEOUT_MS = 2800;
 const LEGACY_AUTH_STORAGE_KEYS = new Set([
   "signalforge-auth-token",
   "signalforge-session",
@@ -457,6 +457,9 @@ const api = {
           ...optionHeaders
         }
       });
+      if (path === "/api/auth/session" || path === "/api/auth/restore") {
+        updateAuthDebug({ endpoint: path, statusCode: response.status });
+      }
       const responseText = await response.text();
       let payload = {};
       if (responseText) {
@@ -1975,9 +1978,15 @@ async function enterPaperTrade(button) {
 }
 
 async function init() {
+  console.info(`[app] build_version=${window.__SIGNALFORGE_BUILD_VERSION__ || "development"}`);
   console.info("[auth] restore:start");
+  updateAuthDebug({ started: true, status: "restore_started", endpoint: "/api/auth/session" });
   setSplashStatus("Restoring your session");
   renderHowItWorksPages();
+  if (isClearSessionRoute()) {
+    await emergencyClearSession();
+    return;
+  }
   if (isAccountRecoveryRoute()) {
     setSplashStatus("Opening account recovery support");
     showAccountRecoverySupport();
@@ -2021,6 +2030,7 @@ async function init() {
   } catch (error) {
     if (restoreController.signal.aborted) {
       console.warn("[auth] restore:timeout");
+      updateAuthDebug({ status: "restore_timeout", timeout: true, failureReason: "timeout" });
       const timeoutError = new Error("Session restore timed out.");
       timeoutError.code = "restore_timeout";
       throw timeoutError;
@@ -2059,6 +2069,7 @@ async function init() {
       oauthError ||
       verificationToken ||
       getPendingTelegramUnlockKey() ||
+      isPublicAuthRoute() ||
       isProtectedAppRoute()
     );
     publicProfilePage?.classList.add("hidden");
@@ -2071,7 +2082,7 @@ async function init() {
     if (oauthError) {
       authNote.textContent = googleOAuthErrorMessage(oauthError);
       history.replaceState({}, "", `${location.pathname}${location.hash}`);
-    } else if (isProtectedAppRoute()) {
+    } else if (isProtectedAppRoute() || isPublicAuthRoute()) {
       authNote.textContent = "Please sign in to continue.";
     }
   }
@@ -2094,6 +2105,7 @@ async function loadStartupSession({ signal } = {}) {
 
     if (session.user) {
       console.info(`[auth] restore:success user_id=${safeAuthLogId(session.user.id)}`);
+      updateAuthDebug({ status: "restore_success", userId: safeAuthLogId(session.user.id) });
       console.info("[auth] Cookie session restored.");
       return session;
     }
@@ -2248,6 +2260,45 @@ function clearSavedAuthStorage(reason = "restore_failed") {
   }
 
   console.info(`[auth] local_session:cleared reason=${safeAuthFailureReason({ code: reason })}`);
+  updateAuthDebug({ status: "local_session_cleared", failureReason: reason });
+}
+
+async function emergencyClearSession() {
+  clearSavedAuthStorage("emergency_route");
+  const cleanup = [];
+  if ("caches" in window) {
+    cleanup.push(
+      caches.keys().then((keys) => Promise.all(
+        keys.filter((key) => key.startsWith("signalforge-")).map((key) => caches.delete(key))
+      ))
+    );
+  }
+  if ("serviceWorker" in navigator) {
+    cleanup.push(
+      navigator.serviceWorker.getRegistrations().then((registrations) => Promise.all(
+        registrations.map((registration) => registration.unregister())
+      ))
+    );
+  }
+  await Promise.allSettled(cleanup);
+  history.replaceState({}, "", `${location.pathname}${location.search}#signin`);
+  showAuth();
+  authNote.textContent = "Saved session cleared. Please sign in again.";
+  authRestoreFailure?.classList.add("hidden");
+  hideSplash();
+}
+
+function updateAuthDebug(update = {}) {
+  const debug = window.__signalForgeAuthDebug || {
+    buildVersion: window.__SIGNALFORGE_BUILD_VERSION__ || "development"
+  };
+  Object.assign(debug, update);
+  window.__signalForgeAuthDebug = debug;
+  if (new URLSearchParams(location.search).get("debugAuth") !== "1") return;
+  const panel = document.querySelector("#auth-debug-panel");
+  if (!panel) return;
+  panel.classList.remove("hidden");
+  panel.textContent = `Auth boot: ${JSON.stringify(debug)}`;
 }
 
 function clearClientAuthState() {
@@ -2515,6 +2566,16 @@ function isAccountRecoveryRoute() {
   return String(location.hash || "").split("?")[0].toLowerCase() === "#account-recovery-support";
 }
 
+function isClearSessionRoute() {
+  return String(location.hash || "").split("?")[0].toLowerCase() === "#clear-session";
+}
+
+function isPublicAuthRoute() {
+  return ["#signin", "#signup", "#forgot-password", "#reset-password"].includes(
+    String(location.hash || "").split("?")[0].toLowerCase()
+  );
+}
+
 function showAccountRecoverySupport() {
   publicProfilePage?.classList.add("hidden");
   publicHowItWorksPage?.classList.add("hidden");
@@ -2546,7 +2607,12 @@ function isPublicStartupRoute() {
     "#affiliate-program",
     "#faq",
     "#how-it-works",
-    "#account-recovery-support"
+    "#account-recovery-support",
+    "#signin",
+    "#signup",
+    "#forgot-password",
+    "#reset-password",
+    "#clear-session"
   ].includes(hashRoute) || isPublicProfileRoute();
 }
 
@@ -3405,12 +3471,20 @@ function syncRouteFromLocation({ force = false, replaceInvalid = false, viewOpti
 }
 
 function handleBrowserRouteChange() {
+  if (isClearSessionRoute()) {
+    emergencyClearSession();
+    return;
+  }
   if (isAccountRecoveryRoute()) {
     showAccountRecoverySupport();
     return;
   }
   if (isHowItWorksRoute() && !state.user) {
     showPublicHowItWorks();
+    return;
+  }
+  if (isPublicAuthRoute() && !state.user) {
+    showAuth();
     return;
   }
   if (!state.user && publicHowItWorksPage && !publicHowItWorksPage.classList.contains("hidden")) {
@@ -8675,16 +8749,19 @@ function handleStartupFailure(error) {
 }
 
 function showAuthRestoreFailure(error) {
-  landingPage.classList.add("hidden");
-  authScreen.classList.add("hidden");
-  dashboard.classList.add("hidden");
-  appSplashLoading?.classList.add("hidden");
+  showAuth();
+  authForm?.classList.add("hidden");
   authRestoreFailure?.classList.remove("hidden");
   authRestoreFailureMessage.textContent = error?.code === "restore_timeout"
     ? "Session restore took too long. Please try again or sign in."
     : "Please sign in again.";
-  appSplash?.setAttribute("aria-label", "Session restore failed");
+  updateAuthDebug({
+    status: "restore_failed",
+    failureReason: safeAuthFailureReason(error),
+    timeout: error?.code === "restore_timeout"
+  });
   setAuthRestoreRecoveryBusy(false);
+  hideSplash();
 }
 
 function setAuthRestoreRecoveryBusy(busy, message = "") {
@@ -8695,6 +8772,7 @@ function setAuthRestoreRecoveryBusy(busy, message = "") {
 }
 
 function openSignInAfterRestoreFailure(message) {
+  authRestoreFailure?.classList.add("hidden");
   showAuth();
   authNote.textContent = message;
   hideSplash();
@@ -8706,6 +8784,9 @@ async function registerPwa() {
     const registration = await navigator.serviceWorker.register("/service-worker.js", {
       scope: "/"
     });
+    registration.update().catch((error) => {
+      console.warn(`[pwa] Service worker update check failed: ${error.message}`);
+    });
     window.signalForgePushRegistration = registration;
   } catch (error) {
     console.warn(`[pwa] Service worker registration failed: ${error.message}`);
@@ -8713,8 +8794,12 @@ async function registerPwa() {
 }
 
 function hideSplash() {
+  if (window.__signalForgeBootFailsafe) {
+    window.clearTimeout(window.__signalForgeBootFailsafe);
+    window.__signalForgeBootFailsafe = null;
+  }
   requestAnimationFrame(() => {
-    appSplash.classList.add("hidden");
-    setTimeout(() => appSplash.remove(), 220);
+    appSplash?.classList.add("hidden");
+    setTimeout(() => appSplash?.remove(), 220);
   });
 }

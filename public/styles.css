@@ -67,6 +67,11 @@ button {
   gap: 10px;
   background: #080a0f;
   transition: opacity 180ms ease, visibility 180ms ease;
+  animation: app-splash-failsafe 0s 3s forwards;
+}
+
+@keyframes app-splash-failsafe {
+  to { opacity: 0; visibility: hidden; pointer-events: none; }
 }
 
 .app-splash-loading {
@@ -85,10 +90,32 @@ button {
   text-align: left;
 }
 
-.auth-restore-failure h1 {
+.auth-restore-failure h1,
+.auth-restore-failure h2 {
   margin: 8px 0;
   font-size: 1.45rem;
   letter-spacing: 0;
+}
+
+.auth-boot-debug,
+.auth-debug-panel {
+  color: #8ea2b8;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.68rem;
+  overflow-wrap: anywhere;
+}
+
+.auth-debug-panel {
+  position: fixed;
+  z-index: 1200;
+  left: 10px;
+  bottom: 10px;
+  width: min(calc(100vw - 20px), 640px);
+  padding: 8px 10px;
+  border: 1px solid rgba(75, 214, 255, 0.24);
+  border-radius: 6px;
+  background: #07101a;
+  pointer-events: none;
 }
 
 .auth-restore-failure p {

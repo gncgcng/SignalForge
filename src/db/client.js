@@ -9,7 +9,10 @@ export function getPool() {
     const connectionString = getDatabaseUrl();
 
     pool = new Pool({
-      connectionString
+      connectionString,
+      connectionTimeoutMillis: 5000,
+      query_timeout: 5000,
+      statement_timeout: 5000
     });
 
     pool.on("error", (error) => {

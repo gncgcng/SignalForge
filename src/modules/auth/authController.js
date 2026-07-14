@@ -22,12 +22,7 @@ import {
 
 export async function handleAuthRoutes(req, res, pathname) {
   if (pathname === "/api/auth/session" && req.method === "GET") {
-    const cookies = parseCookies(req.headers.cookie);
-    const presentedSessionId = getSessionCookieNames()
-      .map((name) => cookies[name])
-      .find(Boolean);
-
-    if (presentedSessionId && !req.user) {
+    if (!req.user) {
       logSessionCheck(req, false);
       return sendJson(res, 401, {
         ok: false,
@@ -62,7 +57,7 @@ export async function handleAuthRoutes(req, res, pathname) {
       console.warn(`[auth] Session endpoint failed reason=${safeSessionFailure(error)}`);
       return sendJson(res, 500, {
         ok: false,
-        error: "session_unavailable"
+        error: "auth_check_failed"
       }, authResponseHeaders());
     }
   }

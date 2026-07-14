@@ -1,5 +1,14 @@
-const CACHE_VERSION = "signalforge-static-v28";
+const CACHE_VERSION = "signalforge-static-v29-auth-emergency";
 const OFFLINE_URL = "/offline.html";
+const CRITICAL_ASSET_PATHS = new Set([
+  "/index.html",
+  "/app.js",
+  "/router.js",
+  "/signalFilters.js",
+  "/signalValidity.js",
+  "/riskCalculator.js",
+  "/styles.css"
+]);
 const STATIC_ASSETS = [
   "/",
   "/index.html",
@@ -20,6 +29,7 @@ const STATIC_ASSETS = [
 ];
 
 self.addEventListener("install", (event) => {
+  console.info(`[sw] cache_version=${CACHE_VERSION}`);
   event.waitUntil(
     caches.open(CACHE_VERSION)
       .then((cache) => cache.addAll(STATIC_ASSETS))
@@ -28,10 +38,13 @@ self.addEventListener("install", (event) => {
 });
 
 self.addEventListener("activate", (event) => {
+  console.info(`[sw] cache_version=${CACHE_VERSION}`);
   event.waitUntil(
     caches.keys()
       .then((keys) => Promise.all(
-        keys.filter((key) => key !== CACHE_VERSION).map((key) => caches.delete(key))
+        keys
+          .filter((key) => key.startsWith("signalforge-") && key !== CACHE_VERSION)
+          .map((key) => caches.delete(key))
       ))
       .then(() => self.clients.claim())
   );
@@ -58,6 +71,20 @@ self.addEventListener("fetch", (event) => {
           return response;
         })
         .catch(() => caches.match(OFFLINE_URL))
+    );
+    return;
+  }
+
+  if (CRITICAL_ASSET_PATHS.has(url.pathname)) {
+    event.respondWith(
+      fetch(request, { cache: "no-store" })
+        .then((response) => {
+          if (response.ok) {
+            caches.open(CACHE_VERSION).then((cache) => cache.put(request, response.clone()));
+          }
+          return response;
+        })
+        .catch(() => caches.match(request))
     );
     return;
   }

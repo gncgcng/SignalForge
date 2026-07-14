@@ -28,7 +28,7 @@ import { startSignalOutcomeTracker } from "./modules/signals/signalOutcomeServic
 import { handleSubscriptionRoutes } from "./modules/subscriptions/subscriptionController.js";
 import { handleSupportRoutes } from "./modules/support/supportController.js";
 import { handleTesterAccessRoutes } from "./modules/tester-access/testerAccessController.js";
-import { sendError } from "./shared/http.js";
+import { sendError, sendJson } from "./shared/http.js";
 
 const rootDir = fileURLToPath(new URL("..", import.meta.url));
 const publicDir = join(rootDir, "public");
@@ -45,9 +45,31 @@ const mimeTypes = {
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
-  await attachAuth(req);
+
+  // Static boot assets must never depend on PostgreSQL session availability.
+  if (!url.pathname.startsWith("/api/")) {
+    return serveStatic(url.pathname, res);
+  }
 
   try {
+    if (requiresAuthAttachment(url.pathname)) {
+      try {
+        await withTimeout(attachAuth(req), 2000, "auth_check_timeout");
+      } catch (error) {
+        console.warn(`[auth] Request authentication failed reason=${safeServerReason(error)}`);
+        if (url.pathname === "/api/auth/session") {
+          return sendJson(res, 500, { ok: false, error: "auth_check_failed" }, {
+            "cache-control": "no-store, private"
+          });
+        }
+        return sendError(res, 500, "Authentication check failed.");
+      }
+    } else {
+      req.user = null;
+      req.sessionId = null;
+      req.sessionCookiePresent = false;
+    }
+
     const handled =
       (await handleAuthRoutes(req, res, url.pathname)) ||
       (await handleAdminAnalyticsRoutes(req, res, url.pathname)) ||
@@ -71,11 +93,7 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    if (url.pathname.startsWith("/api/")) {
-      return sendError(res, 404, "API route not found.");
-    }
-
-    return serveStatic(url.pathname, res);
+    return sendError(res, 404, "API route not found.");
   } catch (error) {
     return sendError(
       res,
@@ -102,6 +120,8 @@ async function serveStatic(pathname, res) {
     if (pathname === "/service-worker.js") {
       headers["cache-control"] = "no-cache, no-store, must-revalidate";
       headers["service-worker-allowed"] = "/";
+    } else if ([".html", ".js", ".css"].includes(extname(filePath))) {
+      headers["cache-control"] = "no-cache, no-store, must-revalidate";
     }
     res.writeHead(200, {
       ...headers
@@ -112,9 +132,44 @@ async function serveStatic(pathname, res) {
       return sendError(res, 404, "Static asset not found.");
     }
     const index = await readFile(join(publicDir, "index.html"));
-    res.writeHead(200, { "content-type": mimeTypes[".html"] });
+    res.writeHead(200, {
+      "content-type": mimeTypes[".html"],
+      "cache-control": "no-cache, no-store, must-revalidate"
+    });
     res.end(index);
   }
+}
+
+function requiresAuthAttachment(pathname) {
+  return ![
+    "/api/auth/config",
+    "/api/auth/login",
+    "/api/auth/google/start",
+    "/api/auth/google/callback",
+    "/api/auth/demo",
+    "/api/auth/restore",
+    "/api/auth/verify-email",
+    "/api/auth/password-reset/request",
+    "/api/auth/password-reset/confirm"
+  ].includes(pathname);
+}
+
+function withTimeout(promise, timeoutMs, code) {
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => {
+      const error = new Error("Operation timed out.");
+      error.code = code;
+      reject(error);
+    }, timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
+}
+
+function safeServerReason(error) {
+  return String(error?.code || error?.name || "unknown")
+    .replace(/[^a-zA-Z0-9_-]/g, "_")
+    .slice(0, 64);
 }
 
 logStripeConfiguration();
