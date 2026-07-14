@@ -8,7 +8,7 @@ const robots = readFileSync(new URL("../public/robots.txt", import.meta.url), "u
 const sitemap = readFileSync(new URL("../public/sitemap.xml", import.meta.url), "utf8");
 const landingMockup = html.slice(
   html.indexOf('aria-label="SignalForge app preview"'),
-  html.indexOf('id="how-it-works"')
+  html.indexOf('id="quick-start"')
 );
 
 const result = {
@@ -30,7 +30,8 @@ const result = {
     html.includes("Telegram Ready") &&
     html.includes("Educational Tool Only. Not Financial Advice."),
   requiredSections:
-    html.includes('id="how-it-works"') &&
+    html.includes('id="quick-start"') &&
+    html.includes('id="public-how-it-works-page"') &&
     html.includes('id="why-signalforge"') &&
     html.includes('id="features"') &&
     html.includes('id="live-preview"') &&

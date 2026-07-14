@@ -155,6 +155,7 @@ const avoidTradeGrid = document.querySelector("#avoid-trade-grid");
 const avoidTradeCount = document.querySelector("#avoid-trade-count");
 const avoidTradeMore = document.querySelector("#avoid-trade-more");
 const landingPage = document.querySelector("#landing-page");
+const publicHowItWorksPage = document.querySelector("#public-how-it-works-page");
 const publicProfilePage = document.querySelector("#public-profile-page");
 const accountRecoverySupportPage = document.querySelector("#account-recovery-support-page");
 const accountRecoverySupportForm = document.querySelector("#account-recovery-support-form");
@@ -515,6 +516,42 @@ document.querySelectorAll("[data-legal-doc]").forEach((trigger) => {
 
 document.querySelectorAll("[data-legal-close]").forEach((trigger) => {
   trigger.addEventListener("click", closeLegalDocument);
+});
+
+document.addEventListener("click", (event) => {
+  const trustLink = event.target.closest("[data-how-it-works-link], [data-public-how-it-works]");
+  if (trustLink) {
+    event.preventDefault();
+    if (state.user) {
+      if (state.unlockedRevealSignalId) {
+        unlockReveal.classList.add("hidden");
+        document.body.classList.remove("unlock-reveal-open");
+        sessionStorage.removeItem(UNLOCK_REVEAL_KEY);
+        state.unlockedRevealSignalId = null;
+      }
+      navigateTo("how-it-works");
+    }
+    else showPublicHowItWorks({ updateHistory: true });
+    return;
+  }
+
+  if (event.target.closest("[data-how-it-works-home]")) {
+    showLandingFromTrustPage();
+    return;
+  }
+
+  if (event.target.closest("[data-how-it-works-start]")) {
+    if (state.user) navigateTo("scanner");
+    else {
+      history.replaceState({}, "", `${location.pathname}${location.search}#scanner`);
+      showAuth();
+    }
+    return;
+  }
+
+  if (event.target.closest("[data-how-risk-disclaimer]")) {
+    openLegalDocument("risk");
+  }
 });
 
 document.addEventListener("click", (event) => {
@@ -1859,6 +1896,7 @@ async function enterPaperTrade(button) {
 
 async function init() {
   setSplashStatus("Restoring your session");
+  renderHowItWorksPages();
   if (isAccountRecoveryRoute()) {
     setSplashStatus("Opening account recovery support");
     showAccountRecoverySupport();
@@ -1921,6 +1959,9 @@ async function init() {
       history.replaceState({}, "", `${location.pathname}${location.hash}`);
     }
     await bootDashboard();
+  } else if (isHowItWorksRoute()) {
+    setSplashStatus("Opening SignalForge guide");
+    showPublicHowItWorks();
   } else {
     setSplashStatus("Preparing your market desk");
     const showAuthCallback = Boolean(oauthError || verificationToken || getPendingTelegramUnlockKey());
@@ -2138,6 +2179,7 @@ function clearClientAuthState() {
 
 async function bootDashboard() {
   publicProfilePage?.classList.add("hidden");
+  publicHowItWorksPage?.classList.add("hidden");
   landingPage.classList.add("hidden");
   authScreen.classList.add("hidden");
   dashboard.classList.remove("hidden");
@@ -2265,6 +2307,7 @@ function removeTelegramUnlockParam() {
 function showAuth() {
   setMobileNavigationOpen(false);
   publicProfilePage?.classList.add("hidden");
+  publicHowItWorksPage?.classList.add("hidden");
   landingPage.classList.add("hidden");
   dashboard.classList.add("hidden");
   authScreen.classList.remove("hidden");
@@ -2294,10 +2337,141 @@ function isAccountRecoveryRoute() {
 
 function showAccountRecoverySupport() {
   publicProfilePage?.classList.add("hidden");
+  publicHowItWorksPage?.classList.add("hidden");
   landingPage.classList.add("hidden");
   authScreen.classList.add("hidden");
   dashboard.classList.add("hidden");
   accountRecoverySupportPage?.classList.remove("hidden");
+}
+
+function isHowItWorksRoute() {
+  return parseAppHash(location.hash).route === "how-it-works";
+}
+
+function showPublicHowItWorks({ updateHistory = false } = {}) {
+  renderHowItWorksPages();
+  if (updateHistory && location.hash !== "#how-it-works") {
+    history.pushState({}, "", `${location.pathname}${location.search}#how-it-works`);
+  }
+  publicProfilePage?.classList.add("hidden");
+  accountRecoverySupportPage?.classList.add("hidden");
+  landingPage.classList.add("hidden");
+  authScreen.classList.add("hidden");
+  dashboard.classList.add("hidden");
+  publicHowItWorksPage?.classList.remove("hidden");
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function showLandingFromTrustPage() {
+  history.pushState({}, "", `${location.pathname}${location.search}#top`);
+  publicHowItWorksPage?.classList.add("hidden");
+  publicProfilePage?.classList.add("hidden");
+  authScreen.classList.add("hidden");
+  dashboard.classList.add("hidden");
+  landingPage.classList.remove("hidden");
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function renderHowItWorksPages() {
+  const markup = renderHowItWorksContent();
+  document.querySelectorAll("[data-how-it-works-content]").forEach((container) => {
+    container.innerHTML = markup;
+  });
+}
+
+function renderHowItWorksContent() {
+  return `
+    <div class="trust-page">
+      <section class="trust-hero">
+        <span class="eyebrow">Transparent market analysis</span>
+        <h1>How SignalForge Works</h1>
+        <p>SignalForge scans crypto markets for structured trading setups using rule-based analysis, risk/reward checks, and market condition filters.</p>
+        <div class="trust-actions">
+          <button type="button" data-how-it-works-start>Start scanning</button>
+          <button class="secondary-action" type="button" data-how-risk-disclaimer>View risk disclaimer</button>
+        </div>
+      </section>
+
+      <div class="trust-card-grid trust-card-grid-primary">
+        ${renderTrustCard("What it does", "A structured workflow from scan to review.", [
+          "Scans supported crypto markets across available timeframes.",
+          "Checks trend, momentum, volume, structure, volatility, and risk/reward.",
+          "Watches developing setups before promoting them.",
+          "Alerts users when a validated setup becomes ready.",
+          "Lets users unlock full details, paper trade, and review outcomes."
+        ], "does")}
+        ${renderTrustCard("What it does not do", "Clear limits matter.", [
+          "Does not guarantee profit or provide financial advice.",
+          "Does not place real trades or connect to brokers.",
+          "Does not know the future or predict every market move.",
+          "Does not force every scanned market into a signal."
+        ], "does-not")}
+      </div>
+
+      <section class="trust-confidence-card">
+        <div>
+          <span class="eyebrow">Confidence explained</span>
+          <h2>Rule alignment, not win probability.</h2>
+          <p>Confidence reflects how well a setup matches SignalForge's rules. It is not a probability of profit.</p>
+        </div>
+        <div class="trust-confidence-examples">
+          <article><strong>Higher confidence</strong><span>More required rules aligned and fewer material risk factors were found.</span></article>
+          <article><strong>Lower confidence</strong><span>Fewer confirmations aligned, or the setup carried more unresolved risk.</span></article>
+        </div>
+      </section>
+
+      <div class="trust-card-grid">
+        ${renderTrustCard("Watching setups", "Possible ideas that are not ready yet.", [
+          "Waiting for volume confirmation.",
+          "Price is too far from the intended entry.",
+          "Risk/reward is not strong enough.",
+          "Candle confirmation is missing or trend context conflicts."
+        ], "watching")}
+        ${renderTrustCard("Avoid trade zones", "Sometimes the best result is no trade.", [
+          "The market is choppy or trend direction is unclear.",
+          "Volume or risk/reward is weak.",
+          "Price is overextended or too close to opposing structure."
+        ], "avoid")}
+        ${renderTrustCard("Unlocks and credits", "Pay only for eligible full signal details.", [
+          "Previews appear before unlock; Entry, Stop Loss, and Take Profit remain protected.",
+          "A credit is used only when an eligible signal is unlocked.",
+          "Expired signals do not charge as fresh unlocks.",
+          "Watching setups and Avoid Trade cards are free to view."
+        ], "credits")}
+        ${renderTrustCard("Paper trading", "Simulated practice, never a real order.", [
+          "Uses no real money and does not connect to a broker.",
+          "Helps users test signals and practice risk management.",
+          "Simulated results may differ from real execution."
+        ], "paper")}
+        ${renderTrustCard("Risk management", "Every signal can lose.", [
+          "Stop loss and position sizing remain important.",
+          "Users choose their own risk and remain responsible for decisions.",
+          "The position-size calculator is an estimate, not a recommendation.",
+          "High risk per trade can cause substantial losses."
+        ], "risk")}
+        ${renderTrustCard("Learning engine", "Outcome review improves context, not certainty.", [
+          "Reviews TP, SL, expired, rejected, and watched setups.",
+          "Uses post-mortem tags to improve scoring over time.",
+          "Learning never overrides validation rules.",
+          "Adjustments require enough real sample data to become meaningful."
+        ], "learning")}
+      </div>
+
+      <section class="trust-final-disclaimer">
+        <span class="eyebrow">Final disclaimer</span>
+        <h2>Educational analysis with visible limits.</h2>
+        <p>SignalForge is an educational market analysis tool. It is not financial advice, investment advice, or a guarantee of results. Trading involves risk, including possible loss of capital.</p>
+      </section>
+    </div>`;
+}
+
+function renderTrustCard(title, subtitle, items, type) {
+  return `
+    <article class="trust-card trust-card-${type}">
+      <span class="trust-card-label">${escapeHtml(title)}</span>
+      <h2>${escapeHtml(subtitle)}</h2>
+      <ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+    </article>`;
 }
 
 function showPasswordResetConfirm() {
@@ -3033,6 +3207,17 @@ function handleBrowserRouteChange() {
     showAccountRecoverySupport();
     return;
   }
+  if (isHowItWorksRoute() && !state.user) {
+    showPublicHowItWorks();
+    return;
+  }
+  if (!state.user && publicHowItWorksPage && !publicHowItWorksPage.classList.contains("hidden")) {
+    publicHowItWorksPage.classList.add("hidden");
+    landingPage.classList.remove("hidden");
+    authScreen.classList.add("hidden");
+    dashboard.classList.add("hidden");
+    return;
+  }
   syncRouteFromLocation({ replaceInvalid: true });
 }
 
@@ -3095,7 +3280,7 @@ function removeHashParams(names) {
 }
 
 function applyViewState(view, options = {}) {
-  const allowedViews = ["scanner", "watchlist", "alerts", "notifications", "signals", "paper-portfolio", "journal", "backtesting", "performance", "affiliate", "leaderboard", "profile", "settings", "support", "billing"];
+  const allowedViews = ["scanner", "watchlist", "alerts", "notifications", "signals", "paper-portfolio", "journal", "backtesting", "performance", "how-it-works", "affiliate", "leaderboard", "profile", "settings", "support", "billing"];
   if (state.user?.isAdmin) {
     allowedViews.push("admin", "admin-support", "affiliate-admin", "webhook-events");
   }
@@ -3127,6 +3312,7 @@ function applyViewState(view, options = {}) {
     journal: ["Review and discipline", "Trade Journal"],
     backtesting: ["Historical strategy research", "Backtesting Lab"],
     performance: ["Outcome analytics", "Performance"],
+    "how-it-works": ["Product guide", "How SignalForge Works"],
     affiliate: ["Recurring commissions", "Affiliate Program"],
     leaderboard: ["Community rankings", "Leaderboard"],
     profile: ["Public identity", "Profile"],
@@ -3721,7 +3907,7 @@ function renderSignalsHistory() {
           <th>Stop</th>
           <th>Take profit</th>
           <th>R/R</th>
-          <th>Confidence</th>
+          <th>Confidence ${renderConfidenceHelp()}</th>
           <th>Status</th>
           <th>Created</th>
         </tr>
@@ -4822,7 +5008,7 @@ function renderMobileSignalHistoryCard(signal) {
         ${renderMobileSignalValue("Stop", formatCurrency(signal.stopLoss))}
         ${renderMobileSignalValue("Take profit", formatCurrency(signal.takeProfit))}
         ${renderMobileSignalValue("R/R", `${signal.riskRewardRatio}:1`)}
-        ${renderMobileSignalValue("Confidence", `${signal.confidenceScore}%`)}
+        ${renderMobileSignalConfidence(signal.confidenceScore)}
       </div>
       ${renderRiskCalculator(signal)}
       ${renderPaperTradeAction(signal)}
@@ -4838,6 +5024,15 @@ function renderMobileSignalValue(label, value) {
     <div>
       <span>${escapeHtml(label)}</span>
       <strong>${escapeHtml(value)}</strong>
+    </div>
+  `;
+}
+
+function renderMobileSignalConfidence(confidenceScore) {
+  return `
+    <div>
+      <span>Confidence ${renderConfidenceHelp()}</span>
+      <strong>${Number(confidenceScore || 0)}%</strong>
     </div>
   `;
 }
@@ -5124,7 +5319,7 @@ function renderScanCard(setup) {
       ${renderSignalValidity(setup)}
       <div class="signal-metrics">
         <div><span>Setup type</span><strong>${setup.setupType || "Qualified setup"}</strong></div>
-        <div><span>Confidence</span><strong>${setup.confidenceScore}%</strong></div>
+        <div><span>Confidence ${renderConfidenceHelp()}</span><strong>${setup.confidenceScore}%</strong></div>
         <div><span>Risk/reward</span><strong>${setup.riskRewardRatio}:1</strong></div>
         ${state.scannerMode === "advanced" ? `
           <div><span>Validation</span><strong>${setup.validationPassed === false ? "Rejected" : "Passed"}</strong></div>
@@ -5163,7 +5358,7 @@ function renderSignalCard(signal) {
         <div><span>Stop loss</span><strong>${formatCurrency(signal.stopLoss)}</strong></div>
         <div><span>Take profit</span><strong>${formatCurrency(signal.takeProfit)}</strong></div>
         <div><span>Risk/reward</span><strong>${signal.riskRewardRatio}:1</strong></div>
-        <div><span>Confidence</span><strong>${signal.confidenceScore}%</strong></div>
+        <div><span>Confidence ${renderConfidenceHelp()}</span><strong>${signal.confidenceScore}%</strong></div>
         ${state.scannerMode === "advanced" ? `
           <div><span>Validation</span><strong>${signal.validationPassed === false ? "Rejected" : "Passed"}</strong></div>
           <div><span>Validation score</span><strong>${Number(signal.validationScore || 100)}/100</strong></div>
@@ -5191,7 +5386,7 @@ function renderModeDetails(signal, locked = false) {
           <div><span>Stop loss</span><strong>${formatCurrency(signal.stopLoss)}</strong></div>
           <div><span>Take profit</span><strong>${formatCurrency(signal.takeProfit)}</strong></div>
           <div><span>Risk/reward</span><strong>${signal.riskRewardRatio}:1</strong></div>
-          <div><span>Confidence</span><strong>${signal.confidenceScore}%</strong></div>
+          <div><span>Confidence ${renderConfidenceHelp()}</span><strong>${signal.confidenceScore}%</strong></div>
         </div>`}
         <section class="signal-transparency">
           <h4>${locked ? "Why this setup?" : "Why this setup?"}</h4>
@@ -5551,11 +5746,22 @@ function renderConfidenceSummary(signal) {
   const passed = confirmations.filter((item) => item.passed).length;
   return `
     <section class="unlocked-confidence-summary">
-      <span>Confidence summary</span>
+      <span>Confidence summary ${renderConfidenceHelp()}</span>
       <strong>${getConfidenceBand(signal.confidenceScore)} · ${Number(signal.confidenceScore || 0)}%</strong>
       <small>${passed}/${confirmations.length} confirmations passed. Confidence measures rule alignment, not probability of profit.</small>
     </section>
   `;
+}
+
+function renderConfidenceHelp() {
+  return `
+    <span class="confidence-help" tabindex="0" aria-label="About SignalForge confidence">
+      <span aria-hidden="true">i</span>
+      <span class="confidence-tooltip" role="tooltip">
+        Confidence reflects rule alignment and setup quality. It is not a win probability.
+        <button type="button" data-how-it-works-link>Learn more</button>
+      </span>
+    </span>`;
 }
 
 function renderLockedSignalQuality(signal) {
@@ -5684,7 +5890,7 @@ function renderUnlockedSignalDetails(signal) {
         <button class="secondary-action view-advanced-details" type="button" data-signal-view-mode="advanced">View advanced details</button>
         <div class="signal-disclaimer">
           <strong>Educational analysis only. Not financial advice.</strong>
-          <span>Confidence reflects rule alignment and setup quality. It is not a guarantee.</span>
+          <span>Confidence reflects rule alignment and setup quality. It is not a guarantee. <button class="inline-trust-link" type="button" data-how-it-works-link>Learn how signals work</button></span>
         </div>
       </div>`;
   }
@@ -5729,7 +5935,7 @@ function renderUnlockedSignalDetails(signal) {
       ${renderCandidateHistory(signal)}
       <div class="signal-disclaimer">
         <strong>Educational tool only. Not financial advice.</strong>
-        <span>Review the market and your own risk limits before making any decision.</span>
+        <span>Review the market and your own risk limits before making any decision. <button class="inline-trust-link" type="button" data-how-it-works-link>Learn how signals work</button></span>
       </div>
     </div>
   `;
@@ -6074,7 +6280,7 @@ function renderAlerts() {
         </div>
       </div>
       <div class="signal-metrics">
-        <div><span>Confidence</span><strong>${alert.confidenceScore}%</strong></div>
+        <div><span>Confidence ${renderConfidenceHelp()}</span><strong>${alert.confidenceScore}%</strong></div>
         <div><span>Risk/reward</span><strong>${alert.riskRewardRatio}:1</strong></div>
       </div>
       <p class="reasoning">${alert.reasoning}</p>
@@ -7457,6 +7663,7 @@ async function loadPublicProfileRoute() {
   landingPage.classList.add("hidden");
   authScreen.classList.add("hidden");
   dashboard.classList.add("hidden");
+  publicHowItWorksPage?.classList.add("hidden");
   publicProfilePage?.classList.remove("hidden");
 
   try {
@@ -7918,6 +8125,7 @@ function renderUnlockReveal() {
       <button class="text-action" type="button" data-unlock-reveal-close>Close</button>
     </div>
     <p class="unlock-reveal-disclaimer">Educational tool only. Not financial advice.</p>
+    <p class="unlock-trust-link">New to SignalForge? <button type="button" data-how-it-works-link>Learn how signals work.</button></p>
   `;
   unlockReveal.classList.remove("hidden");
   document.body.classList.add("unlock-reveal-open");
