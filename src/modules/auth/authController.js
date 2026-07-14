@@ -21,6 +21,8 @@ import {
   validateOAuthStateCookie
 } from "./googleOAuthService.js";
 
+const LOGIN_OPERATION_TIMEOUT_MS = 8000;
+
 export async function handleAuthRoutes(req, res, pathname) {
   if (pathname === "/api/auth/session" && req.method === "GET") {
     if (!req.user) {
@@ -180,21 +182,25 @@ export async function handleAuthRoutes(req, res, pathname) {
   if (pathname === "/api/auth/login" && req.method === "POST") {
     let emailHash = "missing";
     try {
-      const body = await readJson(req);
-      emailHash = hashEmailForLog(body.email);
-      console.info(`[auth] login:start email_hash=${emailHash}`);
-      const deviceFingerprint = req.headers["x-device-fingerprint"] || body.deviceFingerprint;
-      const result = await registerOrLogin({
-        ...body,
-        deviceFingerprint
-      }, req);
-      const restore = await createPersistentRestoreToken(
-        result.user.id,
-        req,
-        deviceFingerprint
-      );
+      const { result, restore } = await withLoginTimeout((async () => {
+        const body = await readJson(req);
+        emailHash = hashEmailForLog(body.email);
+        console.info(`[auth] login:start email_hash=${emailHash}`);
+        const deviceFingerprint = req.headers["x-device-fingerprint"] || body.deviceFingerprint;
+        const authenticated = await registerOrLogin({
+          ...body,
+          deviceFingerprint
+        }, req);
+        const persistentRestore = await createPersistentRestoreToken(
+          authenticated.user.id,
+          req,
+          deviceFingerprint
+        );
+        return { result: authenticated, restore: persistentRestore };
+      })());
       logSessionCookieIssued("login");
       console.info(`[auth] login:success user_id=${safeLogContext(result.user.id)}`);
+      console.info("[auth] login:response:success");
       return sendJson(res, 200, {
         ok: true,
         user: result.user,
@@ -212,6 +218,8 @@ export async function handleAuthRoutes(req, res, pathname) {
       const errorCode = error.code === "INVALID_CREDENTIALS"
         ? "invalid_credentials"
         : statusCode >= 500 ? "login_failed" : "login_rejected";
+      console.warn(`[auth] login:response:failed reason=${safeLogContext(errorCode)}`);
+      if (statusCode >= 500) console.warn(`[auth] login:error reason=${safeLogContext(error.code || errorCode)}`);
       console.warn(`[auth] login:${statusCode >= 500 ? "error" : "failed"} email_hash=${emailHash} reason=${safeLogContext(errorCode)}`);
       return sendJson(res, statusCode, {
         ok: false,
@@ -361,6 +369,23 @@ function hashEmailForLog(email) {
   const normalized = String(email || "").trim().toLowerCase();
   if (!normalized) return "missing";
   return createHash("sha256").update(normalized).digest("hex").slice(0, 12);
+}
+
+export async function withLoginTimeout(operation, timeoutMs = LOGIN_OPERATION_TIMEOUT_MS) {
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => {
+      const error = new Error("Login operation timed out.");
+      error.code = "LOGIN_TIMEOUT";
+      error.statusCode = 500;
+      reject(error);
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([operation, timeout]);
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 function sendRedirect(res, location, headers = {}) {

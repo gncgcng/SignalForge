@@ -48,8 +48,11 @@ export function hashPassword(password, salt = randomBytes(16).toString("hex")) {
 }
 
 function isValidPassword(password, record) {
+  if (!record?.salt || !record?.hash) return false;
   const candidate = hashPassword(password, record.salt).hash;
-  return timingSafeEqual(Buffer.from(candidate), Buffer.from(record.hash));
+  const candidateBuffer = Buffer.from(candidate);
+  const storedBuffer = Buffer.from(record.hash);
+  return candidateBuffer.length === storedBuffer.length && timingSafeEqual(candidateBuffer, storedBuffer);
 }
 
 function publicUser(user) {
@@ -108,10 +111,15 @@ export async function registerOrLogin({
     throw invalidCredentialsError();
   }
 
+  console.info("[auth] login:user_lookup:start");
   const existing = await findUserByEmail(normalizedEmail);
+  console.info(`[auth] login:user_lookup:done found=${Boolean(existing)}`);
 
   if (existing) {
-    if (!isValidPassword(password, existing.password)) {
+    console.info("[auth] login:password_check:start");
+    const passwordValid = isValidPassword(password, existing.password);
+    console.info(`[auth] login:password_check:done valid=${passwordValid}`);
+    if (!passwordValid) {
       throw invalidCredentialsError();
     }
 
@@ -229,6 +237,7 @@ function invalidCredentialsError() {
 }
 
 export async function createSession(user) {
+  console.info("[auth] login:session_create:start");
   const sessionId = createId("sess");
   const expiresAt = new Date(Date.now() + appConfig.sessionMaxAgeSeconds * 1000);
   await createSessionRecord({ id: sessionId, userId: user.id, expiresAt });
@@ -236,6 +245,7 @@ export async function createSession(user) {
     `[auth] PostgreSQL session inserted user=${safeLogId(user.id)} ` +
     `expiresAt=${expiresAt.toISOString()}`
   );
+  console.info("[auth] login:session_create:done");
 
   return {
     sessionId,

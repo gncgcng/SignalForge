@@ -385,6 +385,8 @@ let marketLoadTimer = null;
 let telegramConnectionTimer = null;
 let billingRefreshTimer = null;
 let deferredInstallPrompt = null;
+let loginInProgress = false;
+let authOperationVersion = 0;
 
 const legalDocuments = {
   terms: {
@@ -429,7 +431,7 @@ const defaultSupportIssues = {
 
 const api = {
   async request(path, options = {}) {
-    const { timeoutMs = 0, signal: externalSignal, ...fetchOptions } = options;
+    const { timeoutMs = 0, signal: externalSignal, onResponse, ...fetchOptions } = options;
     const optionHeaders = fetchOptions.headers || {};
     const controller = new AbortController();
     let timedOut = false;
@@ -458,6 +460,7 @@ const api = {
           ...optionHeaders
         }
       });
+      onResponse?.({ status: response.status, ok: response.ok });
       if (path === "/api/auth/session" || path === "/api/auth/restore") {
         updateAuthDebug({ endpoint: path, statusCode: response.status });
       }
@@ -677,6 +680,10 @@ onboardingPanel?.addEventListener("click", (event) => {
 authForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   console.info("[auth-ui] login:submit");
+  if (loginInProgress) {
+    authNote.textContent = "Sign in is already in progress.";
+    return;
+  }
   if (!authForm.reportValidity()) {
     authNote.textContent = "Enter a valid email and password.";
     updateAuthDebug({ lastAuthAction: "login", lastAuthStatus: "validation_failed", lastErrorMessage: authNote.textContent });
@@ -688,17 +695,33 @@ authForm.addEventListener("submit", async (event) => {
   credentials.legalConsentAccepted = legalConsent.checked;
   credentials.publicProfileEnabled = Boolean(credentials.publicProfileEnabled);
   const submitButton = authForm.querySelector("button[type='submit']");
+  const loginOperationId = ++authOperationVersion;
+  loginInProgress = true;
+  window.__signalForgeLoginInProgress = true;
 
   try {
     submitButton.disabled = true;
     submitButton.textContent = "Signing in...";
     authNote.textContent = "Signing in...";
     console.info("[auth-ui] login:request:start");
-    updateAuthDebug({ lastAuthAction: "login", lastAuthStatus: "loading", lastErrorMessage: "" });
+    updateAuthDebug({
+      authLoading: false,
+      signingIn: true,
+      endpoint: "/api/auth/login",
+      lastAuthAction: "login",
+      lastAuthStatus: "loading",
+      lastLoginStage: "request_start",
+      lastHttpStatus: null,
+      lastErrorMessage: ""
+    });
     const result = await api.request("/api/auth/login", {
       method: "POST",
       body: JSON.stringify(credentials),
-      timeoutMs: 12000
+      timeoutMs: 8000,
+      onResponse: ({ status }) => {
+        console.info(`[auth-ui] login:request:response status=${status}`);
+        updateAuthDebug({ lastLoginStage: "response_received", lastHttpStatus: status });
+      }
     });
     if (result.ok !== true || !result.user || typeof result.user !== "object") {
       const error = new Error("Sign in failed. Please try again.");
@@ -707,7 +730,13 @@ authForm.addEventListener("submit", async (event) => {
     }
     saveAuthSession(result);
     console.info("[auth-ui] login:success");
-    updateAuthDebug({ lastAuthAction: "login", lastAuthStatus: "success", lastErrorMessage: "" });
+    updateAuthDebug({
+      signingIn: false,
+      lastAuthAction: "login",
+      lastAuthStatus: "success",
+      lastLoginStage: "session_saved",
+      lastErrorMessage: ""
+    });
     if (result.verificationRequired) {
       authNote.textContent = result.verificationUnavailable
         ? "Email verification is temporarily unavailable. Your account is saved; contact support for account help."
@@ -716,16 +745,31 @@ authForm.addEventListener("submit", async (event) => {
         : "Check your email to activate your free signals.";
     }
     history.replaceState({}, "", `${location.pathname}${location.search}#scanner`);
-    await bootDashboard();
+    bootDashboard().catch((error) => {
+      console.warn(`[auth-ui] dashboard:hydrate:failed reason=${safeAuthFailureReason(error)}`);
+      if (statusLine) statusLine.textContent = "Signed in. Some dashboard data could not load yet; refresh or retry in a moment.";
+    });
   } catch (error) {
     const message = getLoginErrorMessage(error);
+    if (error.code === "request_timeout") console.warn("[auth-ui] login:timeout");
     console.warn(`[auth-ui] login:failed reason=${safeAuthFailureReason(error)}`);
     console.warn("[auth-ui] login:request:error");
     authNote.textContent = message;
-    updateAuthDebug({ lastAuthAction: "login", lastAuthStatus: "failed", lastErrorMessage: message });
+    updateAuthDebug({
+      signingIn: false,
+      lastAuthAction: "login",
+      lastAuthStatus: error.code === "request_timeout" ? "timeout" : "failed",
+      lastLoginStage: error.code === "request_timeout" ? "request_timeout" : "request_failed",
+      lastHttpStatus: error.statusCode || null,
+      lastErrorMessage: message
+    });
   } finally {
+    if (loginOperationId === authOperationVersion) loginInProgress = false;
+    window.__signalForgeLoginInProgress = loginInProgress;
     submitButton.disabled = false;
     submitButton.textContent = "Enter Dashboard";
+    console.info("[auth-ui] login:finally");
+    updateAuthDebug({ signingIn: loginInProgress });
   }
 });
 
@@ -835,6 +879,10 @@ passwordResetConfirmForm?.addEventListener("submit", async (event) => {
 });
 
 googleAuthButton.addEventListener("click", async () => {
+  if (loginInProgress) {
+    authNote.textContent = "Finish the current sign-in attempt before using Google.";
+    return;
+  }
   if (googleAuthButton.dataset.enabled !== "true") {
     authNote.textContent = "Google sign-in is temporarily unavailable.";
     return;
@@ -855,7 +903,11 @@ googleAuthButton.addEventListener("click", async () => {
         affiliateCode: state.referralCode,
         legalConsentAccepted: true
       }),
-      timeoutMs: 12000
+      timeoutMs: 8000,
+      onResponse: ({ status }) => {
+        console.info(`[auth-ui] google:request:response status=${status}`);
+        updateAuthDebug({ lastHttpStatus: status, lastLoginStage: "google_response" });
+      }
     });
     if (!authorizationUrl || !/^https:\/\//.test(authorizationUrl)) {
       const error = new Error("Google sign-in returned an unexpected response.");
@@ -870,7 +922,9 @@ googleAuthButton.addEventListener("click", async () => {
     console.warn(`[auth-ui] google:failed reason=${safeAuthFailureReason(error)}`);
     authNote.textContent = message;
     updateAuthDebug({ lastAuthAction: "google_login", lastAuthStatus: "failed", lastErrorMessage: message });
-    googleAuthButton.disabled = false;
+  } finally {
+    googleAuthButton.disabled = googleAuthButton.dataset.enabled !== "true";
+    console.info("[auth-ui] google:finally");
   }
 });
 
@@ -2027,9 +2081,17 @@ async function enterPaperTrade(button) {
 }
 
 async function init() {
+  const restoreOperationId = ++authOperationVersion;
   console.info(`[app] build_version=${window.__SIGNALFORGE_BUILD_VERSION__ || "development"}`);
   console.info("[auth] restore:start");
-  updateAuthDebug({ started: true, status: "restore_started", endpoint: "/api/auth/session" });
+  updateAuthDebug({
+    started: true,
+    status: "restore_started",
+    authLoading: true,
+    signingIn: false,
+    endpoint: "/api/auth/session",
+    lastLoginStage: "session_restore"
+  });
   setSplashStatus("Restoring your session");
   renderHowItWorksPages();
   if (isClearSessionRoute()) {
@@ -2073,10 +2135,14 @@ async function init() {
   let authConfig;
   try {
     [session, authConfig] = await Promise.all([
-      loadStartupSession({ signal: restoreController.signal }),
+      loadStartupSession({ signal: restoreController.signal, operationId: restoreOperationId }),
       loadAuthConfig({ signal: restoreController.signal })
     ]);
   } catch (error) {
+    if (!isAuthOperationCurrent(restoreOperationId)) {
+      console.info("[auth] restore:stale_result_ignored");
+      return;
+    }
     if (restoreController.signal.aborted) {
       console.warn("[auth] restore:timeout");
       updateAuthDebug({ status: "restore_timeout", timeout: true, failureReason: "timeout" });
@@ -2089,6 +2155,11 @@ async function init() {
     window.clearTimeout(restoreTimeout);
   }
   applyAuthConfig(authConfig);
+  if (!isAuthOperationCurrent(restoreOperationId) || loginInProgress) {
+    console.info("[auth] restore:stale_result_ignored");
+    return;
+  }
+  updateAuthDebug({ authLoading: false });
   const user = session.user;
 
   state.user = user;
@@ -2144,16 +2215,16 @@ function setSplashStatus(message) {
   if (appSplashStatus) appSplashStatus.textContent = message;
 }
 
-async function loadStartupSession({ signal } = {}) {
+async function loadStartupSession({ signal, operationId } = {}) {
   let cookieFailure = null;
   try {
     const session = await api.request("/api/auth/session", { signal });
     if (!isValidSessionPayload(session)) {
       console.warn("[auth] restore:failed reason=unexpected_session_response");
-      clearSavedAuthStorage("unexpected_session_response");
+      if (isAuthOperationCurrent(operationId)) clearSavedAuthStorage("unexpected_session_response");
       return { user: null };
     }
-    saveRestoreToken(session.restore);
+    if (isAuthOperationCurrent(operationId)) saveRestoreToken(session.restore);
 
     if (session.user) {
       console.info(`[auth] restore:success user_id=${safeAuthLogId(session.user.id)}`);
@@ -2169,7 +2240,7 @@ async function loadStartupSession({ signal } = {}) {
     console.warn(`[auth] Cookie session check failed; trying persistent restore token. ${error.message}`);
   }
 
-  const user = await restoreSavedSession({ signal, cookieFailure });
+  const user = await restoreSavedSession({ signal, cookieFailure, operationId });
   return { user };
 }
 
@@ -2203,12 +2274,13 @@ function applyAuthConfig(authConfig = {}) {
   googleAuthButton.setAttribute("aria-disabled", String(!authConfig.googleEnabled));
 }
 
-async function restoreSavedSession({ signal, cookieFailure = null } = {}) {
+async function restoreSavedSession({ signal, cookieFailure = null, operationId } = {}) {
+  if (!isAuthOperationCurrent(operationId)) return null;
   const restoreToken = getAuthSession().restoreToken;
   if (!restoreToken) {
     console.info("[auth] No persistent restore token found.");
     if (cookieFailure && !isMissingSessionFailure(cookieFailure)) throw cookieFailure;
-    if (cookieFailure) clearSavedAuthStorage("invalid_cookie_session");
+    if (cookieFailure && isAuthOperationCurrent(operationId)) clearSavedAuthStorage("invalid_cookie_session");
     return null;
   }
 
@@ -2221,9 +2293,10 @@ async function restoreSavedSession({ signal, cookieFailure = null } = {}) {
     });
     if (!isValidRestoredSessionPayload(result)) {
       console.warn("[auth] restore:failed reason=unexpected_restore_response");
-      clearSavedAuthStorage("unexpected_restore_response");
+      if (isAuthOperationCurrent(operationId)) clearSavedAuthStorage("unexpected_restore_response");
       return null;
     }
+    if (!isAuthOperationCurrent(operationId)) return null;
     saveRestoreToken(result.restore);
     console.info(`[auth] restore:success user_id=${safeAuthLogId(result.user.id)}`);
     console.info("[auth] Persistent restore token succeeded.");
@@ -2231,7 +2304,7 @@ async function restoreSavedSession({ signal, cookieFailure = null } = {}) {
   } catch (error) {
     if (signal?.aborted || error.code === "request_aborted") throw error;
     if (isPermanentRestoreFailure(error)) {
-      clearSavedAuthStorage("invalid_or_expired_restore_token");
+      if (isAuthOperationCurrent(operationId)) clearSavedAuthStorage("invalid_or_expired_restore_token");
       console.warn(`[auth] restore:failed reason=${safeAuthFailureReason(error)}`);
       return null;
     }
@@ -2269,11 +2342,24 @@ function safeAuthFailureReason(error) {
   return String(error?.code || error?.statusCode || "unknown").replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
 }
 
+function isAuthOperationCurrent(operationId) {
+  return operationId === undefined || operationId === authOperationVersion;
+}
+
 function getLoginErrorMessage(error) {
+  if (error?.code === "request_timeout") {
+    return "Sign in timed out. Please try again.";
+  }
   if ([401, 403].includes(error?.statusCode) || error?.code === "invalid_credentials") {
     return "Invalid email or password.";
   }
-  if (["request_timeout", "request_aborted"].includes(error?.code) || error?.statusCode >= 500) {
+  if (error?.statusCode === 404) {
+    return "Sign in is currently unavailable.";
+  }
+  if (error?.code === "invalid_json") {
+    return "Sign in failed. Server returned an invalid response.";
+  }
+  if (error?.code === "request_aborted" || error?.statusCode >= 500) {
     return "Could not sign in right now. Please try again.";
   }
   if (error?.code === "unexpected_login_response" || error?.code === "invalid_json") {
@@ -2395,7 +2481,17 @@ function updateAuthDebug(update = {}) {
   const panel = document.querySelector("#auth-debug-panel");
   if (!panel) return;
   panel.classList.remove("hidden");
-  panel.textContent = `Auth boot: ${JSON.stringify(debug)}`;
+  panel.textContent = [
+    `Build: ${debug.buildVersion || "development"}`,
+    `Route: ${location.hash || "#top"}`,
+    `Auth loading: ${Boolean(debug.authLoading)}`,
+    `Signing in: ${Boolean(debug.signingIn)}`,
+    `Last stage: ${debug.lastLoginStage || debug.status || "idle"}`,
+    `HTTP status: ${debug.lastHttpStatus ?? debug.statusCode ?? "none"}`,
+    `Endpoint: ${debug.endpoint || "none"}`,
+    `Saved restore token: ${Boolean(getAuthSession().restoreToken)}`,
+    `Last error: ${debug.lastErrorMessage || debug.failureReason || "none"}`
+  ].join(" | ");
 }
 
 function clearClientAuthState() {

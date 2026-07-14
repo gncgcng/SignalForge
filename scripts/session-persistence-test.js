@@ -73,7 +73,7 @@ const result = {
     app.includes('credentials: "same-origin"') &&
     app.includes('cache: "no-store"'),
   sessionRestoreOnLaunch:
-    app.includes("async function loadStartupSession({ signal } = {})") &&
+    app.includes("async function loadStartupSession({ signal, operationId } = {})") &&
     app.includes('api.request("/api/auth/session", { signal })') &&
     app.includes("setSplashStatus(\"Restoring your session\")") &&
     html.includes('id="app-splash-status"'),
@@ -92,11 +92,11 @@ const result = {
     !app.includes("await Promise.all([\n    loadPairs()"),
   normalCookieRestoreFirst:
     app.indexOf('api.request("/api/auth/session", { signal })') <
-    app.indexOf("restoreSavedSession({ signal, cookieFailure })") &&
+    app.indexOf("restoreSavedSession({ signal, cookieFailure, operationId })") &&
     authController.includes("refreshSessionExpiry(req.sessionId)") &&
     authController.includes("createPersistentRestoreToken("),
   pwaCookieLossFallback:
-    app.includes("async function restoreSavedSession({ signal, cookieFailure = null } = {})") &&
+    app.includes("async function restoreSavedSession({ signal, cookieFailure = null, operationId } = {})") &&
     app.includes('api.request("/api/auth/restore"') &&
     app.includes("No cookie session found; checking persistent restore token.") &&
     app.includes("function isPermanentRestoreFailure(error)") &&

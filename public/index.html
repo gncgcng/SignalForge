@@ -2066,7 +2066,7 @@
     <script>
       (function emergencyBootGuard() {
         "use strict";
-        var buildVersion = "2026.07.13-auth-actions.2";
+        var buildVersion = "2026.07.13-auth-timeout.3";
         var hash = String(window.location.hash || "").split("?")[0].toLowerCase();
         var hashParams = new URLSearchParams(String(window.location.hash || "").split("?")[1] || "");
         var debugEnabled = new URLSearchParams(window.location.search).get("debugAuth") === "1" || hashParams.get("debugAuth") === "1";
@@ -2146,7 +2146,7 @@
         }, 2800);
       }());
     </script>
-    <script src="/auth-bootstrap.js?v=2026.07.13-auth-actions.2"></script>
-    <script src="/app.js?v=2026.07.13-auth-actions.2" type="module"></script>
+    <script src="/auth-bootstrap.js?v=2026.07.13-auth-timeout.3"></script>
+    <script src="/app.js?v=2026.07.13-auth-timeout.3" type="module"></script>
   </body>
 </html>

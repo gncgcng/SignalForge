@@ -2,7 +2,7 @@
   "use strict";
 
   var RESTORE_TOKEN_KEY = "signalforge-restore-token";
-  var REQUEST_TIMEOUT_MS = 12000;
+  var REQUEST_TIMEOUT_MS = 8000;
   var LEGACY_AUTH_KEYS = [
     "signalforge-auth-token",
     "signalforge-session",
@@ -59,10 +59,13 @@
   function setDebug(action, status, errorMessage) {
     var current = window.__signalForgeAuthDebug || {};
     current.route = window.location.hash || "#top";
-    current.authLoading = status === "loading";
+    if (current.authLoading === undefined) current.authLoading = false;
+    if (action === "login" && status === "loading") current.signingIn = true;
+    if (action === "login" && ["success", "failed", "timeout"].indexOf(status) >= 0) current.signingIn = false;
     current.hasLocalToken = Boolean(storage.getAuthSession().restoreToken);
     current.lastAuthAction = action || current.lastAuthAction || "none";
     current.lastAuthStatus = status || current.lastAuthStatus || "idle";
+    current.lastLoginStage = action === "login" ? status : (current.lastLoginStage || "idle");
     current.lastErrorMessage = errorMessage || "";
     window.__signalForgeAuthDebug = current;
     var hashParams = new URLSearchParams(String(window.location.hash || "").split("?")[1] || "");
@@ -74,9 +77,12 @@
         "Build: " + (current.buildVersion || "development"),
         "Route: " + current.route,
         "Auth loading: " + current.authLoading,
+        "Signing in: " + current.signingIn,
         "Saved restore token: " + current.hasLocalToken,
         "Last action: " + current.lastAuthAction,
-        "Last status: " + current.lastAuthStatus,
+        "Last stage: " + current.lastLoginStage,
+        "HTTP status: " + (current.lastHttpStatus == null ? "none" : current.lastHttpStatus),
+        "Endpoint: " + (current.endpoint || "none"),
         "Last error: " + (current.lastErrorMessage || "none")
       ].join(" | ");
     }
@@ -107,10 +113,13 @@
   }
 
   function errorMessageFor(error) {
+    if (error && error.code === "timeout") return "Sign in timed out. Please try again.";
     if (error && (error.status === 401 || error.status === 403 || error.code === "invalid_credentials")) {
       return "Invalid email or password.";
     }
-    if (error && (error.code === "timeout" || error.code === "network_error" || error.status >= 500)) {
+    if (error && error.status === 404) return "Sign in is currently unavailable.";
+    if (error && error.code === "invalid_json") return "Sign in failed. Server returned an invalid response.";
+    if (error && (error.code === "network_error" || error.status >= 500)) {
       return "Could not sign in right now. Please try again.";
     }
     return "Sign in failed. Please try again.";
@@ -144,6 +153,12 @@
           "x-device-fingerprint": getDeviceFingerprint()
         }, options && options.headers)
       }));
+      if (path === "/api/auth/login") {
+        console.info("[auth-ui] login:request:response status=" + response.status);
+        setDebug("login", "response_received", "");
+        window.__signalForgeAuthDebug.lastHttpStatus = response.status;
+        window.__signalForgeAuthDebug.endpoint = path;
+      }
       var text = await response.text();
       var payload;
       try {
@@ -151,7 +166,7 @@
       } catch (_) {
         var invalidResponse = new Error("unexpected_response");
         invalidResponse.status = response.status;
-        invalidResponse.code = "unexpected_response";
+        invalidResponse.code = "invalid_json";
         throw invalidResponse;
       }
       if (!response.ok) {
@@ -182,6 +197,10 @@
     event.preventDefault();
     event.stopImmediatePropagation();
     console.info("[auth-ui] login:submit");
+    if (window.__signalForgeAuthDebug?.signingIn) {
+      if (authNote) authNote.textContent = "Sign in is already in progress.";
+      return;
+    }
     if (!authForm.reportValidity()) {
       if (authNote) authNote.textContent = "Enter a valid email and password.";
       setDebug("login", "validation_failed", "Enter a valid email and password.");
@@ -200,6 +219,7 @@
       if (authNote) authNote.textContent = "Signing in...";
       console.info("[auth-ui] login:request:start");
       setDebug("login", "loading", "");
+      window.__signalForgeAuthDebug.endpoint = "/api/auth/login";
       var result = await requestJson("/api/auth/login", {
         method: "POST",
         body: JSON.stringify(credentials)
@@ -212,9 +232,11 @@
       storage.saveAuthSession(result);
       console.info("[auth-ui] login:success");
       setDebug("login", "success", "");
-      window.location.replace(window.location.pathname + window.location.search + "#scanner");
+      window.history.replaceState({}, "", window.location.pathname + window.location.search + "#scanner");
+      window.location.reload();
     } catch (error) {
       var message = errorMessageFor(error);
+      if (error.code === "timeout") console.warn("[auth-ui] login:timeout");
       console.warn("[auth-ui] login:failed reason=" + String(error.code || error.status || "unknown").replace(/[^a-z0-9_-]/gi, "_").slice(0, 64));
       console.warn("[auth-ui] login:request:error");
       if (authNote) authNote.textContent = message;
@@ -224,6 +246,7 @@
         submitButton.disabled = false;
         submitButton.textContent = "Enter Dashboard";
       }
+      console.info("[auth-ui] login:finally");
     }
   });
 
@@ -275,8 +298,10 @@
         ? "Could not open Google sign-in right now. Please try again."
         : "Google sign-in failed. Please try again.";
       if (authNote) authNote.textContent = message;
-      googleButton.disabled = false;
       setDebug("google_login", "failed", message);
+    } finally {
+      googleButton.disabled = googleButton.dataset.enabled !== "true";
+      console.info("[auth-ui] google:finally");
     }
   });
 

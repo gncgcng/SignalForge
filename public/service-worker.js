@@ -1,4 +1,4 @@
-const CACHE_VERSION = "signalforge-static-v30-auth-actions";
+const CACHE_VERSION = "signalforge-static-v31-auth-timeout";
 const OFFLINE_URL = "/offline.html";
 const CRITICAL_ASSET_PATHS = new Set([
   "/index.html",
