@@ -132,7 +132,8 @@ const state = {
 };
 
 const RESTORE_TOKEN_KEY = "signalforge-restore-token";
-const SCANNER_MODE_KEY = "signalforge-scanner-mode";
+const SIGNAL_VIEW_MODE_KEY = "signalforge-signal-view-mode";
+const LEGACY_SCANNER_MODE_KEY = "signalforge-scanner-mode";
 const NAV_SECTIONS_KEY = "signalforge-nav-sections";
 const TELEGRAM_UNLOCK_KEY = "signalforge-telegram-unlock";
 const UNLOCK_REVEAL_KEY = "signalforge-unlock-reveal";
@@ -201,7 +202,6 @@ const scanProgressCount = document.querySelector("#scan-progress-count");
 const scanProgressBar = document.querySelector("#scan-progress-bar");
 const scanSummaryPanel = document.querySelector("#scan-summary-panel");
 const viewOpportunitiesButton = document.querySelector("#view-opportunities-button");
-const scannerModeToggle = document.querySelector("#scanner-mode-toggle");
 const onboardingPanel = document.querySelector("#onboarding-panel");
 const onboardingChecklist = document.querySelector("#onboarding-checklist");
 const onboardingProgressText = document.querySelector("#onboarding-progress-text");
@@ -517,10 +517,10 @@ document.querySelectorAll("[data-legal-close]").forEach((trigger) => {
   trigger.addEventListener("click", closeLegalDocument);
 });
 
-scannerModeToggle.addEventListener("change", () => {
-  state.scannerMode = scannerModeToggle.checked ? "advanced" : "basic";
-  localStorage.setItem(SCANNER_MODE_KEY, state.scannerMode);
-  renderSignals();
+document.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-signal-view-mode]");
+  if (!button) return;
+  setSignalViewMode(button.dataset.signalViewMode);
 });
 
 viewOpportunitiesButton.addEventListener("click", () => {
@@ -2034,7 +2034,7 @@ function clearClientAuthState() {
   const scannerMode = getStoredScannerMode();
   const navSections = getStoredNavSections();
   localStorage.clear();
-  localStorage.setItem(SCANNER_MODE_KEY, scannerMode);
+  localStorage.setItem(SIGNAL_VIEW_MODE_KEY, scannerMode);
   localStorage.setItem(NAV_SECTIONS_KEY, JSON.stringify(navSections));
   sessionStorage.clear();
 
@@ -2148,7 +2148,7 @@ async function bootDashboard() {
   webhookEventsNavLink.classList.toggle("hidden", !state.user.isAdmin);
   testerAccountBadge.classList.toggle("hidden", state.user.role !== "tester");
   renderNavSections();
-  scannerModeToggle.checked = state.scannerMode === "advanced";
+  syncSignalViewToggles();
 
   const dashboardLoads = await Promise.allSettled([
     loadPairs(),
@@ -2534,24 +2534,25 @@ function renderCandidates() {
     const nextConditions = candidate.nextConditions?.length
       ? candidate.nextConditions
       : ["Waiting for the remaining rule confirmations to align."];
+    const advanced = state.scannerMode === "advanced";
     return `<article class="candidate-card ${escapeHtml(candidate.status)}">
       <header><div><strong>${escapeHtml(getDisplaySymbol(candidate.symbol))}</strong><span>${escapeHtml(candidate.timeframe)} · ${escapeHtml(String(candidate.direction || "").toUpperCase())} · ${escapeHtml(candidate.setupType)}</span></div><span class="status-pill">${escapeHtml(label)}</span></header>
-      <div class="candidate-scores"><span>Setup quality<strong>${Number(candidate.setupQualityScore ?? candidate.candidateScore)}%</strong></span><span>Entry readiness<strong>${Number(candidate.entryReadinessScore ?? candidate.readinessScore)}%</strong></span></div>
+      ${advanced ? `<div class="candidate-scores"><span>Setup quality<strong>${Number(candidate.setupQualityScore ?? candidate.candidateScore)}%</strong></span><span>Entry readiness<strong>${Number(candidate.entryReadinessScore ?? candidate.readinessScore)}%</strong></span></div>
       <div class="candidate-quality-summary">
         <span class="quality-chip ${qualityStatusFromScore(candidate.setupQualityScore ?? candidate.candidateScore)}">Setup ${qualityLabel(qualityStatusFromScore(candidate.setupQualityScore ?? candidate.candidateScore))}</span>
         <span class="quality-chip ${qualityStatusFromScore(candidate.entryReadinessScore ?? candidate.readinessScore)}">Entry ${qualityLabel(qualityStatusFromScore(candidate.entryReadinessScore ?? candidate.readinessScore))}</span>
-      </div>
+      </div>` : ""}
       <p class="candidate-primary-reason"><strong>Why not a signal yet:</strong> ${escapeHtml(reasons[0])}</p>
       <p class="candidate-next-condition"><strong>Next:</strong> ${escapeHtml(nextConditions[0])}</p>
       <small>Last checked ${escapeHtml(formatDateTime(candidate.lastCheckedAt || candidate.firstDetectedAt))}</small>
-      <details><summary>View explanation</summary>
+      ${advanced ? `<details><summary>View technical explanation</summary>
         <div class="candidate-explanation">
           <section><strong>Why not a signal?</strong><ul>${reasons.map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul></section>
           <section><strong>Missing confirmations</strong>${missing.length ? `<ul>${missing.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : `<p>No named confirmation is missing; entry timing is still being monitored.</p>`}</section>
           <section><strong>Next condition needed</strong><ul>${nextConditions.map((condition) => `<li>${escapeHtml(condition)}</li>`).join("")}</ul></section>
           <section><strong>Technical status</strong><p>Entry quality: ${escapeHtml(titleCase(candidate.entryQuality))}. Monitoring expires ${escapeHtml(formatDateTime(candidate.expiresAt))}.</p></section>
         </div>
-      </details>
+      </details>` : ""}
     </article>`;
   }).join("");
 }
@@ -2568,6 +2569,7 @@ function renderAvoidTrades() {
   }
 
   const visible = state.showAllAvoidTrades ? avoidTrades : avoidTrades.slice(0, 3);
+  const advanced = state.scannerMode === "advanced";
   avoidTradeGrid.innerHTML = visible.map((item) => `
     <article class="avoid-trade-card" data-result-type="avoid_trade">
       <header>
@@ -2575,10 +2577,10 @@ function renderAvoidTrades() {
         <span class="avoid-trade-badge">Avoid Trade</span>
       </header>
       <p class="avoid-trade-primary"><strong>Reason:</strong> ${escapeHtml(item.reason)}</p>
-      <div class="avoid-trade-columns">
+      ${advanced ? `<div class="avoid-trade-columns">
         <section><strong>Avoid because</strong><ul>${(item.reasons || []).map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul></section>
         <section><strong>What would improve it</strong><ul>${(item.improvements || []).map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul></section>
-      </div>
+      </div>` : ""}
       <footer><span>${escapeHtml(item.marketCondition || "Confirmations not aligned")}</span><span>No credits used</span></footer>
     </article>
   `).join("");
@@ -2605,23 +2607,24 @@ function renderMarketBrief() {
   const mainReasons = brief.mainReasons?.length
     ? brief.mainReasons
     : ["No single reason dominates the current scanner results."];
+  const advanced = state.scannerMode === "advanced";
   dailyBriefContent.innerHTML = `
     <div class="daily-brief-overview">
       <div class="daily-brief-condition"><span>Market condition</span><strong>${escapeHtml(brief.marketCondition)}</strong></div>
-      <div class="daily-brief-chips">
+      ${advanced ? `<div class="daily-brief-chips">
         <span><strong>${Number(brief.readySignalCount || 0)}</strong> ready</span>
         <span><strong>${Number(brief.watchingCount || 0)}</strong> watching</span>
         <span><strong>${Number(brief.avoidCount || 0)}</strong> avoid</span>
         <span><strong>${Number(brief.pairsScanned || 0)}</strong> pairs</span>
-      </div>
+      </div>` : ""}
     </div>
     <div class="daily-brief-columns">
       ${renderBriefPairList("Stronger pairs", brief.strongestPairs, "No directional strength stands out yet.")}
       ${renderBriefPairList("Weak or choppy", brief.weakestPairs, "No weak pair context is available yet.")}
       <section><strong>${noSignal ? "No clean signal yet because" : "What to watch next"}</strong><ul>${mainReasons.map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul></section>
     </div>
-    ${brief.watchingBreakdown?.length ? `<div class="daily-brief-watching"><strong>Watching:</strong> ${brief.watchingBreakdown.map((item) => `${Number(item.count)} ${escapeHtml(item.setupType)}`).join(" · ")}</div>` : ""}
-    <details class="daily-brief-pairs"><summary>View all pair summaries</summary><div>${(brief.pairSummaries || []).map((item) => `<article><strong>${escapeHtml(item.displaySymbol || getDisplaySymbol(item.symbol))}</strong><span>${escapeHtml(item.timeframe)} · ${escapeHtml(item.summary)}</span></article>`).join("")}</div></details>
+    ${advanced && brief.watchingBreakdown?.length ? `<div class="daily-brief-watching"><strong>Watching:</strong> ${brief.watchingBreakdown.map((item) => `${Number(item.count)} ${escapeHtml(item.setupType)}`).join(" · ")}</div>` : ""}
+    ${advanced ? `<details class="daily-brief-pairs"><summary>View scanner and timeframe detail</summary><div>${(brief.pairSummaries || []).map((item) => `<article><strong>${escapeHtml(item.displaySymbol || getDisplaySymbol(item.symbol))}</strong><span>${escapeHtml(item.timeframe)} · ${escapeHtml(item.summary)}</span></article>`).join("")}</div></details>` : ""}
   `;
 }
 
@@ -2765,6 +2768,8 @@ async function loadProfile() {
   const result = await api.request("/api/profile/me");
   const profile = normalizeProfile(result.profile, state.user);
   state.profile = profile;
+  state.scannerMode = profile.signalViewMode;
+  persistSignalViewMode(profile.signalViewMode);
   state.user = {
     ...state.user,
     username: profile?.username || "",
@@ -2775,6 +2780,7 @@ async function loadProfile() {
     profile
   };
   document.querySelector("#user-name").textContent = getUserDisplayName();
+  renderSignalViewSurfaces();
   renderProfile();
   renderOnboarding();
   return profile;
@@ -2784,7 +2790,8 @@ async function saveProfileSettings({
   username,
   publicProfileEnabled,
   publicLeaderboardEnabled,
-  messageElement
+  messageElement,
+  signalViewMode
 }) {
   try {
     if (messageElement) messageElement.textContent = "Saving profile...";
@@ -2793,11 +2800,14 @@ async function saveProfileSettings({
       body: JSON.stringify({
         ...(String(username || "").trim() ? { username: String(username).trim() } : {}),
         publicProfileEnabled,
-        publicLeaderboardEnabled
+        publicLeaderboardEnabled,
+        ...(signalViewMode ? { signalViewMode } : {})
       })
     });
     const profile = normalizeProfile(result.profile, state.user);
     state.profile = profile;
+    state.scannerMode = profile.signalViewMode;
+    persistSignalViewMode(profile.signalViewMode);
     state.user = {
       ...state.user,
       username: profile?.username || "",
@@ -2808,6 +2818,7 @@ async function saveProfileSettings({
       profile
     };
     document.querySelector("#user-name").textContent = getUserDisplayName();
+    renderSignalViewSurfaces();
     renderProfile();
     renderOnboarding();
     if (messageElement) messageElement.textContent = "Profile updated.";
@@ -4816,7 +4827,7 @@ function renderMobileSignalHistoryCard(signal) {
       ${renderRiskCalculator(signal)}
       ${renderPaperTradeAction(signal)}
       ${renderConfidenceSummary(signal)}
-      ${renderSignalQuality(signal, { compact: true })}
+      ${state.scannerMode === "advanced" ? renderSignalQuality(signal, { compact: true }) : ""}
       ${renderMobileSignalAccordion(signal)}
     </article>
   `;
@@ -4834,6 +4845,18 @@ function renderMobileSignalValue(label, value) {
 function renderMobileSignalAccordion(signal) {
   const confirmations = normalizeConfirmations(signal.confirmations || [], signal.indicators || {});
   const passed = confirmations.filter((item) => item.passed).map((item) => item.name);
+
+  if (state.scannerMode === "beginner") {
+    return `
+      <div class="mobile-signal-accordion beginner">
+        <details>
+          <summary>Why this setup?</summary>
+          <p class="reasoning">${escapeHtml(getShortSignalReason(signal))}</p>
+        </details>
+        <button class="secondary-action view-advanced-details" type="button" data-signal-view-mode="advanced">View advanced details</button>
+        <p class="mobile-signal-disclaimer">Educational analysis only. Not financial advice.</p>
+      </div>`;
+  }
 
   return `
     <div class="mobile-signal-accordion">
@@ -4890,6 +4913,7 @@ function renderMobileSignalAccordion(signal) {
         <summary>Historical learning insight</summary>
         ${renderLearningInsight(signal)}
       </details>
+      ${renderCandidateHistory(signal)}
     </div>
   `;
 }
@@ -5102,8 +5126,10 @@ function renderScanCard(setup) {
         <div><span>Setup type</span><strong>${setup.setupType || "Qualified setup"}</strong></div>
         <div><span>Confidence</span><strong>${setup.confidenceScore}%</strong></div>
         <div><span>Risk/reward</span><strong>${setup.riskRewardRatio}:1</strong></div>
-        <div><span>Validation</span><strong>${setup.validationPassed === false ? "Rejected" : "Passed"}</strong></div>
-        <div><span>Validation score</span><strong>${Number(setup.validationScore || 100)}/100</strong></div>
+        ${state.scannerMode === "advanced" ? `
+          <div><span>Validation</span><strong>${setup.validationPassed === false ? "Rejected" : "Passed"}</strong></div>
+          <div><span>Validation score</span><strong>${Number(setup.validationScore || 100)}/100</strong></div>
+        ` : ""}
       </div>
       ${renderLockedSignalQuality(setup)}
       <div class="compact-actions">
@@ -5138,8 +5164,10 @@ function renderSignalCard(signal) {
         <div><span>Take profit</span><strong>${formatCurrency(signal.takeProfit)}</strong></div>
         <div><span>Risk/reward</span><strong>${signal.riskRewardRatio}:1</strong></div>
         <div><span>Confidence</span><strong>${signal.confidenceScore}%</strong></div>
-        <div><span>Validation</span><strong>${signal.validationPassed === false ? "Rejected" : "Passed"}</strong></div>
-        <div><span>Validation score</span><strong>${Number(signal.validationScore || 100)}/100</strong></div>
+        ${state.scannerMode === "advanced" ? `
+          <div><span>Validation</span><strong>${signal.validationPassed === false ? "Rejected" : "Passed"}</strong></div>
+          <div><span>Validation score</span><strong>${Number(signal.validationScore || 100)}/100</strong></div>
+        ` : ""}
       </div>
       ${renderRiskCalculator(signal)}
       <div class="compact-actions">
@@ -5154,28 +5182,37 @@ function renderSignalCard(signal) {
 }
 
 function renderModeDetails(signal, locked = false) {
-  if (state.scannerMode === "basic") {
+  if (state.scannerMode === "beginner") {
     return `
       <section class="basic-signal-details">
-        <div class="signal-metrics">
+        ${locked ? "" : `<div class="signal-metrics">
           <div><span>Direction</span><strong class="direction ${signal.direction}">${String(signal.direction || "").toUpperCase()}</strong></div>
-          <div><span>Entry</span><strong>${locked ? "Unlock required" : formatCurrency(signal.entryPrice)}</strong></div>
-          <div><span>Stop loss</span><strong>${locked ? "Unlock required" : formatCurrency(signal.stopLoss)}</strong></div>
-          <div><span>Take profit</span><strong>${locked ? "Unlock required" : formatCurrency(signal.takeProfit)}</strong></div>
+          <div><span>Entry</span><strong>${formatCurrency(signal.entryPrice)}</strong></div>
+          <div><span>Stop loss</span><strong>${formatCurrency(signal.stopLoss)}</strong></div>
+          <div><span>Take profit</span><strong>${formatCurrency(signal.takeProfit)}</strong></div>
           <div><span>Risk/reward</span><strong>${signal.riskRewardRatio}:1</strong></div>
           <div><span>Confidence</span><strong>${signal.confidenceScore}%</strong></div>
-        </div>
+        </div>`}
         <section class="signal-transparency">
-          <h4>Why this signal?</h4>
+          <h4>${locked ? "Why this setup?" : "Why this setup?"}</h4>
           <p class="reasoning">${escapeHtml(getShortSignalReason(signal))}</p>
           <div class="signal-disclaimer">
             <strong>Educational tool only. Not financial advice.</strong>
-            <span>Review risk and market context before making any decision.</span>
+            <span>Confidence reflects rule alignment and setup quality. It is not a guarantee.</span>
           </div>
         </section>
-        ${locked ? "" : renderSignalQuality(signal)}
-        ${renderSignalValidation(signal)}
         ${locked ? "" : renderRiskEngineCard(signal)}
+      </section>
+    `;
+  }
+
+  if (locked) {
+    return `
+      <section class="advanced-signal-details locked-advanced-preview">
+        <p class="reasoning">${escapeHtml(getShortSignalReason(signal))}</p>
+        ${renderLockedSignalQuality(signal)}
+        ${renderAdvancedPreviewChecks(signal)}
+        <p class="locked-preview-note">Entry, stop loss, take profit, and full analysis remain hidden until unlock.</p>
       </section>
     `;
   }
@@ -5184,12 +5221,35 @@ function renderModeDetails(signal, locked = false) {
     <section class="advanced-signal-details">
       <p class="reasoning">${escapeHtml(signal.reasoning || "Advanced signal context is based on rule alignment.")}</p>
       ${renderSignalTransparency(signal)}
-      ${locked ? "" : renderSignalQuality(signal)}
+      ${renderSignalQuality(signal)}
       ${renderSignalValidation(signal)}
       ${renderSignalConfluence(signal)}
-      ${renderRiskEngineCard(signal, locked)}
+      ${renderRiskEngineCard(signal)}
+      ${renderCandidateHistory(signal)}
     </section>
   `;
+}
+
+function renderAdvancedPreviewChecks(signal) {
+  const confirmations = normalizeConfirmations(signal.confirmations || [], signal.indicators || {});
+  const passed = confirmations.filter((item) => item.passed).map((item) => item.name).slice(0, 5);
+  return `<div class="advanced-preview-checks"><strong>Preview context</strong><span>${escapeHtml(passed.join(" · ") || "Validated rule alignment")}</span></div>`;
+}
+
+function renderCandidateHistory(signal) {
+  const history = signal.candidateHistory || signal.indicators?.candidateHistory || [];
+  const setupScore = signal.setupQualityScore ?? signal.indicators?.setupQualityScore;
+  const readinessScore = signal.entryReadinessScore ?? signal.indicators?.entryReadinessScore;
+  if (!history.length && setupScore == null && readinessScore == null) return "";
+  return `
+    <details class="unlocked-analysis-section">
+      <summary>Candidate and watch history</summary>
+      <div class="candidate-history-summary">
+        ${setupScore == null ? "" : `<div><span>Setup quality</span><strong>${Number(setupScore)}%</strong></div>`}
+        ${readinessScore == null ? "" : `<div><span>Entry readiness</span><strong>${Number(readinessScore)}%</strong></div>`}
+      </div>
+      ${history.length ? `<ol>${history.slice(0, 8).map((item) => `<li>${escapeHtml(item.message || item.status || item)}</li>`).join("")}</ol>` : `<p class="reasoning">This signal was promoted after its setup and entry checks became ready.</p>`}
+    </details>`;
 }
 
 function renderSignalValidation(signal) {
@@ -5611,6 +5671,23 @@ function qualityLabel(value) {
 
 function renderUnlockedSignalDetails(signal) {
   const confirmations = normalizeConfirmations(signal.confirmations || [], signal.indicators || {});
+  if (state.scannerMode === "beginner") {
+    return `
+      <div class="unlocked-signal-details beginner">
+        ${renderRiskCalculator(signal)}
+        ${renderPaperTradeAction(signal)}
+        ${renderConfidenceSummary(signal)}
+        <section class="unlocked-analysis-section">
+          <h4>Why this setup?</h4>
+          <p class="reasoning">${escapeHtml(getShortSignalReason(signal))}</p>
+        </section>
+        <button class="secondary-action view-advanced-details" type="button" data-signal-view-mode="advanced">View advanced details</button>
+        <div class="signal-disclaimer">
+          <strong>Educational analysis only. Not financial advice.</strong>
+          <span>Confidence reflects rule alignment and setup quality. It is not a guarantee.</span>
+        </div>
+      </div>`;
+  }
   return `
     <div class="unlocked-signal-details">
       ${renderRiskCalculator(signal)}
@@ -5649,6 +5726,7 @@ function renderUnlockedSignalDetails(signal) {
         <summary>Historical learning insight</summary>
         ${renderLearningInsight(signal)}
       </details>
+      ${renderCandidateHistory(signal)}
       <div class="signal-disclaimer">
         <strong>Educational tool only. Not financial advice.</strong>
         <span>Review the market and your own risk limits before making any decision.</span>
@@ -7302,6 +7380,8 @@ function renderProfile() {
     settingsPublicLeaderboard.checked = Boolean(profile?.publicLeaderboardEnabled);
     settingsPublicLeaderboard.disabled = false;
   }
+  setText("#signal-view-mode-status", `${profile.signalViewMode === "advanced" ? "Advanced" : "Beginner"} view is saved to your account.`);
+  syncSignalViewToggles();
   const eligibility = profile?.private?.leaderboardEligibility || {};
   setText("#eligibility-public-profile", profile?.publicProfileEnabled ? "On" : "Off");
   setText("#eligibility-leaderboard", profile?.publicLeaderboardEnabled ? "On" : "Off");
@@ -7334,6 +7414,9 @@ function normalizeProfile(profile, user = state.user) {
     joinedAt: source?.joinedAt || user?.createdAt || null,
     publicProfileEnabled: Boolean(source?.publicProfileEnabled ?? user?.publicProfileEnabled),
     publicLeaderboardEnabled: Boolean(source?.publicLeaderboardEnabled ?? user?.publicLeaderboardEnabled),
+    signalViewMode: source?.signalViewMode === "advanced" || user?.signalViewMode === "advanced"
+      ? "advanced"
+      : "beginner",
     publicProfileUrl: source?.publicProfileUrl || (username ? `/u/${username}` : null),
     plan: source?.plan || user?.plan || "free",
     stats: {
@@ -7476,7 +7559,60 @@ function getStoredAffiliateCode() {
 }
 
 function getStoredScannerMode() {
-  return localStorage.getItem("signalforge-scanner-mode") === "advanced" ? "advanced" : "basic";
+  const stored = localStorage.getItem(SIGNAL_VIEW_MODE_KEY) || localStorage.getItem(LEGACY_SCANNER_MODE_KEY);
+  return stored === "advanced" ? "advanced" : "beginner";
+}
+
+function persistSignalViewMode(mode) {
+  const normalized = mode === "advanced" ? "advanced" : "beginner";
+  localStorage.setItem(SIGNAL_VIEW_MODE_KEY, normalized);
+  localStorage.removeItem(LEGACY_SCANNER_MODE_KEY);
+}
+
+function syncSignalViewToggles() {
+  document.querySelectorAll("[data-signal-view-mode]").forEach((button) => {
+    const active = button.dataset.signalViewMode === state.scannerMode;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+}
+
+function renderSignalViewSurfaces() {
+  syncSignalViewToggles();
+  renderSignals();
+  renderSignalsHistory();
+  renderCandidates();
+  renderAvoidTrades();
+  renderMarketBrief();
+  if (state.unlockedRevealSignalId) renderUnlockReveal();
+}
+
+async function setSignalViewMode(mode) {
+  const nextMode = mode === "advanced" ? "advanced" : "beginner";
+  if (state.scannerMode === nextMode) return;
+  const previousMode = state.scannerMode;
+  state.scannerMode = nextMode;
+  persistSignalViewMode(nextMode);
+  renderSignalViewSurfaces();
+
+  if (!state.user) return;
+  const status = document.querySelector("#signal-view-mode-status");
+  if (status) status.textContent = "Saving view preference...";
+  try {
+    const result = await api.request("/api/profile/me", {
+      method: "PUT",
+      body: JSON.stringify({ signalViewMode: nextMode })
+    });
+    state.profile = normalizeProfile(result.profile, state.user);
+    state.user = { ...state.user, signalViewMode: nextMode, profile: state.profile };
+    if (status) status.textContent = `${nextMode === "advanced" ? "Advanced" : "Beginner"} view is saved to your account.`;
+  } catch (error) {
+    state.scannerMode = previousMode;
+    persistSignalViewMode(previousMode);
+    renderSignalViewSurfaces();
+    if (status) status.textContent = `Could not save view preference: ${error.message}`;
+    showToast("Could not save signal view mode");
+  }
 }
 
 function getStoredPaperIndicators() {
@@ -7749,6 +7885,11 @@ function renderUnlockReveal() {
     <button class="unlock-reveal-close" type="button" aria-label="Close unlocked signal" data-unlock-reveal-close>×</button>
     <header class="unlock-reveal-header">
       <span class="unlock-reveal-kicker">Signal Unlocked</span>
+      <div class="signal-view-toggle compact" data-signal-view-toggle role="group" aria-label="Signal view mode">
+        <span>View:</span>
+        <button type="button" data-signal-view-mode="beginner">Beginner</button>
+        <button type="button" data-signal-view-mode="advanced">Advanced</button>
+      </div>
       <div class="unlock-reveal-identity">
         <div>
           <h2 id="unlock-reveal-title">${escapeHtml(getDisplaySymbol(signal.symbol))}</h2>
@@ -7769,8 +7910,7 @@ function renderUnlockReveal() {
       <div class="target"><span>Take Profit</span><strong>${formatCurrency(signal.takeProfit)}</strong></div>
       <div class="reward"><span>Risk / Reward</span><strong>${Number(signal.riskRewardRatio || 0).toFixed(2)}R</strong></div>
     </section>
-    ${renderSignalQuality(signal, { compact: true })}
-    ${renderRiskCalculator(signal, { compact: true })}
+    ${renderUnlockSignalModeContent(signal)}
     <div class="unlock-reveal-primary">${renderPaperTradeAction(signal, true)}</div>
     <div class="unlock-reveal-actions">
       <button class="secondary-action" type="button" data-unlock-view-analysis>View full analysis</button>
@@ -7782,6 +7922,28 @@ function renderUnlockReveal() {
   unlockReveal.classList.remove("hidden");
   document.body.classList.add("unlock-reveal-open");
   requestAnimationFrame(() => unlockRevealCard.focus?.());
+  syncSignalViewToggles();
+}
+
+function renderUnlockSignalModeContent(signal) {
+  if (state.scannerMode === "beginner") {
+    return `
+      <section class="unlock-simple-reason">
+        <span class="eyebrow">Why this setup?</span>
+        <p>${escapeHtml(getShortSignalReason(signal))}</p>
+      </section>
+      ${renderRiskCalculator(signal, { compact: true })}`;
+  }
+
+  return `
+    ${renderSignalQuality(signal, { compact: true })}
+    ${renderRiskCalculator(signal, { compact: true })}
+    <details class="unlock-advanced-details">
+      <summary>Technical signal details</summary>
+      ${renderSignalValidation(signal)}
+      ${renderSignalConfluence(signal)}
+      ${renderCandidateHistory(signal)}
+    </details>`;
 }
 
 function closeUnlockReveal() {

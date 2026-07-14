@@ -79,10 +79,11 @@ const checks = {
     app.includes("if (key) highlightSignalKey(key)") &&
     app.includes("Signal unlocked"),
   basicAdvancedModePersists:
-    html.includes('id="scanner-mode-toggle"') &&
-    app.includes("SCANNER_MODE_KEY") &&
+    html.includes('data-signal-view-toggle') &&
+    html.includes('data-signal-view-mode="beginner"') &&
+    app.includes("SIGNAL_VIEW_MODE_KEY") &&
     app.includes("getStoredScannerMode()") &&
-    app.includes("localStorage.setItem(SCANNER_MODE_KEY, state.scannerMode)") &&
+    app.includes("persistSignalViewMode(nextMode)") &&
     app.includes("renderModeDetails(signal"),
   mobileAccordionLayout:
     css.includes("@media (max-width: 767px)") &&

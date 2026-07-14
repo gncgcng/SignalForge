@@ -40,6 +40,9 @@ export async function updateMyProfile(user, input) {
       : undefined,
     publicLeaderboardEnabled: Object.hasOwn(input, "publicLeaderboardEnabled")
       ? input.publicLeaderboardEnabled === true
+      : undefined,
+    signalViewMode: Object.hasOwn(input, "signalViewMode")
+      ? validateSignalViewMode(input.signalViewMode)
       : undefined
   });
   if (!updated) return buildEmptyProfile(user, { privateView: true });
@@ -79,6 +82,9 @@ function buildProfile(user, signals = [], { privateView, leaderboardEligibility 
     joinedAt: safeUser.createdAt || null,
     publicProfileEnabled: Boolean(safeUser.publicProfileEnabled),
     publicLeaderboardEnabled: Boolean(safeUser.publicLeaderboardEnabled),
+    signalViewMode: privateView
+      ? (safeUser.signalViewMode === "advanced" ? "advanced" : "beginner")
+      : undefined,
     publicProfileUrl: safeUser.username ? `${appConfig.appUrl || ""}/u/${safeUser.username}` : null,
     plan: safeUser.plan || "free",
     stats: {
@@ -115,10 +121,20 @@ function buildEmptyProfile(user, options) {
     username: "",
     publicProfileEnabled: false,
     publicLeaderboardEnabled: false,
+    signalViewMode: "beginner",
     usernameUpdatedAt: null,
     createdAt: user?.createdAt || null,
     plan: user?.plan || "free"
   }, [], options);
+}
+
+function validateSignalViewMode(value) {
+  if (!["beginner", "advanced"].includes(value)) {
+    const error = new Error("Signal view mode must be beginner or advanced.");
+    error.statusCode = 400;
+    throw error;
+  }
+  return value;
 }
 
 function realizedR(signal) {

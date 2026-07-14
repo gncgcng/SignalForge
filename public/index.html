@@ -802,11 +802,11 @@
                   <h3>Signal desk</h3>
                 </div>
                 <div class="signal-desk-actions">
-                  <label class="mode-toggle" aria-label="Signal detail mode">
-                    <span>Basic</span>
-                    <input id="scanner-mode-toggle" type="checkbox" />
-                    <span>Advanced</span>
-                  </label>
+                  <div class="signal-view-toggle" data-signal-view-toggle role="group" aria-label="Signal view mode">
+                    <span>View:</span>
+                    <button type="button" data-signal-view-mode="beginner">Beginner</button>
+                    <button type="button" data-signal-view-mode="advanced">Advanced</button>
+                  </div>
                   <span id="signal-count">0 setups</span>
                 </div>
               </div>
@@ -978,7 +978,14 @@
                 <span class="eyebrow">Saved signals</span>
                 <h3>Signals history</h3>
               </div>
-              <span id="history-count">0 saved</span>
+              <div class="signal-desk-actions">
+                <div class="signal-view-toggle" data-signal-view-toggle role="group" aria-label="Signal view mode">
+                  <span>View:</span>
+                  <button type="button" data-signal-view-mode="beginner">Beginner</button>
+                  <button type="button" data-signal-view-mode="advanced">Advanced</button>
+                </div>
+                <span id="history-count">0 saved</span>
+              </div>
             </div>
             <div class="performance-grid">
               <div><span>Total signals</span><strong id="stat-total">0</strong></div>
@@ -1469,6 +1476,19 @@
                 <p class="reasoning">Send a secure support request with your account context attached automatically.</p>
               </div>
               <button class="secondary-action" id="settings-open-support" type="button">Contact Support</button>
+            </article>
+            <article class="panel signal-view-settings-panel">
+              <div>
+                <span class="eyebrow">Signal detail</span>
+                <h3>Signal view mode</h3>
+                <p class="reasoning">Beginner keeps the decision-critical levels and plain-language context first. Advanced adds technical diagnostics and learning detail.</p>
+              </div>
+              <div class="signal-view-toggle" data-signal-view-toggle role="group" aria-label="Signal view mode">
+                <span>View:</span>
+                <button type="button" data-signal-view-mode="beginner">Beginner</button>
+                <button type="button" data-signal-view-mode="advanced">Advanced</button>
+              </div>
+              <p class="form-note" id="signal-view-mode-status">Your preference is saved to your account.</p>
             </article>
             <article class="panel profile-settings-panel">
               <div class="panel-header">

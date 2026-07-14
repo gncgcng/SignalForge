@@ -139,12 +139,13 @@ export async function createUser({
 export async function updateUserProfileSettings(userId, {
   username = undefined,
   publicProfileEnabled = undefined,
-  publicLeaderboardEnabled = undefined
+  publicLeaderboardEnabled = undefined,
+  signalViewMode = undefined
 }) {
-  return transaction(async (client) => {
+  await transaction(async (client) => {
     const currentResult = await client.query(`
       SELECT id, username, username_normalized, username_updated_at,
-        public_profile_enabled, public_leaderboard_enabled
+        public_profile_enabled, public_leaderboard_enabled, signal_view_mode
       FROM users
       WHERE id = $1
       FOR UPDATE
@@ -206,6 +207,7 @@ export async function updateUserProfileSettings(userId, {
           WHEN COALESCE($5, public_profile_enabled) = false THEN false
           ELSE COALESCE($6, public_leaderboard_enabled)
         END,
+        signal_view_mode = COALESCE($7, signal_view_mode),
         updated_at = now()
       WHERE id = $1
     `, [
@@ -214,7 +216,8 @@ export async function updateUserProfileSettings(userId, {
       nextNormalized,
       updateUsernameTimestamp,
       publicProfileEnabled === undefined ? null : Boolean(publicProfileEnabled),
-      publicLeaderboardEnabled === undefined ? null : Boolean(publicLeaderboardEnabled)
+      publicLeaderboardEnabled === undefined ? null : Boolean(publicLeaderboardEnabled),
+      signalViewMode === undefined ? null : signalViewMode
     ]);
   });
 
@@ -3645,6 +3648,7 @@ function mapUser(row) {
     usernameUpdatedAt: row.username_updated_at || null,
     publicProfileEnabled: Boolean(row.public_profile_enabled),
     publicLeaderboardEnabled: Boolean(row.public_leaderboard_enabled),
+    signalViewMode: row.signal_view_mode === "advanced" ? "advanced" : "beginner",
     role: row.role || "user",
     password: {
       salt: row.password_salt,

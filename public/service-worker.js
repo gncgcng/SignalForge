@@ -1,4 +1,4 @@
-const CACHE_VERSION = "signalforge-static-v25";
+const CACHE_VERSION = "signalforge-static-v26";
 const OFFLINE_URL = "/offline.html";
 const STATIC_ASSETS = [
   "/",

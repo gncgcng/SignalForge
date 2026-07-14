@@ -61,6 +61,7 @@ function publicUser(user) {
     username: profile.username,
     usernameRequired: profile.usernameRequired,
     publicProfileEnabled: profile.publicProfileEnabled,
+    signalViewMode: profile.signalViewMode,
     usernameUpdatedAt: profile.usernameUpdatedAt,
     profile,
     role: user.role,
@@ -80,6 +81,7 @@ function publicUserProfile(user) {
     usernameRequired: !user?.username,
     publicProfileEnabled: Boolean(user?.publicProfileEnabled),
     publicLeaderboardEnabled: Boolean(user?.publicLeaderboardEnabled),
+    signalViewMode: user?.signalViewMode === "advanced" ? "advanced" : "beginner",
     usernameUpdatedAt: user?.usernameUpdatedAt || null
   };
 }
