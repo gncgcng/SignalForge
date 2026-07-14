@@ -539,8 +539,8 @@
           <button type="submit">Enter Dashboard</button>
           <button class="link-button" id="forgot-password-button" type="button">Forgot password?</button>
           <div class="auth-divider"><span>or</span></div>
-          <button class="google-auth-button" id="google-auth-button" type="button">
-            Continue with Google
+          <button class="google-auth-button" id="google-auth-button" type="button" disabled aria-disabled="true">
+            Checking Google sign-in...
           </button>
           <p class="form-note" id="auth-note">Sign in or create your account. Your first 3 signals are included.</p>
         </form>
@@ -2066,9 +2066,10 @@
     <script>
       (function emergencyBootGuard() {
         "use strict";
-        var buildVersion = "2026.07.13-auth-emergency.1";
+        var buildVersion = "2026.07.13-auth-actions.2";
         var hash = String(window.location.hash || "").split("?")[0].toLowerCase();
-        var debugEnabled = new URLSearchParams(window.location.search).get("debugAuth") === "1";
+        var hashParams = new URLSearchParams(String(window.location.hash || "").split("?")[1] || "");
+        var debugEnabled = new URLSearchParams(window.location.search).get("debugAuth") === "1" || hashParams.get("debugAuth") === "1";
         var protectedRoutes = ["#scanner", "#signals", "#paper-trading", "#backtesting", "#performance", "#watchlist", "#alerts", "#notifications", "#journal", "#affiliate", "#leaderboard", "#profile", "#settings", "#support", "#billing", "#admin", "#admin-support", "#affiliate-admin", "#webhook-events"];
         var authRoutes = ["#signin", "#signup", "#forgot-password", "#reset-password"];
 
@@ -2123,7 +2124,10 @@
           setVisible("dashboard", false);
           setVisible("landing-page", !showRecovery && !showGuide && !showAuth);
           var splash = document.getElementById("app-splash");
-          if (splash) splash.classList.add("hidden");
+          if (splash) {
+            splash.classList.add("hidden");
+            window.setTimeout(function () { splash.remove(); }, 220);
+          }
           showDebug();
         }
 
@@ -2142,6 +2146,7 @@
         }, 2800);
       }());
     </script>
-    <script src="/app.js?v=2026.07.13-auth-emergency.1" type="module"></script>
+    <script src="/auth-bootstrap.js?v=2026.07.13-auth-actions.2"></script>
+    <script src="/app.js?v=2026.07.13-auth-actions.2" type="module"></script>
   </body>
 </html>

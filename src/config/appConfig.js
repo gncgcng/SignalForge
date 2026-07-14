@@ -84,6 +84,7 @@ export const appConfig = {
     publicAppUrl: appUrl || "https://signalforge-app.xyz"
   },
   googleOAuth: {
+    enabled: process.env.GOOGLE_AUTH_ENABLED !== "false",
     clientId: process.env.GOOGLE_CLIENT_ID || "",
     clientSecret: process.env.GOOGLE_CLIENT_SECRET || "",
     redirectUri: process.env.GOOGLE_REDIRECT_URI || (

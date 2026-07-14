@@ -129,7 +129,8 @@ const result = {
     !service.includes("DELETE FROM users") &&
     migration.includes("user_id text NOT NULL REFERENCES users"),
   frontendDoesNotSupplyIdentity:
-    html.includes("Continue with Google") &&
+    html.includes('id="google-auth-button"') &&
+    app.includes("Continue with Google") &&
     app.includes("/api/auth/google/start") &&
     app.includes("authorizationUrl") &&
     !app.includes("google.email") &&

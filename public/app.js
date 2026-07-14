@@ -156,6 +156,7 @@ const FIRST_SCAN_KEY = "signalforge-first-scan-complete";
 const PAPER_INDICATORS_KEY = "signalforge-paper-indicators";
 const RISK_ACCOUNT_SIZE_KEY = "signalforge-risk-account-size";
 const RISK_PERCENT_KEY = "signalforge-risk-percent";
+const authStorage = window.SignalForgeAuthStorage;
 
 
 const authScreen = document.querySelector("#auth-screen");
@@ -474,9 +475,9 @@ const api = {
       }
 
       if (!response.ok) {
-        const message = typeof payload.error === "string"
+        const message = payload.message || (typeof payload.error === "string"
           ? payload.error
-          : payload.error?.message;
+          : payload.error?.message);
         const error = new Error(message || "Request failed.");
         error.statusCode = response.status;
         error.code = payload.code ||
@@ -675,20 +676,38 @@ onboardingPanel?.addEventListener("click", (event) => {
 
 authForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+  console.info("[auth-ui] login:submit");
+  if (!authForm.reportValidity()) {
+    authNote.textContent = "Enter a valid email and password.";
+    updateAuthDebug({ lastAuthAction: "login", lastAuthStatus: "validation_failed", lastErrorMessage: authNote.textContent });
+    return;
+  }
   const form = new FormData(authForm);
   const credentials = Object.fromEntries(form);
   credentials.affiliateCode = state.referralCode;
   credentials.legalConsentAccepted = legalConsent.checked;
   credentials.publicProfileEnabled = Boolean(credentials.publicProfileEnabled);
+  const submitButton = authForm.querySelector("button[type='submit']");
 
   try {
-    authNote.textContent = "Authenticating...";
+    submitButton.disabled = true;
+    submitButton.textContent = "Signing in...";
+    authNote.textContent = "Signing in...";
+    console.info("[auth-ui] login:request:start");
+    updateAuthDebug({ lastAuthAction: "login", lastAuthStatus: "loading", lastErrorMessage: "" });
     const result = await api.request("/api/auth/login", {
       method: "POST",
-      body: JSON.stringify(credentials)
+      body: JSON.stringify(credentials),
+      timeoutMs: 12000
     });
-    saveRestoreToken(result.restore);
-    state.user = result.user;
+    if (result.ok !== true || !result.user || typeof result.user !== "object") {
+      const error = new Error("Sign in failed. Please try again.");
+      error.code = "unexpected_login_response";
+      throw error;
+    }
+    saveAuthSession(result);
+    console.info("[auth-ui] login:success");
+    updateAuthDebug({ lastAuthAction: "login", lastAuthStatus: "success", lastErrorMessage: "" });
     if (result.verificationRequired) {
       authNote.textContent = result.verificationUnavailable
         ? "Email verification is temporarily unavailable. Your account is saved; contact support for account help."
@@ -696,13 +715,22 @@ authForm.addEventListener("submit", async (event) => {
         ? `Verify your email to activate free signals. Development link: ${result.developmentVerificationUrl}`
         : "Check your email to activate your free signals.";
     }
+    history.replaceState({}, "", `${location.pathname}${location.search}#scanner`);
     await bootDashboard();
   } catch (error) {
-    authNote.textContent = error.message;
+    const message = getLoginErrorMessage(error);
+    console.warn(`[auth-ui] login:failed reason=${safeAuthFailureReason(error)}`);
+    console.warn("[auth-ui] login:request:error");
+    authNote.textContent = message;
+    updateAuthDebug({ lastAuthAction: "login", lastAuthStatus: "failed", lastErrorMessage: message });
+  } finally {
+    submitButton.disabled = false;
+    submitButton.textContent = "Enter Dashboard";
   }
 });
 
 forgotPasswordButton?.addEventListener("click", () => {
+  history.pushState({}, "", `${location.pathname}${location.search}#reset-password`);
   showPasswordResetRequest();
 });
 
@@ -714,7 +742,7 @@ passwordResetContactSupport?.addEventListener("click", (event) => {
 
 document.querySelector("#recovery-back-to-sign-in")?.addEventListener("click", (event) => {
   event.preventDefault();
-  history.pushState({}, "", location.pathname);
+  history.pushState({}, "", `${location.pathname}${location.search}#signin`);
   showAuth();
 });
 
@@ -744,6 +772,7 @@ accountRecoverySupportForm?.addEventListener("submit", async (event) => {
 });
 
 backToLoginButton?.addEventListener("click", () => {
+  history.pushState({}, "", `${location.pathname}${location.search}#signin`);
   showAuthForm();
 });
 
@@ -806,6 +835,10 @@ passwordResetConfirmForm?.addEventListener("submit", async (event) => {
 });
 
 googleAuthButton.addEventListener("click", async () => {
+  if (googleAuthButton.dataset.enabled !== "true") {
+    authNote.textContent = "Google sign-in is temporarily unavailable.";
+    return;
+  }
   if (!legalConsent.checked) {
     authNote.textContent = "Agree to the Terms, Privacy Policy, and Risk Disclaimer before creating or connecting an account.";
     return;
@@ -814,19 +847,34 @@ googleAuthButton.addEventListener("click", async () => {
   try {
     googleAuthButton.disabled = true;
     authNote.textContent = "Opening Google sign-in...";
+    console.info("[auth-ui] google:request:start");
+    updateAuthDebug({ lastAuthAction: "google_login", lastAuthStatus: "loading", lastErrorMessage: "" });
     const { authorizationUrl } = await api.request("/api/auth/google/start", {
       method: "POST",
       body: JSON.stringify({
         affiliateCode: state.referralCode,
         legalConsentAccepted: true
-      })
+      }),
+      timeoutMs: 12000
     });
+    if (!authorizationUrl || !/^https:\/\//.test(authorizationUrl)) {
+      const error = new Error("Google sign-in returned an unexpected response.");
+      error.code = "unexpected_google_response";
+      throw error;
+    }
     location.assign(authorizationUrl);
   } catch (error) {
-    authNote.textContent = error.message;
+    const message = ["request_timeout", "request_aborted"].includes(error.code) || error.statusCode >= 500
+      ? "Could not open Google sign-in right now. Please try again."
+      : "Google sign-in failed. Please try again.";
+    console.warn(`[auth-ui] google:failed reason=${safeAuthFailureReason(error)}`);
+    authNote.textContent = message;
+    updateAuthDebug({ lastAuthAction: "google_login", lastAuthStatus: "failed", lastErrorMessage: message });
     googleAuthButton.disabled = false;
   }
 });
+
+window.__signalForgeMainAuthReady = true;
 
 resendVerificationButton.addEventListener("click", async () => {
   try {
@@ -848,9 +896,10 @@ document.querySelector("#logout-button").addEventListener("click", async () => {
   try {
     await api.request("/api/auth/logout", {
       method: "POST",
-      body: JSON.stringify({ restoreToken: getRestoreToken() })
+      body: JSON.stringify({ restoreToken: getAuthSession().restoreToken })
     });
   } finally {
+    clearAuthSession("logout");
     clearClientAuthState();
   }
   landingPage.classList.remove("hidden");
@@ -2063,6 +2112,9 @@ async function init() {
   } else if (isHowItWorksRoute()) {
     setSplashStatus("Opening SignalForge guide");
     showPublicHowItWorks();
+  } else if (isPasswordResetRequestRoute()) {
+    setSplashStatus("Opening account recovery");
+    showPasswordResetRequest();
   } else {
     setSplashStatus("Preparing your market desk");
     const showAuthCallback = Boolean(
@@ -2142,11 +2194,17 @@ function applyAuthConfig(authConfig = {}) {
   passwordResetSubmit?.classList.toggle("hidden", !emailFeaturesEnabled);
   adminEmailWarning?.classList.toggle("hidden", emailFeaturesEnabled);
   viewDemoButton.classList.remove("hidden");
-  googleAuthButton.classList.toggle("hidden", !authConfig.googleEnabled);
+  googleAuthButton.classList.remove("hidden");
+  googleAuthButton.dataset.enabled = String(Boolean(authConfig.googleEnabled));
+  googleAuthButton.disabled = !authConfig.googleEnabled;
+  googleAuthButton.textContent = authConfig.googleEnabled
+    ? "Continue with Google"
+    : "Google sign-in temporarily unavailable";
+  googleAuthButton.setAttribute("aria-disabled", String(!authConfig.googleEnabled));
 }
 
 async function restoreSavedSession({ signal, cookieFailure = null } = {}) {
-  const restoreToken = getRestoreToken();
+  const restoreToken = getAuthSession().restoreToken;
   if (!restoreToken) {
     console.info("[auth] No persistent restore token found.");
     if (cookieFailure && !isMissingSessionFailure(cookieFailure)) throw cookieFailure;
@@ -2211,8 +2269,38 @@ function safeAuthFailureReason(error) {
   return String(error?.code || error?.statusCode || "unknown").replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
 }
 
+function getLoginErrorMessage(error) {
+  if ([401, 403].includes(error?.statusCode) || error?.code === "invalid_credentials") {
+    return "Invalid email or password.";
+  }
+  if (["request_timeout", "request_aborted"].includes(error?.code) || error?.statusCode >= 500) {
+    return "Could not sign in right now. Please try again.";
+  }
+  if (error?.code === "unexpected_login_response" || error?.code === "invalid_json") {
+    return "Sign in failed. Please try again.";
+  }
+  return error?.message || "Sign in failed. Please try again.";
+}
+
+function saveAuthSession(session = {}) {
+  if (session.user && typeof session.user === "object") state.user = session.user;
+  if (authStorage?.saveAuthSession) authStorage.saveAuthSession(session);
+  else saveRestoreToken(session.restore || (session.restoreToken ? { token: session.restoreToken } : null));
+}
+
+function getAuthSession() {
+  return {
+    user: state.user,
+    restoreToken: authStorage?.getAuthSession?.().restoreToken || getRestoreToken()
+  };
+}
+
 function saveRestoreToken(restore) {
   if (!restore?.token) return;
+  if (authStorage?.saveAuthSession) {
+    authStorage.saveAuthSession({ restore });
+    return;
+  }
   try {
     localStorage.setItem(RESTORE_TOKEN_KEY, restore.token);
   } catch (error) {
@@ -2221,6 +2309,7 @@ function saveRestoreToken(restore) {
 }
 
 function getRestoreToken() {
+  if (authStorage?.getAuthSession) return authStorage.getAuthSession().restoreToken || "";
   try {
     return localStorage.getItem(RESTORE_TOKEN_KEY) || "";
   } catch (error) {
@@ -2230,6 +2319,7 @@ function getRestoreToken() {
 }
 
 function clearRestoreToken() {
+  authStorage?.clearAuthSession?.();
   try {
     localStorage.removeItem(RESTORE_TOKEN_KEY);
   } catch (error) {
@@ -2238,6 +2328,7 @@ function clearRestoreToken() {
 }
 
 function clearSavedAuthStorage(reason = "restore_failed") {
+  authStorage?.clearAuthSession?.();
   const shouldRemove = (key) => {
     const normalized = String(key || "").toLowerCase();
     return normalized === RESTORE_TOKEN_KEY ||
@@ -2263,8 +2354,13 @@ function clearSavedAuthStorage(reason = "restore_failed") {
   updateAuthDebug({ status: "local_session_cleared", failureReason: reason });
 }
 
+function clearAuthSession(reason = "user_requested") {
+  clearSavedAuthStorage(reason);
+  state.user = null;
+}
+
 async function emergencyClearSession() {
-  clearSavedAuthStorage("emergency_route");
+  clearAuthSession("emergency_route");
   const cleanup = [];
   if ("caches" in window) {
     cleanup.push(
@@ -2294,7 +2390,8 @@ function updateAuthDebug(update = {}) {
   };
   Object.assign(debug, update);
   window.__signalForgeAuthDebug = debug;
-  if (new URLSearchParams(location.search).get("debugAuth") !== "1") return;
+  const hashParams = new URLSearchParams(String(location.hash || "").split("?")[1] || "");
+  if (new URLSearchParams(location.search).get("debugAuth") !== "1" && hashParams.get("debugAuth") !== "1") return;
   const panel = document.querySelector("#auth-debug-panel");
   if (!panel) return;
   panel.classList.remove("hidden");
@@ -2542,7 +2639,14 @@ function showAuth() {
   landingPage.classList.add("hidden");
   dashboard.classList.add("hidden");
   authScreen.classList.remove("hidden");
+  authRestoreFailure?.classList.add("hidden");
   showAuthForm();
+}
+
+function isPasswordResetRequestRoute() {
+  return ["#forgot-password", "#reset-password"].includes(
+    String(location.hash || "").split("?")[0].toLowerCase()
+  ) && !getPasswordResetToken();
 }
 
 function showAuthForm() {
@@ -3484,7 +3588,8 @@ function handleBrowserRouteChange() {
     return;
   }
   if (isPublicAuthRoute() && !state.user) {
-    showAuth();
+    if (isPasswordResetRequestRoute()) showPasswordResetRequest();
+    else showAuth();
     return;
   }
   if (!state.user && publicHowItWorksPage && !publicHowItWorksPage.classList.contains("hidden")) {
@@ -8735,6 +8840,8 @@ function handleStartupFailure(error) {
   if (isPublicStartupRoute()) {
     if (isAccountRecoveryRoute()) showAccountRecoverySupport();
     else if (isHowItWorksRoute()) showPublicHowItWorks();
+    else if (isPasswordResetRequestRoute()) showPasswordResetRequest();
+    else if (isPublicAuthRoute()) showAuth();
     else {
       publicHowItWorksPage?.classList.add("hidden");
       authScreen.classList.add("hidden");

@@ -1,8 +1,9 @@
-const CACHE_VERSION = "signalforge-static-v29-auth-emergency";
+const CACHE_VERSION = "signalforge-static-v30-auth-actions";
 const OFFLINE_URL = "/offline.html";
 const CRITICAL_ASSET_PATHS = new Set([
   "/index.html",
   "/app.js",
+  "/auth-bootstrap.js",
   "/router.js",
   "/signalFilters.js",
   "/signalValidity.js",
@@ -14,6 +15,7 @@ const STATIC_ASSETS = [
   "/index.html",
   "/styles.css",
   "/app.js",
+  "/auth-bootstrap.js",
   "/router.js",
   "/signalFilters.js",
   "/signalValidity.js",

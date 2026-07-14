@@ -171,7 +171,8 @@ const result = {
     authController.includes("revokePersistentRestoreToken({") &&
     authService.includes("revokeAuthRestoreToken(hashRestoreToken(token))") &&
     authService.includes("revokeAuthRestoreTokensForUserDevice(user.id, deviceHash)") &&
-    app.includes("body: JSON.stringify({ restoreToken: getRestoreToken() })") &&
+    app.includes("body: JSON.stringify({ restoreToken: getAuthSession().restoreToken })") &&
+    app.includes('clearAuthSession("logout")') &&
     clearCookies.some((item) => item.startsWith("__Secure-signalforge_session=")) &&
     clearCookies.some((item) => item.startsWith("__Host-signalforge_session=")) &&
     clearCookies.some((item) => item.startsWith("signalforge_session=")) &&

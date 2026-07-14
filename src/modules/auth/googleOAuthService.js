@@ -324,6 +324,12 @@ function secureStringEqual(left, right) {
 }
 
 function assertGoogleConfigured() {
+  if (!appConfig.googleOAuth.enabled) {
+    const error = new Error("Google sign-in is temporarily unavailable.");
+    error.statusCode = 503;
+    error.oauthCode = "disabled";
+    throw error;
+  }
   const missing = [
     ["GOOGLE_CLIENT_ID", appConfig.googleOAuth.clientId],
     ["GOOGLE_CLIENT_SECRET", appConfig.googleOAuth.clientSecret],

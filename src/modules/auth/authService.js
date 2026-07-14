@@ -97,20 +97,22 @@ export async function registerOrLogin({
   publicProfileEnabled
 }, req, options = {}) {
   if (!email || !password || password.length < 6) {
-    throw new Error("Use a valid email and a password with at least 6 characters.");
+    const error = new Error("Use a valid email and a password with at least 6 characters.");
+    error.statusCode = 400;
+    throw error;
   }
 
   const normalizedEmail = email.trim().toLowerCase();
 
   if (appConfig.isProduction && isDemoOrTesterIdentity(normalizedEmail)) {
-    throw new Error("Invalid email or password.");
+    throw invalidCredentialsError();
   }
 
   const existing = await findUserByEmail(normalizedEmail);
 
   if (existing) {
     if (!isValidPassword(password, existing.password)) {
-      throw new Error("Invalid email or password.");
+      throw invalidCredentialsError();
     }
 
     return { ...(await createSession(existing)), verificationRequired: !existing.emailVerifiedAt };
@@ -217,6 +219,13 @@ export async function registerOrLogin({
     verificationRequired: !options.bypassVerification,
     verification
   };
+}
+
+function invalidCredentialsError() {
+  const error = new Error("Invalid email or password.");
+  error.code = "INVALID_CREDENTIALS";
+  error.statusCode = 401;
+  return error;
 }
 
 export async function createSession(user) {

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { appConfig } from "../../config/appConfig.js";
 import { readJson, sendError, sendJson, parseCookies } from "../../shared/http.js";
 import {
@@ -66,6 +67,7 @@ export async function handleAuthRoutes(req, res, pathname) {
     return sendJson(res, 200, {
       demoEnabled: appConfig.demoEnabled,
       googleEnabled: Boolean(
+        appConfig.googleOAuth.enabled &&
         appConfig.googleOAuth.clientId &&
         appConfig.googleOAuth.clientSecret &&
         appConfig.googleOAuth.redirectUri
@@ -176,8 +178,11 @@ export async function handleAuthRoutes(req, res, pathname) {
   }
 
   if (pathname === "/api/auth/login" && req.method === "POST") {
+    let emailHash = "missing";
     try {
       const body = await readJson(req);
+      emailHash = hashEmailForLog(body.email);
+      console.info(`[auth] login:start email_hash=${emailHash}`);
       const deviceFingerprint = req.headers["x-device-fingerprint"] || body.deviceFingerprint;
       const result = await registerOrLogin({
         ...body,
@@ -189,18 +194,32 @@ export async function handleAuthRoutes(req, res, pathname) {
         deviceFingerprint
       );
       logSessionCookieIssued("login");
+      console.info(`[auth] login:success user_id=${safeLogContext(result.user.id)}`);
       return sendJson(res, 200, {
+        ok: true,
         user: result.user,
         verificationRequired: result.verificationRequired,
         verificationUnavailable: Boolean(result.verification?.unavailable),
         developmentVerificationUrl: result.verification?.developmentUrl || null,
-        restore
+        restore,
+        restoreToken: restore.token
       }, {
         ...authResponseHeaders(),
         "set-cookie": buildSessionCookie(result.sessionId)
       });
     } catch (error) {
-      return sendError(res, error.statusCode || 400, error.message);
+      const statusCode = error.statusCode || 500;
+      const errorCode = error.code === "INVALID_CREDENTIALS"
+        ? "invalid_credentials"
+        : statusCode >= 500 ? "login_failed" : "login_rejected";
+      console.warn(`[auth] login:${statusCode >= 500 ? "error" : "failed"} email_hash=${emailHash} reason=${safeLogContext(errorCode)}`);
+      return sendJson(res, statusCode, {
+        ok: false,
+        error: errorCode,
+        message: errorCode === "invalid_credentials"
+          ? "Invalid email or password."
+          : statusCode >= 500 ? "Could not sign in right now." : error.message
+      }, authResponseHeaders());
     }
   }
 
@@ -336,6 +355,12 @@ function logSessionCheck(req, refreshed) {
 
 function safeLogContext(context) {
   return String(context || "unknown").replace(/[^a-z0-9_-]/gi, "").slice(0, 32) || "unknown";
+}
+
+function hashEmailForLog(email) {
+  const normalized = String(email || "").trim().toLowerCase();
+  if (!normalized) return "missing";
+  return createHash("sha256").update(normalized).digest("hex").slice(0, 12);
 }
 
 function sendRedirect(res, location, headers = {}) {
