@@ -54,6 +54,7 @@ const state = {
   },
   signals: [],
   candidates: [],
+  marketBrief: null,
   avoidTrades: [],
   showAllAvoidTrades: false,
   scanResults: [],
@@ -145,6 +146,9 @@ const RISK_PERCENT_KEY = "signalforge-risk-percent";
 const authScreen = document.querySelector("#auth-screen");
 const candidateGrid = document.querySelector("#candidate-grid");
 const candidateCount = document.querySelector("#candidate-count");
+const dailyMarketBrief = document.querySelector("#daily-market-brief");
+const dailyBriefContent = document.querySelector("#daily-brief-content");
+const dailyBriefUpdated = document.querySelector("#daily-brief-updated");
 const avoidTradeSection = document.querySelector("#avoid-trade-section");
 const avoidTradeGrid = document.querySelector("#avoid-trade-grid");
 const avoidTradeCount = document.querySelector("#avoid-trade-count");
@@ -1106,7 +1110,7 @@ scanAllButton.addEventListener("click", async () => {
     await loadAlerts();
     await loadCandidates();
     markFirstScanCompleted();
-    renderScanResults(result.setups, result.errors, result.diagnostics, result.scanSummary, result.avoidTrades);
+    renderScanResults(result.setups, result.errors, result.diagnostics, result.scanSummary, result.avoidTrades, result.marketBrief);
   } catch (error) {
     updateScanProgress(0, total, "Scan All failed");
     renderScanResults([], [{ symbol: "Scan All", timeframe: "", message: error.message }], null, null, []);
@@ -1136,7 +1140,7 @@ generateButton.addEventListener("click", async () => {
     });
     state.subscription = subscription;
     renderSubscription();
-    await loadCandidates();
+    await Promise.all([loadCandidates(), loadMarketBrief()]);
 
     if (!signal) {
       markFirstScanCompleted();
@@ -1345,6 +1349,11 @@ telegramEnabled.addEventListener("change", async () => {
 avoidTradeMore?.addEventListener("click", () => {
   state.showAllAvoidTrades = !state.showAllAvoidTrades;
   renderAvoidTrades();
+});
+
+dailyMarketBrief?.addEventListener("click", (event) => {
+  if (!event.target.closest("#daily-brief-refresh")) return;
+  scanAllButton?.click();
 });
 
 requestTesterAccessButton.addEventListener("click", async () => {
@@ -2146,6 +2155,7 @@ async function bootDashboard() {
     loadSubscription(),
     loadSignals(),
     loadCandidates(),
+    loadMarketBrief(),
     loadWatchlist(),
     loadAlerts(),
     loadNotifications(),
@@ -2465,9 +2475,15 @@ async function loadCandidates() {
   renderCandidates();
 }
 
+async function loadMarketBrief() {
+  const { marketBrief } = await api.request("/api/signals/market-brief");
+  state.marketBrief = marketBrief || null;
+  renderMarketBrief();
+}
+
 async function loadCandidateQuality() {
   if (!state.user?.isAdmin) return;
-  const { quality } = await api.request("/api/signals/candidates/quality");
+  const { quality, marketBrief } = await api.request("/api/signals/candidates/quality");
   state.candidateQuality = quality;
   setText("#candidate-quality-created", quality.candidatesCreatedToday || 0);
   setText("#candidate-quality-watching", quality.candidatesWatching || 0);
@@ -2493,6 +2509,7 @@ async function loadCandidateQuality() {
   document.querySelector("#candidate-quality-avoid-timeframes").innerHTML = renderCandidateMetricRows(
     quality.mostAvoidedTimeframes || [], "timeframe", "count"
   );
+  renderAdminMarketBrief(marketBrief);
 }
 
 function renderCandidateMetricRows(items, labelKey, valueKey) {
@@ -2567,6 +2584,81 @@ function renderAvoidTrades() {
   `).join("");
   avoidTradeMore.classList.toggle("hidden", avoidTrades.length <= 3);
   avoidTradeMore.textContent = state.showAllAvoidTrades ? "Show top 3" : `View ${avoidTrades.length - 3} more`;
+}
+
+function renderMarketBrief() {
+  if (!dailyBriefContent || !dailyBriefUpdated) return;
+  const brief = state.marketBrief;
+  if (!brief?.available) {
+    dailyBriefUpdated.textContent = "Waiting for scanner data";
+    dailyBriefContent.innerHTML = `
+      <div class="daily-brief-empty">
+        <strong>Market brief unavailable right now.</strong>
+        <p>SignalForge needs fresh market data to generate a brief.</p>
+        <button class="secondary-action" id="daily-brief-refresh" type="button">Scan again</button>
+      </div>`;
+    return;
+  }
+
+  dailyBriefUpdated.textContent = `Last updated ${formatBriefAge(brief.generatedAt)}`;
+  const noSignal = Number(brief.readySignalCount || 0) === 0;
+  const mainReasons = brief.mainReasons?.length
+    ? brief.mainReasons
+    : ["No single reason dominates the current scanner results."];
+  dailyBriefContent.innerHTML = `
+    <div class="daily-brief-overview">
+      <div class="daily-brief-condition"><span>Market condition</span><strong>${escapeHtml(brief.marketCondition)}</strong></div>
+      <div class="daily-brief-chips">
+        <span><strong>${Number(brief.readySignalCount || 0)}</strong> ready</span>
+        <span><strong>${Number(brief.watchingCount || 0)}</strong> watching</span>
+        <span><strong>${Number(brief.avoidCount || 0)}</strong> avoid</span>
+        <span><strong>${Number(brief.pairsScanned || 0)}</strong> pairs</span>
+      </div>
+    </div>
+    <div class="daily-brief-columns">
+      ${renderBriefPairList("Stronger pairs", brief.strongestPairs, "No directional strength stands out yet.")}
+      ${renderBriefPairList("Weak or choppy", brief.weakestPairs, "No weak pair context is available yet.")}
+      <section><strong>${noSignal ? "No clean signal yet because" : "What to watch next"}</strong><ul>${mainReasons.map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul></section>
+    </div>
+    ${brief.watchingBreakdown?.length ? `<div class="daily-brief-watching"><strong>Watching:</strong> ${brief.watchingBreakdown.map((item) => `${Number(item.count)} ${escapeHtml(item.setupType)}`).join(" · ")}</div>` : ""}
+    <details class="daily-brief-pairs"><summary>View all pair summaries</summary><div>${(brief.pairSummaries || []).map((item) => `<article><strong>${escapeHtml(item.displaySymbol || getDisplaySymbol(item.symbol))}</strong><span>${escapeHtml(item.timeframe)} · ${escapeHtml(item.summary)}</span></article>`).join("")}</div></details>
+  `;
+}
+
+function renderBriefPairList(title, pairs = [], emptyCopy) {
+  return `<section><strong>${escapeHtml(title)}</strong>${pairs.length
+    ? `<ul>${pairs.map((item) => `<li><b>${escapeHtml(item.displaySymbol || getDisplaySymbol(item.symbol))}</b> ${escapeHtml(item.summary)}</li>`).join("")}</ul>`
+    : `<p>${escapeHtml(emptyCopy)}</p>`}</section>`;
+}
+
+function renderAdminMarketBrief(brief) {
+  const container = document.querySelector("#admin-market-brief");
+  const updated = document.querySelector("#admin-market-brief-updated");
+  if (!container || !updated) return;
+  if (!brief?.available) {
+    updated.textContent = "Unavailable";
+    container.innerHTML = `<p class="reasoning">No market brief has been generated yet.</p>`;
+    return;
+  }
+  updated.textContent = formatDateTime(brief.generatedAt);
+  container.innerHTML = `
+    <div class="admin-market-brief-grid">
+      <div><span>Condition</span><strong>${escapeHtml(brief.marketCondition)}</strong></div>
+      <div><span>Pairs scanned</span><strong>${Number(brief.pairsScanned || 0)}</strong></div>
+      <div><span>Snapshot</span><strong>${escapeHtml(brief.scannerSnapshotId || "--")}</strong></div>
+      <div><span>Ready / Watching / Avoid</span><strong>${Number(brief.readySignalCount || 0)} / ${Number(brief.watchingCount || 0)} / ${Number(brief.avoidCount || 0)}</strong></div>
+    </div>
+    ${renderRejectionReasons(brief.mainReasons || [])}`;
+}
+
+function formatBriefAge(value) {
+  const elapsed = Math.max(0, Date.now() - new Date(value).getTime());
+  const minutes = Math.floor(elapsed / 60000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  return formatDateTime(value);
 }
 
 async function loadPaperPortfolio() {
@@ -4908,8 +5000,10 @@ function renderScanSummary(opportunitiesFound, marketsScanned, timeframesScanned
   `;
 }
 
-function renderScanResults(setups, errors, diagnostics = null, scanSummary = null, avoidTrades = []) {
+function renderScanResults(setups, errors, diagnostics = null, scanSummary = null, avoidTrades = [], marketBrief = null) {
   state.scanResults = setups;
+  if (marketBrief) state.marketBrief = marketBrief;
+  renderMarketBrief();
   state.avoidTrades = avoidTrades || [];
   state.showAllAvoidTrades = false;
   renderAvoidTrades();

@@ -77,6 +77,7 @@
     "test:signal-validity": "node scripts/signal-validity-test.js",
     "test:signal-quality": "node scripts/signal-quality-breakdown-test.js",
     "test:avoid-trades": "node scripts/avoid-trade-alerts-test.js",
+    "test:market-brief": "node scripts/daily-market-brief-test.js",
     "test:advanced-structure": "node scripts/advanced-market-structure-test.js"
   },
   "dependencies": {

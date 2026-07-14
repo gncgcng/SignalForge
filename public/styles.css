@@ -7550,6 +7550,117 @@ polyline {
   font-weight: 700;
 }
 
+.daily-market-brief {
+  margin: 14px 0 18px;
+  padding: 18px;
+  border-color: rgba(75, 214, 255, 0.24);
+  background: rgba(6, 15, 25, 0.92);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025), 0 14px 34px rgba(0, 0, 0, 0.16);
+}
+
+.daily-brief-header,
+.daily-brief-overview,
+.daily-brief-condition,
+.daily-brief-pairs article,
+.admin-market-brief-grid div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.daily-brief-header { align-items: flex-start; }
+.daily-brief-header h3 { margin: 3px 0 0; }
+.daily-brief-header > span { color: var(--muted); font-size: 0.74rem; }
+
+.daily-brief-overview {
+  align-items: center;
+  margin-top: 16px;
+  padding: 13px;
+  border: 1px solid rgba(75, 214, 255, 0.16);
+  border-radius: 8px;
+  background: rgba(4, 12, 21, 0.72);
+}
+
+.daily-brief-condition { flex-direction: column; gap: 4px; }
+.daily-brief-condition span { color: var(--muted); font-size: 0.72rem; }
+.daily-brief-condition strong { color: var(--cyan); font-size: 1.08rem; }
+
+.daily-brief-chips { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+.daily-brief-chips span {
+  padding: 6px 8px;
+  border: 1px solid rgba(75, 214, 255, 0.14);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+.daily-brief-chips strong { color: var(--text); }
+
+.daily-brief-columns {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.daily-brief-columns section {
+  min-width: 0;
+  padding: 13px;
+  border: 1px solid rgba(142, 155, 176, 0.14);
+  border-radius: 8px;
+  background: rgba(4, 10, 18, 0.58);
+}
+
+.daily-brief-columns ul { margin: 9px 0 0; padding-left: 18px; color: var(--muted); }
+.daily-brief-columns li, .daily-brief-columns p { margin: 6px 0; line-height: 1.48; overflow-wrap: anywhere; }
+.daily-brief-columns b { color: var(--text); }
+
+.daily-brief-watching {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-left: 2px solid var(--cyan);
+  color: var(--muted);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.daily-brief-watching strong { color: var(--text); }
+.daily-brief-pairs { margin-top: 12px; }
+.daily-brief-pairs summary { cursor: pointer; color: var(--cyan); font-weight: 700; }
+.daily-brief-pairs > div { display: grid; gap: 7px; margin-top: 10px; }
+.daily-brief-pairs article { min-width: 0; padding: 8px 0; border-bottom: 1px solid rgba(142, 155, 176, 0.1); }
+.daily-brief-pairs article strong { flex: 0 0 auto; }
+.daily-brief-pairs article span { color: var(--muted); text-align: right; overflow-wrap: anywhere; }
+
+.daily-brief-empty { padding: 20px 0 8px; text-align: center; }
+.daily-brief-empty p, .daily-brief-disclaimer { color: var(--muted); }
+.daily-brief-empty button { margin-top: 8px; }
+.daily-brief-disclaimer { margin: 14px 0 0; font-size: 0.72rem; line-height: 1.45; }
+
+.admin-market-brief-panel { margin: 0 0 14px; }
+.admin-market-brief-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
+.admin-market-brief-grid div { min-width: 0; flex-direction: column; padding: 10px; border: 1px solid var(--line); border-radius: 7px; }
+.admin-market-brief-grid span { color: var(--muted); font-size: 0.7rem; }
+.admin-market-brief-grid strong { overflow-wrap: anywhere; }
+
+@media (max-width: 900px) {
+  .daily-brief-columns { grid-template-columns: 1fr; }
+  .admin-market-brief-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 767px) {
+  .daily-market-brief { max-width: 100%; padding: 14px; overflow-x: hidden; }
+  .daily-brief-header, .daily-brief-overview { align-items: flex-start; flex-direction: column; }
+  .daily-brief-chips { justify-content: flex-start; }
+  .daily-brief-pairs article { flex-direction: column; }
+  .daily-brief-pairs article span { text-align: left; }
+  .daily-brief-columns section, .daily-brief-pairs { max-width: 100%; overflow-x: hidden; }
+}
+
+@media (max-width: 460px) {
+  .admin-market-brief-grid { grid-template-columns: 1fr; }
+  .daily-brief-empty button { width: 100%; min-height: 44px; }
+}
+
 .avoid-trade-section {
   margin: 18px 0;
   border-color: rgba(245, 190, 77, 0.25);

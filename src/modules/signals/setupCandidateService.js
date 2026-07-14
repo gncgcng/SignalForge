@@ -13,6 +13,7 @@ import {
 import { getOhlcv, getPair, listActivePairs } from "../market-data/marketDataService.js";
 import { getMultiTimeframeMarketData } from "../market-data/multiTimeframeService.js";
 import { generateMarketDataSetup } from "./signalGenerator.js";
+import { buildMarketBriefObservation, refreshDailyMarketBrief } from "./dailyMarketBriefService.js";
 
 const timeframeExpiryHours = { "1m": 2, "5m": 2, "15m": 6, "1h": 24, "4h": 48 };
 const watcherTimeframes = ["5m", "15m", "1h", "4h"];
@@ -151,21 +152,42 @@ export async function runCandidateMarketWatch() {
   const selected = Array.from({ length: batchSize }, (_, index) => markets[(marketCursor + index) % markets.length]);
   marketCursor = (marketCursor + batchSize) % markets.length;
   let scanned = 0; let createdOrUpdated = 0;
+  const briefObservations = [];
   for (const pair of selected) {
     for (const timeframe of watcherTimeframes) {
       try {
         const marketData = await getMultiTimeframeMarketData(pair.symbol, timeframe);
         scanned += 1;
         const result = generateMarketDataSetup(marketData, timeframe);
-        if (!result.valid) continue;
-        const readiness = evaluateSetupReadiness(result.signal, marketData);
-        if (await observeSetupCandidate(result.signal, marketData, readiness)) createdOrUpdated += 1;
+        const readiness = result.valid ? evaluateSetupReadiness(result.signal, marketData) : null;
+        const candidate = result.valid ? await observeSetupCandidate(result.signal, marketData, readiness) : null;
+        if (candidate) createdOrUpdated += 1;
+        const resultType = result.valid
+          ? readiness?.ready ? "ready_signal" : readiness?.rejected ? "avoid_trade" : "watching_setup"
+          : "avoid_trade";
+        briefObservations.push(buildMarketBriefObservation({
+          symbol: pair.symbol,
+          timeframe,
+          marketData,
+          result,
+          readiness,
+          candidate,
+          resultType
+        }));
       } catch (error) {
         console.warn(`[crypto-watch] ${pair.symbol} ${timeframe} skipped: ${error.message}`);
       }
     }
   }
-  return { scanned, createdOrUpdated };
+  let marketBrief = null;
+  if (briefObservations.length) {
+    try {
+      marketBrief = await refreshDailyMarketBrief({ observations: briefObservations });
+    } catch (error) {
+      console.warn(`[market-brief] watcher_refresh_failed reason=${error.message}`);
+    }
+  }
+  return { scanned, createdOrUpdated, marketBrief };
 }
 
 export function evaluateCandidateOutcome(candidate, candles = []) {

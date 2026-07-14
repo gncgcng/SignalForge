@@ -44,6 +44,11 @@ import {
   classifyScannerResult
 } from "./avoidTradeService.js";
 import { recordAvoidTradeLearningEvent } from "./setupCandidateRepository.js";
+import {
+  buildMarketBriefObservation,
+  getLatestDailyMarketBrief,
+  refreshDailyMarketBrief
+} from "./dailyMarketBriefService.js";
 
 const scanTimeframes = ["1h", "4h", "15m", "5m"];
 
@@ -55,6 +60,7 @@ export async function createSignal(user, { symbol, timeframe, setupKey }) {
   if (!result) {
     assertDiscoveryAvailable(user);
     result = await scanMarketSetupDetailed(user, { symbol, timeframe });
+    result.marketBrief = await refreshMarketBriefSafely([result.briefObservation]);
     await recordDiscoveryUsage(user, result.publicResult.valid ? 1 : 0, scanKey);
     await cacheScanResult(user.id, scanKey, result);
   }
@@ -251,12 +257,14 @@ export async function scanMarketSetup(user, { symbol, timeframe }) {
     });
     return {
       ...cached.publicResult,
+      marketBrief: await refreshMarketBriefSafely([]),
       cached: true,
       subscription: getSubscriptionSummary(user)
     };
   }
   assertDiscoveryAvailable(user);
   const result = await scanMarketSetupDetailed(user, { symbol, timeframe });
+  const marketBrief = await refreshMarketBriefSafely([result.briefObservation]);
   const quantity = result.publicResult.valid ? 1 : 0;
   const subscription = await recordDiscoveryUsage(user, quantity, scanKey);
   await cacheScanResult(user.id, scanKey, result);
@@ -269,6 +277,7 @@ export async function scanMarketSetup(user, { symbol, timeframe }) {
   });
   return {
     ...result.publicResult,
+    marketBrief,
     cached: false,
     subscription
   };
@@ -333,6 +342,16 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
     ? buildAvoidTradeResult({ symbol, timeframe, analysis, candidate })
     : null;
   if (avoidTrade) await recordAvoidTradeSafely(avoidTrade);
+  const briefObservation = buildMarketBriefObservation({
+    symbol,
+    timeframe,
+    marketData,
+    result,
+    readiness,
+    candidate,
+    avoidTrade,
+    resultType
+  });
 
   return {
     publicResult: {
@@ -346,7 +365,8 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
       avoidTrade
     },
     fullSetup: signal,
-    analysis
+    analysis,
+    briefObservation
   };
 }
 
@@ -438,6 +458,7 @@ export async function scanAllMarketsDetailed(user) {
   const fullSetups = [];
   const candidatesById = new Map();
   const avoidTrades = [];
+  const briefObservations = [];
   const errors = [];
   const diagnostics = {
     rejectionReasonCodes: {},
@@ -457,6 +478,7 @@ export async function scanAllMarketsDetailed(user) {
         );
         const result = detailed.publicResult;
         const analysis = result.analysis || {};
+        if (detailed.briefObservation) briefObservations.push(detailed.briefObservation);
         scanned.push({
           symbol,
           timeframe,
@@ -523,6 +545,7 @@ export async function scanAllMarketsDetailed(user) {
   const candidates = [...candidatesById.values()];
   const finalizedDiagnostics = finalizeScanDiagnostics(diagnostics);
   const scanSummary = summarizeScanBatch(scanned, setups, candidates, finalizedDiagnostics, avoidTrades);
+  const marketBrief = await refreshMarketBriefSafely(briefObservations, scanSummary);
   console.info(
     `[scanner] ready=${scanSummary.ready} watching=${scanSummary.watching} ` +
     `avoid=${scanSummary.avoidTrade} rejected=${scanSummary.rejected} expired=${scanSummary.expired}`
@@ -538,6 +561,7 @@ export async function scanAllMarketsDetailed(user) {
       errors,
       diagnostics: finalizedDiagnostics,
       scanSummary,
+      marketBrief,
       message: setups.length ? "Valid setups found." : "No high-probability setups right now"
     },
     fullSetups
@@ -601,6 +625,18 @@ async function recordAvoidTradeSafely(avoidTrade) {
     await recordAvoidTradeLearningEvent(avoidTrade);
   } catch (error) {
     console.warn(`[scanner] avoid_learning_failed market=${avoidTrade.symbol} timeframe=${avoidTrade.timeframe} reason=${error.message}`);
+  }
+}
+
+async function refreshMarketBriefSafely(observations, scanSummary = null) {
+  try {
+    const clean = (observations || []).filter(Boolean);
+    return clean.length
+      ? await refreshDailyMarketBrief({ observations: clean, scanSummary })
+      : await getLatestDailyMarketBrief();
+  } catch (error) {
+    console.warn(`[market-brief] refresh_failed reason=${error.message}`);
+    return null;
   }
 }
 

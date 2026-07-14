@@ -643,6 +643,20 @@
               </div>
             </section>
             <button class="secondary-action onboarding-show hidden" id="onboarding-show-button" type="button">Show get started checklist</button>
+            <section class="daily-market-brief panel" id="daily-market-brief" aria-live="polite">
+              <div class="daily-brief-header">
+                <div><span class="eyebrow">Crypto market context</span><h3>Daily Market Brief</h3></div>
+                <span id="daily-brief-updated">Waiting for scanner data</span>
+              </div>
+              <div id="daily-brief-content">
+                <div class="daily-brief-empty">
+                  <strong>Market brief unavailable right now.</strong>
+                  <p>SignalForge needs fresh market data to generate a brief.</p>
+                  <button class="secondary-action" id="daily-brief-refresh" type="button">Scan again</button>
+                </div>
+              </div>
+              <p class="daily-brief-disclaimer">Market briefs are educational summaries based on SignalForge scanner data. They are not financial advice.</p>
+            </section>
             <section class="scanner-grid">
               <div class="panel controls-panel">
                 <div class="panel-header">
@@ -1789,6 +1803,10 @@
                 <div><span class="eyebrow">Signal learning</span><h3>Learning Dashboard</h3></div>
                 <span>Shadow-mode calibration only</span>
               </div>
+              <article class="analytics-panel admin-market-brief-panel">
+                <div class="admin-panel-header"><div><span class="eyebrow">Latest scanner snapshot</span><h3>Daily Market Brief</h3></div><span id="admin-market-brief-updated">Unavailable</span></div>
+                <div id="admin-market-brief"><p class="reasoning">No market brief has been generated yet.</p></div>
+              </article>
               <div class="admin-analytics-grid compact" id="candidate-quality-dashboard">
                 <article class="panel"><span>Candidates today</span><strong id="candidate-quality-created">0</strong></article>
                 <article class="panel"><span>Watching</span><strong id="candidate-quality-watching">0</strong></article>
