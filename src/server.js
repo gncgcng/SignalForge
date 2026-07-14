@@ -143,6 +143,7 @@ async function serveStatic(pathname, res) {
 function requiresAuthAttachment(pathname) {
   return ![
     "/api/auth/config",
+    "/api/auth/health",
     "/api/auth/login",
     "/api/auth/google/start",
     "/api/auth/google/callback",

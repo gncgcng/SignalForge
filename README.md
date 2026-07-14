@@ -51,6 +51,29 @@ Use any valid email and a password of 6+ characters. For a seeded local account,
 
 Demo access and demo seed data are disabled when `NODE_ENV=production`.
 
+## Authentication diagnostics
+
+The public, secret-free health check is available at `GET /api/auth/health`. It reports the build, PostgreSQL connectivity, auth route mount, password hasher, session store, Google configuration, and email feature flag without exposing credentials.
+
+Run a credentialed login proof against a local or deployed instance:
+
+```bash
+APP_URL=https://signalforge-app.xyz \
+AUTH_SMOKE_EMAIL=admin@example.com \
+AUTH_SMOKE_PASSWORD=... \
+npm run auth:smoke
+```
+
+The smoke test verifies the real login endpoint, JSON contract, persistent cookie, `/api/auth/session`, device-bound restore token, and restored session. It never prints passwords or full tokens.
+
+To repair a single authorized administrator account, set the email in both `ADMIN_EMAILS` and `REPAIR_ADMIN_EMAIL`, then run:
+
+```bash
+npm run repair:admin
+```
+
+`REPAIR_ADMIN_PASSWORD` is required. The command uses the same password hashing implementation as signup/login, activates and verifies the account, and revokes old sessions and restore tokens. Keep repair credentials command-scoped; do not leave the password configured after use.
+
 ## Architecture
 
 - `src/server.js`: HTTP server, static file serving, API router.

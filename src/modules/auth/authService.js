@@ -47,6 +47,15 @@ export function hashPassword(password, salt = randomBytes(16).toString("hex")) {
   return { salt, hash };
 }
 
+export function isPasswordHasherReady() {
+  try {
+    const record = hashPassword("signalforge-auth-health", "signalforge-health-salt");
+    return isValidPassword("signalforge-auth-health", record);
+  } catch {
+    return false;
+  }
+}
+
 function isValidPassword(password, record) {
   if (!record?.salt || !record?.hash) return false;
   const candidate = hashPassword(password, record.salt).hash;
@@ -113,12 +122,15 @@ export async function registerOrLogin({
 
   console.info("[auth] login:user_lookup:start");
   const existing = await findUserByEmail(normalizedEmail);
-  console.info(`[auth] login:user_lookup:done found=${Boolean(existing)}`);
+  console.info(`[auth] login:user_lookup:found=${Boolean(existing)}`);
 
   if (existing) {
+    if (existing.accountStatus && existing.accountStatus !== "active") {
+      throw invalidCredentialsError();
+    }
     console.info("[auth] login:password_check:start");
     const passwordValid = isValidPassword(password, existing.password);
-    console.info(`[auth] login:password_check:done valid=${passwordValid}`);
+    console.info(`[auth] login:password_check:valid=${passwordValid}`);
     if (!passwordValid) {
       throw invalidCredentialsError();
     }

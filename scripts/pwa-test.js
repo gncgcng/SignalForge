@@ -75,8 +75,11 @@ const result = {
     app.includes(".catch(handleStartupFailure)"),
   pushReady:
     serviceWorker.includes('self.addEventListener("push"') &&
-    serviceWorker.includes('self.addEventListener("notificationclick"') &&
-    app.includes("window.signalForgePushRegistration = registration"),
+    serviceWorker.includes('self.addEventListener("notificationclick"'),
+  serviceWorkerTemporarilyDisabled:
+    app.includes("Service worker registration temporarily disabled for auth stability") &&
+    app.includes("registration.unregister()") &&
+    app.includes('key.startsWith("signalforge-")'),
   serverSupport:
     server.includes('".png": "image/png"') &&
     server.includes('"service-worker-allowed"') &&

@@ -59,6 +59,9 @@ export const stripeEnvironmentKeys = [
 
 export const appConfig = {
   appName: "SignalForge",
+  buildVersion: process.env.SIGNALFORGE_BUILD_VERSION ||
+    process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 12) ||
+    "2026.07.13-auth-diagnostics.1",
   appUrl,
   nodeEnv: process.env.NODE_ENV || "development",
   isProduction: process.env.NODE_ENV === "production",

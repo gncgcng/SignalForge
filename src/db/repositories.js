@@ -3650,6 +3650,7 @@ function mapUser(row) {
     publicLeaderboardEnabled: Boolean(row.public_leaderboard_enabled),
     signalViewMode: row.signal_view_mode === "advanced" ? "advanced" : "beginner",
     role: row.role || "user",
+    accountStatus: row.account_status || "active",
     password: {
       salt: row.password_salt,
       hash: row.password_hash

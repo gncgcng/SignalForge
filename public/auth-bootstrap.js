@@ -56,17 +56,41 @@
   window.SignalForgeAuthStorage = storage;
   window.__signalForgeMainAuthReady = false;
 
-  function setDebug(action, status, errorMessage) {
+  function hasLegacyLocalToken() {
+    try {
+      return ["signalforge-auth-token", "auth-token", "access-token", "token"]
+        .some(function (key) { return Boolean(window.localStorage.getItem(key)); });
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function summarizeResponse(payload) {
+    if (!payload || typeof payload !== "object") return "invalid_or_empty";
+    var errorCode = typeof payload.error === "string" ? payload.error :
+      ((payload.error && payload.error.code) || (payload.ok === false ? "request_failed" : "none"));
+    return [
+      "ok=" + (payload.ok === true),
+      "user=" + Boolean(payload.user && typeof payload.user === "object"),
+      "token=" + Boolean(payload.token),
+      "restoreToken=" + Boolean(payload.restoreToken || (payload.restore && payload.restore.token)),
+      "error=" + String(errorCode).replace(/[^a-z0-9_-]/gi, "_").slice(0, 48)
+    ].join(" ");
+  }
+
+  function setDebug(action, status, errorMessage, responseSummary) {
     var current = window.__signalForgeAuthDebug || {};
     current.route = window.location.hash || "#top";
     if (current.authLoading === undefined) current.authLoading = false;
     if (action === "login" && status === "loading") current.signingIn = true;
     if (action === "login" && ["success", "failed", "timeout"].indexOf(status) >= 0) current.signingIn = false;
-    current.hasLocalToken = Boolean(storage.getAuthSession().restoreToken);
+    current.hasLocalToken = hasLegacyLocalToken();
+    current.hasRestoreToken = Boolean(storage.getAuthSession().restoreToken);
     current.lastAuthAction = action || current.lastAuthAction || "none";
     current.lastAuthStatus = status || current.lastAuthStatus || "idle";
     current.lastLoginStage = action === "login" ? status : (current.lastLoginStage || "idle");
     current.lastErrorMessage = errorMessage || "";
+    if (responseSummary) current.lastResponseSummary = responseSummary;
     window.__signalForgeAuthDebug = current;
     var hashParams = new URLSearchParams(String(window.location.hash || "").split("?")[1] || "");
     var enabled = new URLSearchParams(window.location.search).get("debugAuth") === "1" || hashParams.get("debugAuth") === "1";
@@ -83,6 +107,9 @@
         "Last stage: " + current.lastLoginStage,
         "HTTP status: " + (current.lastHttpStatus == null ? "none" : current.lastHttpStatus),
         "Endpoint: " + (current.endpoint || "none"),
+        "Response: " + (current.lastResponseSummary || "none"),
+        "Local token: " + current.hasLocalToken,
+        "Restore token: " + current.hasRestoreToken,
         "Last error: " + (current.lastErrorMessage || "none")
       ].join(" | ");
     }
@@ -169,10 +196,15 @@
         invalidResponse.code = "invalid_json";
         throw invalidResponse;
       }
+      if (path === "/api/auth/login") {
+        console.info("[auth-ui] login:response_json_ok=true");
+        setDebug("login", "response_parsed", "", summarizeResponse(payload));
+      }
       if (!response.ok) {
         var requestError = new Error(payload.message || (payload.error && payload.error.message) || payload.error || "request_failed");
         requestError.status = response.status;
         requestError.code = typeof payload.error === "string" ? payload.error : (payload.code || "request_failed");
+        requestError.responseSummary = summarizeResponse(payload);
         throw requestError;
       }
       return payload;
@@ -218,8 +250,10 @@
       }
       if (authNote) authNote.textContent = "Signing in...";
       console.info("[auth-ui] login:request:start");
+      console.info("[auth-ui] login:endpoint=/api/auth/login");
       setDebug("login", "loading", "");
       window.__signalForgeAuthDebug.endpoint = "/api/auth/login";
+      console.info("[auth-ui] login:request_sent");
       var result = await requestJson("/api/auth/login", {
         method: "POST",
         body: JSON.stringify(credentials)
@@ -229,10 +263,13 @@
         unexpected.code = "unexpected_response";
         throw unexpected;
       }
+      console.info("[auth-ui] login:save_session:start");
       storage.saveAuthSession(result);
+      console.info("[auth-ui] login:save_session:done");
       console.info("[auth-ui] login:success");
-      setDebug("login", "success", "");
+      setDebug("login", "success", "", summarizeResponse(result));
       window.history.replaceState({}, "", window.location.pathname + window.location.search + "#scanner");
+      console.info("[auth-ui] login:navigate:dashboard");
       window.location.reload();
     } catch (error) {
       var message = errorMessageFor(error);
@@ -240,7 +277,7 @@
       console.warn("[auth-ui] login:failed reason=" + String(error.code || error.status || "unknown").replace(/[^a-z0-9_-]/gi, "_").slice(0, 64));
       console.warn("[auth-ui] login:request:error");
       if (authNote) authNote.textContent = message;
-      setDebug("login", "failed", message);
+      setDebug("login", "failed", message, error.responseSummary || "response_unavailable");
     } finally {
       if (submitButton) {
         submitButton.disabled = false;

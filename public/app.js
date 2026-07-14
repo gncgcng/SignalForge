@@ -431,7 +431,7 @@ const defaultSupportIssues = {
 
 const api = {
   async request(path, options = {}) {
-    const { timeoutMs = 0, signal: externalSignal, onResponse, ...fetchOptions } = options;
+    const { timeoutMs = 0, signal: externalSignal, onResponse, onPayload, ...fetchOptions } = options;
     const optionHeaders = fetchOptions.headers || {};
     const controller = new AbortController();
     let timedOut = false;
@@ -476,6 +476,7 @@ const api = {
           throw error;
         }
       }
+      onPayload?.({ payload, status: response.status, ok: response.ok });
 
       if (!response.ok) {
         const message = payload.message || (typeof payload.error === "string"
@@ -487,6 +488,7 @@ const api = {
           (typeof payload.error === "string" ? payload.error : payload.error?.code) ||
           "request_failed";
         error.details = payload.error?.details;
+        error.responseSummary = summarizeAuthResponse(payload);
         throw error;
       }
 
@@ -704,6 +706,7 @@ authForm.addEventListener("submit", async (event) => {
     submitButton.textContent = "Signing in...";
     authNote.textContent = "Signing in...";
     console.info("[auth-ui] login:request:start");
+    console.info("[auth-ui] login:endpoint=/api/auth/login");
     updateAuthDebug({
       authLoading: false,
       signingIn: true,
@@ -714,13 +717,19 @@ authForm.addEventListener("submit", async (event) => {
       lastHttpStatus: null,
       lastErrorMessage: ""
     });
+    console.info("[auth-ui] login:request_sent");
     const result = await api.request("/api/auth/login", {
       method: "POST",
       body: JSON.stringify(credentials),
       timeoutMs: 8000,
       onResponse: ({ status }) => {
-        console.info(`[auth-ui] login:request:response status=${status}`);
+        console.info(`[auth-ui] login:response_status=${status}`);
         updateAuthDebug({ lastLoginStage: "response_received", lastHttpStatus: status });
+      },
+      onPayload: ({ payload }) => {
+        const summary = summarizeAuthResponse(payload);
+        console.info(`[auth-ui] login:response_json_ok=${Boolean(payload && typeof payload === "object")}`);
+        updateAuthDebug({ lastResponseSummary: summary });
       }
     });
     if (result.ok !== true || !result.user || typeof result.user !== "object") {
@@ -728,13 +737,16 @@ authForm.addEventListener("submit", async (event) => {
       error.code = "unexpected_login_response";
       throw error;
     }
+    console.info("[auth-ui] login:save_session:start");
     saveAuthSession(result);
+    console.info("[auth-ui] login:save_session:done");
     console.info("[auth-ui] login:success");
     updateAuthDebug({
       signingIn: false,
       lastAuthAction: "login",
       lastAuthStatus: "success",
       lastLoginStage: "session_saved",
+      lastResponseSummary: summarizeAuthResponse(result),
       lastErrorMessage: ""
     });
     if (result.verificationRequired) {
@@ -745,6 +757,7 @@ authForm.addEventListener("submit", async (event) => {
         : "Check your email to activate your free signals.";
     }
     history.replaceState({}, "", `${location.pathname}${location.search}#scanner`);
+    console.info("[auth-ui] login:navigate:dashboard");
     bootDashboard().catch((error) => {
       console.warn(`[auth-ui] dashboard:hydrate:failed reason=${safeAuthFailureReason(error)}`);
       if (statusLine) statusLine.textContent = "Signed in. Some dashboard data could not load yet; refresh or retry in a moment.";
@@ -761,6 +774,7 @@ authForm.addEventListener("submit", async (event) => {
       lastAuthStatus: error.code === "request_timeout" ? "timeout" : "failed",
       lastLoginStage: error.code === "request_timeout" ? "request_timeout" : "request_failed",
       lastHttpStatus: error.statusCode || null,
+      lastResponseSummary: error.responseSummary || "response_unavailable",
       lastErrorMessage: message
     });
   } finally {
@@ -2489,9 +2503,34 @@ function updateAuthDebug(update = {}) {
     `Last stage: ${debug.lastLoginStage || debug.status || "idle"}`,
     `HTTP status: ${debug.lastHttpStatus ?? debug.statusCode ?? "none"}`,
     `Endpoint: ${debug.endpoint || "none"}`,
-    `Saved restore token: ${Boolean(getAuthSession().restoreToken)}`,
+    `Response: ${debug.lastResponseSummary || "none"}`,
+    `Local token: ${hasLegacyLocalAuthToken()}`,
+    `Restore token: ${Boolean(getAuthSession().restoreToken)}`,
     `Last error: ${debug.lastErrorMessage || debug.failureReason || "none"}`
   ].join(" | ");
+}
+
+function hasLegacyLocalAuthToken() {
+  try {
+    return ["signalforge-auth-token", "auth-token", "access-token", "token"]
+      .some((key) => Boolean(localStorage.getItem(key)));
+  } catch {
+    return false;
+  }
+}
+
+function summarizeAuthResponse(payload) {
+  if (!payload || typeof payload !== "object") return "invalid_or_empty";
+  const errorCode = typeof payload.error === "string"
+    ? payload.error
+    : payload.error?.code || (payload.ok === false ? "request_failed" : "none");
+  return [
+    `ok=${payload.ok === true}`,
+    `user=${Boolean(payload.user && typeof payload.user === "object")}`,
+    `token=${Boolean(payload.token)}`,
+    `restoreToken=${Boolean(payload.restoreToken || payload.restore?.token)}`,
+    `error=${String(errorCode).replace(/[^a-z0-9_-]/gi, "_").slice(0, 48)}`
+  ].join(" ");
 }
 
 function clearClientAuthState() {
@@ -8984,15 +9023,15 @@ function openSignInAfterRestoreFailure(message) {
 async function registerPwa() {
   if (!("serviceWorker" in navigator)) return;
   try {
-    const registration = await navigator.serviceWorker.register("/service-worker.js", {
-      scope: "/"
-    });
-    registration.update().catch((error) => {
-      console.warn(`[pwa] Service worker update check failed: ${error.message}`);
-    });
-    window.signalForgePushRegistration = registration;
+    const registrations = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(registrations.map((registration) => registration.unregister()));
+    if ("caches" in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.filter((key) => key.startsWith("signalforge-")).map((key) => caches.delete(key)));
+    }
+    console.info("[pwa] Service worker registration temporarily disabled for auth stability.");
   } catch (error) {
-    console.warn(`[pwa] Service worker registration failed: ${error.message}`);
+    console.warn(`[pwa] Service worker cleanup failed: ${error.message}`);
   }
 }
 

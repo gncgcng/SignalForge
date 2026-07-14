@@ -1,11 +1,13 @@
 import { createHash } from "node:crypto";
 import { appConfig } from "../../config/appConfig.js";
+import { query } from "../../db/client.js";
 import { readJson, sendError, sendJson, parseCookies } from "../../shared/http.js";
 import {
   createDemoSession,
   createPersistentRestoreToken,
   completePasswordReset,
   destroySession,
+  isPasswordHasherReady,
   registerOrLogin,
   requestPasswordReset,
   resendVerification,
@@ -24,6 +26,10 @@ import {
 const LOGIN_OPERATION_TIMEOUT_MS = 8000;
 
 export async function handleAuthRoutes(req, res, pathname) {
+  if (pathname === "/api/auth/health" && req.method === "GET") {
+    return handleAuthHealth(res);
+  }
+
   if (pathname === "/api/auth/session" && req.method === "GET") {
     if (!req.user) {
       logSessionCheck(req, false);
@@ -191,11 +197,20 @@ export async function handleAuthRoutes(req, res, pathname) {
           ...body,
           deviceFingerprint
         }, req);
-        const persistentRestore = await createPersistentRestoreToken(
-          authenticated.user.id,
-          req,
-          deviceFingerprint
-        );
+        console.info("[auth] login:token_create:start");
+        let persistentRestore = null;
+        try {
+          persistentRestore = await createPersistentRestoreToken(
+            authenticated.user.id,
+            req,
+            deviceFingerprint
+          );
+          console.info("[auth] login:token_create:done");
+        } catch (error) {
+          // The persistent token is a PWA fallback. A valid cookie session must
+          // still be allowed to sign in if fallback-token storage is unavailable.
+          console.warn(`[auth] login:restore_token_failed reason=${safeSessionFailure(error)}`);
+        }
         return { result: authenticated, restore: persistentRestore };
       })());
       logSessionCookieIssued("login");
@@ -208,7 +223,10 @@ export async function handleAuthRoutes(req, res, pathname) {
         verificationUnavailable: Boolean(result.verification?.unavailable),
         developmentVerificationUrl: result.verification?.developmentUrl || null,
         restore,
-        restoreToken: restore.token
+        // `token` is a compatibility alias for the opaque restore token. The
+        // primary session remains the HttpOnly cookie and is never exposed here.
+        token: restore?.token || null,
+        restoreToken: restore?.token || null
       }, {
         ...authResponseHeaders(),
         "set-cookie": buildSessionCookie(result.sessionId)
@@ -293,6 +311,43 @@ export async function handleAuthRoutes(req, res, pathname) {
   }
 
   return false;
+}
+
+async function handleAuthHealth(res) {
+  const passwordHasherReady = isPasswordHasherReady();
+  let dbConnected = false;
+  let sessionStoreReady = false;
+  let reason = null;
+
+  try {
+    await query("SELECT 1");
+    dbConnected = true;
+    await query("SELECT id FROM sessions LIMIT 0");
+    sessionStoreReady = true;
+  } catch (error) {
+    reason = dbConnected ? "session_store_unavailable" : "database_unavailable";
+    console.warn(`[auth] health:failed reason=${safeLogContext(reason)} detail=${safeSessionFailure(error)}`);
+  }
+
+  const googleAuthConfigured = Boolean(
+    appConfig.googleOAuth.enabled &&
+    appConfig.googleOAuth.clientId &&
+    appConfig.googleOAuth.clientSecret &&
+    appConfig.googleOAuth.redirectUri
+  );
+  const ok = dbConnected && sessionStoreReady && passwordHasherReady;
+
+  return sendJson(res, ok ? 200 : 503, {
+    ok,
+    buildVersion: appConfig.buildVersion,
+    dbConnected,
+    authRoutesMounted: true,
+    passwordHasherReady,
+    sessionStoreReady,
+    googleAuthConfigured,
+    emailFeaturesEnabled: appConfig.email.featuresEnabled,
+    ...(reason ? { reason } : {})
+  }, authResponseHeaders());
 }
 
 function authResponseHeaders() {
