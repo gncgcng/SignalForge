@@ -69,6 +69,63 @@ button {
   transition: opacity 180ms ease, visibility 180ms ease;
 }
 
+.app-splash-loading {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+}
+
+.auth-restore-failure {
+  width: min(calc(100vw - 32px), 480px);
+  padding: 24px;
+  border: 1px solid rgba(75, 214, 255, 0.24);
+  border-radius: 8px;
+  background: #0b121c;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.38);
+  text-align: left;
+}
+
+.auth-restore-failure h1 {
+  margin: 8px 0;
+  font-size: 1.45rem;
+  letter-spacing: 0;
+}
+
+.auth-restore-failure p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.auth-restore-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.auth-restore-actions .text-action {
+  grid-column: 1 / -1;
+  min-height: 42px;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: #9fb1c5;
+}
+
+.auth-restore-actions .text-action:hover {
+  border-color: rgba(75, 214, 255, 0.2);
+  color: var(--cyan);
+  transform: none;
+}
+
+@media (max-width: 480px) {
+  .auth-restore-failure { padding: 20px; }
+  .auth-restore-actions { grid-template-columns: minmax(0, 1fr); }
+  .auth-restore-actions .text-action { grid-column: auto; }
+  .auth-restore-actions button { width: 100%; min-height: 46px; }
+}
+
 .app-splash.hidden {
   display: grid !important;
   opacity: 0;

@@ -73,8 +73,8 @@ const result = {
     app.includes('credentials: "same-origin"') &&
     app.includes('cache: "no-store"'),
   sessionRestoreOnLaunch:
-    app.includes("async function loadStartupSession()") &&
-    app.includes('api.request("/api/auth/session")') &&
+    app.includes("async function loadStartupSession({ signal } = {})") &&
+    app.includes('api.request("/api/auth/session", { signal })') &&
     app.includes("setSplashStatus(\"Restoring your session\")") &&
     html.includes('id="app-splash-status"'),
   loginRefreshStillLoggedIn:
@@ -91,12 +91,12 @@ const result = {
     app.includes("dashboard.classList.remove(\"hidden\")") &&
     !app.includes("await Promise.all([\n    loadPairs()"),
   normalCookieRestoreFirst:
-    app.indexOf('api.request("/api/auth/session")') <
-    app.indexOf("restoreSavedSession()") &&
+    app.indexOf('api.request("/api/auth/session", { signal })') <
+    app.indexOf("restoreSavedSession({ signal, cookieFailure })") &&
     authController.includes("refreshSessionExpiry(req.sessionId)") &&
     authController.includes("createPersistentRestoreToken("),
   pwaCookieLossFallback:
-    app.includes("async function restoreSavedSession()") &&
+    app.includes("async function restoreSavedSession({ signal, cookieFailure = null } = {})") &&
     app.includes('api.request("/api/auth/restore"') &&
     app.includes("No cookie session found; checking persistent restore token.") &&
     app.includes("function isPermanentRestoreFailure(error)") &&
@@ -124,8 +124,8 @@ const result = {
   invalidRestoreFailsSafely:
     authService.includes('throw restoreError("Saved session expired. Please sign in again.")') &&
     authService.includes("statusCode = 401") &&
-    app.includes("console.warn(`[auth] Persistent restore token failed: ${error.message}`)") &&
-    app.includes("clearRestoreToken();") &&
+    app.includes("console.warn(`[auth] restore:failed reason=${safeAuthFailureReason(error)}`)") &&
+    app.includes('clearSavedAuthStorage("invalid_or_expired_restore_token")') &&
     app.includes("return null"),
   loginSetsPersistentCookie:
     authController.includes('pathname === "/api/auth/login"') &&

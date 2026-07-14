@@ -71,7 +71,8 @@ const result = {
   splashScreen:
     html.includes('id="app-splash"') &&
     styles.includes(".app-splash") &&
-    app.includes(".finally(hideSplash)"),
+    app.includes(".then(hideSplash)") &&
+    app.includes(".catch(handleStartupFailure)"),
   pushReady:
     serviceWorker.includes('self.addEventListener("push"') &&
     serviceWorker.includes('self.addEventListener("notificationclick"') &&

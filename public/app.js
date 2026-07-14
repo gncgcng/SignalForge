@@ -132,6 +132,20 @@ const state = {
 };
 
 const RESTORE_TOKEN_KEY = "signalforge-restore-token";
+const AUTH_RESTORE_TIMEOUT_MS = 7000;
+const LEGACY_AUTH_STORAGE_KEYS = new Set([
+  "signalforge-auth-token",
+  "signalforge-session",
+  "signalforge-session-token",
+  "signalforge-refresh-token",
+  "signalforge-user",
+  "signalforge-cached-user",
+  "auth-token",
+  "refresh-token",
+  "access-token",
+  "token",
+  "user"
+]);
 const SIGNAL_VIEW_MODE_KEY = "signalforge-signal-view-mode";
 const LEGACY_SCANNER_MODE_KEY = "signalforge-scanner-mode";
 const NAV_SECTIONS_KEY = "signalforge-nav-sections";
@@ -163,6 +177,12 @@ const accountRecoveryStatus = document.querySelector("#account-recovery-status")
 const dashboard = document.querySelector("#dashboard");
 const appSplash = document.querySelector("#app-splash");
 const appSplashStatus = document.querySelector("#app-splash-status");
+const appSplashLoading = document.querySelector("#app-splash-loading");
+const authRestoreFailure = document.querySelector("#auth-restore-failure");
+const authRestoreFailureMessage = document.querySelector("#auth-restore-failure-message");
+const authRestoreRetry = document.querySelector("#auth-restore-retry");
+const authRestoreSignIn = document.querySelector("#auth-restore-sign-in");
+const authRestoreClear = document.querySelector("#auth-restore-clear");
 const installAppButton = document.querySelector("#install-app-button");
 const mobileMenuToggle = document.querySelector("#mobile-menu-toggle");
 const sidebar = document.querySelector(".sidebar");
@@ -408,27 +428,73 @@ const defaultSupportIssues = {
 
 const api = {
   async request(path, options = {}) {
-    const optionHeaders = options.headers || {};
-    const response = await fetch(path, {
-      ...options,
-      credentials: "same-origin",
-      cache: "no-store",
-      headers: {
-        "content-type": "application/json",
-        "x-device-fingerprint": getDeviceFingerprint(),
-        ...optionHeaders
-      }
-    });
-    const payload = await response.json();
+    const { timeoutMs = 0, signal: externalSignal, ...fetchOptions } = options;
+    const optionHeaders = fetchOptions.headers || {};
+    const controller = new AbortController();
+    let timedOut = false;
+    let timeoutId = null;
+    const abortFromExternalSignal = () => controller.abort();
 
-    if (!response.ok) {
-      const error = new Error(payload.error?.message || "Request failed.");
-      error.statusCode = response.status;
-      error.details = payload.error?.details;
-      throw error;
+    if (externalSignal?.aborted) controller.abort();
+    else externalSignal?.addEventListener("abort", abortFromExternalSignal, { once: true });
+
+    if (timeoutMs > 0) {
+      timeoutId = window.setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, timeoutMs);
     }
 
-    return payload;
+    try {
+      const response = await fetch(path, {
+        ...fetchOptions,
+        credentials: "same-origin",
+        cache: "no-store",
+        signal: controller.signal,
+        headers: {
+          "content-type": "application/json",
+          "x-device-fingerprint": getDeviceFingerprint(),
+          ...optionHeaders
+        }
+      });
+      const responseText = await response.text();
+      let payload = {};
+      if (responseText) {
+        try {
+          payload = JSON.parse(responseText);
+        } catch {
+          const error = new Error("The server returned an unexpected response.");
+          error.statusCode = response.status;
+          error.code = "invalid_json";
+          throw error;
+        }
+      }
+
+      if (!response.ok) {
+        const message = typeof payload.error === "string"
+          ? payload.error
+          : payload.error?.message;
+        const error = new Error(message || "Request failed.");
+        error.statusCode = response.status;
+        error.code = payload.code ||
+          (typeof payload.error === "string" ? payload.error : payload.error?.code) ||
+          "request_failed";
+        error.details = payload.error?.details;
+        throw error;
+      }
+
+      return payload;
+    } catch (error) {
+      if (controller.signal.aborted) {
+        const abortError = new Error(timedOut ? "The request timed out." : "The request was cancelled.");
+        abortError.code = timedOut ? "request_timeout" : "request_aborted";
+        throw abortError;
+      }
+      throw error;
+    } finally {
+      if (timeoutId) window.clearTimeout(timeoutId);
+      externalSignal?.removeEventListener("abort", abortFromExternalSignal);
+    }
   }
 };
 
@@ -443,6 +509,20 @@ window.addEventListener("appinstalled", () => {
   deferredInstallPrompt = null;
   console.info("[pwa] App installation completed.");
   updateInstallButtonVisibility();
+});
+
+authRestoreRetry?.addEventListener("click", () => {
+  setAuthRestoreRecoveryBusy(true, "Trying again...");
+  location.reload();
+});
+
+authRestoreSignIn?.addEventListener("click", () => {
+  openSignInAfterRestoreFailure("Session restore failed. Please sign in again.");
+});
+
+authRestoreClear?.addEventListener("click", () => {
+  clearSavedAuthStorage("user_requested");
+  openSignInAfterRestoreFailure("Saved session cleared. Please sign in again.");
 });
 
 installAppButton.addEventListener("click", async () => {
@@ -1895,6 +1975,7 @@ async function enterPaperTrade(button) {
 }
 
 async function init() {
+  console.info("[auth] restore:start");
   setSplashStatus("Restoring your session");
   renderHowItWorksPages();
   if (isAccountRecoveryRoute()) {
@@ -1928,17 +2009,27 @@ async function init() {
     }
     authNote.textContent = verificationMessage;
   }
-  const [session, authConfig] = await Promise.all([
-    loadStartupSession(),
-    loadAuthConfig()
-  ]);
-  emailFeaturesEnabled = Boolean(authConfig.emailFeaturesEnabled);
-  passwordResetUnavailable?.classList.toggle("hidden", emailFeaturesEnabled);
-  passwordResetEmailField?.classList.toggle("hidden", !emailFeaturesEnabled);
-  passwordResetSubmit?.classList.toggle("hidden", !emailFeaturesEnabled);
-  adminEmailWarning?.classList.toggle("hidden", emailFeaturesEnabled);
-  viewDemoButton.classList.remove("hidden");
-  googleAuthButton.classList.toggle("hidden", !authConfig.googleEnabled);
+  const restoreController = new AbortController();
+  const restoreTimeout = window.setTimeout(() => restoreController.abort(), AUTH_RESTORE_TIMEOUT_MS);
+  let session;
+  let authConfig;
+  try {
+    [session, authConfig] = await Promise.all([
+      loadStartupSession({ signal: restoreController.signal }),
+      loadAuthConfig({ signal: restoreController.signal })
+    ]);
+  } catch (error) {
+    if (restoreController.signal.aborted) {
+      console.warn("[auth] restore:timeout");
+      const timeoutError = new Error("Session restore timed out.");
+      timeoutError.code = "restore_timeout";
+      throw timeoutError;
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(restoreTimeout);
+  }
+  applyAuthConfig(authConfig);
   const user = session.user;
 
   state.user = user;
@@ -1964,7 +2055,12 @@ async function init() {
     showPublicHowItWorks();
   } else {
     setSplashStatus("Preparing your market desk");
-    const showAuthCallback = Boolean(oauthError || verificationToken || getPendingTelegramUnlockKey());
+    const showAuthCallback = Boolean(
+      oauthError ||
+      verificationToken ||
+      getPendingTelegramUnlockKey() ||
+      isProtectedAppRoute()
+    );
     publicProfilePage?.classList.add("hidden");
     landingPage.classList.toggle("hidden", showAuthCallback);
     authScreen.classList.toggle("hidden", !showAuthCallback);
@@ -1975,6 +2071,8 @@ async function init() {
     if (oauthError) {
       authNote.textContent = googleOAuthErrorMessage(oauthError);
       history.replaceState({}, "", `${location.pathname}${location.hash}`);
+    } else if (isProtectedAppRoute()) {
+      authNote.textContent = "Please sign in to continue.";
     }
   }
 }
@@ -1983,29 +2081,39 @@ function setSplashStatus(message) {
   if (appSplashStatus) appSplashStatus.textContent = message;
 }
 
-async function loadStartupSession() {
+async function loadStartupSession({ signal } = {}) {
+  let cookieFailure = null;
   try {
-    const session = await api.request("/api/auth/session");
+    const session = await api.request("/api/auth/session", { signal });
+    if (!isValidSessionPayload(session)) {
+      console.warn("[auth] restore:failed reason=unexpected_session_response");
+      clearSavedAuthStorage("unexpected_session_response");
+      return { user: null };
+    }
     saveRestoreToken(session.restore);
 
     if (session.user) {
+      console.info(`[auth] restore:success user_id=${safeAuthLogId(session.user.id)}`);
       console.info("[auth] Cookie session restored.");
       return session;
     }
 
     console.info("[auth] No cookie session found; checking persistent restore token.");
   } catch (error) {
+    if (signal?.aborted || error.code === "request_aborted") throw error;
+    cookieFailure = error;
     console.warn(`[auth] Cookie session check failed; trying persistent restore token. ${error.message}`);
   }
 
-  const user = await restoreSavedSession();
+  const user = await restoreSavedSession({ signal, cookieFailure });
   return { user };
 }
 
-async function loadAuthConfig() {
+async function loadAuthConfig({ signal } = {}) {
   try {
-    return await api.request("/api/auth/config");
+    return await api.request("/api/auth/config", { signal });
   } catch (error) {
+    if (signal?.aborted || error.code === "request_aborted") throw error;
     console.warn(`[auth] Auth config failed to load: ${error.message}`);
     return {
       demoEnabled: false,
@@ -2015,10 +2123,22 @@ async function loadAuthConfig() {
   }
 }
 
-async function restoreSavedSession() {
+function applyAuthConfig(authConfig = {}) {
+  emailFeaturesEnabled = Boolean(authConfig.emailFeaturesEnabled);
+  passwordResetUnavailable?.classList.toggle("hidden", emailFeaturesEnabled);
+  passwordResetEmailField?.classList.toggle("hidden", !emailFeaturesEnabled);
+  passwordResetSubmit?.classList.toggle("hidden", !emailFeaturesEnabled);
+  adminEmailWarning?.classList.toggle("hidden", emailFeaturesEnabled);
+  viewDemoButton.classList.remove("hidden");
+  googleAuthButton.classList.toggle("hidden", !authConfig.googleEnabled);
+}
+
+async function restoreSavedSession({ signal, cookieFailure = null } = {}) {
   const restoreToken = getRestoreToken();
   if (!restoreToken) {
     console.info("[auth] No persistent restore token found.");
+    if (cookieFailure && !isMissingSessionFailure(cookieFailure)) throw cookieFailure;
+    if (cookieFailure) clearSavedAuthStorage("invalid_cookie_session");
     return null;
   }
 
@@ -2026,22 +2146,57 @@ async function restoreSavedSession() {
     setSplashStatus("Reopening your saved session");
     const result = await api.request("/api/auth/restore", {
       method: "POST",
-      body: JSON.stringify({ restoreToken })
+      body: JSON.stringify({ restoreToken }),
+      signal
     });
+    if (!isValidRestoredSessionPayload(result)) {
+      console.warn("[auth] restore:failed reason=unexpected_restore_response");
+      clearSavedAuthStorage("unexpected_restore_response");
+      return null;
+    }
     saveRestoreToken(result.restore);
+    console.info(`[auth] restore:success user_id=${safeAuthLogId(result.user.id)}`);
     console.info("[auth] Persistent restore token succeeded.");
     return result.user;
   } catch (error) {
+    if (signal?.aborted || error.code === "request_aborted") throw error;
     if (isPermanentRestoreFailure(error)) {
-      clearRestoreToken();
+      clearSavedAuthStorage("invalid_or_expired_restore_token");
+      console.warn(`[auth] restore:failed reason=${safeAuthFailureReason(error)}`);
+      return null;
     }
     console.warn(`[auth] Persistent restore token failed: ${error.message}`);
-    return null;
+    throw error;
   }
 }
 
 function isPermanentRestoreFailure(error) {
   return [400, 401, 403, 404, 410].includes(error.statusCode);
+}
+
+function isMissingSessionFailure(error) {
+  return [401, 403].includes(error?.statusCode);
+}
+
+function isValidSessionPayload(payload) {
+  return Boolean(
+    payload &&
+    typeof payload === "object" &&
+    Object.prototype.hasOwnProperty.call(payload, "user") &&
+    (payload.user === null || typeof payload.user === "object")
+  );
+}
+
+function isValidRestoredSessionPayload(payload) {
+  return Boolean(payload && typeof payload === "object" && payload.user && typeof payload.user === "object");
+}
+
+function safeAuthLogId(value) {
+  return String(value || "unknown").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64) || "unknown";
+}
+
+function safeAuthFailureReason(error) {
+  return String(error?.code || error?.statusCode || "unknown").replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
 }
 
 function saveRestoreToken(restore) {
@@ -2068,6 +2223,31 @@ function clearRestoreToken() {
   } catch (error) {
     console.warn(`[auth] Persistent restore localStorage clear failed: ${error.message}`);
   }
+}
+
+function clearSavedAuthStorage(reason = "restore_failed") {
+  const shouldRemove = (key) => {
+    const normalized = String(key || "").toLowerCase();
+    return normalized === RESTORE_TOKEN_KEY ||
+      LEGACY_AUTH_STORAGE_KEYS.has(normalized) ||
+      (/^signalforge[-_:]/.test(normalized) && /(auth|session|restore|access-token|refresh-token|cached-user)/.test(normalized));
+  };
+
+  for (const storage of [localStorage, sessionStorage]) {
+    try {
+      const keys = Array.from({ length: storage.length }, (_, index) => storage.key(index)).filter(Boolean);
+      keys.filter(shouldRemove).forEach((key) => storage.removeItem(key));
+    } catch (error) {
+      console.warn(`[auth] Saved session storage cleanup failed: ${error.message}`);
+    }
+  }
+
+  for (const name of ["signalforge_session", "__Secure-signalforge_session", "__Host-signalforge_session"]) {
+    document.cookie = `${name}=; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax`;
+    document.cookie = `${name}=; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax; Secure`;
+  }
+
+  console.info(`[auth] local_session:cleared reason=${safeAuthFailureReason({ code: reason })}`);
 }
 
 function clearClientAuthState() {
@@ -2346,6 +2526,28 @@ function showAccountRecoverySupport() {
 
 function isHowItWorksRoute() {
   return parseAppHash(location.hash).route === "how-it-works";
+}
+
+function isProtectedAppRoute() {
+  const parsed = parseAppHash(location.hash);
+  return parsed.valid && parsed.route !== "how-it-works";
+}
+
+function isPublicStartupRoute() {
+  const hashRoute = String(location.hash || "").split("?")[0].toLowerCase();
+  return !hashRoute || [
+    "#top",
+    "#quick-start",
+    "#why-signalforge",
+    "#features",
+    "#live-preview",
+    "#markets-covered",
+    "#pricing",
+    "#affiliate-program",
+    "#faq",
+    "#how-it-works",
+    "#account-recovery-support"
+  ].includes(hashRoute) || isPublicProfileRoute();
 }
 
 function showPublicHowItWorks({ updateHistory = false } = {}) {
@@ -8440,24 +8642,63 @@ function toDateInputValue(date) {
 
 registerPwa();
 init()
-  .catch((error) => {
-    console.warn(`[auth] Startup session restore failed before login state was confirmed: ${error.message}`);
-    if (state.user) {
-      landingPage.classList.add("hidden");
-      authScreen.classList.add("hidden");
-      dashboard.classList.remove("hidden");
-      if (statusLine) {
-        statusLine.textContent = "Session restored. Some dashboard data could not load yet.";
-      }
-      return;
-    }
+  .then(hideSplash)
+  .catch(handleStartupFailure);
 
+function handleStartupFailure(error) {
+  const reason = error?.code === "restore_timeout" ? "timeout" : safeAuthFailureReason(error);
+  console.warn(`[auth] restore:failed reason=${reason}`);
+  console.warn(`[auth] Startup session restore failed before login state was confirmed: ${error.message}`);
+  if (state.user) {
     landingPage.classList.add("hidden");
-    authScreen.classList.remove("hidden");
-    dashboard.classList.add("hidden");
-    authNote.textContent = "We could not confirm your session. Check your connection and refresh before signing in again.";
-  })
-  .finally(hideSplash);
+    authScreen.classList.add("hidden");
+    dashboard.classList.remove("hidden");
+    if (statusLine) statusLine.textContent = "Session restored. Some dashboard data could not load yet.";
+    hideSplash();
+    return;
+  }
+
+  if (isPublicStartupRoute()) {
+    if (isAccountRecoveryRoute()) showAccountRecoverySupport();
+    else if (isHowItWorksRoute()) showPublicHowItWorks();
+    else {
+      publicHowItWorksPage?.classList.add("hidden");
+      authScreen.classList.add("hidden");
+      dashboard.classList.add("hidden");
+      landingPage.classList.remove("hidden");
+    }
+    hideSplash();
+    return;
+  }
+
+  showAuthRestoreFailure(error);
+}
+
+function showAuthRestoreFailure(error) {
+  landingPage.classList.add("hidden");
+  authScreen.classList.add("hidden");
+  dashboard.classList.add("hidden");
+  appSplashLoading?.classList.add("hidden");
+  authRestoreFailure?.classList.remove("hidden");
+  authRestoreFailureMessage.textContent = error?.code === "restore_timeout"
+    ? "Session restore took too long. Please try again or sign in."
+    : "Please sign in again.";
+  appSplash?.setAttribute("aria-label", "Session restore failed");
+  setAuthRestoreRecoveryBusy(false);
+}
+
+function setAuthRestoreRecoveryBusy(busy, message = "") {
+  for (const button of [authRestoreRetry, authRestoreSignIn, authRestoreClear]) {
+    if (button) button.disabled = busy;
+  }
+  if (busy && message) authRestoreFailureMessage.textContent = message;
+}
+
+function openSignInAfterRestoreFailure(message) {
+  showAuth();
+  authNote.textContent = message;
+  hideSplash();
+}
 
 async function registerPwa() {
   if (!("serviceWorker" in navigator)) return;

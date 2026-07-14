@@ -26,6 +26,7 @@
     "test:mobile-nav": "node scripts/mobile-navigation-test.js",
     "test:routing": "node scripts/client-routing-test.js",
     "test:session-persistence": "node scripts/session-persistence-test.js",
+    "test:auth-restore-failsafe": "node scripts/auth-restore-failsafe-test.js",
     "test:anti-abuse": "node scripts/anti-abuse-test.js",
     "test:stripe-billing": "node scripts/stripe-billing-test.js",
     "test:stripe-config": "node scripts/stripe-config-test.js",

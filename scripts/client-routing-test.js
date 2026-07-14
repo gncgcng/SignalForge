@@ -24,6 +24,10 @@ assert.equal(ROUTE_TO_VIEW["paper-trading"], "paper-portfolio");
 const app = readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
 const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
 const serviceWorker = readFileSync(new URL("../public/service-worker.js", import.meta.url), "utf8");
+const navigationSource = app.slice(
+  app.indexOf("function navigateTo("),
+  app.indexOf("function syncRouteFromLocation(")
+);
 
 const checks = {
   centralizedNavigation:
@@ -33,7 +37,7 @@ const checks = {
     !app.includes("showView("),
   hashUpdatesWithoutReload:
     app.includes('history[options.replace ? "replaceState" : "pushState"]') &&
-    !app.includes("location.reload("),
+    !navigationSource.includes("location.reload("),
   initialDeepLink:
     app.includes("syncRouteFromLocation({ force: true, replaceInvalid: true })") &&
     app.includes('history.replaceState({}, "", `${location.pathname}${location.search}#scanner`)'),

@@ -22,24 +22,49 @@ import {
 
 export async function handleAuthRoutes(req, res, pathname) {
   if (pathname === "/api/auth/session" && req.method === "GET") {
-    const refreshed = req.user && req.sessionId
-      ? await refreshSessionExpiry(req.sessionId)
-      : null;
-    logSessionCheck(req, Boolean(refreshed));
-    return sendJson(res, 200, {
-      user: toPublicUser(req.user),
-      sessionExpiresAt: refreshed?.expiresAt || null,
-      restore: req.user
-        ? await createPersistentRestoreToken(
-          req.user.id,
-          req,
-          req.headers["x-device-fingerprint"]
-        )
-        : null
-    }, {
-      ...authResponseHeaders(),
-      ...(refreshed ? { "set-cookie": buildSessionCookie(req.sessionId) } : {})
-    });
+    const cookies = parseCookies(req.headers.cookie);
+    const presentedSessionId = getSessionCookieNames()
+      .map((name) => cookies[name])
+      .find(Boolean);
+
+    if (presentedSessionId && !req.user) {
+      logSessionCheck(req, false);
+      return sendJson(res, 401, {
+        ok: false,
+        error: "invalid_session"
+      }, {
+        ...authResponseHeaders(),
+        "set-cookie": buildClearCookies()
+      });
+    }
+
+    try {
+      const refreshed = req.user && req.sessionId
+        ? await refreshSessionExpiry(req.sessionId)
+        : null;
+      logSessionCheck(req, Boolean(refreshed));
+      return sendJson(res, 200, {
+        ok: true,
+        user: toPublicUser(req.user),
+        sessionExpiresAt: refreshed?.expiresAt || null,
+        restore: req.user
+          ? await createPersistentRestoreToken(
+            req.user.id,
+            req,
+            req.headers["x-device-fingerprint"]
+          )
+          : null
+      }, {
+        ...authResponseHeaders(),
+        ...(refreshed ? { "set-cookie": buildSessionCookie(req.sessionId) } : {})
+      });
+    } catch (error) {
+      console.warn(`[auth] Session endpoint failed reason=${safeSessionFailure(error)}`);
+      return sendJson(res, 500, {
+        ok: false,
+        error: "session_unavailable"
+      }, authResponseHeaders());
+    }
   }
 
   if (pathname === "/api/auth/config" && req.method === "GET") {
@@ -65,6 +90,7 @@ export async function handleAuthRoutes(req, res, pathname) {
       }, req);
       logSessionCookieIssued("restore");
       return sendJson(res, 200, {
+        ok: true,
         user: result.user,
         restore: {
           token: result.restoreToken,
@@ -252,6 +278,12 @@ function authResponseHeaders() {
     "cache-control": "no-store, private",
     vary: "Cookie"
   };
+}
+
+function safeSessionFailure(error) {
+  return String(error?.code || error?.name || "unknown")
+    .replace(/[^a-zA-Z0-9_-]/g, "_")
+    .slice(0, 64);
 }
 
 export function buildSessionCookie(sessionId) {

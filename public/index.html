@@ -83,9 +83,21 @@
   </head>
   <body>
     <div class="app-splash" id="app-splash" role="status" aria-label="Loading SignalForge">
-      <img src="/icons/android-chrome-192x192.png" alt="" />
-      <strong>SignalForge</strong>
-      <span id="app-splash-status">Restoring your session</span>
+      <div class="app-splash-loading" id="app-splash-loading">
+        <img src="/icons/android-chrome-192x192.png" alt="" />
+        <strong>SignalForge</strong>
+        <span id="app-splash-status">Restoring your session</span>
+      </div>
+      <section class="auth-restore-failure hidden" id="auth-restore-failure" role="alert" aria-labelledby="auth-restore-failure-title">
+        <span class="eyebrow">Account access</span>
+        <h1 id="auth-restore-failure-title">Couldn&rsquo;t restore session</h1>
+        <p id="auth-restore-failure-message">Please sign in again.</p>
+        <div class="auth-restore-actions">
+          <button id="auth-restore-retry" type="button">Try again</button>
+          <button class="secondary-action" id="auth-restore-sign-in" type="button">Back to sign in</button>
+          <button class="text-action" id="auth-restore-clear" type="button">Clear saved session</button>
+        </div>
+      </section>
     </div>
     <button class="install-app-button hidden" id="install-app-button" type="button">
       Install SignalForge
