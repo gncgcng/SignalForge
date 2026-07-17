@@ -17,6 +17,7 @@ import {
   calculateAdaptiveQualityAdjustment,
   currentStrategyVersion
 } from "../analyst/signalAnalystService.js";
+import { detectChartPatterns } from "../patterns/patternDetector.js";
 
 const minimumCandles = 60;
 const minimumQualityScore = 70;
@@ -41,9 +42,10 @@ export function generateMarketDataSetup(marketData, timeframe, options = {}) {
   const candles = marketData.candles;
 
   if (candles.length < minimumCandles) {
-    return noSetup("Not enough candles to calculate reliable indicators.", marketData, timeframe, [], ["strategy_not_matched"]);
+    return noSetup("Not enough candles to calculate reliable indicators.", marketData, timeframe, [], ["strategy_not_matched"], []);
   }
 
+  const detectedPatterns = detectChartPatterns(candles, { timeframe });
   const indicators = calculateIndicators(candles);
   const latest = candles[candles.length - 1];
   const regime = analyzeMarketRegime(candles);
@@ -60,7 +62,7 @@ export function generateMarketDataSetup(marketData, timeframe, options = {}) {
   const rawShortCase = isCommodity
     ? evaluateCommodityShort(latest, indicators, levels)
     : evaluateCryptoShort(latest, indicators, levels, marketData.volumeAvailable !== false);
-  const longCase = validateCandidate(
+  const longCase = withPatternContext(validateCandidate(
     adjustCandidateForVolatility(rawLongCase, regime),
     candles,
     indicators,
@@ -72,8 +74,8 @@ export function generateMarketDataSetup(marketData, timeframe, options = {}) {
     marketData.advancedStructure,
     marketData.correlation,
     options.analystProfile
-  );
-  const shortCase = validateCandidate(
+  ), detectedPatterns, "long");
+  const shortCase = withPatternContext(validateCandidate(
     adjustCandidateForVolatility(rawShortCase, regime),
     candles,
     indicators,
@@ -85,7 +87,7 @@ export function generateMarketDataSetup(marketData, timeframe, options = {}) {
     marketData.advancedStructure,
     marketData.correlation,
     options.analystProfile
-  );
+  ), detectedPatterns, "short");
   const bestCase = [longCase, shortCase]
     .filter((candidate) => candidate.valid)
     .sort((a, b) => b.qualityScore - a.qualityScore || b.confidenceScore - a.confidenceScore)[0];
@@ -98,7 +100,9 @@ export function generateMarketDataSetup(marketData, timeframe, options = {}) {
         : buildNoSetupMessage(evaluated),
       marketData,
       timeframe,
-      evaluated
+      evaluated,
+      [],
+      detectedPatterns
     );
   }
   const analyst = buildSignalAnalystReport(bestCase, options.analystProfile);
@@ -127,6 +131,7 @@ export function generateMarketDataSetup(marketData, timeframe, options = {}) {
       riskPlan: bestCase.riskPlan,
       marketStructure: bestCase.marketStructure,
       correlation: bestCase.correlation,
+      patternContext: bestCase.patternContext,
       analyst,
       reasoning: analyst.summary,
       confirmations: bestCase.confirmations,
@@ -141,7 +146,8 @@ export function generateMarketDataSetup(marketData, timeframe, options = {}) {
         bestCase.riskPlan,
         bestCase.marketStructure,
         bestCase.correlation,
-        analyst
+        analyst,
+        bestCase.patternContext
       ),
       generatedAt: new Date().toISOString(),
       marketSource: marketData.source
@@ -150,6 +156,8 @@ export function generateMarketDataSetup(marketData, timeframe, options = {}) {
       message: "Valid setup found.",
       qualityScore: bestCase.qualityScore,
       setupType: bestCase.setupType,
+      patternContext: bestCase.patternContext,
+      detectedPatterns,
       confirmations: bestCase.confirmations,
       indicators: serializeIndicators(
         indicators,
@@ -162,7 +170,8 @@ export function generateMarketDataSetup(marketData, timeframe, options = {}) {
         bestCase.riskPlan,
         bestCase.marketStructure,
         bestCase.correlation,
-        analyst
+        analyst,
+        bestCase.patternContext
       )
     }
   };
@@ -1102,7 +1111,7 @@ function atrConfirmation(atrValue, price) {
   );
 }
 
-function noSetup(message, marketData, timeframe, candidates, fallbackCodes = []) {
+function noSetup(message, marketData, timeframe, candidates, fallbackCodes = [], detectedPatterns = []) {
   const diagnostics = summarizeDiagnostics(candidates, fallbackCodes);
   return {
     valid: false,
@@ -1114,6 +1123,8 @@ function noSetup(message, marketData, timeframe, candidates, fallbackCodes = [])
       rejectionReasons: diagnostics.reasons,
       rejectionReasonCodes: diagnostics.codes,
       rejectionSummary: diagnostics.summary,
+      patternContext: detectedPatterns[0] || null,
+      detectedPatterns,
       evaluatedAt: new Date().toISOString(),
       candidates: candidates.map((candidate) => ({
         direction: candidate.direction,
@@ -1194,7 +1205,8 @@ function serializeIndicators(
   marketStructure = null,
   correlation = null
   ,
-  analyst = null
+  analyst = null,
+  patternContext = null
 ) {
   return {
     ema20: roundPrice(indicators.ema20),
@@ -1256,8 +1268,17 @@ function serializeIndicators(
     analystWeaknesses: analyst?.weaknesses || [],
     analystSections: analyst?.sections || {},
     analystAdaptiveAdjustment: analyst?.adaptive?.adjustment || 0,
-    analystAdaptiveFactors: analyst?.adaptive?.factors || []
+    analystAdaptiveFactors: analyst?.adaptive?.factors || [],
+    patternContext
   };
+}
+
+function withPatternContext(candidate, detectedPatterns, direction) {
+  const wantedBias = direction === "long" ? "bullish" : "bearish";
+  const patternContext = detectedPatterns.find((pattern) => pattern.bias === wantedBias) ||
+    detectedPatterns.find((pattern) => pattern.category === "uncertain") ||
+    null;
+  return { ...candidate, patternContext };
 }
 
 function mergeAdvancedLevels(levels, advancedStructure, latestClose) {

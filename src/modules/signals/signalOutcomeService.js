@@ -10,6 +10,7 @@ import {
 import { getCachedOhlcv, getOhlcv, getPair } from "../market-data/marketDataService.js";
 import { runSignalPostMortem } from "./signalLearningService.js";
 import { getSignalValidUntil } from "./signalValidityService.js";
+import { recordPromotedCandidatePatternOutcome } from "./setupCandidateRepository.js";
 
 const terminalStatuses = new Set(["Hit TP", "Hit SL", "Expired"]);
 let trackingTimer = null;
@@ -65,6 +66,7 @@ export async function expireSignalsPastValidity() {
   const expiredSignals = await expireActiveSignalsPastValidity();
   for (const signal of expiredSignals) {
     await runSignalPostMortem({ recordSignalLearningEvent, refreshLearningStats }, signal);
+    await recordPromotedCandidatePatternOutcome(signal);
   }
   console.info(`[signals] expired=${expiredSignals.length}`);
   return expiredSignals;
@@ -181,5 +183,8 @@ function markSignal(signal, status, reason, candleTime = null) {
   signal.statusUpdatedAt = new Date().toISOString();
   signal.resolvedAt = candleTime ? new Date(candleTime * 1000).toISOString() : signal.statusUpdatedAt;
   return updateSignalOutcome(signal)
-    .then(() => runSignalPostMortem({ recordSignalLearningEvent, refreshLearningStats }, signal));
+    .then(async () => {
+      await runSignalPostMortem({ recordSignalLearningEvent, refreshLearningStats }, signal);
+      await recordPromotedCandidatePatternOutcome(signal);
+    });
 }

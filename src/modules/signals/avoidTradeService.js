@@ -110,6 +110,10 @@ export function buildAvoidTradeResult({ symbol, timeframe, analysis = {}, candid
     analysis.message,
     candidate?.rejectionReason
   ].filter(Boolean);
+  const patternContext = analysis.patternContext || candidate?.patternContext || null;
+  if (patternContext?.category === "uncertain") {
+    sourceReasons.unshift(`Unclear pattern: ${patternContext.label}.`);
+  }
   const guidance = sourceReasons.map(toAvoidGuidance).filter(Boolean);
   const uniqueReasons = unique(guidance.map((item) => item.reason)).slice(0, 4);
   const improvements = unique(guidance.map((item) => item.improvement)).slice(0, 4);
@@ -128,6 +132,7 @@ export function buildAvoidTradeResult({ symbol, timeframe, analysis = {}, candid
     marketCondition: inferMarketCondition(sourceReasons.join(" ")),
     setupQualityScore: finiteScore(candidate?.setupQualityScore ?? candidate?.candidateScore ?? analysis.qualityScore),
     entryReadinessScore: finiteScore(candidate?.entryReadinessScore ?? candidate?.readinessScore ?? analysis.readinessScore),
+    patternContext,
     createdAt: new Date(now).toISOString()
   };
 }

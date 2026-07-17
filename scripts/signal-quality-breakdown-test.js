@@ -32,7 +32,7 @@ const signal = {
 };
 
 const quality = buildSignalQuality(signal);
-assert.equal(Object.keys(quality.categories).length, 10);
+assert.equal(Object.keys(quality.categories).length, 11);
 assert.equal(quality.categories.trendAlignment.status, "good");
 assert.equal(quality.categories.volumeConfirmation.status, "failed");
 assert.equal(quality.categories.entryTiming.status, "fair");
@@ -40,6 +40,7 @@ assert.equal(quality.categories.riskReward.status, "good");
 assert.equal(quality.categories.higherTimeframe.status, "weak");
 assert.equal(quality.categories.learningHistory.status, "limited");
 assert.match(quality.categories.marketStructure.reason, /Not enough data/);
+assert.equal(quality.categories.patternContext.status, "missing");
 assert.ok(quality.strengths.some((reason) => reason.includes("EMA")));
 assert.ok(quality.risks.some((reason) => reason.includes("Volume")));
 assert.match(quality.confidenceExplanation, /not a guarantee or probability of profit/i);

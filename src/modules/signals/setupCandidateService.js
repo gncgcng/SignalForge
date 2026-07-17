@@ -103,7 +103,11 @@ export async function observeSetupCandidate(signal, marketData, readiness) {
     missingConfirmations: readiness.missingConfirmations, nextConditions: readiness.nextConditions,
     rejectionReason: readiness.rejectionReason,
     promotedSignalId: null,
-    metadata: { distanceAtr: readiness.distanceAtr, setupKey: signal.setupKey }
+    metadata: {
+      distanceAtr: readiness.distanceAtr,
+      setupKey: signal.setupKey,
+      patternContext: sanitizePatternContext(signal.patternContext)
+    }
   });
   if (["rejected", "expired"].includes(candidate.status)) await recordCandidateLearningEvent(candidate);
   return candidate;
@@ -253,6 +257,24 @@ function isCryptoMarket(signal, marketData) {
 
 function displayPair(symbol) {
   return String(symbol || "").toUpperCase().replace(/[-/]/g, "");
+}
+
+function sanitizePatternContext(pattern) {
+  if (!pattern?.pattern) return null;
+  return {
+    pattern: pattern.pattern,
+    label: pattern.label,
+    bias: pattern.bias,
+    category: pattern.category,
+    confidence: Number(pattern.confidence || 0),
+    strength: pattern.strength,
+    detectedAt: pattern.detectedAt,
+    reasons: Array.isArray(pattern.reasons) ? pattern.reasons.slice(0, 4) : [],
+    warnings: Array.isArray(pattern.warnings) ? pattern.warnings.slice(0, 4) : [],
+    shadowMode: true,
+    confidenceModifier: 0,
+    minimumSamplesForWeighting: 30
+  };
 }
 
 export function buildNextConditions(reasons = [], missingConfirmations = [], timeframe = "current") {

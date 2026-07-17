@@ -115,8 +115,10 @@ export async function recordCandidateLearningEvent(candidate, outcome = {}) {
       initial_setup_score, readiness_score, initial_readiness_score, final_status,
       would_have_hit_tp, would_have_hit_sl,
       went_nowhere, max_favorable_excursion, max_adverse_excursion,
-      entry_never_filled, reason_not_promoted, resolved_at
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,now())
+      entry_never_filled, reason_not_promoted, detected_pattern, pattern_confidence,
+      pattern_bias, pattern_expected_move, pattern_invalidation_hit, pattern_breakout_confirmed,
+      resolved_at
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,now())
     ON CONFLICT (candidate_id) DO UPDATE SET
       readiness_score = EXCLUDED.readiness_score,
       initial_readiness_score = COALESCE(candidate_learning_events.initial_readiness_score, EXCLUDED.initial_readiness_score),
@@ -128,6 +130,12 @@ export async function recordCandidateLearningEvent(candidate, outcome = {}) {
       max_adverse_excursion = COALESCE(EXCLUDED.max_adverse_excursion, candidate_learning_events.max_adverse_excursion),
       entry_never_filled = COALESCE(EXCLUDED.entry_never_filled, candidate_learning_events.entry_never_filled),
       reason_not_promoted = EXCLUDED.reason_not_promoted,
+      detected_pattern = COALESCE(EXCLUDED.detected_pattern, candidate_learning_events.detected_pattern),
+      pattern_confidence = COALESCE(EXCLUDED.pattern_confidence, candidate_learning_events.pattern_confidence),
+      pattern_bias = COALESCE(EXCLUDED.pattern_bias, candidate_learning_events.pattern_bias),
+      pattern_expected_move = COALESCE(EXCLUDED.pattern_expected_move, candidate_learning_events.pattern_expected_move),
+      pattern_invalidation_hit = COALESCE(EXCLUDED.pattern_invalidation_hit, candidate_learning_events.pattern_invalidation_hit),
+      pattern_breakout_confirmed = COALESCE(EXCLUDED.pattern_breakout_confirmed, candidate_learning_events.pattern_breakout_confirmed),
       resolved_at = now()
   `, [
     createId("clearn"), candidate.id, candidate.symbol, candidate.timeframe, candidate.direction,
@@ -136,9 +144,16 @@ export async function recordCandidateLearningEvent(candidate, outcome = {}) {
     outcome.wouldHaveHitTp ?? null, outcome.wouldHaveHitSl ?? null, outcome.wentNowhere ?? null,
     outcome.maxFavorableExcursion ?? null, outcome.maxAdverseExcursion ?? null,
     outcome.entryNeverFilled ?? null,
-    candidate.rejectionReason || outcome.reasonNotPromoted || null
+    candidate.rejectionReason || outcome.reasonNotPromoted || null,
+    candidate.patternContext?.pattern || null,
+    candidate.patternContext?.confidence ?? null,
+    candidate.patternContext?.bias || null,
+    outcome.wouldHaveHitTp ?? null,
+    outcome.wouldHaveHitSl ?? null,
+    candidate.patternContext ? candidate.patternContext.warnings?.length === 0 : null
   ]);
   await updateCandidateShadowAdjustment(candidate.id);
+  await updatePatternShadowAdjustment(candidate.id);
   if (outcome.wouldHaveHitSl === true) {
     await query(`
       UPDATE avoid_trade_learning_events
@@ -150,6 +165,26 @@ export async function recordCandidateLearningEvent(candidate, outcome = {}) {
         AND last_observed_at >= now() - interval '72 hours'
     `, [candidate.symbol, candidate.timeframe]);
   }
+}
+
+export async function recordPromotedCandidatePatternOutcome(signal) {
+  const status = String(signal?.status || "");
+  if (!signal?.id || !["Hit TP", "Hit SL", "Expired"].includes(status)) return 0;
+  const result = await query(`
+    UPDATE candidate_learning_events e
+    SET final_status = $2,
+      pattern_expected_move = CASE WHEN $2 = 'Hit TP' THEN true WHEN $2 = 'Hit SL' THEN false ELSE pattern_expected_move END,
+      pattern_invalidation_hit = CASE WHEN $2 = 'Hit SL' THEN true WHEN $2 = 'Hit TP' THEN false ELSE pattern_invalidation_hit END,
+      went_nowhere = CASE WHEN $2 = 'Expired' THEN true ELSE went_nowhere END,
+      resolved_at = COALESCE($3::timestamptz, now())
+    FROM setup_candidates c
+    WHERE e.candidate_id = c.id
+      AND c.promoted_signal_id = $1
+      AND e.detected_pattern IS NOT NULL
+    RETURNING e.candidate_id
+  `, [signal.id, status, signal.resolvedAt || signal.statusUpdatedAt || null]);
+  for (const row of result.rows) await updatePatternShadowAdjustment(row.candidate_id);
+  return result.rowCount;
 }
 
 async function updateCandidateShadowAdjustment(candidateId) {
@@ -178,6 +213,34 @@ async function updateCandidateShadowAdjustment(candidateId) {
   `, [candidateId]);
 }
 
+async function updatePatternShadowAdjustment(candidateId) {
+  await query(`
+    WITH candidate_pattern AS (
+      SELECT detected_pattern
+      FROM candidate_learning_events
+      WHERE candidate_id = $1 AND detected_pattern IS NOT NULL
+    ), stats AS (
+      SELECT COUNT(*) FILTER (
+          WHERE pattern_expected_move IS NOT NULL OR pattern_invalidation_hit IS NOT NULL
+        )::integer AS sample_size,
+        AVG(CASE WHEN pattern_expected_move THEN 1.0 WHEN pattern_invalidation_hit THEN 0.0 END) AS observed_win_rate
+      FROM candidate_learning_events e
+      JOIN candidate_pattern p USING (detected_pattern)
+    )
+    UPDATE candidate_learning_events e
+    SET pattern_sample_size = stats.sample_size,
+        pattern_shadow_adjustment = CASE
+          WHEN stats.sample_size < 30 THEN 0
+          WHEN stats.observed_win_rate >= 0.60 THEN 2
+          WHEN stats.observed_win_rate < 0.40 THEN -2
+          ELSE 0
+        END,
+        pattern_adjustment_applied = false
+    FROM stats
+    WHERE e.candidate_id = $1
+  `, [candidateId]);
+}
+
 export async function listCandidatesNeedingOutcome(limit = 20) {
   const result = await query(`
     SELECT c.* FROM setup_candidates c
@@ -192,7 +255,7 @@ export async function listCandidatesNeedingOutcome(limit = 20) {
 }
 
 export async function getCandidateQualitySummary() {
-  const [result, reasons, entryQuality, avoidSummary, avoidReasons, avoidMarkets, avoidTimeframes] = await Promise.all([query(`
+  const [result, reasons, entryQuality, avoidSummary, avoidReasons, avoidMarkets, avoidTimeframes, patterns, recentPatterns] = await Promise.all([query(`
     SELECT
       COUNT(*) FILTER (WHERE created_at::date = current_date)::integer AS created_today,
       COUNT(*) FILTER (WHERE status = 'promoted_to_signal' AND updated_at::date = current_date)::integer AS promoted,
@@ -226,6 +289,18 @@ export async function getCandidateQualitySummary() {
     SELECT timeframe, COUNT(*)::integer AS count
     FROM avoid_trade_learning_events
     GROUP BY timeframe ORDER BY count DESC LIMIT 6
+  `), query(`
+    SELECT detected_pattern AS pattern, COUNT(*)::integer AS count,
+      ROUND(AVG(pattern_confidence)::numeric, 2) AS average_confidence
+    FROM candidate_learning_events
+    WHERE detected_pattern IS NOT NULL
+    GROUP BY detected_pattern ORDER BY count DESC LIMIT 8
+  `), query(`
+    SELECT detected_pattern AS pattern, pattern_confidence AS confidence,
+      pattern_bias AS bias, final_status, reason_not_promoted
+    FROM candidate_learning_events
+    WHERE detected_pattern IS NOT NULL
+    ORDER BY resolved_at DESC LIMIT 10
   `)]);
   const row = result.rows[0] || {};
   const total = Number(row.created_today || 0);
@@ -244,7 +319,19 @@ export async function getCandidateQualitySummary() {
     avoidTradesWouldHaveFailed: Number(avoidSummary.rows[0]?.would_fail || 0),
     topAvoidReasons: avoidReasons.rows.map((item) => ({ reason: item.reason, count: Number(item.count || 0) })),
     mostAvoidedMarkets: avoidMarkets.rows.map((item) => ({ market: item.market, count: Number(item.count || 0) })),
-    mostAvoidedTimeframes: avoidTimeframes.rows.map((item) => ({ timeframe: item.timeframe, count: Number(item.count || 0) }))
+    mostAvoidedTimeframes: avoidTimeframes.rows.map((item) => ({ timeframe: item.timeframe, count: Number(item.count || 0) })),
+    patternShadowSummary: patterns.rows.map((item) => ({
+      pattern: item.pattern,
+      count: Number(item.count || 0),
+      averageConfidence: Number(item.average_confidence || 0)
+    })),
+    recentPatternObservations: recentPatterns.rows.map((item) => ({
+      pattern: item.pattern,
+      confidence: Number(item.confidence || 0),
+      bias: item.bias,
+      finalStatus: item.final_status,
+      reason: item.reason_not_promoted || "Pattern remained context-only."
+    }))
   };
 }
 
@@ -304,6 +391,8 @@ function mapCandidate(row) {
     potentialRr: Number(row.potential_rr || 0), reasonsForWatching: row.reasons_for_watching || [],
     missingConfirmations: row.missing_confirmations || [], nextConditions: row.next_conditions || [],
     rejectionReason: row.rejection_reason,
-    promotedSignalId: row.promoted_signal_id || null
+    promotedSignalId: row.promoted_signal_id || null,
+    metadata: row.metadata || {},
+    patternContext: row.metadata?.patternContext || null
   };
 }

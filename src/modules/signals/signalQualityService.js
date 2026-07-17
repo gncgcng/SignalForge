@@ -5,6 +5,7 @@ const categoryDefinitions = Object.freeze([
   ["entryTiming", "Entry timing"],
   ["riskReward", "Risk/reward"],
   ["marketStructure", "Market structure"],
+  ["patternContext", "Pattern context"],
   ["supportResistance", "Support/resistance context"],
   ["volatilityAtr", "Volatility / ATR"],
   ["higherTimeframe", "Higher timeframe alignment"],
@@ -41,6 +42,7 @@ export function buildSignalQuality(signal = {}) {
     entryTiming: entryTimingCategory(signal),
     riskReward: riskRewardCategory(signal),
     marketStructure: marketStructureCategory(signal, confirmations),
+    patternContext: patternContextCategory(signal),
     supportResistance: confirmationCategory(
       findConfirmation(confirmations, ["support", "resistance", "support room", "resistance room"]),
       "Support and resistance context was not recorded.",
@@ -167,6 +169,21 @@ function marketStructureCategory(signal, confirmations) {
     reason: humanReason(structure.explanation, aligned ? "Market structure supports the setup direction." : "Market structure alignment is weak."),
     ruleSource: "market_structure",
     confidenceImpact: Number.isFinite(Number(structure.confidenceAdjustment)) ? Number(structure.confidenceAdjustment) : null
+  };
+}
+
+function patternContextCategory(signal) {
+  const pattern = signal.patternContext || signal.indicators?.patternContext;
+  if (!pattern?.pattern) return missingCategory("No named chart pattern was detected. This does not prevent other validated setup types.", "pattern_shadow_mode");
+  const status = ["strong", "good", "fair", "weak"].includes(pattern.strength)
+    ? pattern.strength
+    : statusFromScore(Number(pattern.confidence || 0) * 100);
+  return {
+    status,
+    score: finiteScore(Number(pattern.confidence || 0) * 100),
+    reason: `${pattern.label} provides ${pattern.bias} ${pattern.category} context. Pattern recognition is in shadow mode and did not create this signal.`,
+    ruleSource: "pattern_shadow_mode",
+    confidenceImpact: Number(pattern.confidenceModifier || 0)
   };
 }
 

@@ -3287,12 +3287,20 @@ async function loadCandidateQuality() {
   document.querySelector("#candidate-quality-avoid-timeframes").innerHTML = renderCandidateMetricRows(
     quality.mostAvoidedTimeframes || [], "timeframe", "count"
   );
+  document.querySelector("#candidate-quality-patterns").innerHTML = renderPatternDiagnosticRows(
+    quality.recentPatternObservations || []
+  );
   renderAdminMarketBrief(marketBrief);
 }
 
 function renderCandidateMetricRows(items, labelKey, valueKey) {
   if (!items.length) return `<p class="reasoning">No candidate data yet.</p>`;
   return items.map((item) => `<div class="analytics-list-row"><span>${escapeHtml(titleCase(item[labelKey]))}</span><strong>${Number(item[valueKey] || 0)}</strong></div>`).join("");
+}
+
+function renderPatternDiagnosticRows(items) {
+  if (!items.length) return `<p class="reasoning">No resolved shadow pattern observations yet.</p>`;
+  return items.map((item) => `<div class="analytics-list-row pattern-diagnostic-row"><span><strong>${escapeHtml(titleCase(item.pattern))}</strong><small>${escapeHtml(item.reason)}</small></span><strong>${Math.round(Number(item.confidence || 0) * 100)}% Â· ${escapeHtml(titleCase(item.finalStatus))}</strong></div>`).join("");
 }
 
 function renderCandidates() {
@@ -3320,6 +3328,7 @@ function renderCandidates() {
         <span class="quality-chip ${qualityStatusFromScore(candidate.setupQualityScore ?? candidate.candidateScore)}">Setup ${qualityLabel(qualityStatusFromScore(candidate.setupQualityScore ?? candidate.candidateScore))}</span>
         <span class="quality-chip ${qualityStatusFromScore(candidate.entryReadinessScore ?? candidate.readinessScore)}">Entry ${qualityLabel(qualityStatusFromScore(candidate.entryReadinessScore ?? candidate.readinessScore))}</span>
       </div>` : ""}
+      ${candidate.patternContext ? `<div class="pattern-context-inline"><span>Pattern</span><strong>${escapeHtml(candidate.patternContext.label)}</strong><small>${escapeHtml(titleCase(candidate.patternContext.bias))} ${escapeHtml(candidate.patternContext.category)}</small></div>` : ""}
       <p class="candidate-primary-reason"><strong>Why not a signal yet:</strong> ${escapeHtml(reasons[0])}</p>
       <p class="candidate-next-condition"><strong>Next:</strong> ${escapeHtml(nextConditions[0])}</p>
       <small>Last checked ${escapeHtml(formatDateTime(candidate.lastCheckedAt || candidate.firstDetectedAt))}</small>
@@ -3329,6 +3338,7 @@ function renderCandidates() {
           <section><strong>Missing confirmations</strong>${missing.length ? `<ul>${missing.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : `<p>No named confirmation is missing; entry timing is still being monitored.</p>`}</section>
           <section><strong>Next condition needed</strong><ul>${nextConditions.map((condition) => `<li>${escapeHtml(condition)}</li>`).join("")}</ul></section>
           <section><strong>Technical status</strong><p>Entry quality: ${escapeHtml(titleCase(candidate.entryQuality))}. Monitoring expires ${escapeHtml(formatDateTime(candidate.expiresAt))}.</p></section>
+          ${renderPatternContext(candidate.patternContext, { diagnostic: true })}
         </div>
       </details>` : ""}
     </article>`;
@@ -6035,6 +6045,7 @@ function renderModeDetails(signal, locked = false) {
       <p class="reasoning">${escapeHtml(signal.reasoning || "Advanced signal context is based on rule alignment.")}</p>
       ${renderSignalTransparency(signal)}
       ${renderSignalQuality(signal)}
+      ${renderPatternContext(signal.patternContext || signal.indicators?.patternContext)}
       ${renderSignalValidation(signal)}
       ${renderSignalConfluence(signal)}
       ${renderRiskEngineCard(signal)}
@@ -6436,6 +6447,7 @@ function getSignalQualityData(signal) {
     ["entryTiming", "Entry timing", []],
     ["riskReward", "Risk/reward", []],
     ["marketStructure", "Market structure", ["structure"]],
+    ["patternContext", "Pattern context", []],
     ["supportResistance", "Support/resistance context", ["support", "resistance"]],
     ["volatilityAtr", "Volatility / ATR", ["atr", "volatility"]],
     ["higherTimeframe", "Higher timeframe alignment", []],
@@ -6462,6 +6474,12 @@ function getSignalQualityData(signal) {
       const samples = Number(signal.learningInsight?.sampleSize || signal.indicators?.learningSampleSize || 0);
       category = samples ? { status: samples >= 20 ? "good" : "fair", reason: `${samples} comparable closed signals informed calibration.` } : { status: "limited", reason: "Not enough closed signals yet for strong learning confidence." };
     }
+    if (key === "patternContext") {
+      const pattern = signal.patternContext || signal.indicators?.patternContext;
+      category = pattern?.pattern
+        ? { status: normalizeQualityStatus(pattern.strength), reason: `${pattern.label} provides ${pattern.bias} context in shadow mode; it did not create the signal.` }
+        : { status: "missing", reason: "No named chart pattern was detected. Other validated setup logic may still apply." };
+    }
     return [key, { key, label, ...category }];
   }));
   const list = Object.values(categories);
@@ -6472,6 +6490,19 @@ function getSignalQualityData(signal) {
     risks: list.filter((item) => ["fair", "weak", "missing", "failed", "limited"].includes(item.status)).map((item) => item.reason).slice(0, 4),
     confidenceExplanation: "Confidence reflects rule alignment and setup quality. It is not a guarantee or probability of profit."
   };
+}
+
+function renderPatternContext(pattern, { diagnostic = false } = {}) {
+  if (!pattern?.pattern) return "";
+  const reasons = Array.isArray(pattern.reasons) ? pattern.reasons : [];
+  const warnings = Array.isArray(pattern.warnings) ? pattern.warnings : [];
+  return `<section class="pattern-context-card">
+    <div class="pattern-context-heading"><div><span class="eyebrow">Pattern context</span><strong>${escapeHtml(pattern.label)}</strong></div><span class="quality-chip ${normalizeQualityStatus(pattern.strength)}">${escapeHtml(titleCase(pattern.strength))}</span></div>
+    <p>${escapeHtml(titleCase(pattern.bias))} ${escapeHtml(pattern.category)} context detected. Confirmation still comes from trend, volume, entry readiness, risk/reward, and final validation.</p>
+    ${diagnostic && reasons.length ? `<ul>${reasons.map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}
+    ${diagnostic && warnings.length ? `<div class="pattern-warning"><strong>Still needed</strong><span>${escapeHtml(warnings.join(" "))}</span></div>` : ""}
+    <small>Pattern recognition supports setup analysis, but it does not guarantee direction or outcome.</small>
+  </section>`;
 }
 
 function qualityStatusFromScore(value) {
