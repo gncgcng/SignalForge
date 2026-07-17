@@ -160,6 +160,8 @@ const authStorage = window.SignalForgeAuthStorage;
 
 
 const authScreen = document.querySelector("#auth-screen");
+const debugBuildPage = document.querySelector("#debug-build-page");
+const clearSessionPage = document.querySelector("#clear-session-page");
 const candidateGrid = document.querySelector("#candidate-grid");
 const candidateCount = document.querySelector("#candidate-count");
 const dailyMarketBrief = document.querySelector("#daily-market-brief");
@@ -2108,6 +2110,11 @@ async function init() {
   });
   setSplashStatus("Restoring your session");
   renderHowItWorksPages();
+  if (window.__signalForgeHardClearInProgress) return;
+  if (isDebugBuildRoute()) {
+    showDebugBuildPage();
+    return;
+  }
   if (isClearSessionRoute()) {
     await emergencyClearSession();
     return;
@@ -2460,7 +2467,15 @@ function clearAuthSession(reason = "user_requested") {
 }
 
 async function emergencyClearSession() {
+  const restoreToken = getAuthSession().restoreToken;
+  api.request("/api/auth/logout", {
+    method: "POST",
+    body: JSON.stringify({ restoreToken }),
+    timeoutMs: 2000
+  }).catch(() => {});
   clearAuthSession("emergency_route");
+  try { localStorage.clear(); } catch {}
+  try { sessionStorage.clear(); } catch {}
   const cleanup = [];
   if ("caches" in window) {
     cleanup.push(
@@ -2769,6 +2784,8 @@ function removeTelegramUnlockParam() {
 
 function showAuth() {
   setMobileNavigationOpen(false);
+  debugBuildPage?.classList.add("hidden");
+  clearSessionPage?.classList.add("hidden");
   publicProfilePage?.classList.add("hidden");
   publicHowItWorksPage?.classList.add("hidden");
   landingPage.classList.add("hidden");
@@ -2807,6 +2824,44 @@ function isAccountRecoveryRoute() {
 
 function isClearSessionRoute() {
   return String(location.hash || "").split("?")[0].toLowerCase() === "#clear-session";
+}
+
+function isDebugBuildRoute() {
+  return String(location.hash || "").split("?")[0].toLowerCase() === "#debug-build";
+}
+
+async function showDebugBuildPage() {
+  publicProfilePage?.classList.add("hidden");
+  publicHowItWorksPage?.classList.add("hidden");
+  accountRecoverySupportPage?.classList.add("hidden");
+  landingPage.classList.add("hidden");
+  authScreen.classList.add("hidden");
+  dashboard.classList.add("hidden");
+  clearSessionPage?.classList.add("hidden");
+  debugBuildPage?.classList.remove("hidden");
+  document.querySelector("#debug-build-route").textContent = location.hash || "none";
+  document.querySelector("#debug-build-local-auth").textContent = hasStoredAuthKeys(localStorage) ? "Yes" : "No";
+  document.querySelector("#debug-build-session-auth").textContent = hasStoredAuthKeys(sessionStorage) ? "Yes" : "No";
+  const workerStatus = document.querySelector("#debug-build-service-worker");
+  try {
+    const registrations = "serviceWorker" in navigator
+      ? await navigator.serviceWorker.getRegistrations()
+      : [];
+    workerStatus.textContent = registrations.length ? "Yes" : "No";
+  } catch {
+    workerStatus.textContent = "Unavailable";
+  }
+  hideSplash();
+}
+
+function hasStoredAuthKeys(storage) {
+  try {
+    return Array.from({ length: storage.length }, (_, index) => String(storage.key(index) || "").toLowerCase())
+      .some((key) => key === "token" || key === "user" ||
+        /(signalforge.*(auth|session|restore|access-token|refresh-token|cached-user))/.test(key));
+  } catch {
+    return false;
+  }
 }
 
 function isPublicAuthRoute() {
@@ -2851,7 +2906,8 @@ function isPublicStartupRoute() {
     "#signup",
     "#forgot-password",
     "#reset-password",
-    "#clear-session"
+    "#clear-session",
+    "#debug-build"
   ].includes(hashRoute) || isPublicProfileRoute();
 }
 
@@ -8975,6 +9031,7 @@ function handleStartupFailure(error) {
   if (isPublicStartupRoute()) {
     if (isAccountRecoveryRoute()) showAccountRecoverySupport();
     else if (isHowItWorksRoute()) showPublicHowItWorks();
+    else if (isDebugBuildRoute()) showDebugBuildPage();
     else if (isPasswordResetRequestRoute()) showPasswordResetRequest();
     else if (isPublicAuthRoute()) showAuth();
     else {
@@ -9029,6 +9086,8 @@ async function registerPwa() {
       const keys = await caches.keys();
       await Promise.all(keys.filter((key) => key.startsWith("signalforge-")).map((key) => caches.delete(key)));
     }
+    const workerStatus = document.querySelector("#debug-build-service-worker");
+    if (workerStatus) workerStatus.textContent = "No";
     console.info("[pwa] Service worker registration temporarily disabled for auth stability.");
   } catch (error) {
     console.warn(`[pwa] Service worker cleanup failed: ${error.message}`);

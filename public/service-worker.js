@@ -1,4 +1,4 @@
-const CACHE_VERSION = "signalforge-static-v32-auth-diagnostics";
+const CACHE_VERSION = "signalforge-static-v33-auth-debug-001";
 const OFFLINE_URL = "/offline.html";
 const CRITICAL_ASSET_PATHS = new Set([
   "/index.html",

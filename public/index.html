@@ -489,6 +489,31 @@
     </div>
   </section>
 
+  <section class="build-debug-page hidden" id="debug-build-page" aria-labelledby="debug-build-title">
+    <article class="build-debug-card">
+      <span class="eyebrow">Deployment diagnostic</span>
+      <h1 id="debug-build-title">SignalForge Build Debug</h1>
+      <dl class="build-debug-list">
+        <div><dt>Frontend build marker</dt><dd id="debug-build-marker">AUTH-DEBUG-001</dd></div>
+        <div><dt>Build timestamp</dt><dd id="debug-build-timestamp">2026-07-17T05:46:28.0145333Z</dd></div>
+        <div><dt>Current route</dt><dd id="debug-build-route">#debug-build</dd></div>
+        <div><dt>Service worker registered</dt><dd id="debug-build-service-worker">Checking...</dd></div>
+        <div><dt>localStorage auth keys found</dt><dd id="debug-build-local-auth">Checking...</dd></div>
+        <div><dt>sessionStorage auth keys found</dt><dd id="debug-build-session-auth">Checking...</dd></div>
+      </dl>
+      <a class="secondary-action" href="#signin">Back to sign in</a>
+    </article>
+  </section>
+
+  <section class="build-debug-page hidden" id="clear-session-page" aria-labelledby="clear-session-title">
+    <article class="build-debug-card" role="status" aria-live="polite">
+      <span class="eyebrow">Account recovery</span>
+      <h1 id="clear-session-title">Session cleared</h1>
+      <p>Saved authentication data and old app caches were cleared. Returning to sign in...</p>
+      <small>SignalForge build: AUTH-DEBUG-001</small>
+    </article>
+  </section>
+
   <section class="auth-screen hidden" id="auth-screen">
         <div class="brand-panel">
           <img class="brand-logo auth-logo" src="/icons/android-chrome-192x192.png" alt="SignalForge" />
@@ -579,6 +604,10 @@
             <button class="text-action" id="auth-restore-clear" type="button">Clear saved session</button>
           </div>
         </section>
+        <p class="auth-build-marker" id="auth-build-marker">
+          SignalForge build: <strong>AUTH-DEBUG-001</strong>
+          <span>Built 2026-07-17T05:46:28.0145333Z</span>
+        </p>
       </section>
 
       <section class="dashboard hidden" id="dashboard">
@@ -2066,7 +2095,8 @@
     <script>
       (function emergencyBootGuard() {
         "use strict";
-        var buildVersion = "2026.07.13-auth-diagnostics.1";
+        var buildVersion = "AUTH-DEBUG-001";
+        var buildTimestamp = "2026-07-17T05:46:28.0145333Z";
         var hash = String(window.location.hash || "").split("?")[0].toLowerCase();
         var hashParams = new URLSearchParams(String(window.location.hash || "").split("?")[1] || "");
         var debugEnabled = new URLSearchParams(window.location.search).get("debugAuth") === "1" || hashParams.get("debugAuth") === "1";
@@ -2074,6 +2104,7 @@
         var authRoutes = ["#signin", "#signup", "#forgot-password", "#reset-password"];
 
         window.__SIGNALFORGE_BUILD_VERSION__ = buildVersion;
+        window.__SIGNALFORGE_BUILD_TIMESTAMP__ = buildTimestamp;
         window.__signalForgeAuthDebug = { started: true, endpoint: "not_called", status: "boot", timeout: false, buildVersion: buildVersion };
         console.info("[app] build_version=" + buildVersion);
 
@@ -2091,19 +2122,19 @@
         }
 
         function clearAuthStorage() {
-          var removeAuthKeys = function (storage) {
-            var keys = [];
-            var index;
-            try {
-              for (index = 0; index < storage.length; index += 1) keys.push(storage.key(index));
-              keys.filter(Boolean).forEach(function (key) {
-                var normalized = String(key).toLowerCase();
-                if (normalized === "token" || normalized === "user" || /(signalforge.*(auth|session|restore|access-token|refresh-token|cached-user))/.test(normalized)) storage.removeItem(key);
-              });
-            } catch (_) {}
-          };
-          removeAuthKeys(window.localStorage);
-          removeAuthKeys(window.sessionStorage);
+          var restoreToken = "";
+          try { restoreToken = window.localStorage.getItem("signalforge-restore-token") || ""; } catch (_) {}
+          try { window.localStorage.clear(); } catch (_) {}
+          try { window.sessionStorage.clear(); } catch (_) {}
+          if (typeof window.fetch === "function") {
+            window.fetch("/api/auth/logout", {
+              method: "POST",
+              credentials: "same-origin",
+              cache: "no-store",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ restoreToken: restoreToken })
+            }).catch(function () {});
+          }
           ["signalforge_session", "__Secure-signalforge_session", "__Host-signalforge_session"].forEach(function (name) {
             document.cookie = name + "=; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax";
             document.cookie = name + "=; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax; Secure";
@@ -2113,16 +2144,51 @@
           console.info("[auth] local_session:cleared reason=emergency_route");
         }
 
+        function hasStoredAuthKeys(storage) {
+          try {
+            for (var index = 0; index < storage.length; index += 1) {
+              var key = String(storage.key(index) || "").toLowerCase();
+              if (key === "token" || key === "user" || /(signalforge.*(auth|session|restore|access-token|refresh-token|cached-user))/.test(key)) return true;
+            }
+          } catch (_) {}
+          return false;
+        }
+
+        function updateBuildDebugPage() {
+          var route = document.getElementById("debug-build-route");
+          var localAuth = document.getElementById("debug-build-local-auth");
+          var sessionAuth = document.getElementById("debug-build-session-auth");
+          var worker = document.getElementById("debug-build-service-worker");
+          if (route) route.textContent = window.location.hash || "none";
+          if (localAuth) localAuth.textContent = hasStoredAuthKeys(window.localStorage) ? "Yes" : "No";
+          if (sessionAuth) sessionAuth.textContent = hasStoredAuthKeys(window.sessionStorage) ? "Yes" : "No";
+          if (!worker) return;
+          if (!navigator.serviceWorker) {
+            worker.textContent = "No";
+            return;
+          }
+          navigator.serviceWorker.getRegistrations().then(function (registrations) {
+            worker.textContent = registrations.length > 0 ? "Yes" : "No";
+          }).catch(function () {
+            worker.textContent = "Unavailable";
+          });
+        }
+
         function revealRequestedRoute(reason) {
           window.__signalForgeAuthDebug.status = reason;
           var showRecovery = hash === "#account-recovery-support";
           var showGuide = hash === "#how-it-works";
+          var showBuildDebug = hash === "#debug-build";
+          var showClearSession = hash === "#clear-session";
           var showAuth = authRoutes.indexOf(hash) >= 0 || protectedRoutes.indexOf(hash) >= 0 || hash === "#clear-session";
           setVisible("account-recovery-support-page", showRecovery);
           setVisible("public-how-it-works-page", showGuide);
-          setVisible("auth-screen", showAuth && !showRecovery && !showGuide);
+          setVisible("debug-build-page", showBuildDebug);
+          setVisible("clear-session-page", showClearSession);
+          setVisible("auth-screen", showAuth && !showRecovery && !showGuide && !showClearSession);
           setVisible("dashboard", false);
-          setVisible("landing-page", !showRecovery && !showGuide && !showAuth);
+          setVisible("landing-page", !showRecovery && !showGuide && !showBuildDebug && !showClearSession && !showAuth);
+          if (showBuildDebug) updateBuildDebugPage();
           var splash = document.getElementById("app-splash");
           if (splash) {
             splash.classList.add("hidden");
@@ -2132,13 +2198,17 @@
         }
 
         if (hash === "#clear-session") {
+          window.__signalForgeHardClearInProgress = true;
           clearAuthStorage();
-          window.history.replaceState({}, "", window.location.pathname + window.location.search + "#signin");
-          hash = "#signin";
           window.__signalForgeAuthDebug.status = "session_cleared";
+          revealRequestedRoute("session_cleared");
+          window.setTimeout(function () {
+            window.history.replaceState({}, "", window.location.pathname + window.location.search + "#signin");
+            window.location.reload();
+          }, 1000);
+        } else {
+          revealRequestedRoute("rendered_immediately");
         }
-
-        revealRequestedRoute("rendered_immediately");
         window.__signalForgeBootFailsafe = window.setTimeout(function () {
           window.__signalForgeAuthDebug.timeout = true;
           window.__signalForgeAuthDebug.status = "failsafe_rendered";
@@ -2146,7 +2216,7 @@
         }, 2800);
       }());
     </script>
-    <script src="/auth-bootstrap.js?v=2026.07.13-auth-diagnostics.1"></script>
-    <script src="/app.js?v=2026.07.13-auth-diagnostics.1" type="module"></script>
+    <script src="/auth-bootstrap.js?v=AUTH-DEBUG-001"></script>
+    <script src="/app.js?v=AUTH-DEBUG-001" type="module"></script>
   </body>
 </html>

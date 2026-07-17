@@ -59,6 +59,8 @@ export const stripeEnvironmentKeys = [
 
 export const appConfig = {
   appName: "SignalForge",
+  debugBuildMarker: "AUTH-DEBUG-001",
+  buildTimestamp: process.env.SIGNALFORGE_BUILD_TIMESTAMP || new Date().toISOString(),
   buildVersion: process.env.SIGNALFORGE_BUILD_VERSION ||
     process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 12) ||
     "2026.07.13-auth-diagnostics.1",

@@ -46,6 +46,18 @@ const mimeTypes = {
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
 
+  if (url.pathname === "/api/debug/ping" && req.method === "GET") {
+    return sendJson(res, 200, {
+      ok: true,
+      message: "SignalForge backend is running",
+      build: appConfig.debugBuildMarker,
+      timestamp: appConfig.buildTimestamp,
+      env: appConfig.nodeEnv
+    }, {
+      "cache-control": "no-store"
+    });
+  }
+
   // Static boot assets must never depend on PostgreSQL session availability.
   if (!url.pathname.startsWith("/api/")) {
     return serveStatic(url.pathname, res);

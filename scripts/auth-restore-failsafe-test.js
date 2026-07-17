@@ -27,6 +27,7 @@ function createStorage(initial = {}) {
     getItem(key) { return values.get(key) || null; },
     setItem(key, value) { values.set(key, String(value)); },
     removeItem(key) { values.delete(key); },
+    clear() { values.clear(); },
     has(key) { return values.has(key); }
   };
 }
@@ -34,7 +35,9 @@ function createStorage(initial = {}) {
 function runBootGuard(hash) {
   const ids = [
     "app-splash", "auth-debug-panel", "account-recovery-support-page",
-    "public-how-it-works-page", "auth-screen", "dashboard", "landing-page"
+    "public-how-it-works-page", "debug-build-page", "clear-session-page",
+    "auth-screen", "dashboard", "landing-page", "debug-build-route",
+    "debug-build-local-auth", "debug-build-session-auth", "debug-build-service-worker"
   ];
   const elements = Object.fromEntries(ids.map((id) => [id, {
     textContent: "",
@@ -81,12 +84,13 @@ function runBootGuard(hash) {
 }
 
 const clearBoot = runBootGuard("#clear-session");
-assert.equal(clearBoot.location.hash, "#signin");
+assert.equal(clearBoot.location.hash, "#clear-session");
 assert.equal(clearBoot.localStorage.has("signalforge-restore-token"), false);
 assert.equal(clearBoot.localStorage.has("signalforge-cached-user"), false);
-assert.equal(clearBoot.localStorage.has("signalforge-risk-percent"), true);
+assert.equal(clearBoot.localStorage.has("signalforge-risk-percent"), false);
 assert.equal(clearBoot.sessionStorage.has("signalforge-auth-token"), false);
-assert.equal(clearBoot.elements["auth-screen"].classList.values.has("hidden"), false);
+assert.equal(clearBoot.elements["auth-screen"].classList.values.has("hidden"), true);
+assert.equal(clearBoot.elements["clear-session-page"].classList.values.has("hidden"), false);
 assert.equal(clearBoot.elements["app-splash"].classList.values.has("hidden"), true);
 
 const recoveryBoot = runBootGuard("#account-recovery-support");
@@ -96,6 +100,11 @@ assert.equal(recoveryBoot.elements["app-splash"].classList.values.has("hidden"),
 const signInBoot = runBootGuard("#signin");
 assert.equal(signInBoot.elements["auth-screen"].classList.values.has("hidden"), false);
 assert.equal(signInBoot.elements["app-splash"].classList.values.has("hidden"), true);
+
+const debugBuildBoot = runBootGuard("#debug-build");
+assert.equal(debugBuildBoot.elements["debug-build-page"].classList.values.has("hidden"), false);
+assert.equal(debugBuildBoot.elements["auth-screen"].classList.values.has("hidden"), true);
+assert.equal(debugBuildBoot.elements["debug-build-route"].textContent, "#debug-build");
 
 const protectedBoot = runBootGuard("#scanner");
 assert.equal(protectedBoot.elements["auth-screen"].classList.values.has("hidden"), false);
@@ -215,7 +224,7 @@ const checks = {
     styles.includes("@media (max-width: 480px)") &&
     styles.includes("width: min(calc(100vw - 32px), 480px)"),
   pwaReceivesFix:
-    worker.includes('const CACHE_VERSION = "signalforge-static-v32-auth-diagnostics"') &&
+    worker.includes('const CACHE_VERSION = "signalforge-static-v33-auth-debug-001"') &&
     worker.includes('"/auth-bootstrap.js"') &&
     worker.includes("CRITICAL_ASSET_PATHS") &&
     worker.includes('fetch(request, { cache: "no-store" })'),
