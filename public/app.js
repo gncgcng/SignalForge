@@ -1,4 +1,11 @@
-import { ROUTE_TO_VIEW, buildRouteHash, normalizeAppRoute, parseAppHash } from "./router.js";
+import {
+  ROUTE_TO_VIEW,
+  buildRouteHash,
+  getHashRoute,
+  isPublicRoute,
+  normalizeAppRoute,
+  parseAppHash
+} from "./router.js";
 import {
   SIGNAL_STATUS_FILTERS,
   createSignalFilters,
@@ -12,6 +19,42 @@ import {
 } from "./signalFilters.js";
 import { calculateRiskPosition } from "./riskCalculator.js";
 import { formatSignalCountdown, getSignalValidityState } from "./signalValidity.js";
+
+const RESTORE_TOKEN_KEY = "signalforge-restore-token";
+const AUTH_RESTORE_TIMEOUT_MS = 2800;
+const LEGACY_AUTH_STORAGE_KEYS = new Set([
+  "signalforge-auth-token",
+  "signalforge-session",
+  "signalforge-session-token",
+  "signalforge-refresh-token",
+  "signalforge-user",
+  "signalforge-cached-user",
+  "auth-token",
+  "refresh-token",
+  "access-token",
+  "authtoken",
+  "accesstoken",
+  "restoretoken",
+  "refreshtoken",
+  "signalforge_auth",
+  "signalforge_session",
+  "signalforge_restore",
+  "signalforge_user",
+  "signalforge_cached_user",
+  "token",
+  "user"
+]);
+const SIGNAL_VIEW_MODE_KEY = "signalforge-signal-view-mode";
+const LEGACY_SCANNER_MODE_KEY = "signalforge-scanner-mode";
+const NAV_SECTIONS_KEY = "signalforge-nav-sections";
+const TELEGRAM_UNLOCK_KEY = "signalforge-telegram-unlock";
+const UNLOCK_REVEAL_KEY = "signalforge-unlock-reveal";
+const ONBOARDING_SKIP_KEY = "signalforge-onboarding-skipped";
+const FIRST_SCAN_KEY = "signalforge-first-scan-complete";
+const PAPER_INDICATORS_KEY = "signalforge-paper-indicators";
+const RISK_ACCOUNT_SIZE_KEY = "signalforge-risk-account-size";
+const RISK_PERCENT_KEY = "signalforge-risk-percent";
+const authStorage = window.SignalForgeAuthStorage;
 
 const state = {
   user: null,
@@ -130,34 +173,6 @@ const state = {
   },
   backtesting: null
 };
-
-const RESTORE_TOKEN_KEY = "signalforge-restore-token";
-const AUTH_RESTORE_TIMEOUT_MS = 2800;
-const LEGACY_AUTH_STORAGE_KEYS = new Set([
-  "signalforge-auth-token",
-  "signalforge-session",
-  "signalforge-session-token",
-  "signalforge-refresh-token",
-  "signalforge-user",
-  "signalforge-cached-user",
-  "auth-token",
-  "refresh-token",
-  "access-token",
-  "token",
-  "user"
-]);
-const SIGNAL_VIEW_MODE_KEY = "signalforge-signal-view-mode";
-const LEGACY_SCANNER_MODE_KEY = "signalforge-scanner-mode";
-const NAV_SECTIONS_KEY = "signalforge-nav-sections";
-const TELEGRAM_UNLOCK_KEY = "signalforge-telegram-unlock";
-const UNLOCK_REVEAL_KEY = "signalforge-unlock-reveal";
-const ONBOARDING_SKIP_KEY = "signalforge-onboarding-skipped";
-const FIRST_SCAN_KEY = "signalforge-first-scan-complete";
-const PAPER_INDICATORS_KEY = "signalforge-paper-indicators";
-const RISK_ACCOUNT_SIZE_KEY = "signalforge-risk-account-size";
-const RISK_PERCENT_KEY = "signalforge-risk-percent";
-const authStorage = window.SignalForgeAuthStorage;
-
 
 const authScreen = document.querySelector("#auth-screen");
 const debugBuildPage = document.querySelector("#debug-build-page");
@@ -790,8 +805,31 @@ authForm.addEventListener("submit", async (event) => {
 });
 
 forgotPasswordButton?.addEventListener("click", () => {
-  history.pushState({}, "", `${location.pathname}${location.search}#reset-password`);
-  showPasswordResetRequest();
+  location.hash = "#reset-password";
+});
+
+document.querySelector("#auth-api-test")?.addEventListener("click", async () => {
+  const button = document.querySelector("#auth-api-test");
+  try {
+    button.disabled = true;
+    button.textContent = "Testing auth API...";
+    updateAuthDebug({ endpoint: "/api/auth/health", lastLoginStage: "auth_api_test_start", lastErrorMessage: "" });
+    const result = await api.request("/api/auth/health", {
+      timeoutMs: 5000,
+      onResponse: ({ status }) => updateAuthDebug({ lastHttpStatus: status })
+    });
+    updateAuthDebug({ lastLoginStage: "auth_api_test_success", lastResponseSummary: `ok=${result?.ok === true}` });
+    button.textContent = "Auth API reachable";
+  } catch (error) {
+    updateAuthDebug({
+      lastLoginStage: "auth_api_test_failed",
+      lastHttpStatus: error.statusCode || null,
+      lastErrorMessage: error.message
+    });
+    button.textContent = "Auth API test failed";
+  } finally {
+    button.disabled = false;
+  }
 });
 
 passwordResetContactSupport?.addEventListener("click", (event) => {
@@ -2124,6 +2162,15 @@ async function init() {
     showAccountRecoverySupport();
     return;
   }
+  if (isPublicAuthRoute()) {
+    const authConfig = await loadAuthConfig();
+    applyAuthConfig(authConfig);
+    updateAuthDebug({ authLoading: false, status: "public_auth_route", endpoint: "not_called" });
+    if (isPasswordResetRequestRoute()) showPasswordResetRequest();
+    else showAuth();
+    hideSplash();
+    return;
+  }
   if (isPublicProfileRoute()) {
     setSplashStatus("Loading public profile");
     await loadPublicProfileRoute();
@@ -2440,7 +2487,7 @@ function clearSavedAuthStorage(reason = "restore_failed") {
     const normalized = String(key || "").toLowerCase();
     return normalized === RESTORE_TOKEN_KEY ||
       LEGACY_AUTH_STORAGE_KEYS.has(normalized) ||
-      (/^signalforge[-_:]/.test(normalized) && /(auth|session|restore|access-token|refresh-token|cached-user)/.test(normalized));
+      (/^signalforge[-_:]/.test(normalized) && /(auth|session|token|restore|user)/.test(normalized));
   };
 
   for (const storage of [localStorage, sessionStorage]) {
@@ -2512,7 +2559,7 @@ function updateAuthDebug(update = {}) {
   panel.classList.remove("hidden");
   panel.textContent = [
     `Build: ${debug.buildVersion || "development"}`,
-    `Route: ${location.hash || "#top"}`,
+    `Route: ${getHashRoute()}`,
     `Auth loading: ${Boolean(debug.authLoading)}`,
     `Signing in: ${Boolean(debug.signingIn)}`,
     `Last stage: ${debug.lastLoginStage || debug.status || "idle"}`,
@@ -2793,12 +2840,16 @@ function showAuth() {
   authScreen.classList.remove("hidden");
   authRestoreFailure?.classList.add("hidden");
   showAuthForm();
+  document.querySelector("#auth-api-test")?.classList.toggle("hidden", !isAuthDebugEnabled());
+}
+
+function isAuthDebugEnabled() {
+  const hashParams = new URLSearchParams(String(location.hash || "").split("?")[1] || "");
+  return new URLSearchParams(location.search).get("debugAuth") === "1" || hashParams.get("debugAuth") === "1";
 }
 
 function isPasswordResetRequestRoute() {
-  return ["#forgot-password", "#reset-password"].includes(
-    String(location.hash || "").split("?")[0].toLowerCase()
-  ) && !getPasswordResetToken();
+  return ["#forgot-password", "#reset-password"].includes(getHashRoute()) && !getPasswordResetToken();
 }
 
 function showAuthForm() {
@@ -2819,15 +2870,15 @@ function showPasswordResetRequest() {
 }
 
 function isAccountRecoveryRoute() {
-  return String(location.hash || "").split("?")[0].toLowerCase() === "#account-recovery-support";
+  return getHashRoute() === "#account-recovery-support";
 }
 
 function isClearSessionRoute() {
-  return String(location.hash || "").split("?")[0].toLowerCase() === "#clear-session";
+  return getHashRoute() === "#clear-session";
 }
 
 function isDebugBuildRoute() {
-  return String(location.hash || "").split("?")[0].toLowerCase() === "#debug-build";
+  return getHashRoute() === "#debug-build";
 }
 
 async function showDebugBuildPage() {
@@ -2858,16 +2909,14 @@ function hasStoredAuthKeys(storage) {
   try {
     return Array.from({ length: storage.length }, (_, index) => String(storage.key(index) || "").toLowerCase())
       .some((key) => key === "token" || key === "user" ||
-        /(signalforge.*(auth|session|restore|access-token|refresh-token|cached-user))/.test(key));
+        /(signalforge.*(auth|session|token|restore|user))/.test(key));
   } catch {
     return false;
   }
 }
 
 function isPublicAuthRoute() {
-  return ["#signin", "#signup", "#forgot-password", "#reset-password"].includes(
-    String(location.hash || "").split("?")[0].toLowerCase()
-  );
+  return ["#signin", "#signup", "#forgot-password", "#reset-password"].includes(getHashRoute());
 }
 
 function showAccountRecoverySupport() {
@@ -2889,25 +2938,17 @@ function isProtectedAppRoute() {
 }
 
 function isPublicStartupRoute() {
-  const hashRoute = String(location.hash || "").split("?")[0].toLowerCase();
-  return !hashRoute || [
+  const hashRoute = getHashRoute();
+  return isPublicRoute(hashRoute) || [
     "#top",
     "#quick-start",
     "#why-signalforge",
     "#features",
     "#live-preview",
     "#markets-covered",
-    "#pricing",
     "#affiliate-program",
     "#faq",
-    "#how-it-works",
-    "#account-recovery-support",
-    "#signin",
-    "#signup",
     "#forgot-password",
-    "#reset-password",
-    "#clear-session",
-    "#debug-build"
   ].includes(hashRoute) || isPublicProfileRoute();
 }
 
@@ -3770,6 +3811,10 @@ function handleBrowserRouteChange() {
     emergencyClearSession();
     return;
   }
+  if (isDebugBuildRoute()) {
+    showDebugBuildPage();
+    return;
+  }
   if (isAccountRecoveryRoute()) {
     showAccountRecoverySupport();
     return;
@@ -3781,6 +3826,7 @@ function handleBrowserRouteChange() {
   if (isPublicAuthRoute() && !state.user) {
     if (isPasswordResetRequestRoute()) showPasswordResetRequest();
     else showAuth();
+    updateAuthDebug({ status: "public_auth_route", authLoading: false });
     return;
   }
   if (!state.user && publicHowItWorksPage && !publicHowItWorksPage.classList.contains("hidden")) {

@@ -35,6 +35,6 @@ assert.match(repair, /REPAIR_ADMIN_EMAIL/);
 assert.match(repair, /hashPassword/);
 assert.match(repair, /DELETE FROM sessions WHERE user_id/);
 assert.match(repair, /DELETE FROM auth_restore_tokens WHERE user_id/);
-assert.match(html, /2026\.07\.13-auth-diagnostics\.1/);
+assert.match(html, /AUTH-DEBUG-001/);
 
 console.log("Auth diagnostics, smoke proof, and admin repair safeguards verified.");

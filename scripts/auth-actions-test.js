@@ -32,10 +32,14 @@ assert.match(appSource, /if \(!isAuthOperationCurrent\(restoreOperationId\) \|\|
 assert.match(appSource, /if \(isAuthOperationCurrent\(operationId\)\) saveRestoreToken\(session\.restore\)/);
 assert.match(appSource, /if \(!isAuthOperationCurrent\(operationId\)\) return null;\s+saveRestoreToken\(result\.restore\)/);
 assert.match(appSource, /finally \{[\s\S]*submitButton\.disabled = false/);
-assert.match(appSource, /history\.pushState\(\{\}, "", `\$\{location\.pathname\}\$\{location\.search\}#reset-password`\)/);
+assert.match(appSource, /location\.hash = "#reset-password"/);
 assert.match(appSource, /function saveAuthSession\(session = \{\}\)/);
 assert.match(appSource, /function getAuthSession\(\)/);
 assert.match(appSource, /window\.__signalForgeMainAuthReady = true/);
+assert.ok(
+  appSource.indexOf('const SIGNAL_VIEW_MODE_KEY = "signalforge-signal-view-mode"') < appSource.indexOf("const state ="),
+  "storage constants initialize before state reads persisted preferences"
+);
 assert.match(appSource, /Google sign-in temporarily unavailable/);
 assert.match(bootstrapSource, /googleButton\.disabled = !config\.googleEnabled/);
 assert.match(authController, /ok: true,[\s\S]*restoreToken: restore\?\.token \|\| null/);
@@ -88,7 +92,7 @@ const ids = [
   "password-reset-confirm-form", "password-reset-unavailable", "password-reset-email-field",
   "password-reset-submit", "password-reset-request-note", "landing-page", "dashboard",
   "account-recovery-support-page", "auth-debug-panel", "password-reset-contact-support",
-  "start-free-button", "landing-login-button"
+  "start-free-button", "landing-login-button", "auth-api-test"
 ];
 const elements = Object.fromEntries(ids.map((id) => [id, new FakeElement(id)]));
 elements.submit = new FakeElement("submit");
@@ -169,6 +173,8 @@ await new Promise((resolve) => setTimeout(resolve, 0));
 const submitEvent = { preventDefault() {}, stopImmediatePropagation() {} };
 await elements["auth-form"].listeners.submit(submitEvent);
 assert.ok(requests.includes("/api/auth/login"), "login form calls the auth API");
+assert.equal(context.__signalForgeAuthDebug.endpoint, "/api/auth/login");
+assert.equal(context.__signalForgeAuthDebug.lastHttpStatus, 200);
 assert.equal(context.localStorage.getItem("signalforge-restore-token"), "opaque-restore-token");
 assert.equal(location.hash, "#scanner");
 assert.equal(location.reloadCalled, true);

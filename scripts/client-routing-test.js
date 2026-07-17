@@ -3,9 +3,20 @@ import { readFileSync } from "node:fs";
 import {
   ROUTE_TO_VIEW,
   buildRouteHash,
+  getHashRoute,
+  isPublicRoute,
   normalizeAppRoute,
   parseAppHash
 } from "../public/router.js";
+
+assert.equal(getHashRoute("#signin"), "#signin");
+assert.equal(getHashRoute("#signin?debugAuth=1"), "#signin");
+assert.equal(getHashRoute("#account-recovery-support"), "#account-recovery-support");
+assert.equal(getHashRoute("#clear-session"), "#clear-session");
+assert.equal(getHashRoute("#debug-build"), "#debug-build");
+assert.equal(getHashRoute(""), "#landing");
+assert.equal(isPublicRoute("#signin"), true);
+assert.equal(isPublicRoute("#scanner"), false);
 
 assert.equal(parseAppHash("#signals").route, "signals");
 assert.equal(parseAppHash("#backtesting").route, "backtesting");

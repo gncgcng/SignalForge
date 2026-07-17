@@ -21,7 +21,7 @@
     var normalized = String(key || "").toLowerCase();
     return normalized === RESTORE_TOKEN_KEY ||
       LEGACY_AUTH_KEYS.indexOf(normalized) >= 0 ||
-      (/^signalforge[-_:]/.test(normalized) && /(auth|session|restore|access-token|refresh-token|cached-user)/.test(normalized));
+      (/^signalforge[-_:]/.test(normalized) && /(auth|session|token|restore|user)/.test(normalized));
   }
 
   var storage = {
@@ -80,7 +80,7 @@
 
   function setDebug(action, status, errorMessage, responseSummary) {
     var current = window.__signalForgeAuthDebug || {};
-    current.route = window.location.hash || "#top";
+    current.route = getHashRoute();
     if (current.authLoading === undefined) current.authLoading = false;
     if (action === "login" && status === "loading") current.signingIn = true;
     if (action === "login" && ["success", "failed", "timeout"].indexOf(status) >= 0) current.signingIn = false;
@@ -357,7 +357,35 @@
     googleButton.textContent = "Google sign-in temporarily unavailable";
   });
 
-  var initialRoute = String(window.location.hash || "").split("?")[0].toLowerCase();
+  function getHashRoute() {
+    var rawHash = String(window.location.hash || "").trim();
+    var cleanHash = rawHash.split("?")[0].toLowerCase();
+    return cleanHash || "#landing";
+  }
+
+  var authApiTestButton = document.getElementById("auth-api-test");
+  var authDebugParams = new URLSearchParams(String(window.location.hash || "").split("?")[1] || "");
+  if (authApiTestButton && authDebugParams.get("debugAuth") === "1") {
+    authApiTestButton.classList.remove("hidden");
+    authApiTestButton.addEventListener("click", async function () {
+      if (window.__signalForgeMainAuthReady) return;
+      try {
+        authApiTestButton.disabled = true;
+        authApiTestButton.textContent = "Testing auth API...";
+        setDebug("auth_api_test", "loading", "");
+        await requestJson("/api/auth/health", { method: "GET" });
+        setDebug("auth_api_test", "success", "");
+        authApiTestButton.textContent = "Auth API reachable";
+      } catch (error) {
+        setDebug("auth_api_test", "failed", error.message);
+        authApiTestButton.textContent = "Auth API test failed";
+      } finally {
+        authApiTestButton.disabled = false;
+      }
+    });
+  }
+
+  var initialRoute = getHashRoute();
   if (initialRoute === "#reset-password" || initialRoute === "#forgot-password") showAuthRoute("reset-password");
   setDebug("bootstrap", "ready", "");
 }());

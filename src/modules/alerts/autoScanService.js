@@ -20,6 +20,10 @@ let autoScanTimer = null;
 let autoScanRunning = false;
 
 export function startAutoCryptoAlertScanner() {
+  if (!appConfig.autoScan.cryptoWatcherEnabled) {
+    console.log("[crypto-watch] disabled by CRYPTO_WATCHER_ENABLED=false");
+    return;
+  }
   if (!appConfig.autoScan.enabled || autoScanTimer) {
     return;
   }

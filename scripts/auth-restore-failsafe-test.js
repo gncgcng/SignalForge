@@ -37,7 +37,8 @@ function runBootGuard(hash) {
     "app-splash", "auth-debug-panel", "account-recovery-support-page",
     "public-how-it-works-page", "debug-build-page", "clear-session-page",
     "auth-screen", "dashboard", "landing-page", "debug-build-route",
-    "debug-build-local-auth", "debug-build-session-auth", "debug-build-service-worker"
+    "debug-build-local-auth", "debug-build-session-auth", "debug-build-service-worker",
+    "auth-form", "password-reset-request-form", "password-reset-confirm-form"
   ];
   const elements = Object.fromEntries(ids.map((id) => [id, {
     textContent: "",
@@ -99,7 +100,18 @@ assert.equal(recoveryBoot.elements["app-splash"].classList.values.has("hidden"),
 
 const signInBoot = runBootGuard("#signin");
 assert.equal(signInBoot.elements["auth-screen"].classList.values.has("hidden"), false);
+assert.equal(signInBoot.elements["auth-form"].classList.values.has("hidden"), false);
+assert.equal(signInBoot.elements["landing-page"].classList.values.has("hidden"), true);
 assert.equal(signInBoot.elements["app-splash"].classList.values.has("hidden"), true);
+
+const signInDebugBoot = runBootGuard("#signin?debugAuth=1");
+assert.equal(signInDebugBoot.elements["auth-screen"].classList.values.has("hidden"), false);
+assert.equal(signInDebugBoot.elements["auth-form"].classList.values.has("hidden"), false);
+assert.equal(signInDebugBoot.elements["landing-page"].classList.values.has("hidden"), true);
+
+const resetBoot = runBootGuard("#reset-password");
+assert.equal(resetBoot.elements["password-reset-request-form"].classList.values.has("hidden"), false);
+assert.equal(resetBoot.elements["auth-form"].classList.values.has("hidden"), true);
 
 const debugBuildBoot = runBootGuard("#debug-build");
 assert.equal(debugBuildBoot.elements["debug-build-page"].classList.values.has("hidden"), false);
@@ -201,10 +213,7 @@ const checks = {
     !app.includes("console.info(restoreToken"),
   publicRoutesFailOpen:
     app.includes("function isPublicStartupRoute()") &&
-    app.includes('"#pricing"') &&
-    app.includes('"#how-it-works"') &&
-    app.includes('"#account-recovery-support"') &&
-    app.includes('"#signin"') &&
+    app.includes("isPublicRoute(hashRoute)") &&
     app.includes("if (isPublicStartupRoute())"),
   protectedRoutesRequireAuth:
     app.includes("function isProtectedAppRoute()") &&

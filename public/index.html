@@ -567,6 +567,7 @@
           <button class="google-auth-button" id="google-auth-button" type="button" disabled aria-disabled="true">
             Checking Google sign-in...
           </button>
+          <button class="secondary-action hidden" id="auth-api-test" type="button">Test auth API</button>
           <p class="form-note" id="auth-note">Sign in or create your account. Your first 3 signals are included.</p>
         </form>
         <form class="auth-card hidden" id="password-reset-request-form">
@@ -2097,7 +2098,12 @@
         "use strict";
         var buildVersion = "AUTH-DEBUG-001";
         var buildTimestamp = "2026-07-17T05:46:28.0145333Z";
-        var hash = String(window.location.hash || "").split("?")[0].toLowerCase();
+        function getHashRoute() {
+          var rawHash = String(window.location.hash || "").trim();
+          var cleanHash = rawHash.split("?")[0].toLowerCase();
+          return cleanHash || "#landing";
+        }
+        var hash = getHashRoute();
         var hashParams = new URLSearchParams(String(window.location.hash || "").split("?")[1] || "");
         var debugEnabled = new URLSearchParams(window.location.search).get("debugAuth") === "1" || hashParams.get("debugAuth") === "1";
         var protectedRoutes = ["#scanner", "#signals", "#paper-trading", "#backtesting", "#performance", "#watchlist", "#alerts", "#notifications", "#journal", "#affiliate", "#leaderboard", "#profile", "#settings", "#support", "#billing", "#admin", "#admin-support", "#affiliate-admin", "#webhook-events"];
@@ -2148,7 +2154,7 @@
           try {
             for (var index = 0; index < storage.length; index += 1) {
               var key = String(storage.key(index) || "").toLowerCase();
-              if (key === "token" || key === "user" || /(signalforge.*(auth|session|restore|access-token|refresh-token|cached-user))/.test(key)) return true;
+              if (key === "token" || key === "user" || /(signalforge.*(auth|session|token|restore|user))/.test(key)) return true;
             }
           } catch (_) {}
           return false;
@@ -2175,6 +2181,7 @@
         }
 
         function revealRequestedRoute(reason) {
+          hash = getHashRoute();
           window.__signalForgeAuthDebug.status = reason;
           var showRecovery = hash === "#account-recovery-support";
           var showGuide = hash === "#how-it-works";
@@ -2186,6 +2193,9 @@
           setVisible("debug-build-page", showBuildDebug);
           setVisible("clear-session-page", showClearSession);
           setVisible("auth-screen", showAuth && !showRecovery && !showGuide && !showClearSession);
+          setVisible("auth-form", hash === "#signin" || hash === "#signup" || protectedRoutes.indexOf(hash) >= 0);
+          setVisible("password-reset-request-form", hash === "#reset-password" || hash === "#forgot-password");
+          setVisible("password-reset-confirm-form", false);
           setVisible("dashboard", false);
           setVisible("landing-page", !showRecovery && !showGuide && !showBuildDebug && !showClearSession && !showAuth);
           if (showBuildDebug) updateBuildDebugPage();

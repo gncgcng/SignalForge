@@ -15,6 +15,8 @@ const checks = {
   autoScanConfig:
     appConfig.includes("AUTO_SCAN_INTERVAL_MS") &&
     appConfig.includes("AUTO_SCAN_DUPLICATE_COOLDOWN_MS") &&
+    appConfig.includes('process.env.CRYPTO_WATCHER_ENABLED !== "false"') &&
+    autoScan.includes("[crypto-watch] disabled by CRYPTO_WATCHER_ENABLED=false") &&
     appConfig.includes("intervalMs"),
   autoScanStarted:
     server.includes("startAutoCryptoAlertScanner") &&

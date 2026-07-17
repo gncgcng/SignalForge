@@ -150,7 +150,8 @@ export const appConfig = {
     intervalMs: Number(process.env.SIGNAL_TRACKING_INTERVAL_MS || 60000)
   },
   autoScan: {
-    enabled: process.env.AUTO_SCAN_ENABLED !== "false",
+    enabled: process.env.CRYPTO_WATCHER_ENABLED !== "false" && process.env.AUTO_SCAN_ENABLED !== "false",
+    cryptoWatcherEnabled: process.env.CRYPTO_WATCHER_ENABLED !== "false",
     intervalMs: Number(process.env.AUTO_SCAN_INTERVAL_MS || 300000),
     duplicateCooldownMs: Number(process.env.AUTO_SCAN_DUPLICATE_COOLDOWN_MS || process.env.AUTO_SCAN_INTERVAL_MS || 900000)
   },

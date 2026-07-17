@@ -21,6 +21,28 @@ export const ROUTE_TO_VIEW = Object.freeze({
   "webhook-events": "webhook-events"
 });
 
+export const PUBLIC_ROUTES = new Set([
+  "#landing",
+  "#signin",
+  "#signup",
+  "#reset-password",
+  "#account-recovery-support",
+  "#clear-session",
+  "#debug-build",
+  "#how-it-works",
+  "#pricing"
+]);
+
+export function getHashRoute(hash = globalThis.location?.hash || "") {
+  const rawHash = String(hash || "").trim();
+  const cleanHash = rawHash.split("?")[0].toLowerCase();
+  return cleanHash || "#landing";
+}
+
+export function isPublicRoute(route = getHashRoute()) {
+  return PUBLIC_ROUTES.has(route) || /^#u\/[a-z0-9_]{3,20}$/.test(route);
+}
+
 const VIEW_TO_ROUTE = Object.freeze(Object.fromEntries(
   Object.entries(ROUTE_TO_VIEW).map(([route, view]) => [view, route])
 ));
