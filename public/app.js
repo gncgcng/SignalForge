@@ -132,6 +132,7 @@ const state = {
   adminUserSearchResults: [],
   validationDashboard: null,
   candidateQuality: null,
+  adminSignals: { signals: [], stats: {}, page: 1, totalPages: 1, total: 0, filters: {} },
   profile: null,
   publicProfile: null,
   leaderboards: null,
@@ -344,6 +345,7 @@ const onboardingUsername = document.querySelector("#onboarding-username");
 const onboardingPublicProfile = document.querySelector("#onboarding-public-profile");
 const usernameOnboardingMessage = document.querySelector("#username-onboarding-message");
 const adminNavLink = document.querySelector("#admin-nav-link");
+const adminSignalsNavLink = document.querySelector("#admin-signals-nav-link");
 const affiliateAdminNavLink = document.querySelector("#affiliate-admin-nav-link");
 const webhookEventsNavLink = document.querySelector("#webhook-events-nav-link");
 const adminSupportNavLink = document.querySelector("#admin-support-nav-link");
@@ -369,6 +371,10 @@ const affiliateAdminReferrals = document.querySelector("#affiliate-admin-referra
 const affiliateAdminPayouts = document.querySelector("#affiliate-admin-payouts");
 const webhookEventList = document.querySelector("#webhook-event-list");
 const webhookEventSummary = document.querySelector("#webhook-event-summary");
+const adminSignalFilters = document.querySelector("#admin-signal-filters");
+const adminSignalsTable = document.querySelector("#admin-signals-table");
+const adminSignalModal = document.querySelector("#admin-signal-modal");
+const adminSignalDetail = document.querySelector("#admin-signal-detail");
 const backtestForm = document.querySelector("#backtest-form");
 const backtestSymbol = document.querySelector("#backtest-symbol");
 const backtestTimeframe = document.querySelector("#backtest-timeframe");
@@ -1673,6 +1679,27 @@ document.querySelector("#admin-signal-search")?.addEventListener("input", () => 
   renderAdminSignalMonitor();
 });
 
+adminSignalFilters?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  state.adminSignals.page = 1;
+  state.adminSignals.filters = Object.fromEntries(new FormData(adminSignalFilters).entries());
+  loadAdminSignals();
+});
+document.querySelector("#admin-signal-filters-clear")?.addEventListener("click", () => {
+  adminSignalFilters.reset(); state.adminSignals.page = 1; state.adminSignals.filters = {}; loadAdminSignals();
+});
+document.querySelector("#admin-signals-prev")?.addEventListener("click", () => { if (state.adminSignals.page > 1) { state.adminSignals.page -= 1; loadAdminSignals(); } });
+document.querySelector("#admin-signals-next")?.addEventListener("click", () => { if (state.adminSignals.page < state.adminSignals.totalPages) { state.adminSignals.page += 1; loadAdminSignals(); } });
+adminSignalsTable?.addEventListener("click", async (event) => {
+  const copy = event.target.closest("[data-admin-signal-copy]");
+  if (copy) { await navigator.clipboard.writeText(copy.dataset.adminSignalCopy); showToast("Signal ID copied"); return; }
+  const button = event.target.closest("[data-admin-signal-view]");
+  if (!button) return;
+  try { const { signal } = await api.request(`/api/admin/signals/${encodeURIComponent(button.dataset.adminSignalView)}`); renderAdminSignalDetail(signal); adminSignalModal.classList.remove("hidden"); document.body.classList.add("modal-open"); } catch (error) { showToast(error.message); }
+});
+adminSignalModal?.addEventListener("click", (event) => { if (event.target.closest("[data-admin-signal-close]")) closeAdminSignalModal(); });
+document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !adminSignalModal?.classList.contains("hidden")) closeAdminSignalModal(); });
+
 document.querySelector("#admin-error-filter")?.addEventListener("change", () => {
   renderAdminErrorLogs();
 });
@@ -2710,6 +2737,7 @@ async function bootDashboard() {
   dashboard.classList.remove("hidden");
   document.querySelector("#user-name").textContent = getUserDisplayName();
   adminNavLink.classList.toggle("hidden", !state.user.isAdmin);
+  adminSignalsNavLink.classList.toggle("hidden", !state.user.isAdmin);
   adminSupportNavLink.classList.toggle("hidden", !state.user.isAdmin);
   affiliateAdminNavLink.classList.toggle("hidden", !state.user.isAdmin);
   webhookEventsNavLink.classList.toggle("hidden", !state.user.isAdmin);
@@ -3293,6 +3321,77 @@ async function loadCandidateQuality() {
   renderAdminMarketBrief(marketBrief);
 }
 
+async function loadAdminSignals() {
+  if (!state.user?.isAdmin) throw new Error("Admin access required.");
+  const params = new URLSearchParams({ page: String(state.adminSignals.page || 1), limit: "25" });
+  for (const [key, value] of Object.entries(state.adminSignals.filters || {})) {
+    if (String(value || "").trim()) params.set(key, String(value).trim());
+  }
+  adminSignalsTable.innerHTML = `<div class="empty-state"><strong>Loading generated signals...</strong></div>`;
+  const result = await api.request(`/api/admin/signals?${params}`);
+  state.adminSignals = { ...state.adminSignals, ...result, signals: result.signals || [], stats: result.stats || {} };
+  renderAdminSignals();
+}
+
+function renderAdminSignals() {
+  const data = state.adminSignals;
+  const stats = data.stats || {};
+  document.querySelector("#admin-signals-total-label").textContent = `${formatInteger(data.total || 0)} records`;
+  document.querySelector("#admin-signal-stats").innerHTML = [
+    ["Total generated", stats.total], ["Active", stats.active], ["Expiring soon", stats.expiringSoon],
+    ["Hit TP", stats.hitTp], ["Hit SL", stats.hitSl], ["Expired", stats.expired],
+    ["Win rate", `${Number(stats.winRate || 0).toFixed(1)}%`], ["Average R/R", `${Number(stats.averageRiskReward || 0).toFixed(2)}R`],
+    ["Average confidence", `${Number(stats.averageConfidence || 0).toFixed(1)}%`], ["Today", stats.today], ["This week", stats.week]
+  ].map(([label, value]) => `<article><span>${label}</span><strong>${value ?? 0}</strong></article>`).join("");
+  adminSignalsTable.innerHTML = data.signals.length ? `
+    <div class="admin-generated-table">
+      <div class="admin-generated-row admin-generated-head"><span>Pair</span><span>Setup</span><span>Levels</span><span>Scores</span><span>Status</span><span>Source / created</span><span>Actions</span></div>
+      ${data.signals.map(renderAdminSignalRow).join("")}
+    </div>` : `<div class="empty-state"><strong>No generated signals match these filters.</strong><p class="reasoning">Clear filters or wait for the scanner to promote a validated setup.</p></div>`;
+  document.querySelector("#admin-signals-page-label").textContent = `Page ${data.page || 1} of ${data.totalPages || 1}`;
+  document.querySelector("#admin-signals-prev").disabled = Number(data.page || 1) <= 1;
+  document.querySelector("#admin-signals-next").disabled = Number(data.page || 1) >= Number(data.totalPages || 1);
+}
+
+function renderAdminSignalRow(signal) {
+  const effectiveStatus = signal.expiringSoon && signal.status === "Active" ? "Expiring Soon" : signal.status;
+  return `<article class="admin-generated-row">
+    <span data-label="Pair"><strong>${escapeHtml(signal.displayPair || signal.pair)}</strong><small>${escapeHtml(signal.provider)} &middot; ${escapeHtml(signal.pair)}</small></span>
+    <span data-label="Setup"><strong class="direction ${escapeHtml(signal.direction)}">${escapeHtml(String(signal.direction).toUpperCase())} &middot; ${escapeHtml(signal.timeframe)}</strong><small>${escapeHtml(signal.strategy)}${signal.pattern ? ` &middot; ${escapeHtml(titleCase(signal.pattern))}` : ""}</small></span>
+    <span data-label="Levels"><small>Entry ${formatCurrency(signal.entry)}</small><small>SL ${formatCurrency(signal.stopLoss)} &middot; TP ${formatCurrency(signal.takeProfit)}</small><strong>${Number(signal.riskReward).toFixed(2)}R</strong></span>
+    <span data-label="Scores"><small>Confidence ${Number(signal.confidence).toFixed(0)}%</small><small>Quality ${Number(signal.setupQualityScore).toFixed(0)} &middot; Readiness ${Number(signal.entryReadinessScore).toFixed(0)}</small></span>
+    <span data-label="Status"><em class="status-pill ${adminSignalStatusClass(effectiveStatus)}">${escapeHtml(effectiveStatus)}</em><small>${escapeHtml(signal.resultReason || "Tracking")}</small></span>
+    <span data-label="Source"><strong>${escapeHtml(titleCase(signal.source))}</strong><small>${formatDateTime(signal.createdAt)}</small><small>Valid until ${formatDateTime(signal.validUntil)}</small></span>
+    <span data-label="Actions" class="admin-signal-row-actions"><button data-admin-signal-view="${escapeHtml(signal.id)}" type="button">View details</button><button class="secondary-action" data-admin-signal-copy="${escapeHtml(signal.signalId)}" type="button">Copy ID</button>${signal.promotedFromCandidateId ? `<button class="secondary-action" data-admin-signal-view="${escapeHtml(signal.id)}" type="button">Candidate source</button>` : ""}${signal.status !== "Active" ? `<button class="secondary-action" data-admin-signal-view="${escapeHtml(signal.id)}" type="button">Post-mortem</button>` : ""}</span>
+  </article>`;
+}
+
+function renderAdminSignalDetail(signal) {
+  const quality = signal.qualityBreakdown?.categories || {};
+  const analysis = signal.fullAnalysis || {};
+  const pattern = signal.patternContext || {};
+  const candidate = signal.candidateOrigin;
+  document.querySelector("#admin-signal-modal-title").textContent = `${signal.displayPair} / ${signal.timeframe} / ${String(signal.direction).toUpperCase()}`;
+  adminSignalDetail.innerHTML = `
+    <section class="admin-detail-levels"><div><span>Entry</span><strong>${formatCurrency(signal.entry)}</strong></div><div><span>Stop loss</span><strong>${formatCurrency(signal.stopLoss)}</strong></div><div><span>Take profit</span><strong>${formatCurrency(signal.takeProfit)}</strong></div><div><span>Risk/reward</span><strong>${Number(signal.riskReward).toFixed(2)}R</strong></div></section>
+    <section class="admin-detail-meta"><span class="status-pill ${adminSignalStatusClass(signal.status)}">${escapeHtml(signal.status)}</span><span>${escapeHtml(signal.strategy)}</span><span>${Number(signal.confidence).toFixed(0)}% confidence</span><span>${Number(signal.setupQualityScore).toFixed(0)} quality</span><span>${Number(signal.entryReadinessScore).toFixed(0)} readiness</span></section>
+    ${renderAdminDetailSection("Signal quality breakdown", Object.values(quality).map((item) => `${item.label}: ${titleCase(item.status)} - ${item.reason}`))}
+    ${renderAdminDetailSection("Why it was generated", [analysis.reasoning, ...(analysis.confirmations || []).map((item) => `${item.passed ? "Passed" : "Failed"}: ${item.name} - ${item.detail}`), ...(signal.warningReasons || []).map((item) => `Warning: ${typeof item === "string" ? item : item.reason}`)])}
+    ${signal.pattern ? renderAdminDetailSection("Pattern context", [`${pattern.label || titleCase(signal.pattern)} - ${titleCase(pattern.bias)} ${pattern.category || "pattern"}`, `Pattern confidence: ${Math.round(Number(pattern.confidence || 0) * 100)}%`, ...(pattern.reasons || []), ...(pattern.warnings || []).map((item) => `Warning: ${item}`)]) : ""}
+    ${renderAdminDetailSection("Outcome and post-mortem", [`Status: ${signal.status}`, signal.resultReason, signal.maxFavorableExcursion == null ? null : `Maximum favorable excursion: ${signal.maxFavorableExcursion}R`, signal.maxAdverseExcursion == null ? null : `Maximum adverse excursion: ${signal.maxAdverseExcursion}R`, ...(signal.postMortemTags || []).map((tag) => `Post-mortem: ${tag}`)])}
+    ${candidate ? renderAdminDetailSection("Candidate origin", [`Original status: ${candidate.status}`, `Setup quality at detection: ${candidate.setupQualityScore}`, `Entry readiness at detection: ${candidate.entryReadinessScore}`, ...(candidate.missingConfirmations || []).map((item) => `Missing before promotion: ${item}`), `Watched from ${formatDateTime(candidate.firstDetectedAt)} to ${formatDateTime(candidate.lastCheckedAt)}`]) : ""}
+    <section class="admin-detail-footer"><span>Signal ID ${escapeHtml(signal.signalId)}</span><span>Sources ${escapeHtml((signal.sourceHistory || [signal.source]).join(", "))}</span><span>Created ${formatDateTime(signal.createdAt)}</span></section>`;
+}
+
+function renderAdminDetailSection(title, rows) {
+  const visible = (rows || []).filter(Boolean);
+  if (!visible.length) return "";
+  return `<section class="admin-detail-section"><h4>${escapeHtml(title)}</h4><ul>${visible.map((row) => `<li>${escapeHtml(String(row))}</li>`).join("")}</ul></section>`;
+}
+
+function closeAdminSignalModal() { adminSignalModal?.classList.add("hidden"); document.body.classList.remove("modal-open"); }
+function adminSignalStatusClass(status) { const value = String(status || "").toLowerCase(); if (value.includes("tp")) return "status-hit-tp"; if (value.includes("sl")) return "status-hit-sl"; if (value.includes("expir")) return "status-expired"; return "status-active"; }
+
 function renderCandidateMetricRows(items, labelKey, valueKey) {
   if (!items.length) return `<p class="reasoning">No candidate data yet.</p>`;
   return items.map((item) => `<div class="analytics-list-row"><span>${escapeHtml(titleCase(item[labelKey]))}</span><strong>${Number(item[valueKey] || 0)}</strong></div>`).join("");
@@ -3851,7 +3950,7 @@ function handleBrowserRouteChange() {
 
 function isRouteAllowed(route) {
   if (!Object.hasOwn(ROUTE_TO_VIEW, route)) return false;
-  return !["admin", "admin-support", "affiliate-admin", "webhook-events"].includes(route) || Boolean(state.user?.isAdmin);
+  return !["admin", "admin-signals", "admin-support", "affiliate-admin", "webhook-events"].includes(route) || Boolean(state.user?.isAdmin);
 }
 
 function resolvePaperTradingRouteSymbol(value) {
@@ -3910,9 +4009,10 @@ function removeHashParams(names) {
 function applyViewState(view, options = {}) {
   const allowedViews = ["scanner", "watchlist", "alerts", "notifications", "signals", "paper-portfolio", "journal", "backtesting", "performance", "how-it-works", "affiliate", "leaderboard", "profile", "settings", "support", "billing"];
   if (state.user?.isAdmin) {
-    allowedViews.push("admin", "admin-support", "affiliate-admin", "webhook-events");
+    allowedViews.push("admin", "admin-signals", "admin-support", "affiliate-admin", "webhook-events");
   }
   const normalizedView = allowedViews.includes(view) ? view : "scanner";
+  if (normalizedView !== "admin-signals") closeAdminSignalModal();
   state.activeView = normalizedView;
 
   document.querySelectorAll("[data-view]").forEach((section) => {
@@ -3947,6 +4047,7 @@ function applyViewState(view, options = {}) {
     settings: ["Account", "Settings"],
     support: ["Account support", "Support"],
     admin: ["Administration", "Tester access requests"],
+    "admin-signals": ["ADMIN SIGNALS", "All generated signals"],
     "admin-support": ["Administration", "Support Tickets"],
     "affiliate-admin": ["Administration", "Affiliate Program"],
     "webhook-events": ["Stripe operations", "Webhook Events"],
@@ -3967,6 +4068,12 @@ function applyViewState(view, options = {}) {
   if (normalizedView === "admin") {
     renderAdminRequests();
     renderAbuseDashboard();
+  }
+
+  if (normalizedView === "admin-signals") {
+    loadAdminSignals().catch((error) => {
+      adminSignalsTable.innerHTML = `<div class="empty-state"><strong>Generated signals unavailable</strong><p class="reasoning">${escapeHtml(error.message)}</p></div>`;
+    });
   }
 
   if (normalizedView === "affiliate") {

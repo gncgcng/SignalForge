@@ -11,6 +11,8 @@ import { getCachedOhlcv, getOhlcv, getPair } from "../market-data/marketDataServ
 import { runSignalPostMortem } from "./signalLearningService.js";
 import { getSignalValidUntil } from "./signalValidityService.js";
 import { recordPromotedCandidatePatternOutcome } from "./setupCandidateRepository.js";
+import { syncGeneratedSignalOutcome } from "../admin-signals/generatedSignalRepository.js";
+import { updateAllGeneratedSignalOutcomes } from "../admin-signals/generatedSignalService.js";
 
 const terminalStatuses = new Set(["Hit TP", "Hit SL", "Expired"]);
 let trackingTimer = null;
@@ -60,6 +62,7 @@ export async function updateSignalsForUser(user) {
 export async function updateAllActiveSignalOutcomes() {
   await expireSignalsPastValidity();
   await updateSignalOutcomes(await listActiveSignals());
+  await updateAllGeneratedSignalOutcomes();
 }
 
 export async function expireSignalsPastValidity() {
@@ -67,6 +70,7 @@ export async function expireSignalsPastValidity() {
   for (const signal of expiredSignals) {
     await runSignalPostMortem({ recordSignalLearningEvent, refreshLearningStats }, signal);
     await recordPromotedCandidatePatternOutcome(signal);
+    await syncGeneratedSignalOutcome(signal);
   }
   console.info(`[signals] expired=${expiredSignals.length}`);
   return expiredSignals;
@@ -186,5 +190,6 @@ function markSignal(signal, status, reason, candleTime = null) {
     .then(async () => {
       await runSignalPostMortem({ recordSignalLearningEvent, refreshLearningStats }, signal);
       await recordPromotedCandidatePatternOutcome(signal);
+      await syncGeneratedSignalOutcome(signal);
     });
 }

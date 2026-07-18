@@ -668,6 +668,7 @@
                 <a href="#billing" data-view-link="billing">Billing</a>
                 <a href="#support" data-view-link="support">Support</a>
                 <a class="hidden" href="#admin" data-view-link="admin" id="admin-nav-link">Admin</a>
+                <a class="hidden" href="#admin-signals" data-view-link="admin-signals" id="admin-signals-nav-link">Admin Signals</a>
                 <a class="hidden" href="#admin-support" data-view-link="admin-support" id="admin-support-nav-link">Support Tickets</a>
                 <a class="hidden" href="#affiliate-admin" data-view-link="affiliate-admin" id="affiliate-admin-nav-link">Affiliate Admin</a>
                 <a class="hidden" href="#webhook-events" data-view-link="webhook-events" id="webhook-events-nav-link">Webhook Events</a>
@@ -1985,6 +1986,38 @@
                 </div>
               </div>
             </section>
+          </section>
+
+          <section class="page-view hidden admin-signals-page" id="admin-signals-view" data-view="admin-signals">
+            <div class="section-title admin-signals-heading">
+              <div><span class="eyebrow">ADMIN SIGNALS</span><h3>All generated signals</h3><p>Validated setups found by SignalForge, independent of unlocks or credits.</p></div>
+              <span id="admin-signals-total-label">0 records</span>
+            </div>
+            <div class="admin-signal-stats" id="admin-signal-stats"></div>
+            <form class="admin-signal-filters" id="admin-signal-filters">
+              <input class="sf-input" name="search" type="search" placeholder="Search pair, strategy, pattern, notes, or signal ID">
+              <select class="sf-select" name="status"><option value="all">All statuses</option><option>Active</option><option value="expiring-soon">Expiring Soon</option><option>Hit TP</option><option>Hit SL</option><option>Expired</option><option value="closed">Closed</option></select>
+              <input class="sf-input" name="pair" placeholder="Pair">
+              <select class="sf-select" name="timeframe"><option value="">All timeframes</option><option>1m</option><option>5m</option><option>15m</option><option>1h</option><option>4h</option></select>
+              <select class="sf-select" name="direction"><option value="">Both directions</option><option value="long">Long</option><option value="short">Short</option></select>
+              <input class="sf-input" name="strategy" placeholder="Strategy">
+              <input class="sf-input" name="pattern" placeholder="Pattern">
+              <select class="sf-select" name="source"><option value="">All sources</option><option value="manual_scan">Manual scan</option><option value="auto_crypto_watcher">Auto crypto watcher</option><option value="telegram_alert">Telegram alert</option><option value="candidate_promotion">Candidate promotion</option><option value="backtest_shadow">Backtest shadow</option><option value="admin_test">Admin test</option><option value="legacy_unlocked_signal">Legacy unlocked</option><option value="legacy_saved_signal">Legacy saved</option></select>
+              <label>Confidence <input class="sf-input" name="confidenceMin" type="number" min="0" max="99" placeholder="Min"></label>
+              <label>Confidence <input class="sf-input" name="confidenceMax" type="number" min="0" max="99" placeholder="Max"></label>
+              <label>Quality <input class="sf-input" name="qualityMin" type="number" min="0" max="100" placeholder="Min"></label>
+              <label>Quality <input class="sf-input" name="qualityMax" type="number" min="0" max="100" placeholder="Max"></label>
+              <input class="sf-input" name="from" type="date" aria-label="Created from">
+              <input class="sf-input" name="to" type="date" aria-label="Created through">
+              <select class="sf-select" name="sort"><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="confidence">Highest confidence</option><option value="rr">Highest R/R</option></select>
+              <button type="submit">Apply filters</button><button class="secondary-action" id="admin-signal-filters-clear" type="button">Clear</button>
+            </form>
+            <div class="admin-signals-table-wrap" id="admin-signals-table"><div class="empty-state"><strong>Loading generated signals...</strong></div></div>
+            <div class="admin-signals-pagination"><button class="secondary-action" id="admin-signals-prev" type="button">Previous</button><span id="admin-signals-page-label">Page 1</span><button class="secondary-action" id="admin-signals-next" type="button">Next</button></div>
+            <div class="admin-signal-modal hidden" id="admin-signal-modal" role="dialog" aria-modal="true" aria-labelledby="admin-signal-modal-title">
+              <button class="admin-signal-modal-backdrop" data-admin-signal-close type="button" aria-label="Close signal details"></button>
+              <article class="admin-signal-detail-card"><header><div><span class="eyebrow">Full internal record</span><h3 id="admin-signal-modal-title">Generated signal</h3></div><button class="secondary-action" data-admin-signal-close type="button">Close</button></header><div id="admin-signal-detail"></div></article>
+            </div>
           </section>
 
           <section class="page-view hidden admin-support-page" id="admin-support-view" data-view="admin-support">

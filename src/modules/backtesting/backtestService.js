@@ -17,6 +17,7 @@ import {
 } from "../market-data/correlationService.js";
 import { getTradingSession, tradingSessions } from "../intelligence/sessionIntelligenceService.js";
 import { currentStrategyVersion } from "../analyst/signalAnalystService.js";
+import { saveGeneratedSignal } from "../admin-signals/generatedSignalService.js";
 
 export const backtestSymbols = [
   "BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "ADA-USD", "DOGE-USD",
@@ -44,7 +45,7 @@ const warmupCandles = 60;
 const maximumHoldingBars = 20;
 const timeframeOrder = ["15m", "1h", "4h"];
 
-export async function runHistoricalBacktest(_user, input) {
+export async function runHistoricalBacktest(user, input) {
   const symbols = normalizeSelections(input.symbols || input.symbol, backtestSymbols, "market");
   const timeframes = normalizeSelections(input.timeframes || input.timeframe, backtestTimeframes, "timeframe");
   const components = normalizeComponents(input.components);
@@ -117,6 +118,8 @@ export async function runHistoricalBacktest(_user, input) {
     throw error;
   }
 
+  await persistBacktestShadowSignals(reports, user);
+
   return aggregateBacktestReports(
     reports,
     errors,
@@ -130,6 +133,50 @@ export async function runHistoricalBacktest(_user, input) {
     previousV3Reports,
     previousV2Reports
   );
+}
+
+async function persistBacktestShadowSignals(reports, user) {
+  const findings = reports.flatMap((report) => report.trades.map((trade) => ({ report, trade })));
+  const batchSize = 20;
+  let failed = 0;
+  for (let index = 0; index < findings.length; index += batchSize) {
+    const batch = findings.slice(index, index + batchSize);
+    const results = await Promise.allSettled(batch.map(({ report, trade }) => saveGeneratedSignal({
+      id: `backtest:${trade.symbol}:${trade.timeframe}:${trade.openedAt}:${trade.direction}:${trade.setupType}`,
+      symbol: trade.symbol,
+      marketSource: report.provider,
+      timeframe: trade.timeframe,
+      direction: trade.direction,
+      setupType: trade.setupType,
+      entryPrice: trade.entryPrice,
+      stopLoss: trade.stopLoss,
+      takeProfit: trade.takeProfit,
+      riskRewardRatio: trade.riskRewardRatio,
+      confidenceScore: trade.confidenceScore,
+      qualityScore: trade.qualityScore,
+      readinessScore: trade.qualityScore,
+      status: trade.outcome,
+      generatedAt: trade.openedAt,
+      validUntil: trade.closedAt || trade.openedAt,
+      closedAt: trade.closedAt,
+      resultReason: `Historical shadow result: ${trade.outcome}.`,
+      validationPassed: true,
+      validationScore: trade.qualityScore,
+      indicators: {
+        regime: trade.regime,
+        confluenceScore: trade.confluenceScore,
+        smc: trade.smc,
+        session: trade.session,
+        advancedStructure: trade.advancedStructure,
+        correlation: trade.correlation
+      }
+    }, {
+      source: "backtest_shadow",
+      generatedBy: user?.id || "system"
+    })));
+    failed += results.filter((result) => result.status === "rejected").length;
+  }
+  console.info(`[admin-signals] backtest_shadow saved=${findings.length - failed} failed=${failed}`);
 }
 
 export function backtestMarketData(marketData, timeframe, options = {}) {

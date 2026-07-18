@@ -44,6 +44,7 @@ import {
   classifyScannerResult
 } from "./avoidTradeService.js";
 import { recordAvoidTradeLearningEvent } from "./setupCandidateRepository.js";
+import { saveGeneratedSignal } from "../admin-signals/generatedSignalService.js";
 import {
   buildMarketBriefObservation,
   getLatestDailyMarketBrief,
@@ -123,6 +124,8 @@ export async function createSignal(user, { symbol, timeframe, setupKey }) {
     status: "Active",
     statusUpdatedAt: new Date().toISOString()
   };
+
+  await saveGeneratedSignal(signal, { source: "manual_scan", generatedBy: user.id });
 
   const savedSignal = await saveUnlockedSignal(user.id, signal);
   if (!savedSignal?.alreadyUnlocked) {
@@ -215,6 +218,7 @@ export async function unlockTelegramSignal(user, { setupKey }) {
     applyValidationToSignal(signal, validation)
   );
   const validatedSignal = withSignalQuality(withSignalValidity(learningAdjustedSignal));
+  await saveGeneratedSignal(validatedSignal, { source: "telegram_alert", generatedBy: user.id });
   const savedSignal = await saveUnlockedSignal(user.id, validatedSignal);
   if (!savedSignal?.alreadyUnlocked) {
     await recordLearningSnapshot({ saveSignalSnapshot }, user.id, validatedSignal, freshMarketData);
@@ -283,7 +287,7 @@ export async function scanMarketSetup(user, { symbol, timeframe }) {
   };
 }
 
-export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analystProfile = null) {
+export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analystProfile = null, generationContext = {}) {
   const marketData = await getMultiTimeframeMarketData(symbol, timeframe);
   const profile = analystProfile || await getUserAnalystProfile(user);
   const result = generateMarketDataSetup(marketData, timeframe, { analystProfile: profile });
@@ -317,6 +321,20 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
     : null;
   if (signal && candidate) {
     candidate = await markCandidatePromoted(candidate, signal) || { ...candidate, status: "promoted_to_signal" };
+  }
+  if (signal) {
+    await saveGeneratedSignal(signal, {
+      source: generationContext.source || "manual_scan",
+      generatedBy: generationContext.generatedBy || user?.id || "system",
+      candidateId: candidate?.id || null
+    });
+    if (candidate?.id) {
+      await saveGeneratedSignal(signal, {
+        source: "candidate_promotion",
+        generatedBy: generationContext.generatedBy || user?.id || "system",
+        candidateId: candidate.id
+      });
+    }
   }
   if (readySignal && validation && !validation.passed && candidate) {
     candidate = await markCandidateRejected(candidate, validation.reasons?.[0]?.reason || "Final signal validation failed.") || {

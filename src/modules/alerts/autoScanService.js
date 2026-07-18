@@ -13,6 +13,7 @@ import {
   telegramPreferenceMatchesSetup
 } from "../notifications/notificationService.js";
 import { scanMarketSetupDetailed } from "../signals/signalService.js";
+import { saveGeneratedSignal } from "../admin-signals/generatedSignalService.js";
 import { expireStaleCandidates, getCandidateQualitySummary, refreshCandidateLearningOutcomes, runCandidateMarketWatch } from "../signals/setupCandidateService.js";
 import { preferenceMatchesSetup } from "./alertService.js";
 
@@ -76,7 +77,7 @@ export async function runAutoCryptoAlertScan() {
         const detailed = await scanMarketSetupDetailed(user, {
           symbol: preference.symbol,
           timeframe: preference.timeframe
-        });
+        }, null, { source: "auto_crypto_watcher", generatedBy: "auto_crypto_watcher" });
         const setup = detailed.fullSetup;
 
         if (!setup || !preferenceMatchesSetup(preference, setup)) {
@@ -101,6 +102,7 @@ export async function runAutoCryptoAlertScan() {
           console.log(`[auto-scan] matched alert telegram_queued=0 user=${user.id} symbol=${setup.symbol} timeframe=${setup.timeframe}`);
         } else {
           telegramAlertsQueued += queuedTelegramAlerts.length;
+          await saveGeneratedSignal(setup, { source: "telegram_alert", generatedBy: "auto_crypto_watcher" });
           console.log(`[auto-scan] telegram alert sent user=${user.id} symbol=${setup.symbol} timeframe=${setup.timeframe}`);
         }
       } catch (error) {
@@ -134,7 +136,7 @@ export async function runAutoCryptoAlertScan() {
           scanned += 1;
 
           try {
-            const detailed = await scanMarketSetupDetailed(user, { symbol, timeframe });
+            const detailed = await scanMarketSetupDetailed(user, { symbol, timeframe }, null, { source: "auto_crypto_watcher", generatedBy: "auto_crypto_watcher" });
             const setup = detailed.fullSetup;
 
             if (!setup || !telegramPreferenceMatchesSetup(settings, favoriteSymbols, setup)) {
@@ -145,6 +147,7 @@ export async function runAutoCryptoAlertScan() {
 
             if (queuedTelegramAlerts.length) {
               telegramAlertsQueued += queuedTelegramAlerts.length;
+              await saveGeneratedSignal(setup, { source: "telegram_alert", generatedBy: "auto_crypto_watcher" });
               console.log(`[auto-scan] matched alert user=${user.id} symbol=${setup.symbol} timeframe=${setup.timeframe} direction=${setup.direction}`);
               console.log(`[auto-scan] telegram alert sent user=${user.id} symbol=${setup.symbol} timeframe=${setup.timeframe}`);
             } else {
