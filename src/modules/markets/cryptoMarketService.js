@@ -21,8 +21,8 @@ export async function initializeCryptoMarketSettings() {
       symbol, display_symbol, provider_symbol, name, provider, liquidity_tier,
       enabled, scanner_enabled, paper_trading_enabled, watchlist_enabled,
       provider_status, supported_timeframes, base_asset, quote_asset, product_status,
-      trading_enabled, market_status, verification_status, replacement_symbol
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+      trading_enabled, market_status, verification_status, status, replacement_symbol
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
     ON CONFLICT (symbol) DO UPDATE SET
       display_symbol = EXCLUDED.display_symbol,
       provider_symbol = EXCLUDED.provider_symbol,
@@ -36,7 +36,7 @@ export async function initializeCryptoMarketSettings() {
       state.provider, state.liquidityTier, state.enabled, state.scannerEnabled,
       state.paperTradingEnabled, state.watchlistEnabled, state.providerStatus,
       state.supportedTimeframes, state.baseAsset, state.quoteAsset, "legacy_seed",
-      true, state.marketStatus, state.verificationStatus, state.replacementSymbol
+      true, state.marketStatus, state.verificationStatus, state.status, state.replacementSymbol
     ]);
   }
   await reloadCryptoMarketSettings();
@@ -68,25 +68,25 @@ export function listCryptoMarketSettings() {
 
 export function listScannerCryptoMarkets() {
   return listCryptoMarketSettings()
-    .filter((market) => market.marketStatus === "active" && market.enabled && market.scannerEnabled && !isCoolingDown(market))
+    .filter((market) => market.status === "ready" && market.enabled && market.scannerEnabled && !isCoolingDown(market))
     .slice(0, appConfig.cryptoMarkets.maxActiveScannerPairs);
 }
 
 export function listPaperCryptoMarkets() {
   return listCryptoMarketSettings().filter((market) =>
-    market.marketStatus === "active" && market.enabled && market.paperTradingEnabled && !isCoolingDown(market)
+    market.status === "ready" && market.enabled && market.paperTradingEnabled && !isCoolingDown(market)
   );
 }
 
 export function listWatchlistCryptoMarkets() {
   return listCryptoMarketSettings().filter((market) =>
-    market.marketStatus === "active" && market.enabled && market.watchlistEnabled && !isCoolingDown(market)
+    market.status === "ready" && market.enabled && market.watchlistEnabled && !isCoolingDown(market)
   );
 }
 
 export function canUseCryptoTimeframe(symbol, timeframe, capability = "market") {
   const market = getCryptoMarketState(symbol);
-  if (!market || market.marketStatus !== "active" || !market.enabled || isCoolingDown(market)) return false;
+  if (!market || market.status !== "ready" || !market.enabled || isCoolingDown(market)) return false;
   if (capability === "scanner" && !market.scannerEnabled) return false;
   if (capability === "paper" && !market.paperTradingEnabled) return false;
   if (capability === "watchlist" && !market.watchlistEnabled) return false;
@@ -107,12 +107,13 @@ export async function updateCryptoMarketSettings(symbol, changes) {
     ? "disabled"
     : current.verificationStatus === "verified" ? "active"
       : current.verificationStatus === "legacy" ? "legacy" : "pending";
+  const status = !enabled ? "disabled" : canonicalStatusFromMarketStatus(marketStatus);
   if (scannerEnabled && enabled && marketStatus !== "active") {
     throw marketError("Verify provider candle support before enabling this pair for scanning.", 409);
   }
   const result = await query(`UPDATE crypto_markets SET enabled=$2, scanner_enabled=$3,
-    paper_trading_enabled=$4, watchlist_enabled=$5, market_status=$6, updated_at=now()
-    WHERE symbol=$1 RETURNING *`, [current.symbol, enabled, scannerEnabled, paperTradingEnabled, watchlistEnabled, marketStatus]);
+    paper_trading_enabled=$4, watchlist_enabled=$5, market_status=$6, status=$7, updated_at=now()
+    WHERE symbol=$1 RETURNING *`, [current.symbol, enabled, scannerEnabled, paperTradingEnabled, watchlistEnabled, marketStatus, status]);
   runtime.set(current.symbol, mapRow(result.rows[0]));
   return getCryptoMarketState(current.symbol);
 }
@@ -130,8 +131,8 @@ export async function importCoinbaseCryptoProducts(products) {
       symbol, display_symbol, provider_symbol, name, provider, liquidity_tier,
       enabled, scanner_enabled, paper_trading_enabled, watchlist_enabled,
       provider_status, base_asset, quote_asset, product_status, trading_enabled,
-      market_status, verification_status
-    ) VALUES ($1,$2,$3,$4,'coinbase-exchange',$5,true,false,true,true,'unchecked',$6,$7,$8,true,'pending','pending')
+      market_status, verification_status, status
+    ) VALUES ($1,$2,$3,$4,'coinbase-exchange',$5,true,false,true,true,'unchecked',$6,$7,$8,true,'pending','pending','pending')
     ON CONFLICT (provider_symbol) DO UPDATE SET
       display_symbol=EXCLUDED.display_symbol, name=EXCLUDED.name,
       base_asset=EXCLUDED.base_asset, quote_asset=EXCLUDED.quote_asset,
@@ -146,7 +147,7 @@ export async function importCoinbaseCryptoProducts(products) {
   let missingLegacy = 0;
   if (discovered.length > 0) {
     const missing = await query(`UPDATE crypto_markets SET market_status='unavailable',
-      verification_status='failed', provider_status='unavailable',
+      verification_status='failed', status='unavailable', provider_status='unavailable',
       last_error='Product no longer returned by Coinbase product sync.',
       failure_code='PRODUCT_NOT_RETURNED', cooldown_until=NULL, updated_at=now()
       WHERE provider='coinbase-exchange'
@@ -203,6 +204,7 @@ export async function saveCryptoMarketVerification(symbol, checks, details = {})
   const supported = passed.map((check) => check.timeframe);
   const unsupported = checks.filter((check) => !check.available).map((check) => check.timeframe);
   const { enough, marketStatus, verificationStatus, providerStatus } = classification;
+  const status = canonicalStatusFromMarketStatus(marketStatus);
   const lastSuccess = passed.map((check) => check.lastCandleAt).filter(Boolean).sort().at(-1) || null;
   const lastFailure = checks.findLast?.((check) => !check.available) || [...checks].reverse().find((check) => !check.available);
   const lastError = enough && unsupported.length
@@ -212,20 +214,20 @@ export async function saveCryptoMarketVerification(symbol, checks, details = {})
   const checkedAt = new Date();
   const verificationDetails = buildVerificationDetails(current, checks, {
     ...details,
-    finalStatus: marketStatus,
+    finalStatus: status,
     lastError,
     nextRetryAt: cooldownUntil?.toISOString() || null,
     lastVerificationAttempt: checkedAt.toISOString()
   });
   const result = await query(`UPDATE crypto_markets SET market_status=$2, verification_status=$3,
-    provider_status=$4, supported_timeframes=$5, unsupported_timeframes=$6,
+    status=$13, provider_status=$4, supported_timeframes=$5, unsupported_timeframes=$6,
     last_successful_candle_at=$7, last_checked_at=$11, last_verified_at=$11,
     last_verification_attempt_at=$11,
     last_error=$8, failure_code=$9, cooldown_until=$10, verification_details=$12,
     consecutive_failures=CASE WHEN $2='active' THEN 0 ELSE consecutive_failures+1 END,
     updated_at=now() WHERE symbol=$1 RETURNING *`, [
     current.symbol, marketStatus, verificationStatus, providerStatus, supported, unsupported,
-    lastSuccess, lastError, lastFailure?.code || null, cooldownUntil, checkedAt, verificationDetails
+    lastSuccess, lastError, lastFailure?.code || null, cooldownUntil, checkedAt, verificationDetails, status
   ]);
   runtime.set(current.symbol, mapRow(result.rows[0]));
   if (marketStatus === "active") await markVerifiedLegacyReplacements(current.symbol);
@@ -238,7 +240,7 @@ export async function saveCryptoMarketVerification(symbol, checks, details = {})
 export function classifyCryptoVerification(checks = []) {
   const supportedCount = checks.filter((check) => check.available).length;
   const providerErrorCount = checks.filter((check) => !check.available && isProviderErrorCode(check.code)).length;
-  const enough = supportedCount >= Math.min(3, cryptoTimeframes.length);
+  const enough = supportedCount >= 1;
   return {
     enough,
     marketStatus: enough ? "active" : providerErrorCount ? "provider_error" : "unavailable",
@@ -266,7 +268,7 @@ export async function replaceLegacyCryptoMarket(symbol, replacementSymbol) {
     nextRetryTime: null,
     finalStatus: "legacy"
   };
-  const result = await query(`UPDATE crypto_markets SET market_status='legacy', verification_status='legacy',
+  const result = await query(`UPDATE crypto_markets SET market_status='legacy', verification_status='legacy', status='legacy',
     provider_status='unavailable', enabled=false, scanner_enabled=false, paper_trading_enabled=false,
     replacement_symbol=$2, last_error='Legacy Coinbase symbol. Use the replacement market.',
     last_checked_at=$3, last_verified_at=$3, last_verification_attempt_at=$3,
@@ -281,6 +283,7 @@ export async function resetCryptoMarketCooldown(symbol) {
   if (!current) throw marketError("Unknown crypto market.", 404);
   const previouslyVerified = current.supportedTimeframes.length > 0;
   const next = { ...current,
+    status: previouslyVerified ? "ready" : "pending",
     marketStatus: previouslyVerified ? "active" : "pending",
     verificationStatus: previouslyVerified ? "verified" : "pending",
     providerStatus: previouslyVerified ? "available" : "unchecked",
@@ -289,6 +292,7 @@ export async function resetCryptoMarketCooldown(symbol) {
   runtime.set(current.symbol, next);
   await query(`UPDATE crypto_markets SET market_status=CASE WHEN cardinality(supported_timeframes)>0 THEN 'active' ELSE 'pending' END,
     verification_status=CASE WHEN cardinality(supported_timeframes)>0 THEN 'verified' ELSE 'pending' END,
+    status=CASE WHEN cardinality(supported_timeframes)>0 THEN 'ready' ELSE 'pending' END,
     provider_status=CASE WHEN cardinality(supported_timeframes)>0 THEN 'available' ELSE 'unchecked' END,
     cooldown_until=NULL, last_error=NULL, failure_code=NULL, updated_at=now() WHERE symbol=$1`, [current.symbol]).catch(() => {});
 }
@@ -300,11 +304,11 @@ export async function recordCryptoMarketSuccess(symbol, timeframe, lastCandleAt)
   const unsupported = current.unsupportedTimeframes.filter((item) => item !== timeframe);
   const checkedAt = new Date();
   const recentlyRecorded = current.marketStatus === "active" && current.supportedTimeframes.includes(timeframe) && current.lastCheckedAt && checkedAt.getTime() - new Date(current.lastCheckedAt).getTime() < 300000;
-  const next = { ...current, marketStatus: "active", verificationStatus: "verified", providerStatus: "available", supportedTimeframes: supported, unsupportedTimeframes: unsupported, lastSuccessfulCandleAt: lastCandleAt, lastCheckedAt: checkedAt.toISOString(), lastVerifiedAt: checkedAt.toISOString(), lastError: null, failureCode: null, cooldownUntil: null, consecutiveFailures: 0 };
+  const next = { ...current, status: "ready", marketStatus: "active", verificationStatus: "verified", providerStatus: "available", supportedTimeframes: supported, unsupportedTimeframes: unsupported, lastSuccessfulCandleAt: lastCandleAt, lastCheckedAt: checkedAt.toISOString(), lastVerifiedAt: checkedAt.toISOString(), lastError: null, failureCode: null, cooldownUntil: null, consecutiveFailures: 0 };
   runtime.set(current.symbol, next);
   loggedFailures.delete(`${current.symbol}:${timeframe}`);
   if (recentlyRecorded) return;
-  await query(`UPDATE crypto_markets SET market_status='active', verification_status='verified', provider_status='available',
+  await query(`UPDATE crypto_markets SET market_status='active', verification_status='verified', status='ready', provider_status='available',
     supported_timeframes=$2, unsupported_timeframes=$3, last_successful_candle_at=$4, last_checked_at=$5,
     last_verified_at=$5, last_error=NULL, failure_code=NULL, cooldown_until=NULL,
     consecutive_failures=0, updated_at=now() WHERE symbol=$1`, [current.symbol, supported, unsupported, lastCandleAt, checkedAt]).catch(() => {});
@@ -315,16 +319,17 @@ export async function recordCryptoMarketFailure(symbol, timeframe, error) {
   if (!current) return;
   const unavailable = ["PROVIDER_UNSUPPORTED_MARKET", "EMPTY_CANDLES", "BAD_CANDLES", "INSUFFICIENT_CANDLES", "STALE_CANDLES"].includes(error?.code);
   const marketStatus = unavailable ? "unavailable" : "provider_error";
+  const status = canonicalStatusFromMarketStatus(marketStatus);
   const verificationStatus = unavailable ? "failed" : "error";
   const providerStatus = unavailable ? "unavailable" : "provider_issue";
   const unsupported = unavailable ? [...new Set([...current.unsupportedTimeframes, timeframe])] : current.unsupportedTimeframes;
   const cooldownUntil = new Date(Date.now() + appConfig.cryptoMarkets.unavailableCooldownMs);
-  const next = { ...current, marketStatus, verificationStatus, providerStatus, unsupportedTimeframes: unsupported, lastCheckedAt: new Date().toISOString(), lastVerifiedAt: new Date().toISOString(), lastError: publicError(error), failureCode: error?.code || "PROVIDER_ERROR", cooldownUntil: cooldownUntil.toISOString(), consecutiveFailures: current.consecutiveFailures + 1 };
+  const next = { ...current, status, marketStatus, verificationStatus, providerStatus, unsupportedTimeframes: unsupported, lastCheckedAt: new Date().toISOString(), lastVerifiedAt: new Date().toISOString(), lastError: publicError(error), failureCode: error?.code || "PROVIDER_ERROR", cooldownUntil: cooldownUntil.toISOString(), consecutiveFailures: current.consecutiveFailures + 1 };
   runtime.set(current.symbol, next);
-  await query(`UPDATE crypto_markets SET market_status=$2, verification_status=$3, provider_status=$4,
+  await query(`UPDATE crypto_markets SET market_status=$2, verification_status=$3, status=$9, provider_status=$4,
     unsupported_timeframes=$5, last_checked_at=now(), last_verified_at=now(), last_error=$6,
     failure_code=$7, cooldown_until=$8, consecutive_failures=consecutive_failures+1,
-    updated_at=now() WHERE symbol=$1`, [current.symbol, marketStatus, verificationStatus, providerStatus, unsupported, next.lastError, next.failureCode, cooldownUntil]).catch(() => {});
+    updated_at=now() WHERE symbol=$1`, [current.symbol, marketStatus, verificationStatus, providerStatus, unsupported, next.lastError, next.failureCode, cooldownUntil, status]).catch(() => {});
   logCryptoMarketFailureOnce(current.symbol, timeframe, next);
 }
 
@@ -343,9 +348,9 @@ export function isCryptoMarketCoolingDown(symbol) {
 }
 
 function effectiveFlags(market) {
-  const ready = market.marketStatus === "active" && market.enabled && !isCoolingDown(market);
+  const ready = market.status === "ready" && market.enabled && !isCoolingDown(market);
   return {
-    statusLabel: market.enabled === false ? "Disabled by admin" : statusLabel(market.marketStatus),
+    statusLabel: market.enabled === false ? "Disabled by admin" : statusLabel(market.status),
     effectiveScannerEnabled: Boolean(ready && market.scannerEnabled),
     effectivePaperTradingEnabled: Boolean(ready && market.paperTradingEnabled),
     effectiveWatchlistEnabled: Boolean(ready && market.watchlistEnabled)
@@ -356,6 +361,7 @@ function defaultState(market) {
   const legacyReplacement = legacyCryptoReplacements[market.symbol] || null;
   const established = establishedSymbols.has(market.symbol);
   const marketStatus = legacyReplacement ? "legacy" : established ? "active" : "pending";
+  const status = legacyReplacement ? "legacy" : established ? "ready" : "pending";
   return {
     ...market,
     baseAsset: market.symbol.split("-")[0], quoteAsset: "USD", productStatus: "legacy_seed",
@@ -363,7 +369,7 @@ function defaultState(market) {
     scannerEnabled: legacyReplacement ? false : market.scannerEnabled,
     paperTradingEnabled: legacyReplacement ? false : market.paperTradingEnabled,
     providerStatus: legacyReplacement ? "unavailable" : established ? "available" : "unchecked",
-    marketStatus, verificationStatus: legacyReplacement ? "legacy" : established ? "verified" : "pending",
+    status, marketStatus, verificationStatus: legacyReplacement ? "legacy" : established ? "verified" : "pending",
     supportedTimeframes: established ? [...cryptoTimeframes] : [], unsupportedTimeframes: [],
     lastSuccessfulCandleAt: null, lastCheckedAt: null, lastVerifiedAt: null,
     lastError: legacyReplacement ? "Legacy Coinbase symbol. Use the replacement market." : null,
@@ -381,7 +387,9 @@ function mapRow(row) {
     baseAsset: row.base_asset, quoteAsset: row.quote_asset, productStatus: row.product_status,
     tradingEnabled: row.trading_enabled, enabled: row.enabled, scannerEnabled: row.scanner_enabled,
     paperTradingEnabled: row.paper_trading_enabled, watchlistEnabled: row.watchlist_enabled,
-    providerStatus: row.provider_status, marketStatus: row.market_status || legacyProviderStatus(row),
+    providerStatus: row.provider_status,
+    status: row.status || canonicalStatusFromMarketStatus(row.market_status || legacyProviderStatus(row)),
+    marketStatus: row.market_status || legacyProviderStatus(row),
     verificationStatus: row.verification_status || legacyVerificationStatus(row),
     supportedTimeframes: row.supported_timeframes || [], unsupportedTimeframes: row.unsupported_timeframes || [],
     lastSuccessfulCandleAt: row.last_successful_candle_at, lastCheckedAt: row.last_checked_at,
@@ -434,7 +442,10 @@ async function markVerifiedLegacyReplacements(replacementSymbol) {
 }
 
 function statusLabel(status) {
-  return ({ active: "Active", pending: "Pending verification", unavailable: "Unavailable", legacy: "Legacy / migrated", disabled: "Disabled by admin", provider_error: "Provider error" })[status] || "Pending verification";
+  return ({ ready: "Ready", active: "Active", pending: "Pending verification", unavailable: "Unavailable", legacy: "Legacy / migrated", disabled: "Disabled by admin", provider_error: "Provider error" })[status] || "Pending verification";
+}
+function canonicalStatusFromMarketStatus(status) {
+  return ({ active: "ready", ready: "ready", provider_error: "provider_error", unavailable: "unavailable", legacy: "legacy", disabled: "disabled" })[status] || "pending";
 }
 function safeLogReason(value) { return String(value || "unknown").replace(/[\r\n]+/g, " ").slice(0, 160); }
 function legacyProviderStatus(row) { return row.provider_status === "available" ? "active" : row.provider_status === "provider_issue" ? "provider_error" : row.provider_status === "unavailable" ? "unavailable" : "pending"; }

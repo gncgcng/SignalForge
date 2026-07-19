@@ -79,7 +79,8 @@ export function filterCryptoMarkets(markets, params) {
   const tier = String(params.get("tier") || "all");
   const query = String(params.get("q") || "").trim().toLowerCase();
   return markets.filter((market) => {
-    if (["active", "pending", "unavailable", "legacy", "disabled", "provider_error"].includes(status) && market.marketStatus !== status) return false;
+    const canonicalStatus = status === "active" ? "ready" : status;
+    if (["ready", "pending", "unavailable", "legacy", "disabled", "provider_error"].includes(canonicalStatus) && market.status !== canonicalStatus) return false;
     if (status === "scanner" && !market.effectiveScannerEnabled) return false;
     if (status === "paper" && !market.effectivePaperTradingEnabled) return false;
     if (tier !== "all" && market.liquidityTier !== tier) return false;
@@ -91,12 +92,13 @@ export function filterCryptoMarkets(markets, params) {
 export function summarizeCryptoMarkets(markets) {
   return {
     totalDiscovered: markets.length,
-    active: markets.filter((market) => market.marketStatus === "active").length,
-    pending: markets.filter((market) => market.marketStatus === "pending").length,
-    unavailable: markets.filter((market) => market.marketStatus === "unavailable").length,
-    legacy: markets.filter((market) => market.marketStatus === "legacy").length,
-    disabled: markets.filter((market) => market.marketStatus === "disabled" || market.enabled === false && market.marketStatus !== "legacy").length,
-    providerError: markets.filter((market) => market.marketStatus === "provider_error").length,
+    active: markets.filter((market) => market.status === "ready").length,
+    ready: markets.filter((market) => market.status === "ready").length,
+    pending: markets.filter((market) => market.status === "pending").length,
+    unavailable: markets.filter((market) => market.status === "unavailable").length,
+    legacy: markets.filter((market) => market.status === "legacy").length,
+    disabled: markets.filter((market) => market.status === "disabled" || market.enabled === false && market.status !== "legacy").length,
+    providerError: markets.filter((market) => market.status === "provider_error").length,
     scannerEnabled: markets.filter((market) => market.effectiveScannerEnabled).length,
     paperTradingEnabled: markets.filter((market) => market.effectivePaperTradingEnabled).length
   };

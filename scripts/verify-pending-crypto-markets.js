@@ -3,23 +3,20 @@ import { runPendingMigrations } from "../src/db/migrations.js";
 import { initializeCryptoMarketSettings, listCryptoMarketSettings } from "../src/modules/markets/cryptoMarketService.js";
 import { verifyPendingCryptoMarkets } from "../src/modules/markets/cryptoMarketMonitor.js";
 
+const options = parseArgs(process.argv.slice(2));
+
 try {
   await verifyDatabaseConnection();
   await runPendingMigrations();
   await initializeCryptoMarketSettings();
 
-  const beforePending = listCryptoMarketSettings().filter((market) => {
-    const values = [market.marketStatus, market.verificationStatus, market.statusLabel]
-      .map((value) => String(value || "").trim().toLowerCase());
-    return market.enabled !== false && values.some((value) =>
-      ["pending", "pending verification", "unverified", "unknown"].includes(value)
-    );
-  }).length;
+  const before = summarize(listCryptoMarketSettings());
   console.log(`Before:`);
-  console.log(`Pending markets: ${beforePending}`);
+  printSummary(before);
   console.log("");
 
   const summary = await verifyPendingCryptoMarkets({
+    ...options,
     logger: {
       info(message) {
         console.log(String(message));
@@ -30,16 +27,20 @@ try {
     }
   });
 
+  const after = summary.after || summarize(listCryptoMarketSettings());
+  const changed = summary.changed || diff(before, after);
   console.log("");
   console.log("After:");
-  console.log(`Ready: ${summary.ready}`);
-  console.log(`Unavailable: ${summary.unavailable}`);
-  console.log(`Provider error: ${summary.providerError}`);
-  console.log(`Legacy: ${summary.legacy}`);
-  console.log(`Still pending: ${summary.stillPending}`);
+  printSummary(after);
+  console.log("");
+  console.log("Changed:");
+  printChanged(changed);
 
   if (summary.stillPending > 0) {
-    console.warn("Warning: Some markets are still pending. Re-run the script or inspect DB rows with verificationStatus pending.");
+    console.warn("Remaining pending markets:");
+    for (const market of summary.remainingPending || []) {
+      console.warn(`${market.displaySymbol} (${market.providerSymbol}) status=${market.status} verificationStatus=${market.verificationStatus} lastAttempt=${market.lastVerificationAttemptAt || "never"} error=${market.lastError || "none"}`);
+    }
   }
 } catch (error) {
   console.error(error.message);
@@ -49,5 +50,56 @@ try {
     await getPool().end();
   } catch {
     // Pool may not exist if DATABASE_URL validation failed.
+  }
+}
+
+function parseArgs(args) {
+  const parsed = { includeErrors: false, forceResolvePending: false, limit: 0, symbol: "" };
+  for (const arg of args) {
+    if (arg === "--include-errors") parsed.includeErrors = true;
+    else if (arg === "--force-resolve-pending") parsed.forceResolvePending = true;
+    else if (arg.startsWith("--limit=")) parsed.limit = Number(arg.slice("--limit=".length));
+    else if (arg.startsWith("--symbol=")) parsed.symbol = arg.slice("--symbol=".length);
+  }
+  return parsed;
+}
+
+function summarize(markets) {
+  return {
+    total: markets.length,
+    ready: markets.filter((market) => market.status === "ready").length,
+    pending: markets.filter((market) => market.status === "pending").length,
+    unavailable: markets.filter((market) => market.status === "unavailable").length,
+    providerError: markets.filter((market) => market.status === "provider_error").length,
+    legacy: markets.filter((market) => market.status === "legacy").length,
+    disabled: markets.filter((market) => market.status === "disabled" || market.enabled === false && market.status !== "legacy").length,
+    scannerEnabled: markets.filter((market) => market.effectiveScannerEnabled).length,
+    paperTradingEnabled: markets.filter((market) => market.effectivePaperTradingEnabled).length
+  };
+}
+
+function diff(before, after) {
+  return Object.fromEntries(["ready", "pending", "unavailable", "providerError", "legacy", "disabled"].map((key) => [
+    key,
+    Number(after[key] || 0) - Number(before[key] || 0)
+  ]));
+}
+
+function printSummary(summary) {
+  console.log(`Total: ${summary.total}`);
+  console.log(`Ready: ${summary.ready}`);
+  console.log(`Pending: ${summary.pending}`);
+  console.log(`Unavailable: ${summary.unavailable}`);
+  console.log(`Provider error: ${summary.providerError}`);
+  console.log(`Legacy: ${summary.legacy}`);
+  console.log(`Disabled: ${summary.disabled}`);
+  console.log(`Scanner enabled: ${summary.scannerEnabled}`);
+  console.log(`Paper trading enabled: ${summary.paperTradingEnabled}`);
+}
+
+function printChanged(changed) {
+  for (const key of ["ready", "pending", "unavailable", "providerError", "legacy", "disabled"]) {
+    const value = Number(changed[key] || 0);
+    console.log(`${key}: ${value >= 0 ? "+" : ""}${value}`);
   }
 }

@@ -3549,15 +3549,16 @@ function renderAdminCryptoMarkets() {
 }
 
 function renderAdminCryptoMarket(market) {
-  const status = market.statusLabel || titleCase(market.marketStatus || "pending");
-  const available = market.marketStatus === "active";
-  const providerClass = available ? "available" : market.marketStatus === "pending" ? "unchecked" : "unavailable";
+  const canonicalStatus = market.status || (market.marketStatus === "active" ? "ready" : market.marketStatus) || "pending";
+  const status = market.statusLabel || titleCase(canonicalStatus);
+  const available = canonicalStatus === "ready";
+  const providerClass = available ? "available" : canonicalStatus === "pending" ? "unchecked" : "unavailable";
   const timeframes = market.supportedTimeframes?.length ? market.supportedTimeframes.join(", ") : "None verified";
   const details = market.verificationDetails || {};
   return `<article class="admin-crypto-market-card">
     <header><div><strong>${escapeHtml(market.displaySymbol)}</strong><span>${escapeHtml(market.name)} &middot; Coinbase &middot; ${escapeHtml(market.providerSymbol)}</span></div><em class="crypto-provider-state ${providerClass}">${escapeHtml(status)}</em></header>
     <div class="admin-crypto-market-meta"><span>Status<strong>${escapeHtml(status)}</strong></span><span>Verification<strong>${escapeHtml(titleCase(market.verificationStatus || "pending"))}</strong></span><span>Timeframes<strong>${escapeHtml(timeframes)}</strong></span><span>Last verified<strong>${market.lastVerifiedAt ? formatDateTime(market.lastVerifiedAt) : "Never"}</strong></span><span>Last candle<strong>${market.lastSuccessfulCandleAt ? formatDateTime(market.lastSuccessfulCandleAt) : "Never"}</strong></span></div>
-    <details class="admin-crypto-verification-details" ${market.marketStatus === "pending" ? "open" : ""}>
+    <details class="admin-crypto-verification-details" ${canonicalStatus === "pending" ? "open" : ""}>
       <summary>Verification details</summary>
       <div class="admin-crypto-detail-grid">
         <span>Provider symbol<strong>${escapeHtml(details.providerSymbol || market.providerSymbol)}</strong></span>

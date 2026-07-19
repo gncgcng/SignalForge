@@ -19,6 +19,7 @@ const verifyScript = readFileSync(new URL("../scripts/verify-pending-crypto-mark
 const singleMarketScript = readFileSync(new URL("../scripts/test-coinbase-market.js", import.meta.url), "utf8");
 const migration = readFileSync(new URL("../migrations/045_crypto_market_sync.sql", import.meta.url), "utf8");
 const detailsMigration = readFileSync(new URL("../migrations/046_crypto_market_verification_details.sql", import.meta.url), "utf8");
+const statusMigration = readFileSync(new URL("../migrations/047_crypto_market_canonical_status.sql", import.meta.url), "utf8");
 
 const products = normalizeCoinbaseProducts([
   { id: "BTC-USD", base_currency: "BTC", quote_currency: "USD", display_name: "BTC/USD", status: "online" },
@@ -52,15 +53,20 @@ const checks = {
   timeoutBecomesProviderError: classifyCryptoVerification(timeoutChecks).marketStatus === "provider_error",
   providerErrorStored: classifyCryptoVerification(providerChecks).marketStatus === "provider_error" && serviceSource.includes("last_error=$8"),
   verificationAlwaysTerminal: [passedChecks, emptyChecks, providerChecks].every((value) => classifyCryptoVerification(value).marketStatus !== "pending"),
+  oneTimeframePassesReady: classifyCryptoVerification([{ timeframe: "15m", available: false, code: "EMPTY_CANDLES" }, { timeframe: "1h", available: true }]).marketStatus === "active",
   watcherIndependent: monitorSource.includes("verificationEnabled") && !monitorSource.includes("cryptoWatcherEnabled"),
   verificationDetailsStored: detailsMigration.includes("verification_details jsonb") && serviceSource.includes("verification_details=$12") && serviceSource.includes("buildVerificationDetails"),
   productCheckBeforeCandles: monitorSource.includes("getProductFromCoinbase") && monitorSource.includes("productTradingEnabled === false"),
   verifyAllProgressTerminal: monitorSource.includes("stillPending") && monitorSource.includes("complete ready="),
+  slowReliableControls: monitorSource.includes("verificationDelayMs") && monitorSource.includes("verificationRetries") && monitorSource.includes("verificationTimeframes"),
+  canonicalStatusSynced: statusMigration.includes("ADD COLUMN IF NOT EXISTS status") && serviceSource.includes("status=$13") && serviceSource.includes("canonicalStatusFromMarketStatus"),
   sharedTerminalVerifier: monitorSource.includes("export async function verifyPendingCryptoMarkets") &&
     controllerSource.includes("await verifyPendingCryptoMarkets()") &&
     verifyScript.includes("verifyPendingCryptoMarkets"),
   terminalScriptsPresent: packageJson.includes('"market:test"') &&
     packageJson.includes('"market:verify-pending"') &&
+    packageJson.includes('"market:audit"') &&
+    packageJson.includes('"market:audit-coinbase"') &&
     singleMarketScript.includes("getProductFromCoinbase") &&
     singleMarketScript.includes("getCandlesFromCoinbase"),
   countsSeparate: summary.totalDiscovered === 6 && summary.active === 1 && summary.pending === 1 && summary.unavailable === 1 && summary.legacy === 1 && summary.disabled === 1 && summary.providerError === 1,
@@ -71,18 +77,19 @@ const checks = {
   adminActionsPresent: controllerSource.includes("/sync") && controllerSource.includes("/verify-pending") && controllerSource.includes("/diagnostics") && html.includes("Sync Coinbase markets") && html.includes("Verify all pending") && html.includes("Test Coinbase provider"),
   frontendRefreshes: appSource.includes("await loadAdminCryptoMarkets()") && appSource.includes("await loadPairs()") && appSource.includes("Still pending") && appSource.includes("renderCryptoCandleCheck"),
   diagnosticsSamplePresent: monitorSource.includes("BTC-USD") && monitorSource.includes("AUDIO-USD") && monitorSource.includes("POL-USD"),
-  migrationSafe: migration.includes("ADD COLUMN IF NOT EXISTS") && migration.includes("idx_crypto_markets_verification_queue")
+  migrationSafe: migration.includes("ADD COLUMN IF NOT EXISTS") && migration.includes("idx_crypto_markets_verification_queue") && statusMigration.includes("CHECK (status IN")
 };
 
 for (const [name, passed] of Object.entries(checks)) assert.equal(passed, true, `Crypto market sync check failed: ${name}`);
 console.log(JSON.stringify(checks, null, 2));
 
 function market(symbol, marketStatus, enabled, scannerEnabled, paperTradingEnabled) {
+  const status = ({ active: "ready", provider_error: "provider_error", unavailable: "unavailable", legacy: "legacy", disabled: "disabled" })[marketStatus] || "pending";
   return {
     symbol, displaySymbol: symbol.replace("-", ""), providerSymbol: symbol, name: symbol,
-    marketStatus, verificationStatus: marketStatus === "active" ? "verified" : "pending",
-    enabled, scannerEnabled, paperTradingEnabled, effectiveScannerEnabled: enabled && marketStatus === "active" && scannerEnabled,
-    effectivePaperTradingEnabled: enabled && marketStatus === "active" && paperTradingEnabled,
+    status, marketStatus, verificationStatus: marketStatus === "active" ? "verified" : marketStatus === "provider_error" ? "error" : marketStatus === "legacy" ? "legacy" : marketStatus === "unavailable" ? "failed" : "pending",
+    enabled, scannerEnabled, paperTradingEnabled, effectiveScannerEnabled: enabled && status === "ready" && scannerEnabled,
+    effectivePaperTradingEnabled: enabled && status === "ready" && paperTradingEnabled,
     liquidityTier: "standard"
   };
 }
