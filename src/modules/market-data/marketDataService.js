@@ -1,5 +1,6 @@
 import { getMarketDataProvider, getPairProviderAvailability } from "./marketDataProviderRegistry.js";
 import { MarketDataProviderError } from "./marketDataProviderError.js";
+import { appConfig } from "../../config/appConfig.js";
 import { analyzeMarketRegime } from "./marketRegimeService.js";
 import { analyzeAdvancedMarketStructure } from "./advancedMarketStructureService.js";
 import {
@@ -112,9 +113,104 @@ export function listActivePairs() {
 }
 
 export function listScannerPairs() {
-  const crypto = listScannerCryptoMarkets().map(withAvailability);
-  const other = nonCryptoMarketCatalog.map(withAvailability).filter((pair) => pair.status === "active");
-  return [...crypto, ...other];
+  return listManualScannerPairs();
+}
+
+export function listAutoScannerPairs() {
+  const crypto = listScannerCryptoMarkets().map(withAvailability).filter((pair) => pair.status === "active");
+  if (appConfig.autoScan.cryptoOnly) {
+    return crypto;
+  }
+  return listManualScannerPairs();
+}
+
+export function listManualScannerPairs(options = {}) {
+  return getManualScannerUniverse(options).markets;
+}
+
+export function getManualScannerUniverse(options = {}) {
+  const marketType = normalizeMarketType(options.marketType);
+  const skipped = [];
+  const selected = [];
+  const candidates = [
+    ...listCryptoMarketSettings().map(withAvailability),
+    ...nonCryptoMarketCatalog.map(withAvailability)
+  ];
+
+  for (const pair of candidates) {
+    const typeMatches = marketType === "all" || getMarketTypeKey(pair) === marketType;
+    if (!typeMatches) {
+      skipped.push(toSkippedMarket(pair, "market_type_excluded", "Market type excluded by selected filter."));
+      continue;
+    }
+
+    if (pair.category === "Crypto" && (!pair.enabled || !pair.scannerEnabled)) {
+      skipped.push(toSkippedMarket(pair, "scanner_disabled", "Scanner is disabled for this crypto market."));
+      continue;
+    }
+
+    if (pair.category === "Commodities" && !appConfig.manualScan.twelveDataEnabled) {
+      skipped.push(toSkippedMarket(pair, "manual_provider_disabled", "Twelve Data manual scanning is disabled."));
+      continue;
+    }
+
+    if (!pair.provider) {
+      skipped.push(toSkippedMarket(pair, "provider_not_configured", "No market data provider is configured."));
+      continue;
+    }
+
+    if (pair.status !== "active") {
+      skipped.push(toSkippedMarket(pair, pair.availabilityCode || "market_unavailable", pair.availabilityMessage || "Market is not ready for scanning."));
+      continue;
+    }
+
+    let provider;
+    try {
+      provider = getMarketDataProvider(pair);
+    } catch (error) {
+      skipped.push(toSkippedMarket(pair, "provider_not_configured", error.message));
+      continue;
+    }
+
+    const supportedTimeframes = getSupportedScannerTimeframes(pair, provider);
+    if (supportedTimeframes.length === 0) {
+      skipped.push(toSkippedMarket(pair, "unsupported_timeframe", "No supported scanner timeframe is available for this provider."));
+      continue;
+    }
+
+    selected.push({
+      ...pair,
+      scannerTimeframes: supportedTimeframes
+    });
+  }
+
+  const limited = selected.slice(0, appConfig.manualScan.maxMarkets);
+  for (const pair of selected.slice(appConfig.manualScan.maxMarkets)) {
+    skipped.push(toSkippedMarket(pair, "manual_scan_limit", `Manual scan limit reached (${appConfig.manualScan.maxMarkets} markets).`));
+  }
+
+  return {
+    marketType,
+    markets: limited,
+    skipped,
+    summary: summarizeScannerUniverse(limited, skipped),
+    signature: `${marketType}:${limited.map((pair) => `${pair.symbol}:${(pair.scannerTimeframes || []).join(",")}`).join("|")}`
+  };
+}
+
+export function getSupportedScannerTimeframes(pair, provider = null) {
+  let dataProvider = provider;
+  try {
+    dataProvider ||= getMarketDataProvider(pair);
+  } catch {
+    return [];
+  }
+  return appConfig.supportedTimeframes.filter((timeframe) => {
+    if (pair.category === "Crypto" && !canUseCryptoTimeframe(pair.symbol, timeframe)) {
+      return false;
+    }
+    return dataProvider.supports(pair.symbol, timeframe);
+  });
 }
 
 export function listPaperTradingPairs() {
@@ -332,6 +428,59 @@ function timeframeToMilliseconds(timeframe) {
     "1h": 60 * 60 * 1000,
     "4h": 4 * 60 * 60 * 1000
   }[timeframe] || 15 * 60 * 1000;
+}
+
+export function normalizeMarketType(value = "all") {
+  const normalized = String(value || "all").trim().toLowerCase();
+  if (["crypto", "commodities", "forex", "stocks"].includes(normalized)) {
+    return normalized;
+  }
+  return "all";
+}
+
+function getMarketTypeKey(pair) {
+  if (pair.category === "Crypto") return "crypto";
+  if (pair.category === "Commodities") return "commodities";
+  if (pair.category === "Forex") return "forex";
+  if (pair.category === "Stocks & ETFs" || pair.assetClass === "Stock" || pair.assetClass === "ETF") return "stocks";
+  return String(pair.category || "").toLowerCase();
+}
+
+function toSkippedMarket(pair, reasonCode, reason) {
+  return {
+    symbol: pair.symbol,
+    displaySymbol: pair.displaySymbol || getDisplaySymbol(pair),
+    name: pair.name,
+    category: pair.category,
+    provider: pair.provider,
+    providerLabel: pair.providerLabel,
+    reasonCode,
+    reason
+  };
+}
+
+function summarizeScannerUniverse(markets, skipped) {
+  const countByType = (items, key) => items.filter((item) => getMarketTypeKey(item) === key).length;
+  const timeframeSet = new Set(markets.flatMap((item) => item.scannerTimeframes || []));
+  const skippedByReason = skipped.reduce((acc, item) => {
+    acc[item.reasonCode] = (acc[item.reasonCode] || 0) + 1;
+    return acc;
+  }, {});
+
+  return {
+    totalActive: listActivePairs().length,
+    scannerEnabled: markets.length,
+    selectedManual: markets.length,
+    selectedAuto: listScannerCryptoMarkets().length,
+    timeframes: timeframeSet.size,
+    scanTasks: markets.reduce((total, item) => total + (item.scannerTimeframes || []).length, 0),
+    crypto: countByType(markets, "crypto"),
+    commodities: countByType(markets, "commodities"),
+    forex: countByType(markets, "forex"),
+    stocks: countByType(markets, "stocks"),
+    skipped: skipped.length,
+    skippedByReason
+  };
 }
 
 function isCommodityMarketOpen(date) {

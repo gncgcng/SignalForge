@@ -7,7 +7,7 @@ import {
   listWatchlistByUser,
   saveDetectedAlert
 } from "../../db/repositories.js";
-import { getPair, listScannerPairs } from "../market-data/marketDataService.js";
+import { getPair, listAutoScannerPairs } from "../market-data/marketDataService.js";
 import {
   enqueueMatchingTelegramNotifications,
   telegramPreferenceMatchesSetup
@@ -111,7 +111,7 @@ export async function runAutoCryptoAlertScan() {
     }
 
     const telegramSettings = await listAllEnabledTelegramSettings();
-    const cryptoMarkets = listScannerPairs().filter((pair) => pair.category === "Crypto");
+    const cryptoMarkets = listAutoScannerPairs().filter((pair) => pair.category === "Crypto");
     const cryptoSymbols = cryptoMarkets.map((pair) => pair.symbol);
 
     for (const settings of telegramSettings) {

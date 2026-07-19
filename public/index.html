@@ -744,6 +744,16 @@
                   <span class="live-dot" id="provider-status">Live candles</span>
                 </div>
                 <input class="search-input" id="pair-search" placeholder="Search BTC, Gold, WTI..." />
+                <label class="scanner-filter-label" for="scanner-market-type">
+                  Market type
+                  <select class="sf-select" id="scanner-market-type">
+                    <option value="all" selected>All active markets</option>
+                    <option value="crypto">Crypto</option>
+                    <option value="commodities">Commodities</option>
+                    <option value="forex">Forex</option>
+                    <option value="stocks">Stocks</option>
+                  </select>
+                </label>
                 <div class="pair-list" id="pair-list"></div>
                 <div class="timeframe-row" id="timeframes"></div>
                 <div class="action-row">
@@ -770,6 +780,9 @@
                     <div><span>Avoid trade</span><strong id="scan-summary-avoid">0</strong></div>
                     <div><span>Rejected</span><strong id="scan-summary-rejected">0</strong></div>
                     <div><span>Expired</span><strong id="scan-summary-expired">0</strong></div>
+                    <div><span>Skipped</span><strong id="scan-summary-skipped">0</strong></div>
+                    <div><span>Provider errors</span><strong id="scan-summary-provider-errors">0</strong></div>
+                    <div><span>No data</span><strong id="scan-summary-no-data">0</strong></div>
                     <div><span>Credits</span><strong id="scan-summary-credits">No credits used</strong></div>
                     <div><span>Next scan</span><strong id="scan-summary-next">When ready</strong></div>
                   </div>

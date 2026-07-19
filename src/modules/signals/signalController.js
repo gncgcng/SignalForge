@@ -57,7 +57,8 @@ export async function handleSignalRoutes(req, res, pathname) {
 
   if (pathname === "/api/signals/scan-all" && req.method === "POST") {
     try {
-      const result = await scanAllMarkets(req.user);
+      const body = await readJson(req).catch(() => ({}));
+      const result = await scanAllMarkets(req.user, body);
       const detectedAlerts = await detectMatchingAlerts(req.user, result.setups);
       const queuedTelegramAlerts = await enqueueMatchingTelegramNotifications(
         req.user,

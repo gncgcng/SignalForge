@@ -132,7 +132,7 @@ const result = {
   }),
   scanAllCoverage: activeSymbols.has("BTC-USD") &&
     !activeSymbols.has("MATIC-USD") &&
-    signalService.includes("listScannerPairs()"),
+    signalService.includes("getManualScannerUniverse"),
   uiGroupsPresent: cryptoMarketsSource.includes("Major crypto") &&
     cryptoMarketsSource.includes("Altcoins") &&
     catalog.some((pair) => pair.group === "Commodities") &&

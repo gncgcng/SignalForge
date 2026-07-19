@@ -233,6 +233,7 @@ const landingRunScan = document.querySelector("#landing-run-scan");
 const landingDemoShell = document.querySelector(".landing-demo-shell");
 const landingDemoResult = document.querySelector("#landing-demo-result");
 const pairSearch = document.querySelector("#pair-search");
+const scannerMarketType = document.querySelector("#scanner-market-type");
 const pairList = document.querySelector("#pair-list");
 const timeframes = document.querySelector("#timeframes");
 const generateButton = document.querySelector("#generate-button");
@@ -1371,13 +1372,33 @@ pairSearch.addEventListener("input", async () => {
 
 scanAllButton.addEventListener("click", async () => {
   const frames = ["1h", "4h", "15m", "5m"];
-  const markets = state.marketCatalog.filter((pair) => pair.category === "Crypto" ? pair.effectiveScannerEnabled : pair.status === "active");
+  const marketType = scannerMarketType?.value || "all";
+  const markets = getManualScanMarkets(marketType);
   const scanTasks = markets.flatMap((pair) => frames
-    .filter((timeframe) => pair.category !== "Crypto" || pair.supportedTimeframes.includes(timeframe))
+    .filter((timeframe) => getFrontendSupportedScanTimeframes(pair).includes(timeframe))
     .map((timeframe) => ({ symbol: pair.symbol, timeframe })));
   const total = scanTasks.length;
   let progressTimer = null;
   let progressIndex = 0;
+
+  if (total === 0) {
+    statusLine.textContent = "No active scannable markets selected.";
+    renderScanResults([], [], null, {
+      ready: 0,
+      watching: 0,
+      avoidTrade: 0,
+      rejected: 0,
+      expired: 0,
+      skipped: 0,
+      providerErrors: 0,
+      noData: 0
+    }, [], null, {
+      selectedManual: 0,
+      skipped: 0,
+      skippedByReason: {}
+    });
+    return;
+  }
 
   scanAllButton.disabled = true;
   generateButton.disabled = true;
@@ -1385,7 +1406,7 @@ scanAllButton.addEventListener("click", async () => {
   scanSummaryPanel.classList.add("hidden");
   state.scanResults = [];
   signalsGrid.innerHTML = "";
-  updateScanProgress(0, total, "Scanning all active crypto and commodity markets...");
+  updateScanProgress(0, total, `Scanning ${formatMarketTypeLabel(marketType).toLowerCase()} markets...`);
   progressTimer = setInterval(() => {
     if (progressIndex >= total - 1) return;
     const symbol = scanTasks[progressIndex]?.symbol || scanTasks[0]?.symbol || "market";
@@ -1399,14 +1420,26 @@ scanAllButton.addEventListener("click", async () => {
   }, 180);
 
   try {
-    const result = await api.request("/api/signals/scan-all", { method: "POST" });
+    const result = await api.request("/api/signals/scan-all", {
+      method: "POST",
+      body: JSON.stringify({ marketType })
+    });
     state.subscription = result.subscription || state.subscription;
     renderSubscription();
     updateScanProgress(total, total, "Market scan complete");
     await loadAlerts();
     await loadCandidates();
     markFirstScanCompleted();
-    renderScanResults(result.setups, result.errors, result.diagnostics, result.scanSummary, result.avoidTrades, result.marketBrief);
+    renderScanResults(
+      result.setups,
+      result.errors,
+      result.diagnostics,
+      result.scanSummary,
+      result.avoidTrades,
+      result.marketBrief,
+      result.scanUniverse,
+      result.skippedMarkets
+    );
   } catch (error) {
     updateScanProgress(0, total, "Scan All failed");
     renderScanResults([], [{ symbol: "Scan All", timeframe: "", message: error.message }], null, null, []);
@@ -6256,8 +6289,42 @@ function updateScanProgress(done, total, message) {
   statusLine.textContent = message;
 }
 
-function renderScanSummary(opportunitiesFound, marketsScanned, timeframesScanned, errors = [], diagnostics = null, summary = null) {
+function getManualScanMarkets(marketType = "all") {
+  const selected = String(marketType || "all").toLowerCase();
+  return state.marketCatalog
+    .filter((pair) => selected === "all" || getMarketTypeKey(pair) === selected)
+    .filter((pair) => pair.category === "Crypto" ? pair.effectiveScannerEnabled : pair.status === "active" && pair.selectable !== false);
+}
+
+function getFrontendSupportedScanTimeframes(pair) {
+  if (Array.isArray(pair.scannerTimeframes) && pair.scannerTimeframes.length) return pair.scannerTimeframes;
+  if (pair.category === "Crypto") return pair.supportedTimeframes || [];
+  return ["5m", "15m", "1h", "4h"];
+}
+
+function getMarketTypeKey(pair) {
+  if (pair.category === "Crypto") return "crypto";
+  if (pair.category === "Commodities") return "commodities";
+  if (pair.category === "Forex") return "forex";
+  if (pair.category === "Stocks & ETFs" || pair.assetClass === "Stock" || pair.assetClass === "ETF") return "stocks";
+  return String(pair.category || "").toLowerCase();
+}
+
+function formatMarketTypeLabel(marketType = "all") {
+  return {
+    all: "All active",
+    crypto: "Crypto",
+    commodities: "Commodities",
+    forex: "Forex",
+    stocks: "Stocks"
+  }[String(marketType || "all").toLowerCase()] || "All active";
+}
+
+function renderScanSummary(opportunitiesFound, marketsScanned, timeframesScanned, errors = [], diagnostics = null, summary = null, scanUniverse = null, skippedMarkets = []) {
   const counts = summary || { ready: opportunitiesFound, watching: 0, avoidTrade: 0, rejected: 0, expired: 0 };
+  const skippedCount = counts.skipped ?? skippedMarkets.length ?? 0;
+  const providerErrors = counts.providerErrors ?? errors.length ?? 0;
+  const noData = counts.noData ?? 0;
   scanSummaryPanel.classList.remove("hidden");
   document.querySelector("#scan-summary-title").textContent = opportunitiesFound > 0
     ? "Scan complete"
@@ -6270,6 +6337,9 @@ function renderScanSummary(opportunitiesFound, marketsScanned, timeframesScanned
   document.querySelector("#scan-summary-avoid").textContent = counts.avoidTrade || 0;
   document.querySelector("#scan-summary-rejected").textContent = counts.rejected;
   document.querySelector("#scan-summary-expired").textContent = counts.expired;
+  document.querySelector("#scan-summary-skipped").textContent = skippedCount;
+  document.querySelector("#scan-summary-provider-errors").textContent = providerErrors;
+  document.querySelector("#scan-summary-no-data").textContent = noData;
   document.querySelector("#scan-summary-credits").textContent = opportunitiesFound > 0
     ? "No unlock credits used yet"
     : "No credits used";
@@ -6280,14 +6350,16 @@ function renderScanSummary(opportunitiesFound, marketsScanned, timeframesScanned
       ? "Probable setups were found, but confirmation or entry readiness is still incomplete. No credits used."
       : "SignalForge scanned the market but did not find enough confirmation for a valid setup. No credits used.";
   document.querySelector("#scan-summary-diagnostics-content").innerHTML = `
+    ${scanUniverse ? `<p><strong>Scanner universe:</strong> ${formatInteger(scanUniverse.selectedManual || marketsScanned)} selected · ${formatInteger(scanUniverse.scanTasks || 0)} checks · ${formatInteger(scanUniverse.crypto || 0)} crypto · ${formatInteger(scanUniverse.commodities || 0)} commodities · ${formatInteger(scanUniverse.skipped || skippedCount)} skipped</p>` : ""}
     <p><strong>Most common avoid reason:</strong> ${escapeHtml(summary?.topAvoidReason || summary?.topRejectionReason || diagnostics?.topReasons?.[0]?.reason || "Strategy not matched")}</p>
     ${renderRejectionReasons((diagnostics?.topReasons || []).map((item) => `${item.reason} (${item.count})`))}
     ${renderDiagnosticSamples(diagnostics?.samples)}
     ${errors.length ? `<p>${errors.length} provider warning${errors.length === 1 ? "" : "s"} occurred during this scan.</p>` : ""}
+    ${skippedMarkets?.length ? `<details class="scan-diagnostics"><summary>Skipped markets (${skippedMarkets.length})</summary><div>${skippedMarkets.slice(0, 25).map((item) => `<p><strong>${escapeHtml(item.displaySymbol || item.symbol)}</strong> · ${escapeHtml(item.reason || item.reasonCode || "Skipped")}</p>`).join("")}${skippedMarkets.length > 25 ? `<p>${skippedMarkets.length - 25} more skipped markets hidden.</p>` : ""}</div></details>` : ""}
   `;
 }
 
-function renderScanResults(setups, errors, diagnostics = null, scanSummary = null, avoidTrades = [], marketBrief = null) {
+function renderScanResults(setups, errors, diagnostics = null, scanSummary = null, avoidTrades = [], marketBrief = null, scanUniverse = null, skippedMarkets = []) {
   state.scanResults = setups;
   if (marketBrief) state.marketBrief = marketBrief;
   renderMarketBrief();
@@ -6302,16 +6374,28 @@ function renderScanResults(setups, errors, diagnostics = null, scanSummary = nul
   const frames = ["1h", "4h", "15m", "5m"];
   const scannedMarkets = activePairs.map((pair) => pair.symbol);
   state.lastScanSummary = {
-    marketsScanned: scannedMarkets.length,
-    timeframesScanned: frames.length,
+    marketsScanned: scanUniverse?.selectedManual || scannedMarkets.length,
+    timeframesScanned: scanUniverse?.timeframes || frames.length,
     opportunitiesFound: setups.length,
     watchingSetups: scanSummary?.watching || 0,
     avoidTradeZones: scanSummary?.avoidTrade || 0,
     rejectedSetups: scanSummary?.rejected || 0,
     expiredSetups: scanSummary?.expired || 0,
+    skippedMarkets: scanSummary?.skipped || skippedMarkets?.length || 0,
+    providerErrors: scanSummary?.providerErrors || errors.length,
+    noData: scanSummary?.noData || 0,
     errors: errors.length
   };
-  renderScanSummary(setups.length, scannedMarkets.length, frames.length, errors, diagnostics, scanSummary);
+  renderScanSummary(
+    setups.length,
+    scanUniverse?.selectedManual || scannedMarkets.length,
+    scanUniverse?.timeframes || frames.length,
+    errors,
+    diagnostics,
+    scanSummary,
+    scanUniverse,
+    skippedMarkets
+  );
 
   if (setups.length === 0) {
     signalsGrid.innerHTML = `

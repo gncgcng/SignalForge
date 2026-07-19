@@ -11,7 +11,8 @@ import {
   saveUnlockedSignal
 } from "../../db/repositories.js";
 import { createId } from "../../shared/ids.js";
-import { listScannerPairs } from "../market-data/marketDataService.js";
+import { getManualScannerUniverse } from "../market-data/marketDataService.js";
+import { appConfig } from "../../config/appConfig.js";
 import { getMultiTimeframeMarketData } from "../market-data/multiTimeframeService.js";
 import {
   canDiscoverSetups,
@@ -416,8 +417,9 @@ function toCandidatePreview(candidate) {
   };
 }
 
-export async function scanAllMarkets(user) {
-  const scanKey = "scan-all:active-markets:5m-15m-1h-4h";
+export async function scanAllMarkets(user, options = {}) {
+  const universe = getManualScannerUniverse(options);
+  const scanKey = `scan-all:${universe.signature}:5m-15m-1h-4h`;
   const cached = await getCachedScanResult(user.id, scanKey);
   if (cached) {
     await trackScanAllAnalytics(user, cached.publicResult.scanned, true);
@@ -429,7 +431,7 @@ export async function scanAllMarkets(user) {
     };
   }
   assertDiscoveryAvailable(user);
-  const result = await scanAllMarketsDetailed(user);
+  const result = await scanAllMarketsDetailed(user, { ...options, universe });
   const summary = getSubscriptionSummary(user);
   const remaining = user.role === "tester"
     ? result.publicResult.setups.length
@@ -471,7 +473,7 @@ async function trackScanAllAnalytics(user, scanned = [], cached = false) {
   );
 }
 
-export async function scanAllMarketsDetailed(user) {
+export async function scanAllMarketsDetailed(user, options = {}) {
   const scanned = [];
   const setups = [];
   const fullSetups = [];
@@ -484,12 +486,17 @@ export async function scanAllMarketsDetailed(user) {
     rejectionReasons: {},
     samples: []
   };
-  const scanMarkets = listScannerPairs();
+  const universe = options.universe || getManualScannerUniverse(options);
+  const scanMarkets = universe.markets;
   const analystProfile = await getUserAnalystProfile(user);
+  console.info(
+    `[scanner] manual_universe market_type=${universe.marketType} selected=${scanMarkets.length} ` +
+    `skipped=${universe.skipped.length} crypto=${universe.summary.crypto} commodities=${universe.summary.commodities}`
+  );
 
-  for (const market of scanMarkets) {
+  await runManualScanMarkets(scanMarkets, async (market) => {
     const symbol = market.symbol;
-    const supportedTimeframes = market.category === "Crypto" ? market.supportedTimeframes : scanTimeframes;
+    const supportedTimeframes = market.scannerTimeframes || scanTimeframes;
     for (const timeframe of scanTimeframes.filter((item) => supportedTimeframes.includes(item))) {
       try {
         const detailed = await scanMarketSetupDetailed(
@@ -560,12 +567,12 @@ export async function scanAllMarketsDetailed(user) {
         });
       }
     }
-  }
+  });
 
   rankSetups(setups);
   const candidates = [...candidatesById.values()];
   const finalizedDiagnostics = finalizeScanDiagnostics(diagnostics);
-  const scanSummary = summarizeScanBatch(scanned, setups, candidates, finalizedDiagnostics, avoidTrades);
+  const scanSummary = summarizeScanBatch(scanned, setups, candidates, finalizedDiagnostics, avoidTrades, universe.skipped);
   const marketBrief = await refreshMarketBriefSafely(briefObservations, scanSummary);
   console.info(
     `[scanner] ready=${scanSummary.ready} watching=${scanSummary.watching} ` +
@@ -582,6 +589,8 @@ export async function scanAllMarketsDetailed(user) {
       errors,
       diagnostics: finalizedDiagnostics,
       scanSummary,
+      scanUniverse: universe.summary,
+      skippedMarkets: universe.skipped,
       marketBrief,
       message: setups.length ? "Valid setups found." : "No high-probability setups right now"
     },
@@ -589,7 +598,7 @@ export async function scanAllMarketsDetailed(user) {
   };
 }
 
-export function summarizeScanBatch(scanned, setups, candidates, diagnostics, avoidTrades = []) {
+export function summarizeScanBatch(scanned, setups, candidates, diagnostics, avoidTrades = [], skippedMarkets = []) {
   const watching = candidates.filter((candidate) => ["watching", "almost_ready"].includes(candidate.status)).length;
   const expired = candidates.filter((candidate) => candidate.status === "expired").length;
   const hasTypedResults = scanned.some((item) => item.resultType);
@@ -615,8 +624,38 @@ export function summarizeScanBatch(scanned, setups, candidates, diagnostics, avo
     expired,
     topAvoidReason,
     topRejectionReason: topReason,
-    topRejectionCode: diagnostics.topCodes?.[0]?.code || slugDiagnostic(topReason)
+    topRejectionCode: diagnostics.topCodes?.[0]?.code || slugDiagnostic(topReason),
+    skipped: skippedMarkets.length,
+    providerErrors: scanned.filter((item) => item.providerError).length,
+    noData: scanned.filter((item) => (item.rejectionReasonCodes || []).some((code) =>
+      ["invalid_market_data", "stale_data"].includes(code)
+    )).length
   };
+}
+
+async function runManualScanMarkets(markets, scanMarket) {
+  const concurrency = Math.max(1, appConfig.manualScan.concurrency);
+  let cursor = 0;
+
+  async function worker() {
+    while (cursor < markets.length) {
+      const index = cursor;
+      cursor += 1;
+      if (index > 0 && appConfig.manualScan.providerDelayMs > 0) {
+        await delay(appConfig.manualScan.providerDelayMs);
+      }
+      await scanMarket(markets[index], index);
+    }
+  }
+
+  await Promise.all(Array.from(
+    { length: Math.min(concurrency, markets.length || 1) },
+    () => worker()
+  ));
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function slugDiagnostic(value) {

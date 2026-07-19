@@ -147,6 +147,12 @@ export const appConfig = {
     apiKey: process.env.TWELVEDATA_API_KEY || "",
     cacheTtlMs: Number(process.env.TWELVEDATA_CACHE_TTL_MS || 300000)
   },
+  manualScan: {
+    maxMarkets: Math.max(1, Number(process.env.MANUAL_SCAN_MAX_MARKETS || 200)),
+    concurrency: Math.max(1, Number(process.env.MANUAL_SCAN_CONCURRENCY || 2)),
+    providerDelayMs: Math.max(0, Number(process.env.MANUAL_SCAN_PROVIDER_DELAY_MS || 750)),
+    twelveDataEnabled: process.env.TWELVEDATA_MANUAL_SCAN_ENABLED !== "false"
+  },
   economicCalendar: {
     baseUrl: process.env.TRADING_ECONOMICS_API_BASE_URL || "https://api.tradingeconomics.com",
     apiKey: process.env.TRADING_ECONOMICS_API_KEY || "",
@@ -167,6 +173,7 @@ export const appConfig = {
   autoScan: {
     enabled: process.env.CRYPTO_WATCHER_ENABLED !== "false" && process.env.AUTO_SCAN_ENABLED !== "false",
     cryptoWatcherEnabled: process.env.CRYPTO_WATCHER_ENABLED !== "false",
+    cryptoOnly: process.env.AUTO_SCAN_CRYPTO_ONLY !== "false",
     intervalMs: Number(process.env.AUTO_SCAN_INTERVAL_MS || 300000),
     duplicateCooldownMs: Number(process.env.AUTO_SCAN_DUPLICATE_COOLDOWN_MS || process.env.AUTO_SCAN_INTERVAL_MS || 900000)
   },
