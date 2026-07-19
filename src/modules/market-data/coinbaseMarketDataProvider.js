@@ -195,6 +195,70 @@ export async function getProductsFromCoinbase() {
   }
 }
 
+export async function getProductFromCoinbase(symbol) {
+  const productId = String(symbol || "").trim().toUpperCase();
+  if (!isCoinbaseUsdCryptoSymbol(productId)) {
+    throw new MarketDataProviderError(`Coinbase product symbol is invalid: ${symbol}.`, {
+      statusCode: 400,
+      code: "PROVIDER_UNSUPPORTED_MARKET"
+    });
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), appConfig.marketData.requestTimeoutMs);
+  try {
+    const response = await fetch(new URL(`/products/${encodeURIComponent(productId)}`, appConfig.marketData.baseUrl), {
+      signal: controller.signal,
+      headers: { accept: "application/json", "user-agent": "SignalForge/0.1" }
+    });
+
+    if (response.status === 404 || response.status === 400) {
+      throw new MarketDataProviderError(`Coinbase product not found: ${productId}.`, {
+        statusCode: response.status,
+        code: "PROVIDER_UNSUPPORTED_MARKET"
+      });
+    }
+
+    if (response.status === 429) {
+      throw new MarketDataProviderError("Coinbase product check rate limited.", {
+        statusCode: 429,
+        code: "RATE_LIMITED"
+      });
+    }
+
+    if (!response.ok) {
+      throw new MarketDataProviderError(`Coinbase product check returned ${response.status}.`, {
+        statusCode: response.status,
+        code: "PROVIDER_RESPONSE_ERROR"
+      });
+    }
+
+    const product = await response.json();
+    if (!product || typeof product !== "object") {
+      throw new MarketDataProviderError("Coinbase product response was invalid.", {
+        statusCode: 502,
+        code: "BAD_PROVIDER_RESPONSE"
+      });
+    }
+
+    return product;
+  } catch (error) {
+    if (error instanceof MarketDataProviderError) throw error;
+    if (error.name === "AbortError") {
+      throw new MarketDataProviderError("Coinbase product check timed out.", {
+        statusCode: 504,
+        code: "MARKET_DATA_TIMEOUT"
+      });
+    }
+    throw new MarketDataProviderError("Unable to reach Coinbase product check.", {
+      statusCode: 503,
+      code: "PROVIDER_UNAVAILABLE"
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export function isCoinbaseUsdCryptoSymbol(symbol) {
   return /^[A-Z0-9]{1,20}-USD$/.test(String(symbol || "").trim().toUpperCase());
 }

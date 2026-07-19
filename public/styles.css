@@ -8777,3 +8777,51 @@ polyline {
   .candidate-history-summary { grid-template-columns: minmax(0, 1fr); }
   .view-advanced-details { width: 100%; min-height: 44px; }
 }
+.admin-crypto-verification-details {
+  margin-top: 12px;
+  border: 1px solid rgba(125, 211, 252, 0.18);
+  border-radius: 8px;
+  background: rgba(2, 8, 23, 0.48);
+  padding: 10px 12px;
+}
+
+.admin-crypto-verification-details summary {
+  cursor: pointer;
+  color: #bae6fd;
+  font-weight: 700;
+}
+
+.admin-crypto-detail-grid,
+.admin-crypto-candle-checks {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.admin-crypto-detail-grid span,
+.crypto-candle-check {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 8px;
+  color: #94a3b8;
+  background: rgba(15, 23, 42, 0.58);
+  font-size: 0.78rem;
+}
+
+.admin-crypto-detail-grid strong,
+.crypto-candle-check strong {
+  color: #e2e8f0;
+  overflow-wrap: anywhere;
+}
+
+.crypto-candle-check.pass {
+  border-color: rgba(34, 197, 94, 0.32);
+}
+
+.crypto-candle-check.fail {
+  border-color: rgba(245, 158, 11, 0.32);
+}

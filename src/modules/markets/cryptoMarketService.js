@@ -119,6 +119,7 @@ export async function updateCryptoMarketSettings(symbol, changes) {
 
 export async function importCoinbaseCryptoProducts(products) {
   const discovered = normalizeCoinbaseProducts(products);
+  const discoveredSymbols = new Set(discovered.map((product) => product.providerSymbol));
   const existingResult = await query("SELECT provider_symbol FROM crypto_markets");
   const existing = new Set(existingResult.rows.map((row) => row.provider_symbol));
   let imported = 0;
@@ -142,10 +143,33 @@ export async function importCoinbaseCryptoProducts(products) {
     if (existed) updated += 1;
     else imported += 1;
   }
+  let missingLegacy = 0;
+  if (discovered.length > 0) {
+    const missing = await query(`UPDATE crypto_markets SET market_status='unavailable',
+      verification_status='failed', provider_status='unavailable',
+      last_error='Product no longer returned by Coinbase product sync.',
+      failure_code='PRODUCT_NOT_RETURNED', cooldown_until=NULL, updated_at=now()
+      WHERE provider='coinbase-exchange'
+        AND enabled=true
+        AND market_status NOT IN ('legacy', 'disabled')
+        AND provider_symbol <> ALL($1::text[])
+      RETURNING symbol`, [[...discoveredSymbols]]);
+    missingLegacy = missing.rows.length;
+  }
   await reloadCryptoMarketSettings();
   const skipped = Math.max(0, (Array.isArray(products) ? products.length : 0) - discovered.length);
   console.info(`[market-sync] discovered=${discovered.length} imported=${imported} updated=${updated} skipped=${skipped}`);
-  return { discovered: discovered.length, imported, updated, skipped, total: runtime.size };
+  return {
+    productsFound: Array.isArray(products) ? products.length : 0,
+    discovered: discovered.length,
+    usdCryptoPairsImported: discovered.length,
+    imported,
+    new: imported,
+    updated,
+    missingLegacy,
+    skipped,
+    total: runtime.size
+  };
 }
 
 export function normalizeCoinbaseProducts(products = []) {
@@ -171,7 +195,7 @@ export function normalizeCoinbaseProducts(products = []) {
   return [...unique.values()];
 }
 
-export async function saveCryptoMarketVerification(symbol, checks) {
+export async function saveCryptoMarketVerification(symbol, checks, details = {}) {
   const current = getCryptoMarketState(symbol);
   if (!current) throw marketError("Unknown crypto market.", 404);
   const classification = classifyCryptoVerification(checks);
@@ -185,17 +209,28 @@ export async function saveCryptoMarketVerification(symbol, checks) {
     ? `Verified with ${supported.length}/${cryptoTimeframes.length} timeframes. Unsupported: ${unsupported.join(", ")}.`
     : lastFailure?.error || (enough ? null : "No candle data returned from provider.");
   const cooldownUntil = enough ? null : new Date(Date.now() + appConfig.cryptoMarkets.unavailableCooldownMs);
+  const checkedAt = new Date();
+  const verificationDetails = buildVerificationDetails(current, checks, {
+    ...details,
+    finalStatus: marketStatus,
+    lastError,
+    nextRetryAt: cooldownUntil?.toISOString() || null,
+    lastVerificationAttempt: checkedAt.toISOString()
+  });
   const result = await query(`UPDATE crypto_markets SET market_status=$2, verification_status=$3,
     provider_status=$4, supported_timeframes=$5, unsupported_timeframes=$6,
-    last_successful_candle_at=$7, last_checked_at=now(), last_verified_at=now(),
-    last_error=$8, failure_code=$9, cooldown_until=$10,
+    last_successful_candle_at=$7, last_checked_at=$11, last_verified_at=$11,
+    last_error=$8, failure_code=$9, cooldown_until=$10, verification_details=$12,
     consecutive_failures=CASE WHEN $2='active' THEN 0 ELSE consecutive_failures+1 END,
     updated_at=now() WHERE symbol=$1 RETURNING *`, [
     current.symbol, marketStatus, verificationStatus, providerStatus, supported, unsupported,
-    lastSuccess, lastError, lastFailure?.code || null, cooldownUntil
+    lastSuccess, lastError, lastFailure?.code || null, cooldownUntil, checkedAt, verificationDetails
   ]);
   runtime.set(current.symbol, mapRow(result.rows[0]));
   if (marketStatus === "active") await markVerifiedLegacyReplacements(current.symbol);
+  if (marketStatus !== "active") {
+    console.warn(`[market-verify] ${current.providerSymbol} ${marketStatus} reason=${safeLogReason(lastError)}`);
+  }
   return getCryptoMarketState(current.symbol);
 }
 
@@ -334,7 +369,42 @@ function mapRow(row) {
     lastSuccessfulCandleAt: row.last_successful_candle_at, lastCheckedAt: row.last_checked_at,
     lastVerifiedAt: row.last_verified_at, lastError: row.last_error, failureCode: row.failure_code,
     cooldownUntil: row.cooldown_until, consecutiveFailures: Number(row.consecutive_failures || 0),
-    replacementSymbol: row.replacement_symbol, createdAt: row.created_at, updatedAt: row.updated_at
+    replacementSymbol: row.replacement_symbol, verificationDetails: row.verification_details || {},
+    createdAt: row.created_at, updatedAt: row.updated_at
+  };
+}
+
+function buildVerificationDetails(market, checks, details) {
+  const byTimeframe = Object.fromEntries(cryptoTimeframes.map((timeframe) => {
+    const check = checks.find((item) => item.timeframe === timeframe);
+    return [timeframe, check ? {
+      pass: Boolean(check.available),
+      candles: Number(check.candles || 0),
+      latestCandleAt: check.lastCandleAt || null,
+      error: check.error || null,
+      code: check.code || null
+    } : {
+      pass: false,
+      candles: 0,
+      latestCandleAt: null,
+      error: "Verification was not attempted.",
+      code: "NOT_CHECKED"
+    }];
+  }));
+
+  return {
+    provider: "Coinbase",
+    providerSymbol: market.providerSymbol,
+    productExists: details.productExists ?? null,
+    productTradingEnabled: details.productTradingEnabled ?? null,
+    productStatus: details.productStatus || market.productStatus || null,
+    candleChecks: byTimeframe,
+    latestCandleTime: checks.map((check) => check.lastCandleAt).filter(Boolean).sort().at(-1) || null,
+    lastVerifiedAt: details.lastVerificationAttempt || null,
+    lastVerificationAttempt: details.lastVerificationAttempt || null,
+    lastError: details.lastError || null,
+    nextRetryTime: details.nextRetryAt || null,
+    finalStatus: details.finalStatus || "pending"
   };
 }
 
@@ -347,6 +417,7 @@ async function markVerifiedLegacyReplacements(replacementSymbol) {
 function statusLabel(status) {
   return ({ active: "Active", pending: "Pending verification", unavailable: "Unavailable", legacy: "Legacy / migrated", disabled: "Disabled by admin", provider_error: "Provider error" })[status] || "Pending verification";
 }
+function safeLogReason(value) { return String(value || "unknown").replace(/[\r\n]+/g, " ").slice(0, 160); }
 function legacyProviderStatus(row) { return row.provider_status === "available" ? "active" : row.provider_status === "provider_issue" ? "provider_error" : row.provider_status === "unavailable" ? "unavailable" : "pending"; }
 function legacyVerificationStatus(row) { return row.provider_status === "available" ? "verified" : row.provider_status === "provider_issue" ? "error" : row.provider_status === "unavailable" ? "failed" : "pending"; }
 function normalizeSymbol(value) { return String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, ""); }

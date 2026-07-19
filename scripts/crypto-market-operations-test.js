@@ -15,6 +15,7 @@ import {
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 const migration = read("migrations/044_crypto_market_operations.sql");
+const detailsMigration = read("migrations/046_crypto_market_verification_details.sql");
 const controller = read("src/modules/markets/cryptoMarketController.js");
 const marketData = read("src/modules/market-data/marketDataService.js");
 const provider = read("src/modules/market-data/coinbaseMarketDataProvider.js");
@@ -58,11 +59,12 @@ const checks = {
   starterUniverse: ["BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "ADA-USD", "DOGE-USD", "LINK-USD", "AVAX-USD", "LTC-USD", "BCH-USD", "DOT-USD", "UNI-USD", "AAVE-USD", "ATOM-USD", "ETC-USD", "NEAR-USD", "OP-USD", "ARB-USD", "INJ-USD", "ICP-USD", "SHIB-USD", "PEPE-USD", "BONK-USD"].every((symbol) => findCryptoMarket(symbol)),
   centralMetadata: cryptoMarketUniverse.every((market) => market.displaySymbol && market.providerSymbol && market.provider === "coinbase-exchange" && Array.isArray(market.supportedTimeframes)),
   migrationSafe: migration.includes("CREATE TABLE IF NOT EXISTS crypto_markets") && migration.includes("scanner_enabled") && migration.includes("cooldown_until") && migration.includes("unsupported_timeframes") && !migration.match(/DELETE FROM/i),
+  verificationDetailsMigration: detailsMigration.includes("ADD COLUMN IF NOT EXISTS verification_details") && detailsMigration.includes("idx_crypto_markets_status_retry"),
   scannerUsesCapabilities: signalService.includes("listScannerPairs") && signalService.includes("supportedTimeframes.includes") && marketData.includes("listScannerCryptoMarkets"),
   providerLimited: provider.includes("maxConcurrentRequests") && provider.includes("acquireRequestSlot") && provider.includes("maxCandlesPerRequest"),
   cooldownRecorded: marketData.includes("recordCryptoMarketFailure") && marketData.includes("MARKET_COOLDOWN") && marketData.includes("STALE_CANDLES") && marketData.includes("INSUFFICIENT_CANDLES"),
   adminProtected: controller.includes("if (!req.user)") && controller.includes("if (!isAdminUser(req.user))") && controller.includes("updateCryptoMarketSettings") && controller.includes("verifyCryptoMarket"),
-  adminUi: html.includes('id="admin-crypto-markets-view"') && html.includes('id="admin-crypto-markets-nav-link"') && app.includes("loadAdminCryptoMarkets") && app.includes("data-crypto-setting"),
+  adminUi: html.includes('id="admin-crypto-markets-view"') && html.includes('id="admin-crypto-markets-nav-link"') && html.includes('id="admin-crypto-diagnostics"') && app.includes("loadAdminCryptoMarkets") && app.includes("data-crypto-setting") && app.includes("Verification details"),
   paperRestricted: paper.includes("listPaperTradingPairs") && paper.includes("effectivePaperTradingEnabled"),
   validationPreserved: /Latest candle is stale/i.test(validation) && validation.includes("ATR unavailable") && validation.includes("Invalid volume data") && validation.includes("Risk/reward is below 1.5R")
 };

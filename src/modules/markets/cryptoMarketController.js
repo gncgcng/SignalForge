@@ -1,6 +1,6 @@
 import { readJson, sendError, sendJson } from "../../shared/http.js";
 import { isAdminUser } from "../auth/authService.js";
-import { getPendingCryptoVerificationJob, startPendingCryptoVerification, verifyCryptoMarket } from "./cryptoMarketMonitor.js";
+import { getPendingCryptoVerificationJob, startPendingCryptoVerification, testCoinbaseProviderDiagnostics, verifyCryptoMarket } from "./cryptoMarketMonitor.js";
 import { syncCoinbaseCryptoMarkets } from "./cryptoMarketSyncService.js";
 import { listCryptoMarketSettings, replaceLegacyCryptoMarket, updateCryptoMarketSettings } from "./cryptoMarketService.js";
 
@@ -25,6 +25,14 @@ export async function handleAdminCryptoMarketRoutes(req, res, pathname, url) {
 
   if (pathname === "/api/admin/crypto-markets/verify-pending" && req.method === "POST") {
     return sendJson(res, 202, { verificationJob: startPendingCryptoVerification() });
+  }
+
+  if (pathname === "/api/admin/crypto-markets/diagnostics" && req.method === "POST") {
+    try {
+      return sendJson(res, 200, { diagnostics: await testCoinbaseProviderDiagnostics() });
+    } catch (error) {
+      return sendError(res, error.statusCode || 502, error.message);
+    }
   }
 
   if (pathname === "/api/admin/crypto-markets/verification-job" && req.method === "GET") {
