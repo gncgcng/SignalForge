@@ -379,6 +379,7 @@ const adminSignalModal = document.querySelector("#admin-signal-modal");
 const adminSignalDetail = document.querySelector("#admin-signal-detail");
 const adminCryptoFilters = document.querySelector("#admin-crypto-filters");
 const adminCryptoMarketList = document.querySelector("#admin-crypto-market-list");
+const adminCryptoRebuildActive = document.querySelector("#admin-crypto-rebuild-active");
 const adminCryptoSync = document.querySelector("#admin-crypto-sync");
 const adminCryptoVerifyPending = document.querySelector("#admin-crypto-verify-pending");
 const adminCryptoDiagnostics = document.querySelector("#admin-crypto-diagnostics");
@@ -1719,6 +1720,23 @@ adminCryptoFilters?.addEventListener("submit", (event) => {
 document.querySelector("#admin-crypto-filter-clear")?.addEventListener("click", () => {
   adminCryptoFilters.reset(); state.adminCryptoMarkets.filters = {}; loadAdminCryptoMarkets();
 });
+adminCryptoRebuildActive?.addEventListener("click", async () => {
+  adminCryptoRebuildActive.disabled = true;
+  adminCryptoOperationStatus.textContent = "Rebuilding active Coinbase markets...";
+  try {
+    const result = await api.request("/api/admin/crypto-markets/rebuild-active", { method: "POST" });
+    const rebuild = result.rebuild || {};
+    adminCryptoOperationStatus.textContent = `Rebuild complete: Active ${rebuild.active || 0}, Unavailable ${rebuild.unavailable || 0}, Provider error ${rebuild.providerError || 0}, Legacy ${rebuild.legacy || 0}, Disabled preserved ${rebuild.disabledPreserved || 0}.`;
+    showToast("Active Coinbase markets rebuilt");
+    await loadAdminCryptoMarkets();
+    await loadPairs();
+  } catch (error) {
+    adminCryptoOperationStatus.textContent = error.message;
+    showToast(error.message);
+  } finally {
+    adminCryptoRebuildActive.disabled = false;
+  }
+});
 adminCryptoSync?.addEventListener("click", async () => {
   adminCryptoSync.disabled = true;
   adminCryptoOperationStatus.textContent = "Syncing Coinbase USD markets...";
@@ -1755,13 +1773,13 @@ adminCryptoDiagnostics?.addEventListener("click", async () => {
 });
 adminCryptoVerifyPending?.addEventListener("click", async () => {
   adminCryptoVerifyPending.disabled = true;
-  adminCryptoOperationStatus.textContent = "Verifying pending markets...";
+  adminCryptoOperationStatus.textContent = "Checking unresolved markets...";
   try {
     const result = await api.request("/api/admin/crypto-markets/verify-pending", { method: "POST" });
-    adminCryptoOperationStatus.textContent = `Verification complete: Ready ${result.ready || result.active || 0}, Unavailable ${result.unavailable || 0}, Provider error ${result.providerError || 0}, Legacy ${result.legacy || 0}, Still pending ${result.stillPending || 0}.`;
+    adminCryptoOperationStatus.textContent = `Verification complete: Active ${result.ready || result.active || 0}, Unavailable ${result.unavailable || 0}, Provider error ${result.providerError || 0}, Legacy ${result.legacy || 0}, Unresolved ${result.stillPending || 0}.`;
     await loadAdminCryptoMarkets();
     await loadPairs();
-    showToast("Pending market verification complete");
+    showToast("Market verification complete");
   } catch (error) {
     adminCryptoOperationStatus.textContent = error.message;
     showToast(error.message);
@@ -3540,25 +3558,25 @@ function renderAdminCryptoMarkets() {
   const { markets, summary } = state.adminCryptoMarkets;
   document.querySelector("#admin-crypto-market-count").textContent = `${Number(summary.active || 0)} active markets · ${Number(summary.totalDiscovered || 0)} discovered`;
   document.querySelector("#admin-crypto-summary").innerHTML = [
-    ["Total discovered", summary.totalDiscovered], ["Active", summary.active], ["Pending", summary.pending],
-    ["Unavailable", summary.unavailable], ["Legacy / migrated", summary.legacy], ["Disabled by admin", summary.disabled],
-    ["Provider errors", summary.providerError], ["Scanner enabled", summary.scannerEnabled],
+    ["Active", summary.active], ["Unavailable", summary.unavailable], ["Provider errors", summary.providerError],
+    ["Legacy / migrated", summary.legacy], ["Disabled by admin", summary.disabled],
+    ["Total discovered", summary.totalDiscovered], ["Scanner enabled", summary.scannerEnabled],
     ["Paper trading", summary.paperTradingEnabled]
   ].map(([label, value]) => `<article><span>${label}</span><strong>${Number(value || 0)}</strong></article>`).join("");
   adminCryptoMarketList.innerHTML = markets.length ? markets.map(renderAdminCryptoMarket).join("") : `<div class="empty-state"><strong>No crypto markets match these filters.</strong></div>`;
 }
 
 function renderAdminCryptoMarket(market) {
-  const canonicalStatus = market.status || (market.marketStatus === "active" ? "ready" : market.marketStatus) || "pending";
+  const canonicalStatus = market.status || (market.marketStatus === "active" ? "active" : market.marketStatus) || "unavailable";
   const status = market.statusLabel || titleCase(canonicalStatus);
-  const available = canonicalStatus === "ready";
-  const providerClass = available ? "available" : canonicalStatus === "pending" ? "unchecked" : "unavailable";
+  const available = canonicalStatus === "active";
+  const providerClass = available ? "available" : "unavailable";
   const timeframes = market.supportedTimeframes?.length ? market.supportedTimeframes.join(", ") : "None verified";
   const details = market.verificationDetails || {};
   return `<article class="admin-crypto-market-card">
     <header><div><strong>${escapeHtml(market.displaySymbol)}</strong><span>${escapeHtml(market.name)} &middot; Coinbase &middot; ${escapeHtml(market.providerSymbol)}</span></div><em class="crypto-provider-state ${providerClass}">${escapeHtml(status)}</em></header>
-    <div class="admin-crypto-market-meta"><span>Status<strong>${escapeHtml(status)}</strong></span><span>Verification<strong>${escapeHtml(titleCase(market.verificationStatus || "pending"))}</strong></span><span>Timeframes<strong>${escapeHtml(timeframes)}</strong></span><span>Last verified<strong>${market.lastVerifiedAt ? formatDateTime(market.lastVerifiedAt) : "Never"}</strong></span><span>Last candle<strong>${market.lastSuccessfulCandleAt ? formatDateTime(market.lastSuccessfulCandleAt) : "Never"}</strong></span></div>
-    <details class="admin-crypto-verification-details" ${canonicalStatus === "pending" ? "open" : ""}>
+    <div class="admin-crypto-market-meta"><span>Status<strong>${escapeHtml(status)}</strong></span><span>Verification<strong>${escapeHtml(titleCase(market.verificationStatus || "failed"))}</strong></span><span>Timeframes<strong>${escapeHtml(timeframes)}</strong></span><span>Last verified<strong>${market.lastVerifiedAt ? formatDateTime(market.lastVerifiedAt) : "Never"}</strong></span><span>Last candle<strong>${market.lastSuccessfulCandleAt ? formatDateTime(market.lastSuccessfulCandleAt) : "Never"}</strong></span></div>
+    <details class="admin-crypto-verification-details" ${canonicalStatus !== "active" ? "open" : ""}>
       <summary>Verification details</summary>
       <div class="admin-crypto-detail-grid">
         <span>Provider symbol<strong>${escapeHtml(details.providerSymbol || market.providerSymbol)}</strong></span>
@@ -3611,7 +3629,7 @@ async function pollCryptoVerificationJob() {
       adminCryptoVerifyPending.disabled = false;
       await loadAdminCryptoMarkets();
       await loadPairs();
-      showToast("Pending market verification complete");
+      showToast("Market verification complete");
       break;
     }
   }
@@ -3623,13 +3641,13 @@ function renderCryptoVerificationProgress(job = {}) {
   adminCryptoProgress.classList.toggle("hidden", !job.running && !job.finishedAt);
   document.querySelector("#admin-crypto-progress-label").textContent = job.running
     ? `Verifying ${completed + 1 > total ? total : completed + 1} / ${total}${job.currentSymbol ? ` · ${job.currentSymbol}` : ""}...`
-    : `Verification complete: Ready ${job.active || 0}, Unavailable ${job.unavailable || 0}, Provider error ${job.providerError || 0}, Legacy ${job.legacy || 0}, Still pending ${job.stillPending || 0}.`;
+    : `Verification complete: Active ${job.active || 0}, Unavailable ${job.unavailable || 0}, Provider error ${job.providerError || 0}, Legacy ${job.legacy || 0}, Unresolved ${job.stillPending || 0}.`;
   document.querySelector("#admin-crypto-progress-count").textContent = `${completed} / ${total}`;
   const progress = document.querySelector("#admin-crypto-progress-bar");
   progress.max = Math.max(1, total); progress.value = completed;
   adminCryptoOperationStatus.textContent = job.running
     ? `Verification progress: ${completed}/${total}${job.lastResult?.symbol ? ` · last ${job.lastResult.symbol}: ${titleCase(job.lastResult.status)}` : ""}`
-    : `Verification complete: Ready ${job.active || 0}, Unavailable ${job.unavailable || 0}, Provider error ${job.providerError || 0}, Still pending ${job.stillPending || 0}.`;
+    : `Verification complete: Active ${job.active || 0}, Unavailable ${job.unavailable || 0}, Provider error ${job.providerError || 0}, Unresolved ${job.stillPending || 0}.`;
 }
 
 function cryptoSettingToggle(market, key, label, disabled = false) {

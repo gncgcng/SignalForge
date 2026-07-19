@@ -128,9 +128,9 @@ export const appConfig = {
     cacheTtlMs: 20000
   },
   cryptoMarkets: {
-    syncEnabled: process.env.COINBASE_MARKET_SYNC_ENABLED !== "false",
+    syncEnabled: process.env.COINBASE_MARKET_SYNC_ENABLED === "true",
     syncIntervalMs: Math.max(3600000, Number(process.env.COINBASE_MARKET_SYNC_INTERVAL_MS || 86400000)),
-    verificationEnabled: process.env.MARKET_VERIFICATION_ENABLED !== "false",
+    verificationEnabled: process.env.MARKET_VERIFICATION_ENABLED === "true",
     verificationIntervalMs: Math.max(60000, Number(process.env.MARKET_VERIFICATION_INTERVAL_MS || 300000)),
     verificationConcurrency: Math.max(1, Number(process.env.MARKET_VERIFICATION_CONCURRENCY || 1)),
     verificationDelayMs: Math.max(0, Number(process.env.MARKET_VERIFICATION_DELAY_MS || 750)),

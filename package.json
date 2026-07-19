@@ -51,6 +51,7 @@
     "test:crypto-markets": "node scripts/crypto-market-operations-test.js",
     "test:crypto-market-sync": "node scripts/crypto-market-sync-test.js",
     "market:test": "node scripts/test-coinbase-market.js",
+    "market:rebuild-active": "node scripts/rebuild-active-crypto-markets.js",
     "market:verify-pending": "node scripts/verify-pending-crypto-markets.js",
     "market:audit": "node scripts/audit-crypto-market-verification.js",
     "market:audit-coinbase": "node scripts/audit-coinbase-products.js",

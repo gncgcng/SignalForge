@@ -68,25 +68,25 @@ export function listCryptoMarketSettings() {
 
 export function listScannerCryptoMarkets() {
   return listCryptoMarketSettings()
-    .filter((market) => market.status === "ready" && market.enabled && market.scannerEnabled && !isCoolingDown(market))
+    .filter((market) => market.status === "active" && market.enabled && market.scannerEnabled && !isCoolingDown(market))
     .slice(0, appConfig.cryptoMarkets.maxActiveScannerPairs);
 }
 
 export function listPaperCryptoMarkets() {
   return listCryptoMarketSettings().filter((market) =>
-    market.status === "ready" && market.enabled && market.paperTradingEnabled && !isCoolingDown(market)
+    market.status === "active" && market.enabled && market.paperTradingEnabled && !isCoolingDown(market)
   );
 }
 
 export function listWatchlistCryptoMarkets() {
   return listCryptoMarketSettings().filter((market) =>
-    market.status === "ready" && market.enabled && market.watchlistEnabled && !isCoolingDown(market)
+    market.status === "active" && market.enabled && market.watchlistEnabled && !isCoolingDown(market)
   );
 }
 
 export function canUseCryptoTimeframe(symbol, timeframe, capability = "market") {
   const market = getCryptoMarketState(symbol);
-  if (!market || market.status !== "ready" || !market.enabled || isCoolingDown(market)) return false;
+  if (!market || market.status !== "active" || !market.enabled || isCoolingDown(market)) return false;
   if (capability === "scanner" && !market.scannerEnabled) return false;
   if (capability === "paper" && !market.paperTradingEnabled) return false;
   if (capability === "watchlist" && !market.watchlistEnabled) return false;
@@ -106,7 +106,7 @@ export async function updateCryptoMarketSettings(symbol, changes) {
   const marketStatus = !enabled
     ? "disabled"
     : current.verificationStatus === "verified" ? "active"
-      : current.verificationStatus === "legacy" ? "legacy" : "pending";
+      : current.verificationStatus === "legacy" ? "legacy" : "unavailable";
   const status = !enabled ? "disabled" : canonicalStatusFromMarketStatus(marketStatus);
   if (scannerEnabled && enabled && marketStatus !== "active") {
     throw marketError("Verify provider candle support before enabling this pair for scanning.", 409);
@@ -132,7 +132,7 @@ export async function importCoinbaseCryptoProducts(products) {
       enabled, scanner_enabled, paper_trading_enabled, watchlist_enabled,
       provider_status, base_asset, quote_asset, product_status, trading_enabled,
       market_status, verification_status, status
-    ) VALUES ($1,$2,$3,$4,'coinbase-exchange',$5,true,false,true,true,'unchecked',$6,$7,$8,true,'pending','pending','pending')
+    ) VALUES ($1,$2,$3,$4,'coinbase-exchange',$5,true,false,true,true,'unchecked',$6,$7,$8,true,'unavailable','failed','unavailable')
     ON CONFLICT (provider_symbol) DO UPDATE SET
       display_symbol=EXCLUDED.display_symbol, name=EXCLUDED.name,
       base_asset=EXCLUDED.base_asset, quote_asset=EXCLUDED.quote_asset,
@@ -283,17 +283,17 @@ export async function resetCryptoMarketCooldown(symbol) {
   if (!current) throw marketError("Unknown crypto market.", 404);
   const previouslyVerified = current.supportedTimeframes.length > 0;
   const next = { ...current,
-    status: previouslyVerified ? "ready" : "pending",
-    marketStatus: previouslyVerified ? "active" : "pending",
-    verificationStatus: previouslyVerified ? "verified" : "pending",
-    providerStatus: previouslyVerified ? "available" : "unchecked",
+    status: previouslyVerified ? "active" : "unavailable",
+    marketStatus: previouslyVerified ? "active" : "unavailable",
+    verificationStatus: previouslyVerified ? "verified" : "failed",
+    providerStatus: previouslyVerified ? "available" : "unavailable",
     cooldownUntil: null, lastError: null, failureCode: null
   };
   runtime.set(current.symbol, next);
-  await query(`UPDATE crypto_markets SET market_status=CASE WHEN cardinality(supported_timeframes)>0 THEN 'active' ELSE 'pending' END,
-    verification_status=CASE WHEN cardinality(supported_timeframes)>0 THEN 'verified' ELSE 'pending' END,
-    status=CASE WHEN cardinality(supported_timeframes)>0 THEN 'ready' ELSE 'pending' END,
-    provider_status=CASE WHEN cardinality(supported_timeframes)>0 THEN 'available' ELSE 'unchecked' END,
+  await query(`UPDATE crypto_markets SET market_status=CASE WHEN cardinality(supported_timeframes)>0 THEN 'active' ELSE 'unavailable' END,
+    verification_status=CASE WHEN cardinality(supported_timeframes)>0 THEN 'verified' ELSE 'failed' END,
+    status=CASE WHEN cardinality(supported_timeframes)>0 THEN 'active' ELSE 'unavailable' END,
+    provider_status=CASE WHEN cardinality(supported_timeframes)>0 THEN 'available' ELSE 'unavailable' END,
     cooldown_until=NULL, last_error=NULL, failure_code=NULL, updated_at=now() WHERE symbol=$1`, [current.symbol]).catch(() => {});
 }
 
@@ -304,11 +304,11 @@ export async function recordCryptoMarketSuccess(symbol, timeframe, lastCandleAt)
   const unsupported = current.unsupportedTimeframes.filter((item) => item !== timeframe);
   const checkedAt = new Date();
   const recentlyRecorded = current.marketStatus === "active" && current.supportedTimeframes.includes(timeframe) && current.lastCheckedAt && checkedAt.getTime() - new Date(current.lastCheckedAt).getTime() < 300000;
-  const next = { ...current, status: "ready", marketStatus: "active", verificationStatus: "verified", providerStatus: "available", supportedTimeframes: supported, unsupportedTimeframes: unsupported, lastSuccessfulCandleAt: lastCandleAt, lastCheckedAt: checkedAt.toISOString(), lastVerifiedAt: checkedAt.toISOString(), lastError: null, failureCode: null, cooldownUntil: null, consecutiveFailures: 0 };
+  const next = { ...current, status: "active", marketStatus: "active", verificationStatus: "verified", providerStatus: "available", supportedTimeframes: supported, unsupportedTimeframes: unsupported, lastSuccessfulCandleAt: lastCandleAt, lastCheckedAt: checkedAt.toISOString(), lastVerifiedAt: checkedAt.toISOString(), lastError: null, failureCode: null, cooldownUntil: null, consecutiveFailures: 0 };
   runtime.set(current.symbol, next);
   loggedFailures.delete(`${current.symbol}:${timeframe}`);
   if (recentlyRecorded) return;
-  await query(`UPDATE crypto_markets SET market_status='active', verification_status='verified', status='ready', provider_status='available',
+  await query(`UPDATE crypto_markets SET market_status='active', verification_status='verified', status='active', provider_status='available',
     supported_timeframes=$2, unsupported_timeframes=$3, last_successful_candle_at=$4, last_checked_at=$5,
     last_verified_at=$5, last_error=NULL, failure_code=NULL, cooldown_until=NULL,
     consecutive_failures=0, updated_at=now() WHERE symbol=$1`, [current.symbol, supported, unsupported, lastCandleAt, checkedAt]).catch(() => {});
@@ -348,7 +348,7 @@ export function isCryptoMarketCoolingDown(symbol) {
 }
 
 function effectiveFlags(market) {
-  const ready = market.status === "ready" && market.enabled && !isCoolingDown(market);
+  const ready = market.status === "active" && market.enabled && !isCoolingDown(market);
   return {
     statusLabel: market.enabled === false ? "Disabled by admin" : statusLabel(market.status),
     effectiveScannerEnabled: Boolean(ready && market.scannerEnabled),
@@ -360,8 +360,8 @@ function effectiveFlags(market) {
 function defaultState(market) {
   const legacyReplacement = legacyCryptoReplacements[market.symbol] || null;
   const established = establishedSymbols.has(market.symbol);
-  const marketStatus = legacyReplacement ? "legacy" : established ? "active" : "pending";
-  const status = legacyReplacement ? "legacy" : established ? "ready" : "pending";
+  const marketStatus = legacyReplacement ? "legacy" : established ? "active" : "unavailable";
+  const status = legacyReplacement ? "legacy" : established ? "active" : "unavailable";
   return {
     ...market,
     baseAsset: market.symbol.split("-")[0], quoteAsset: "USD", productStatus: "legacy_seed",
@@ -369,7 +369,7 @@ function defaultState(market) {
     scannerEnabled: legacyReplacement ? false : market.scannerEnabled,
     paperTradingEnabled: legacyReplacement ? false : market.paperTradingEnabled,
     providerStatus: legacyReplacement ? "unavailable" : established ? "available" : "unchecked",
-    status, marketStatus, verificationStatus: legacyReplacement ? "legacy" : established ? "verified" : "pending",
+    status, marketStatus, verificationStatus: legacyReplacement ? "legacy" : established ? "verified" : "failed",
     supportedTimeframes: established ? [...cryptoTimeframes] : [], unsupportedTimeframes: [],
     lastSuccessfulCandleAt: null, lastCheckedAt: null, lastVerifiedAt: null,
     lastError: legacyReplacement ? "Legacy Coinbase symbol. Use the replacement market." : null,
@@ -431,7 +431,7 @@ function buildVerificationDetails(market, checks, details) {
     lastVerificationAttempt: details.lastVerificationAttempt || null,
     lastError: details.lastError || null,
     nextRetryTime: details.nextRetryAt || null,
-    finalStatus: details.finalStatus || "pending"
+    finalStatus: details.finalStatus || "unavailable"
   };
 }
 
@@ -442,14 +442,14 @@ async function markVerifiedLegacyReplacements(replacementSymbol) {
 }
 
 function statusLabel(status) {
-  return ({ ready: "Ready", active: "Active", pending: "Pending verification", unavailable: "Unavailable", legacy: "Legacy / migrated", disabled: "Disabled by admin", provider_error: "Provider error" })[status] || "Pending verification";
+  return ({ active: "Ready", unavailable: "Unavailable", legacy: "Legacy / migrated", disabled: "Disabled by admin", provider_error: "Provider error" })[status] || "Unavailable";
 }
 function canonicalStatusFromMarketStatus(status) {
-  return ({ active: "ready", ready: "ready", provider_error: "provider_error", unavailable: "unavailable", legacy: "legacy", disabled: "disabled" })[status] || "pending";
+  return ({ active: "active", ready: "active", provider_error: "provider_error", unavailable: "unavailable", legacy: "legacy", disabled: "disabled" })[status] || "unavailable";
 }
 function safeLogReason(value) { return String(value || "unknown").replace(/[\r\n]+/g, " ").slice(0, 160); }
-function legacyProviderStatus(row) { return row.provider_status === "available" ? "active" : row.provider_status === "provider_issue" ? "provider_error" : row.provider_status === "unavailable" ? "unavailable" : "pending"; }
-function legacyVerificationStatus(row) { return row.provider_status === "available" ? "verified" : row.provider_status === "provider_issue" ? "error" : row.provider_status === "unavailable" ? "failed" : "pending"; }
+function legacyProviderStatus(row) { return row.provider_status === "available" ? "active" : row.provider_status === "provider_issue" ? "provider_error" : "unavailable"; }
+function legacyVerificationStatus(row) { return row.provider_status === "available" ? "verified" : row.provider_status === "provider_issue" ? "error" : "failed"; }
 function normalizeSymbol(value) { return String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, ""); }
 function isCoolingDown(market) { return Boolean(market.cooldownUntil && new Date(market.cooldownUntil).getTime() > Date.now()); }
 function booleanValue(value, fallback) { return typeof value === "boolean" ? value : fallback; }

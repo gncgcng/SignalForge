@@ -115,14 +115,14 @@ const signalService = readFileSync(
   new URL("../src/modules/signals/signalService.js", import.meta.url),
   "utf8"
 );
+const cryptoMarketsSource = readFileSync(new URL("../src/modules/markets/cryptoMarkets.js", import.meta.url), "utf8");
 const app = readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
 
 const result = {
-  catalogCoverage: requiredCryptoSymbols.every((symbol) => {
-    const pair = catalog.find((item) => item.symbol === symbol);
-    return pair?.category === "Crypto" &&
-      pair.provider === "coinbase-exchange";
-  }),
+  catalogCoverage: catalog
+    .filter((pair) => pair.category === "Crypto")
+    .every((pair) => pair.status === "active" && pair.provider === "coinbase-exchange") &&
+    !catalog.some((pair) => ["MATIC-USD", "RNDR-USD"].includes(pair.symbol)),
   providerCoverage: requiredCryptoSymbols.every((symbol) => coinbaseSymbols.includes(symbol)),
   allTimeframesSupported: requiredCryptoSymbols.every((symbol) => {
     return timeframes.every((timeframe) => coinbaseMarketDataProvider.supports(symbol, timeframe));
@@ -133,9 +133,10 @@ const result = {
   scanAllCoverage: activeSymbols.has("BTC-USD") &&
     !activeSymbols.has("MATIC-USD") &&
     signalService.includes("listScannerPairs()"),
-  uiGroupsPresent: ["Major crypto", "Altcoins", "Commodities"].every((group) => {
-    return catalog.some((pair) => pair.group === group);
-  }) && app.includes("pair.group || pair.category"),
+  uiGroupsPresent: cryptoMarketsSource.includes("Major crypto") &&
+    cryptoMarketsSource.includes("Altcoins") &&
+    catalog.some((pair) => pair.group === "Commodities") &&
+    app.includes("pair.group || pair.category"),
   goldPreserved: catalog.some((pair) => {
     return pair.symbol === "XAU/USD" &&
       pair.provider === "twelve-data" &&

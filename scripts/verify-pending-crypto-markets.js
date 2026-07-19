@@ -67,8 +67,9 @@ function parseArgs(args) {
 function summarize(markets) {
   return {
     total: markets.length,
-    ready: markets.filter((market) => market.status === "ready").length,
-    pending: markets.filter((market) => market.status === "pending").length,
+    ready: markets.filter((market) => market.status === "active").length,
+    pending: markets.filter((market) => [market.status, market.marketStatus, market.verificationStatus]
+      .some((value) => String(value || "").toLowerCase().includes("pending"))).length,
     unavailable: markets.filter((market) => market.status === "unavailable").length,
     providerError: markets.filter((market) => market.status === "provider_error").length,
     legacy: markets.filter((market) => market.status === "legacy").length,
@@ -87,8 +88,8 @@ function diff(before, after) {
 
 function printSummary(summary) {
   console.log(`Total: ${summary.total}`);
-  console.log(`Ready: ${summary.ready}`);
-  console.log(`Pending: ${summary.pending}`);
+  console.log(`Active: ${summary.ready}`);
+  console.log(`Pending-like rows: ${summary.pending}`);
   console.log(`Unavailable: ${summary.unavailable}`);
   console.log(`Provider error: ${summary.providerError}`);
   console.log(`Legacy: ${summary.legacy}`);

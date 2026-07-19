@@ -283,7 +283,7 @@ function isPendingVerificationMarket(market) {
 function summarizeMarkets(markets) {
   return {
     total: markets.length,
-    ready: markets.filter((market) => market.status === "ready").length,
+    ready: markets.filter((market) => market.status === "active").length,
     pending: markets.filter((market) => market.status === "pending" || isPendingVerificationMarket(market)).length,
     unavailable: markets.filter((market) => market.status === "unavailable").length,
     providerError: markets.filter((market) => market.status === "provider_error").length,
@@ -298,14 +298,14 @@ function createVerificationSummary(total, before = {}) {
 }
 function addVerificationResult(summary, market) {
   summary.checked += 1;
-  if (market.status === "ready") summary.ready += 1;
+  if (market.status === "active") summary.ready += 1;
   else if (market.status === "provider_error") summary.providerError += 1;
   else if (market.status === "legacy") summary.legacy += 1;
   else if (market.status === "disabled") summary.disabled += 1;
   else summary.unavailable += 1;
 }
 function terminalStatusLabel(status) {
-  return ({ active: "ready", ready: "ready", provider_error: "provider_error", unavailable: "unavailable", legacy: "legacy", disabled: "disabled" })[status] || "unavailable";
+  return ({ active: "active", ready: "active", provider_error: "provider_error", unavailable: "unavailable", legacy: "legacy", disabled: "disabled" })[status] || "unavailable";
 }
 async function resolveVerificationException(market, error, options = {}) {
   const checks = verificationTimeframes().map((timeframe) => ({
@@ -324,7 +324,7 @@ async function resolveVerificationException(market, error, options = {}) {
   return { symbol: resolved.symbol, available: false, checked: checks, product: null, market: resolved };
 }
 function verificationTimeframes() {
-  return ["15m", "1h", "4h", "5m"];
+  return ["1h", "15m", "4h", "5m"];
 }
 function diffSummaries(before, after) {
   return Object.fromEntries(["ready", "pending", "unavailable", "providerError", "legacy", "disabled"].map((key) => [

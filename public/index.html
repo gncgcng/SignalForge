@@ -1996,8 +1996,9 @@
               <span id="admin-crypto-market-count">0 active markets</span>
             </div>
             <div class="admin-crypto-actions">
+              <button id="admin-crypto-rebuild-active" type="button">Rebuild active Coinbase markets</button>
               <button id="admin-crypto-sync" type="button">Sync Coinbase markets</button>
-              <button class="secondary-action" id="admin-crypto-verify-pending" type="button">Verify all pending</button>
+              <button class="secondary-action" id="admin-crypto-verify-pending" type="button">Check unresolved markets</button>
               <button class="secondary-action" id="admin-crypto-diagnostics" type="button">Test Coinbase provider</button>
               <span class="status-line" id="admin-crypto-operation-status" aria-live="polite"></span>
             </div>
@@ -2005,7 +2006,7 @@
             <div class="admin-crypto-summary" id="admin-crypto-summary"></div>
             <form class="admin-crypto-filters" id="admin-crypto-filters">
               <input class="sf-input" name="q" type="search" placeholder="Search BTC, BTCUSD, BTC-USD, Bitcoin, Coinbase...">
-              <select class="sf-select" name="status"><option value="all">All states</option><option value="active">Active</option><option value="pending">Pending verification</option><option value="unavailable">Unavailable</option><option value="legacy">Legacy / migrated</option><option value="disabled">Disabled by admin</option><option value="provider_error">Provider error</option><option value="scanner">Scanner enabled</option><option value="paper">Paper trading enabled</option></select>
+              <select class="sf-select" name="status"><option value="all">All states</option><option value="active">Active / Ready</option><option value="unavailable">Unavailable</option><option value="provider_error">Provider error</option><option value="legacy">Legacy / migrated</option><option value="disabled">Disabled by admin</option><option value="scanner">Scanner enabled</option><option value="paper">Paper trading enabled</option></select>
               <select class="sf-select" name="tier"><option value="all">All liquidity tiers</option><option value="major">Major</option><option value="standard">Standard</option><option value="high-volatility">High volatility</option></select>
               <button type="submit">Apply</button><button class="secondary-action" id="admin-crypto-filter-clear" type="button">Clear</button>
             </form>

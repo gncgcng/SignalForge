@@ -1,6 +1,7 @@
 import { readJson, sendError, sendJson } from "../../shared/http.js";
 import { isAdminUser } from "../auth/authService.js";
 import { getPendingCryptoVerificationJob, startPendingCryptoVerification, testCoinbaseProviderDiagnostics, verifyCryptoMarket, verifyPendingCryptoMarkets } from "./cryptoMarketMonitor.js";
+import { rebuildActiveCryptoMarkets } from "./cryptoMarketRebuildService.js";
 import { syncCoinbaseCryptoMarkets } from "./cryptoMarketSyncService.js";
 import { listCryptoMarketSettings, replaceLegacyCryptoMarket, updateCryptoMarketSettings } from "./cryptoMarketService.js";
 
@@ -26,6 +27,14 @@ export async function handleAdminCryptoMarketRoutes(req, res, pathname, url) {
   if (pathname === "/api/admin/crypto-markets/verify-pending" && req.method === "POST") {
     try {
       return sendJson(res, 200, await verifyPendingCryptoMarkets());
+    } catch (error) {
+      return sendError(res, error.statusCode || 502, error.message);
+    }
+  }
+
+  if (pathname === "/api/admin/crypto-markets/rebuild-active" && req.method === "POST") {
+    try {
+      return sendJson(res, 200, { rebuild: await rebuildActiveCryptoMarkets() });
     } catch (error) {
       return sendError(res, error.statusCode || 502, error.message);
     }
@@ -79,8 +88,8 @@ export function filterCryptoMarkets(markets, params) {
   const tier = String(params.get("tier") || "all");
   const query = String(params.get("q") || "").trim().toLowerCase();
   return markets.filter((market) => {
-    const canonicalStatus = status === "active" ? "ready" : status;
-    if (["ready", "pending", "unavailable", "legacy", "disabled", "provider_error"].includes(canonicalStatus) && market.status !== canonicalStatus) return false;
+    const canonicalStatus = status;
+    if (["active", "unavailable", "legacy", "disabled", "provider_error"].includes(canonicalStatus) && market.status !== canonicalStatus) return false;
     if (status === "scanner" && !market.effectiveScannerEnabled) return false;
     if (status === "paper" && !market.effectivePaperTradingEnabled) return false;
     if (tier !== "all" && market.liquidityTier !== tier) return false;
@@ -92,9 +101,8 @@ export function filterCryptoMarkets(markets, params) {
 export function summarizeCryptoMarkets(markets) {
   return {
     totalDiscovered: markets.length,
-    active: markets.filter((market) => market.status === "ready").length,
-    ready: markets.filter((market) => market.status === "ready").length,
-    pending: markets.filter((market) => market.status === "pending").length,
+    active: markets.filter((market) => market.status === "active").length,
+    ready: markets.filter((market) => market.status === "active").length,
     unavailable: markets.filter((market) => market.status === "unavailable").length,
     legacy: markets.filter((market) => market.status === "legacy").length,
     disabled: markets.filter((market) => market.status === "disabled" || market.enabled === false && market.status !== "legacy").length,

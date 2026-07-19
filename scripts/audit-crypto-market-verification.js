@@ -11,8 +11,8 @@ try {
   const counts = summarize(markets);
   console.log("Crypto market verification audit");
   console.log(`Total crypto markets: ${counts.total}`);
-  console.log(`Ready markets: ${counts.ready}`);
-  console.log(`Pending markets: ${counts.pending}`);
+  console.log(`Active markets: ${counts.active}`);
+  console.log(`Legacy pending-like rows: ${counts.pendingLike}`);
   console.log(`Unavailable markets: ${counts.unavailable}`);
   console.log(`Provider error markets: ${counts.providerError}`);
   console.log(`Legacy markets: ${counts.legacy}`);
@@ -20,9 +20,9 @@ try {
   console.log(`Scanner enabled: ${counts.scannerEnabled}`);
   console.log(`Paper trading enabled: ${counts.paperTradingEnabled}`);
   console.log("");
-  console.log("First 50 pending markets:");
+  console.log("First 50 pending-like rows:");
 
-  const pending = markets.filter((market) => market.status === "pending").slice(0, 50);
+  const pending = markets.filter(isPendingLike).slice(0, 50);
   if (!pending.length) {
     console.log("None");
   }
@@ -53,8 +53,8 @@ try {
 function summarize(markets) {
   return {
     total: markets.length,
-    ready: markets.filter((market) => market.status === "ready").length,
-    pending: markets.filter((market) => market.status === "pending").length,
+    active: markets.filter((market) => market.status === "active").length,
+    pendingLike: markets.filter(isPendingLike).length,
     unavailable: markets.filter((market) => market.status === "unavailable").length,
     providerError: markets.filter((market) => market.status === "provider_error").length,
     legacy: markets.filter((market) => market.status === "legacy").length,
@@ -62,4 +62,9 @@ function summarize(markets) {
     scannerEnabled: markets.filter((market) => market.effectiveScannerEnabled).length,
     paperTradingEnabled: markets.filter((market) => market.effectivePaperTradingEnabled).length
   };
+}
+
+function isPendingLike(market) {
+  return [market.status, market.marketStatus, market.verificationStatus]
+    .some((value) => String(value || "").toLowerCase().includes("pending"));
 }

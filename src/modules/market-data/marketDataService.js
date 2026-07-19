@@ -71,7 +71,10 @@ const legacyMarketCatalog = [
 const nonCryptoMarketCatalog = legacyMarketCatalog.filter((market) => market.category !== "Crypto");
 
 function currentMarketCatalog() {
-  return [...listCryptoMarketSettings(), ...nonCryptoMarketCatalog];
+  const activeCryptoMarkets = listCryptoMarketSettings().filter((market) =>
+    market.status === "active" && market.enabled
+  );
+  return [...activeCryptoMarkets, ...nonCryptoMarketCatalog];
 }
 
 export function listPairs(query = "") {
