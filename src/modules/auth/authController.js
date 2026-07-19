@@ -42,33 +42,33 @@ export async function handleAuthRoutes(req, res, pathname) {
       });
     }
 
+    let refreshed = null;
+    let restore = null;
     try {
-      const refreshed = req.user && req.sessionId
-        ? await refreshSessionExpiry(req.sessionId)
-        : null;
-      logSessionCheck(req, Boolean(refreshed));
-      return sendJson(res, 200, {
-        ok: true,
-        user: toPublicUser(req.user),
-        sessionExpiresAt: refreshed?.expiresAt || null,
-        restore: req.user
-          ? await createPersistentRestoreToken(
-            req.user.id,
-            req,
-            req.headers["x-device-fingerprint"]
-          )
-          : null
-      }, {
-        ...authResponseHeaders(),
-        ...(refreshed ? { "set-cookie": buildSessionCookie(req.sessionId) } : {})
-      });
+      refreshed = req.sessionId ? await refreshSessionExpiry(req.sessionId) : null;
     } catch (error) {
-      console.warn(`[auth] Session endpoint failed reason=${safeSessionFailure(error)}`);
-      return sendJson(res, 500, {
-        ok: false,
-        error: "auth_check_failed"
-      }, authResponseHeaders());
+      console.warn(`[auth] Session expiry refresh failed reason=${safeSessionFailure(error)}`);
     }
+    try {
+      restore = await createPersistentRestoreToken(
+        req.user.id,
+        req,
+        req.headers["x-device-fingerprint"]
+      );
+    } catch (error) {
+      console.warn(`[auth] Session restore-token rotation failed reason=${safeSessionFailure(error)}`);
+    }
+
+    logSessionCheck(req, Boolean(refreshed));
+    return sendJson(res, 200, {
+      ok: true,
+      user: toPublicUser(req.user),
+      sessionExpiresAt: refreshed?.expiresAt || null,
+      restore
+    }, {
+      ...authResponseHeaders(),
+      ...(refreshed ? { "set-cookie": buildSessionCookie(req.sessionId) } : {})
+    });
   }
 
   if (pathname === "/api/auth/config" && req.method === "GET") {

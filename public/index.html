@@ -2245,6 +2245,23 @@
           var showBuildDebug = hash === "#debug-build";
           var showClearSession = hash === "#clear-session";
           var showAuth = authRoutes.indexOf(hash) >= 0 || protectedRoutes.indexOf(hash) >= 0 || hash === "#clear-session";
+          var waitsForSessionRestore = reason === "rendered_immediately" && (
+            hash === "#landing" ||
+            hash === "#signin" ||
+            hash === "#signup" ||
+            protectedRoutes.indexOf(hash) >= 0
+          );
+          if (waitsForSessionRestore) {
+            setVisible("account-recovery-support-page", false);
+            setVisible("public-how-it-works-page", false);
+            setVisible("debug-build-page", false);
+            setVisible("clear-session-page", false);
+            setVisible("auth-screen", false);
+            setVisible("dashboard", false);
+            setVisible("landing-page", false);
+            showDebug();
+            return;
+          }
           setVisible("account-recovery-support-page", showRecovery);
           setVisible("public-how-it-works-page", showGuide);
           setVisible("debug-build-page", showBuildDebug);
@@ -2280,7 +2297,7 @@
           window.__signalForgeAuthDebug.timeout = true;
           window.__signalForgeAuthDebug.status = "failsafe_rendered";
           revealRequestedRoute("failsafe_rendered");
-        }, 2800);
+        }, 9000);
       }());
     </script>
     <script src="/auth-bootstrap.js?v=AUTH-DEBUG-001"></script>

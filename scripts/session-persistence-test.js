@@ -29,6 +29,7 @@ const repositories = readFileSync(
   "utf8"
 );
 const app = readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+const authBootstrap = readFileSync(new URL("../public/auth-bootstrap.js", import.meta.url), "utf8");
 const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
 const migration = readFileSync(
   new URL("../migrations/019_persistent_sessions.sql", import.meta.url),
@@ -77,6 +78,22 @@ const result = {
     app.includes('api.request("/api/auth/session", { signal })') &&
     app.includes("setSplashStatus(\"Restoring your session\")") &&
     html.includes('id="app-splash-status"'),
+  centralizedPersistentAuthStorage:
+    authBootstrap.includes("saveAuthSession: function (session)") &&
+    authBootstrap.includes("getAuthSession: function ()") &&
+    authBootstrap.includes("clearAuthSession: function ()") &&
+    authBootstrap.includes('var RESTORE_EXPIRES_AT_KEY = "signalforge-restore-expires-at"') &&
+    app.includes("const saved = authStorage?.saveAuthSession") &&
+    app.includes("const stored = authStorage?.getAuthSession?.() || {}"),
+  authRouteWaitsForRestore:
+    !app.includes('if (isPublicAuthRoute()) {\n    const authConfig = await loadAuthConfig();') &&
+    app.includes('} else if (isPublicAuthRoute()) {\n    setSplashStatus("Opening sign in");') &&
+    app.includes("const AUTH_RESTORE_TIMEOUT_MS = 8000"),
+  signInUsesLoginOnlyFields:
+    app.includes('const signupMode = getHashRoute() === "#signup"') &&
+    app.includes('["name", "username", "publicProfileEnabled"]') &&
+    app.includes('input.disabled = !signupMode') &&
+    app.includes('heading.textContent = signupMode ? "Create your account" : "Sign in"'),
   loginRefreshStillLoggedIn:
     app.includes("if (session.user)") &&
     app.includes("console.info(\"[auth] Cookie session restored.\")") &&
@@ -109,6 +126,11 @@ const result = {
     app.includes("error.statusCode = response.status") &&
     app.includes("Startup session restore failed before login state was confirmed") &&
     !app.includes("clearRestoreToken();\n    console.warn(`[auth] Persistent restore token failed"),
+  validSessionSurvivesAuxiliaryRefreshFailure:
+    authController.includes("Session expiry refresh failed") &&
+    authController.includes("Session restore-token rotation failed") &&
+    authController.includes("user: toPublicUser(req.user)") &&
+    !authController.includes("Session endpoint failed reason="),
   restoreTokenDeviceBoundAndHashed:
     restoreMigration.includes("CREATE TABLE IF NOT EXISTS auth_restore_tokens") &&
     restoreMigration.includes("token_hash text NOT NULL UNIQUE") &&

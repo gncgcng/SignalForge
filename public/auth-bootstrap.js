@@ -2,6 +2,7 @@
   "use strict";
 
   var RESTORE_TOKEN_KEY = "signalforge-restore-token";
+  var RESTORE_EXPIRES_AT_KEY = "signalforge-restore-expires-at";
   var REQUEST_TIMEOUT_MS = 8000;
   var LEGACY_AUTH_KEYS = [
     "signalforge-auth-token",
@@ -26,19 +27,36 @@
 
   var storage = {
     saveAuthSession: function (session) {
-      var token = session && (session.restoreToken || (session.restore && session.restore.token));
-      if (!token) return;
+      var token = session && (session.restoreToken || session.token || (session.restore && session.restore.token));
+      var expiresAt = session && (
+        session.expiresAt ||
+        (session.restore && session.restore.expiresAt) ||
+        session.restoreTokenExpiresAt ||
+        ""
+      );
+      if (!token) return false;
       try {
         window.localStorage.setItem(RESTORE_TOKEN_KEY, token);
+        if (expiresAt) window.localStorage.setItem(RESTORE_EXPIRES_AT_KEY, String(expiresAt));
+        else window.localStorage.removeItem(RESTORE_EXPIRES_AT_KEY);
+        return window.localStorage.getItem(RESTORE_TOKEN_KEY) === token;
       } catch (error) {
         console.warn("[auth-ui] restore token could not be saved reason=storage_unavailable");
+        return false;
       }
     },
     getAuthSession: function () {
       try {
-        return { restoreToken: window.localStorage.getItem(RESTORE_TOKEN_KEY) || "" };
+        var restoreToken = window.localStorage.getItem(RESTORE_TOKEN_KEY) || "";
+        var expiresAt = window.localStorage.getItem(RESTORE_EXPIRES_AT_KEY) || "";
+        if (expiresAt && Number.isFinite(Date.parse(expiresAt)) && Date.parse(expiresAt) <= Date.now()) {
+          window.localStorage.removeItem(RESTORE_TOKEN_KEY);
+          window.localStorage.removeItem(RESTORE_EXPIRES_AT_KEY);
+          return { token: "", restoreToken: "", expiresAt: "" };
+        }
+        return { token: restoreToken, restoreToken: restoreToken, expiresAt: expiresAt };
       } catch (_) {
-        return { restoreToken: "" };
+        return { token: "", restoreToken: "", expiresAt: "" };
       }
     },
     clearAuthSession: function () {
@@ -84,8 +102,10 @@
     if (current.authLoading === undefined) current.authLoading = false;
     if (action === "login" && status === "loading") current.signingIn = true;
     if (action === "login" && ["success", "failed", "timeout"].indexOf(status) >= 0) current.signingIn = false;
-    current.hasLocalToken = hasLegacyLocalToken();
+    current.hasLegacyLocalToken = hasLegacyLocalToken();
     current.hasRestoreToken = Boolean(storage.getAuthSession().restoreToken);
+    current.hasStoredToken = current.hasRestoreToken || current.hasLegacyLocalToken;
+    current.hasStoredUser = false;
     current.lastAuthAction = action || current.lastAuthAction || "none";
     current.lastAuthStatus = status || current.lastAuthStatus || "idle";
     current.lastLoginStage = action === "login" ? status : (current.lastLoginStage || "idle");
@@ -102,13 +122,14 @@
         "Route: " + current.route,
         "Auth loading: " + current.authLoading,
         "Signing in: " + current.signingIn,
-        "Saved restore token: " + current.hasLocalToken,
+        "Stored token: " + current.hasStoredToken,
+        "Stored user: " + current.hasStoredUser,
         "Last action: " + current.lastAuthAction,
         "Last stage: " + current.lastLoginStage,
         "HTTP status: " + (current.lastHttpStatus == null ? "none" : current.lastHttpStatus),
         "Endpoint: " + (current.endpoint || "none"),
         "Response: " + (current.lastResponseSummary || "none"),
-        "Local token: " + current.hasLocalToken,
+        "Legacy local token: " + current.hasLegacyLocalToken,
         "Restore token: " + current.hasRestoreToken,
         "Last error: " + (current.lastErrorMessage || "none")
       ].join(" | ");

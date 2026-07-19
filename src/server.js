@@ -71,7 +71,7 @@ const server = createServer(async (req, res) => {
   try {
     if (requiresAuthAttachment(url.pathname)) {
       try {
-        await withTimeout(attachAuth(req), 2000, "auth_check_timeout");
+        await withTimeout(attachAuth(req), 6000, "auth_check_timeout");
       } catch (error) {
         console.warn(`[auth] Request authentication failed reason=${safeServerReason(error)}`);
         if (url.pathname === "/api/auth/session") {

@@ -21,7 +21,7 @@ import { calculateRiskPosition } from "./riskCalculator.js";
 import { formatSignalCountdown, getSignalValidityState } from "./signalValidity.js";
 
 const RESTORE_TOKEN_KEY = "signalforge-restore-token";
-const AUTH_RESTORE_TIMEOUT_MS = 2800;
+const AUTH_RESTORE_TIMEOUT_MS = 8000;
 const LEGACY_AUTH_STORAGE_KEYS = new Set([
   "signalforge-auth-token",
   "signalforge-session",
@@ -493,7 +493,7 @@ const api = {
       });
       onResponse?.({ status: response.status, ok: response.ok });
       if (path === "/api/auth/session" || path === "/api/auth/restore") {
-        updateAuthDebug({ endpoint: path, statusCode: response.status });
+        updateAuthDebug({ endpoint: path, statusCode: response.status, restoreHttpStatus: response.status });
       }
       const responseText = await response.text();
       let payload = {};
@@ -2255,7 +2255,9 @@ async function init() {
   console.info("[auth] restore:start");
   updateAuthDebug({
     started: true,
+    restoreStarted: true,
     status: "restore_started",
+    restoreStatus: "started",
     authLoading: true,
     signingIn: false,
     endpoint: "/api/auth/session",
@@ -2277,12 +2279,11 @@ async function init() {
     showAccountRecoverySupport();
     return;
   }
-  if (isPublicAuthRoute()) {
+  if (isPasswordResetRequestRoute()) {
     const authConfig = await loadAuthConfig();
     applyAuthConfig(authConfig);
     updateAuthDebug({ authLoading: false, status: "public_auth_route", endpoint: "not_called" });
-    if (isPasswordResetRequestRoute()) showPasswordResetRequest();
-    else showAuth();
+    showPasswordResetRequest();
     hideSplash();
     return;
   }
@@ -2312,15 +2313,15 @@ async function init() {
     }
     authNote.textContent = verificationMessage;
   }
+  applyAuthConfig({ googleEnabled: false, emailFeaturesEnabled: false });
+  loadAuthConfig()
+    .then(applyAuthConfig)
+    .catch((error) => console.warn(`[auth] Auth config refresh failed: ${error.message}`));
   const restoreController = new AbortController();
   const restoreTimeout = window.setTimeout(() => restoreController.abort(), AUTH_RESTORE_TIMEOUT_MS);
   let session;
-  let authConfig;
   try {
-    [session, authConfig] = await Promise.all([
-      loadStartupSession({ signal: restoreController.signal, operationId: restoreOperationId }),
-      loadAuthConfig({ signal: restoreController.signal })
-    ]);
+    session = await loadStartupSession({ signal: restoreController.signal, operationId: restoreOperationId });
   } catch (error) {
     if (!isAuthOperationCurrent(restoreOperationId)) {
       console.info("[auth] restore:stale_result_ignored");
@@ -2337,7 +2338,6 @@ async function init() {
   } finally {
     window.clearTimeout(restoreTimeout);
   }
-  applyAuthConfig(authConfig);
   if (!isAuthOperationCurrent(restoreOperationId) || loginInProgress) {
     console.info("[auth] restore:stale_result_ignored");
     return;
@@ -2359,6 +2359,9 @@ async function init() {
 
   if (user) {
     setSplashStatus("Opening your dashboard");
+    if (isPublicAuthRoute()) {
+      history.replaceState({}, "", `${location.pathname}${location.search}#scanner`);
+    }
     if (oauthSuccess) {
       history.replaceState({}, "", `${location.pathname}${location.hash}`);
     }
@@ -2369,6 +2372,10 @@ async function init() {
   } else if (isPasswordResetRequestRoute()) {
     setSplashStatus("Opening account recovery");
     showPasswordResetRequest();
+  } else if (isPublicAuthRoute()) {
+    setSplashStatus("Opening sign in");
+    showAuth();
+    authNote.textContent = "Please sign in to continue.";
   } else {
     setSplashStatus("Preparing your market desk");
     const showAuthCallback = Boolean(
@@ -2378,10 +2385,14 @@ async function init() {
       isPublicAuthRoute() ||
       isProtectedAppRoute()
     );
-    publicProfilePage?.classList.add("hidden");
-    landingPage.classList.toggle("hidden", showAuthCallback);
-    authScreen.classList.toggle("hidden", !showAuthCallback);
-    dashboard.classList.add("hidden");
+    if (showAuthCallback) {
+      showAuth();
+    } else {
+      publicProfilePage?.classList.add("hidden");
+      authScreen.classList.add("hidden");
+      dashboard.classList.add("hidden");
+      landingPage.classList.remove("hidden");
+    }
     if (getPendingTelegramUnlockKey()) {
       authNote.textContent = "Sign in to unlock this Telegram signal preview.";
     }
@@ -2404,14 +2415,21 @@ async function loadStartupSession({ signal, operationId } = {}) {
     const session = await api.request("/api/auth/session", { signal });
     if (!isValidSessionPayload(session)) {
       console.warn("[auth] restore:failed reason=unexpected_session_response");
-      if (isAuthOperationCurrent(operationId)) clearSavedAuthStorage("unexpected_session_response");
-      return { user: null };
+      const error = new Error("The session endpoint returned an unexpected response.");
+      error.code = "unexpected_session_response";
+      throw error;
     }
-    if (isAuthOperationCurrent(operationId)) saveRestoreToken(session.restore);
+    if (isAuthOperationCurrent(operationId)) saveAuthSession(session);
 
     if (session.user) {
       console.info(`[auth] restore:success user_id=${safeAuthLogId(session.user.id)}`);
-      updateAuthDebug({ status: "restore_success", userId: safeAuthLogId(session.user.id) });
+      updateAuthDebug({
+        status: "restore_success",
+        restoreStatus: "success",
+        currentUserLoaded: true,
+        routeAfterRestore: getHashRoute(),
+        userId: safeAuthLogId(session.user.id)
+      });
       console.info("[auth] Cookie session restored.");
       return session;
     }
@@ -2476,12 +2494,19 @@ async function restoreSavedSession({ signal, cookieFailure = null, operationId }
     });
     if (!isValidRestoredSessionPayload(result)) {
       console.warn("[auth] restore:failed reason=unexpected_restore_response");
-      if (isAuthOperationCurrent(operationId)) clearSavedAuthStorage("unexpected_restore_response");
-      return null;
+      const error = new Error("The restore endpoint returned an unexpected response.");
+      error.code = "unexpected_restore_response";
+      throw error;
     }
     if (!isAuthOperationCurrent(operationId)) return null;
-    saveRestoreToken(result.restore);
+    saveAuthSession(result);
     console.info(`[auth] restore:success user_id=${safeAuthLogId(result.user.id)}`);
+    updateAuthDebug({
+      status: "restore_success",
+      restoreStatus: "success",
+      currentUserLoaded: true,
+      routeAfterRestore: getHashRoute()
+    });
     console.info("[auth] Persistent restore token succeeded.");
     return result.user;
   } catch (error) {
@@ -2553,14 +2578,27 @@ function getLoginErrorMessage(error) {
 
 function saveAuthSession(session = {}) {
   if (session.user && typeof session.user === "object") state.user = session.user;
-  if (authStorage?.saveAuthSession) authStorage.saveAuthSession(session);
-  else saveRestoreToken(session.restore || (session.restoreToken ? { token: session.restoreToken } : null));
+  const saved = authStorage?.saveAuthSession
+    ? authStorage.saveAuthSession(session)
+    : saveRestoreToken(session.restore || ((session.restoreToken || session.token) ? {
+      token: session.restoreToken || session.token,
+      expiresAt: session.expiresAt || session.restoreTokenExpiresAt
+    } : null));
+  updateAuthDebug({
+    hasStoredToken: Boolean(getAuthSession().restoreToken),
+    hasStoredUser: false,
+    currentUserLoaded: Boolean(state.user)
+  });
+  return saved;
 }
 
 function getAuthSession() {
+  const stored = authStorage?.getAuthSession?.() || {};
   return {
     user: state.user,
-    restoreToken: authStorage?.getAuthSession?.().restoreToken || getRestoreToken()
+    token: stored.token || stored.restoreToken || getRestoreToken(),
+    restoreToken: stored.restoreToken || stored.token || getRestoreToken(),
+    expiresAt: stored.expiresAt || ""
   };
 }
 
@@ -2666,6 +2704,11 @@ function updateAuthDebug(update = {}) {
     buildVersion: window.__SIGNALFORGE_BUILD_VERSION__ || "development"
   };
   Object.assign(debug, update);
+  const storedSession = getAuthSession();
+  debug.hasStoredToken = Boolean(storedSession.restoreToken);
+  debug.hasStoredUser = false;
+  debug.hasRestoreToken = Boolean(storedSession.restoreToken);
+  debug.currentUserLoaded = Boolean(state.user);
   window.__signalForgeAuthDebug = debug;
   const hashParams = new URLSearchParams(String(location.hash || "").split("?")[1] || "");
   if (new URLSearchParams(location.search).get("debugAuth") !== "1" && hashParams.get("debugAuth") !== "1") return;
@@ -2677,12 +2720,19 @@ function updateAuthDebug(update = {}) {
     `Route: ${getHashRoute()}`,
     `Auth loading: ${Boolean(debug.authLoading)}`,
     `Signing in: ${Boolean(debug.signingIn)}`,
+    `Stored token: ${debug.hasStoredToken}`,
+    `Stored user: ${debug.hasStoredUser}`,
+    `Restore started: ${Boolean(debug.started)}`,
+    `Restore status: ${debug.restoreStatus || debug.status || "idle"}`,
+    `Restore HTTP status: ${debug.restoreHttpStatus ?? debug.statusCode ?? "none"}`,
+    `Current user loaded: ${debug.currentUserLoaded}`,
+    `Route after restore: ${debug.routeAfterRestore || "none"}`,
     `Last stage: ${debug.lastLoginStage || debug.status || "idle"}`,
     `HTTP status: ${debug.lastHttpStatus ?? debug.statusCode ?? "none"}`,
     `Endpoint: ${debug.endpoint || "none"}`,
     `Response: ${debug.lastResponseSummary || "none"}`,
     `Local token: ${hasLegacyLocalAuthToken()}`,
-    `Restore token: ${Boolean(getAuthSession().restoreToken)}`,
+    `Restore token: ${debug.hasRestoreToken}`,
     `Last error: ${debug.lastErrorMessage || debug.failureReason || "none"}`
   ].join(" | ");
 }
@@ -2974,6 +3024,22 @@ function showAuthForm() {
   authForm?.classList.remove("hidden");
   passwordResetRequestForm?.classList.add("hidden");
   passwordResetConfirmForm?.classList.add("hidden");
+  const signupMode = getHashRoute() === "#signup";
+  for (const fieldName of ["name", "username", "publicProfileEnabled"]) {
+    const input = authForm?.elements?.namedItem(fieldName);
+    const label = input?.closest("label");
+    label?.classList.toggle("hidden", !signupMode);
+    if (input) input.disabled = !signupMode;
+  }
+  const heading = authForm?.querySelector("h2");
+  const submit = authForm?.querySelector('button[type="submit"]');
+  if (heading) heading.textContent = signupMode ? "Create your account" : "Sign in";
+  if (submit && !loginInProgress) submit.textContent = signupMode ? "Create account" : "Sign in";
+  if (authNote && !loginInProgress) {
+    authNote.textContent = signupMode
+      ? "Create your account to start with 3 signal unlocks."
+      : "Sign in to continue to your SignalForge dashboard.";
+  }
 }
 
 function showPasswordResetRequest() {

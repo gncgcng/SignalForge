@@ -43,7 +43,7 @@ function runBootGuard(hash) {
   const elements = Object.fromEntries(ids.map((id) => [id, {
     textContent: "",
     classList: {
-      values: new Set(id === "landing-page" ? [] : ["hidden"]),
+      values: new Set(["landing-page", "app-splash"].includes(id) ? [] : ["hidden"]),
       add(value) { this.values.add(value); },
       remove(value) { this.values.delete(value); },
       toggle(value, force) { if (force) this.add(value); else this.remove(value); }
@@ -99,14 +99,12 @@ assert.equal(recoveryBoot.elements["account-recovery-support-page"].classList.va
 assert.equal(recoveryBoot.elements["app-splash"].classList.values.has("hidden"), true);
 
 const signInBoot = runBootGuard("#signin");
-assert.equal(signInBoot.elements["auth-screen"].classList.values.has("hidden"), false);
-assert.equal(signInBoot.elements["auth-form"].classList.values.has("hidden"), false);
+assert.equal(signInBoot.elements["auth-screen"].classList.values.has("hidden"), true);
 assert.equal(signInBoot.elements["landing-page"].classList.values.has("hidden"), true);
-assert.equal(signInBoot.elements["app-splash"].classList.values.has("hidden"), true);
+assert.equal(signInBoot.elements["app-splash"].classList.values.has("hidden"), false);
 
 const signInDebugBoot = runBootGuard("#signin?debugAuth=1");
-assert.equal(signInDebugBoot.elements["auth-screen"].classList.values.has("hidden"), false);
-assert.equal(signInDebugBoot.elements["auth-form"].classList.values.has("hidden"), false);
+assert.equal(signInDebugBoot.elements["auth-screen"].classList.values.has("hidden"), true);
 assert.equal(signInDebugBoot.elements["landing-page"].classList.values.has("hidden"), true);
 
 const resetBoot = runBootGuard("#reset-password");
@@ -119,12 +117,13 @@ assert.equal(debugBuildBoot.elements["auth-screen"].classList.values.has("hidden
 assert.equal(debugBuildBoot.elements["debug-build-route"].textContent, "#debug-build");
 
 const protectedBoot = runBootGuard("#scanner");
-assert.equal(protectedBoot.elements["auth-screen"].classList.values.has("hidden"), false);
+assert.equal(protectedBoot.elements["auth-screen"].classList.values.has("hidden"), true);
 assert.equal(protectedBoot.elements["dashboard"].classList.values.has("hidden"), true);
+assert.equal(protectedBoot.elements["app-splash"].classList.values.has("hidden"), false);
 
 const landingBoot = runBootGuard("");
-assert.equal(landingBoot.elements["landing-page"].classList.values.has("hidden"), false);
-assert.equal(landingBoot.elements["app-splash"].classList.values.has("hidden"), true);
+assert.equal(landingBoot.elements["landing-page"].classList.values.has("hidden"), true);
+assert.equal(landingBoot.elements["app-splash"].classList.values.has("hidden"), false);
 
 function createResponseRecorder() {
   return {
@@ -194,7 +193,7 @@ const checks = {
     app.includes("throw error;\n  }\n}\n\nfunction isPermanentRestoreFailure") &&
     app.includes("Startup session restore failed before login state was confirmed"),
   timeoutRecovery:
-    app.includes("const AUTH_RESTORE_TIMEOUT_MS = 2800") &&
+    app.includes("const AUTH_RESTORE_TIMEOUT_MS = 8000") &&
     app.includes("restoreController.abort()") &&
     app.includes("[auth] restore:timeout") &&
     html.includes('id="auth-restore-failure"') &&
@@ -222,11 +221,12 @@ const checks = {
   unexpectedJsonFailsSafely:
     app.includes('error.code = "invalid_json"') &&
     app.includes("isValidSessionPayload(session)") &&
-    app.includes('clearSavedAuthStorage("unexpected_session_response")'),
+    app.includes('error.code = "unexpected_session_response"') &&
+    !app.includes('clearSavedAuthStorage("unexpected_session_response")'),
   predictableBackendResponses:
     controller.includes('error: "invalid_session"') &&
-    controller.includes('error: "auth_check_failed"') &&
     controller.includes("ok: true") &&
+    server.includes('error: "auth_check_failed"') &&
     controller.includes("buildClearCookies()"),
   mobileRecoveryLayout:
     styles.includes(".auth-restore-failure") &&
@@ -239,7 +239,7 @@ const checks = {
     worker.includes('fetch(request, { cache: "no-store" })'),
   staticBootBypassesDatabase:
     server.indexOf('if (!url.pathname.startsWith("/api/"))') < server.indexOf("attachAuth(req)") &&
-    server.includes('withTimeout(attachAuth(req), 2000, "auth_check_timeout")') &&
+    server.includes('withTimeout(attachAuth(req), 6000, "auth_check_timeout")') &&
     server.includes('error: "auth_check_failed"') &&
     server.includes('"cache-control": "no-cache, no-store, must-revalidate"'),
   databaseLookupBounded:
