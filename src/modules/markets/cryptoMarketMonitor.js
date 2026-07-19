@@ -1,7 +1,15 @@
 import { appConfig } from "../../config/appConfig.js";
 import { getCandlesFromCoinbase, getProductFromCoinbase } from "../market-data/coinbaseMarketDataProvider.js";
 import { cryptoTimeframes } from "./cryptoMarkets.js";
-import { getCryptoMarketState, listCryptoMarketSettings, resetCryptoMarketCooldown, saveCryptoMarketVerification } from "./cryptoMarketService.js";
+import {
+  getCryptoMarketState,
+  legacyCryptoReplacements,
+  listCryptoMarketSettings,
+  reloadCryptoMarketSettings,
+  replaceLegacyCryptoMarket,
+  resetCryptoMarketCooldown,
+  saveCryptoMarketVerification
+} from "./cryptoMarketService.js";
 
 let monitorTimer = null;
 let monitorRunning = false;
@@ -42,6 +50,15 @@ export async function verifyNextCryptoMarkets() {
 export async function verifyCryptoMarket(symbol, options = {}) {
   const before = getCryptoMarketState(symbol);
   if (!before) throw marketError("Unknown crypto market.", 404);
+  const replacement = legacyCryptoReplacements[before.symbol] || legacyCryptoReplacements[before.providerSymbol];
+  if (replacement && !options.allowLegacy) {
+    try {
+      const market = await replaceLegacyCryptoMarket(before.symbol, replacement);
+      return { symbol: market.symbol, available: false, checked: [], product: { productExists: false, productTradingEnabled: false, productStatus: "legacy", error: `Legacy Coinbase symbol. Use ${replacement}.`, code: "LEGACY_MARKET" }, market };
+    } catch {
+      return { symbol: before.symbol, available: false, checked: [], product: { productExists: false, productTradingEnabled: false, productStatus: "legacy", error: `Legacy Coinbase symbol. Use ${replacement}.`, code: "LEGACY_MARKET" }, market: before };
+    }
+  }
   if (before.marketStatus === "legacy" && !options.allowLegacy) {
     return { symbol: before.symbol, available: false, checked: [], market: before };
   }
@@ -58,7 +75,21 @@ export async function verifyCryptoMarket(symbol, options = {}) {
     return { symbol: market.symbol, available: false, checked, product, market };
   }
 
-  for (const timeframe of cryptoTimeframes) {
+  const primaryTimeframe = "15m";
+  try {
+    const data = await getCandlesFromCoinbase(before.providerSymbol, primaryTimeframe);
+    const latestCandleAt = validateCandles(data.candles, primaryTimeframe);
+    checked.push({ timeframe: primaryTimeframe, available: true, candles: data.candles.length, lastCandleAt: latestCandleAt });
+  } catch (error) {
+    checked.push({ timeframe: primaryTimeframe, available: false, error: safeProviderError(error), code: error.code || "PROVIDER_ERROR" });
+    for (const timeframe of cryptoTimeframes.filter((item) => item !== primaryTimeframe)) {
+      checked.push({ timeframe, available: false, error: `Skipped because ${primaryTimeframe} verification failed.`, code: "PRIMARY_TIMEFRAME_FAILED" });
+    }
+    const market = await saveCryptoMarketVerification(before.symbol, checked, product);
+    return { symbol: market.symbol, available: false, checked, product, market };
+  }
+
+  for (const timeframe of cryptoTimeframes.filter((item) => item !== primaryTimeframe)) {
     try {
       const data = await getCandlesFromCoinbase(before.providerSymbol, timeframe);
       const latestCandleAt = validateCandles(data.candles, timeframe);
@@ -69,6 +100,36 @@ export async function verifyCryptoMarket(symbol, options = {}) {
   }
   const market = await saveCryptoMarketVerification(before.symbol, checked, product);
   return { symbol: market.symbol, available: market.marketStatus === "active", checked, product, market };
+}
+
+export async function verifyPendingCryptoMarkets(options = {}) {
+  const logger = options.logger || console;
+  await reloadCryptoMarketSettings();
+  const pending = listCryptoMarketSettings().filter(isPendingVerificationMarket);
+  const summary = createVerificationSummary(pending.length);
+  logger.info?.(`[market-verify] start pending=${pending.length}`);
+
+  const results = [];
+  for (const market of pending) {
+    logger.info?.(`[market-verify] checking symbol=${market.providerSymbol}`);
+    try {
+      const result = await verifyCryptoMarket(market.symbol, { force: true });
+      results.push(result);
+      addVerificationResult(summary, result.market);
+      const status = terminalStatusLabel(result.market.marketStatus);
+      const reason = result.market.lastError ? ` reason=${safeLogValue(result.market.lastError)}` : "";
+      logger.info?.(`[market-verify] result symbol=${result.market.providerSymbol || result.market.symbol} status=${status}${reason}`);
+    } catch (error) {
+      summary.checked += 1;
+      summary.providerError += 1;
+      logger.warn?.(`[market-verify] result symbol=${market.providerSymbol} status=provider_error reason=${safeLogValue(error.message)}`);
+    }
+  }
+
+  await reloadCryptoMarketSettings();
+  summary.stillPending = listCryptoMarketSettings().filter(isPendingVerificationMarket).length;
+  logger.info?.(`[market-verify] complete checked=${summary.checked} ready=${summary.ready} unavailable=${summary.unavailable} provider_error=${summary.providerError} legacy=${summary.legacy} still_pending=${summary.stillPending}`);
+  return { ok: true, ...summary, active: summary.ready, results };
 }
 
 export function startPendingCryptoVerification() {
@@ -195,6 +256,30 @@ function summarizeVerification(results, pending) {
     legacy: results.filter((result) => result?.market?.marketStatus === "legacy").length,
     stillPending: results.filter((result) => result?.market?.marketStatus === "pending").length
   };
+}
+function isPendingVerificationMarket(market) {
+  const values = [market.marketStatus, market.verificationStatus, market.statusLabel]
+    .map((value) => String(value || "").trim().toLowerCase());
+  return market.enabled !== false && values.some((value) =>
+    ["pending", "pending verification", "unverified", "unknown"].includes(value)
+  );
+}
+function createVerificationSummary(total) {
+  return { pending: total, checked: 0, ready: 0, unavailable: 0, providerError: 0, legacy: 0, disabled: 0, stillPending: total };
+}
+function addVerificationResult(summary, market) {
+  summary.checked += 1;
+  if (market.marketStatus === "active") summary.ready += 1;
+  else if (market.marketStatus === "provider_error") summary.providerError += 1;
+  else if (market.marketStatus === "legacy") summary.legacy += 1;
+  else if (market.marketStatus === "disabled") summary.disabled += 1;
+  else summary.unavailable += 1;
+}
+function terminalStatusLabel(status) {
+  return ({ active: "ready", provider_error: "provider_error", unavailable: "unavailable", legacy: "legacy", disabled: "disabled" })[status] || "unavailable";
+}
+function safeLogValue(value) {
+  return String(value || "unknown").replace(/[\r\n]+/g, " ").slice(0, 180);
 }
 async function verifyCoinbaseProduct(providerSymbol) {
   try {

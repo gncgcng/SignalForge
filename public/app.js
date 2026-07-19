@@ -1755,13 +1755,17 @@ adminCryptoDiagnostics?.addEventListener("click", async () => {
 });
 adminCryptoVerifyPending?.addEventListener("click", async () => {
   adminCryptoVerifyPending.disabled = true;
+  adminCryptoOperationStatus.textContent = "Verifying pending markets...";
   try {
     const result = await api.request("/api/admin/crypto-markets/verify-pending", { method: "POST" });
-    renderCryptoVerificationProgress(result.verificationJob);
-    await pollCryptoVerificationJob();
+    adminCryptoOperationStatus.textContent = `Verification complete: Ready ${result.ready || result.active || 0}, Unavailable ${result.unavailable || 0}, Provider error ${result.providerError || 0}, Legacy ${result.legacy || 0}, Still pending ${result.stillPending || 0}.`;
+    await loadAdminCryptoMarkets();
+    await loadPairs();
+    showToast("Pending market verification complete");
   } catch (error) {
     adminCryptoOperationStatus.textContent = error.message;
     showToast(error.message);
+  } finally {
     adminCryptoVerifyPending.disabled = false;
   }
 });

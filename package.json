@@ -50,6 +50,8 @@
     "test:expanded-crypto": "node scripts/expanded-crypto-test.js",
     "test:crypto-markets": "node scripts/crypto-market-operations-test.js",
     "test:crypto-market-sync": "node scripts/crypto-market-sync-test.js",
+    "market:test": "node scripts/test-coinbase-market.js",
+    "market:verify-pending": "node scripts/verify-pending-crypto-markets.js",
     "test:scanner-ux": "node scripts/scanner-ux-test.js",
     "test:mobile-signals": "node scripts/mobile-signals-layout-test.js",
     "test:signal-filters": "node scripts/signal-history-filters-test.js",

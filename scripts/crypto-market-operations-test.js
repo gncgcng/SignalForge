@@ -59,7 +59,7 @@ const checks = {
   starterUniverse: ["BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "ADA-USD", "DOGE-USD", "LINK-USD", "AVAX-USD", "LTC-USD", "BCH-USD", "DOT-USD", "UNI-USD", "AAVE-USD", "ATOM-USD", "ETC-USD", "NEAR-USD", "OP-USD", "ARB-USD", "INJ-USD", "ICP-USD", "SHIB-USD", "PEPE-USD", "BONK-USD"].every((symbol) => findCryptoMarket(symbol)),
   centralMetadata: cryptoMarketUniverse.every((market) => market.displaySymbol && market.providerSymbol && market.provider === "coinbase-exchange" && Array.isArray(market.supportedTimeframes)),
   migrationSafe: migration.includes("CREATE TABLE IF NOT EXISTS crypto_markets") && migration.includes("scanner_enabled") && migration.includes("cooldown_until") && migration.includes("unsupported_timeframes") && !migration.match(/DELETE FROM/i),
-  verificationDetailsMigration: detailsMigration.includes("ADD COLUMN IF NOT EXISTS verification_details") && detailsMigration.includes("idx_crypto_markets_status_retry"),
+  verificationDetailsMigration: detailsMigration.includes("ADD COLUMN IF NOT EXISTS verification_details") && detailsMigration.includes("last_verification_attempt_at") && detailsMigration.includes("idx_crypto_markets_status_retry"),
   scannerUsesCapabilities: signalService.includes("listScannerPairs") && signalService.includes("supportedTimeframes.includes") && marketData.includes("listScannerCryptoMarkets"),
   providerLimited: provider.includes("maxConcurrentRequests") && provider.includes("acquireRequestSlot") && provider.includes("maxCandlesPerRequest"),
   cooldownRecorded: marketData.includes("recordCryptoMarketFailure") && marketData.includes("MARKET_COOLDOWN") && marketData.includes("STALE_CANDLES") && marketData.includes("INSUFFICIENT_CANDLES"),

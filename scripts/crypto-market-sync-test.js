@@ -14,6 +14,9 @@ const monitorSource = readFileSync(new URL("../src/modules/markets/cryptoMarketM
 const controllerSource = readFileSync(new URL("../src/modules/markets/cryptoMarketController.js", import.meta.url), "utf8");
 const appSource = readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
 const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
+const packageJson = readFileSync(new URL("../package.json", import.meta.url), "utf8");
+const verifyScript = readFileSync(new URL("../scripts/verify-pending-crypto-markets.js", import.meta.url), "utf8");
+const singleMarketScript = readFileSync(new URL("../scripts/test-coinbase-market.js", import.meta.url), "utf8");
 const migration = readFileSync(new URL("../migrations/045_crypto_market_sync.sql", import.meta.url), "utf8");
 const detailsMigration = readFileSync(new URL("../migrations/046_crypto_market_verification_details.sql", import.meta.url), "utf8");
 
@@ -53,13 +56,20 @@ const checks = {
   verificationDetailsStored: detailsMigration.includes("verification_details jsonb") && serviceSource.includes("verification_details=$12") && serviceSource.includes("buildVerificationDetails"),
   productCheckBeforeCandles: monitorSource.includes("getProductFromCoinbase") && monitorSource.includes("productTradingEnabled === false"),
   verifyAllProgressTerminal: monitorSource.includes("stillPending") && monitorSource.includes("complete ready="),
+  sharedTerminalVerifier: monitorSource.includes("export async function verifyPendingCryptoMarkets") &&
+    controllerSource.includes("await verifyPendingCryptoMarkets()") &&
+    verifyScript.includes("verifyPendingCryptoMarkets"),
+  terminalScriptsPresent: packageJson.includes('"market:test"') &&
+    packageJson.includes('"market:verify-pending"') &&
+    singleMarketScript.includes("getProductFromCoinbase") &&
+    singleMarketScript.includes("getCandlesFromCoinbase"),
   countsSeparate: summary.totalDiscovered === 6 && summary.active === 1 && summary.pending === 1 && summary.unavailable === 1 && summary.legacy === 1 && summary.disabled === 1 && summary.providerError === 1,
   scannerActiveOnly: listScannerCryptoMarkets().every((item) => item.marketStatus === "active" && item.scannerEnabled),
   paperActiveOnly: listPaperCryptoMarkets().every((item) => item.marketStatus === "active" && item.paperTradingEnabled),
   legacyReplacement: legacyCryptoReplacements["MATIC-USD"] === "POL-USD",
   adminFilters: filterCryptoMarkets(sampleMarkets, new URLSearchParams("status=pending")).map((item) => item.symbol).join() === "NEW-USD",
   adminActionsPresent: controllerSource.includes("/sync") && controllerSource.includes("/verify-pending") && controllerSource.includes("/diagnostics") && html.includes("Sync Coinbase markets") && html.includes("Verify all pending") && html.includes("Test Coinbase provider"),
-  frontendRefreshes: appSource.includes("pollCryptoVerificationJob") && appSource.includes("await loadAdminCryptoMarkets()") && appSource.includes("await loadPairs()") && appSource.includes("renderCryptoCandleCheck"),
+  frontendRefreshes: appSource.includes("await loadAdminCryptoMarkets()") && appSource.includes("await loadPairs()") && appSource.includes("Still pending") && appSource.includes("renderCryptoCandleCheck"),
   diagnosticsSamplePresent: monitorSource.includes("BTC-USD") && monitorSource.includes("AUDIO-USD") && monitorSource.includes("POL-USD"),
   migrationSafe: migration.includes("ADD COLUMN IF NOT EXISTS") && migration.includes("idx_crypto_markets_verification_queue")
 };

@@ -220,6 +220,7 @@ export async function saveCryptoMarketVerification(symbol, checks, details = {})
   const result = await query(`UPDATE crypto_markets SET market_status=$2, verification_status=$3,
     provider_status=$4, supported_timeframes=$5, unsupported_timeframes=$6,
     last_successful_candle_at=$7, last_checked_at=$11, last_verified_at=$11,
+    last_verification_attempt_at=$11,
     last_error=$8, failure_code=$9, cooldown_until=$10, verification_details=$12,
     consecutive_failures=CASE WHEN $2='active' THEN 0 ELSE consecutive_failures+1 END,
     updated_at=now() WHERE symbol=$1 RETURNING *`, [
@@ -250,10 +251,27 @@ export async function replaceLegacyCryptoMarket(symbol, replacementSymbol) {
   const current = getCryptoMarketState(symbol);
   const replacement = getCryptoMarketState(replacementSymbol);
   if (!current || !replacement) throw marketError("Both legacy and replacement markets must exist.", 404);
+  const checkedAt = new Date();
+  const details = {
+    provider: "Coinbase",
+    providerSymbol: current.providerSymbol,
+    productExists: false,
+    productTradingEnabled: false,
+    productStatus: "legacy",
+    candleChecks: {},
+    latestCandleTime: null,
+    lastVerifiedAt: checkedAt.toISOString(),
+    lastVerificationAttempt: checkedAt.toISOString(),
+    lastError: "Legacy Coinbase symbol. Use the replacement market.",
+    nextRetryTime: null,
+    finalStatus: "legacy"
+  };
   const result = await query(`UPDATE crypto_markets SET market_status='legacy', verification_status='legacy',
     provider_status='unavailable', enabled=false, scanner_enabled=false, paper_trading_enabled=false,
-    replacement_symbol=$2, last_error='Legacy Coinbase symbol. Use the replacement market.', updated_at=now()
-    WHERE symbol=$1 RETURNING *`, [current.symbol, replacement.symbol]);
+    replacement_symbol=$2, last_error='Legacy Coinbase symbol. Use the replacement market.',
+    last_checked_at=$3, last_verified_at=$3, last_verification_attempt_at=$3,
+    verification_details=$4, updated_at=now()
+    WHERE symbol=$1 RETURNING *`, [current.symbol, replacement.symbol, checkedAt, details]);
   runtime.set(current.symbol, mapRow(result.rows[0]));
   return getCryptoMarketState(current.symbol);
 }
@@ -367,6 +385,7 @@ function mapRow(row) {
     verificationStatus: row.verification_status || legacyVerificationStatus(row),
     supportedTimeframes: row.supported_timeframes || [], unsupportedTimeframes: row.unsupported_timeframes || [],
     lastSuccessfulCandleAt: row.last_successful_candle_at, lastCheckedAt: row.last_checked_at,
+    lastVerificationAttemptAt: row.last_verification_attempt_at || row.last_checked_at,
     lastVerifiedAt: row.last_verified_at, lastError: row.last_error, failureCode: row.failure_code,
     cooldownUntil: row.cooldown_until, consecutiveFailures: Number(row.consecutive_failures || 0),
     replacementSymbol: row.replacement_symbol, verificationDetails: row.verification_details || {},
