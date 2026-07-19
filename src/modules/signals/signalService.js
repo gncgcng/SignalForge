@@ -11,7 +11,7 @@ import {
   saveUnlockedSignal
 } from "../../db/repositories.js";
 import { createId } from "../../shared/ids.js";
-import { listActivePairs } from "../market-data/marketDataService.js";
+import { listScannerPairs } from "../market-data/marketDataService.js";
 import { getMultiTimeframeMarketData } from "../market-data/multiTimeframeService.js";
 import {
   canDiscoverSetups,
@@ -484,11 +484,13 @@ export async function scanAllMarketsDetailed(user) {
     rejectionReasons: {},
     samples: []
   };
-  const scanSymbols = listActivePairs().map((pair) => pair.symbol);
+  const scanMarkets = listScannerPairs();
   const analystProfile = await getUserAnalystProfile(user);
 
-  for (const symbol of scanSymbols) {
-    for (const timeframe of scanTimeframes) {
+  for (const market of scanMarkets) {
+    const symbol = market.symbol;
+    const supportedTimeframes = market.category === "Crypto" ? market.supportedTimeframes : scanTimeframes;
+    for (const timeframe of scanTimeframes.filter((item) => supportedTimeframes.includes(item))) {
       try {
         const detailed = await scanMarketSetupDetailed(
           user,

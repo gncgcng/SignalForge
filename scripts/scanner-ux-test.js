@@ -12,6 +12,10 @@ const coinbaseProvider = readFileSync(
   new URL("../src/modules/market-data/coinbaseMarketDataProvider.js", import.meta.url),
   "utf8"
 );
+const cryptoMarkets = readFileSync(
+  new URL("../src/modules/markets/cryptoMarkets.js", import.meta.url),
+  "utf8"
+);
 
 const expandedSymbols = [
   "BCH-USD",
@@ -52,8 +56,9 @@ const expandedSymbols = [
 
 const checks = {
   expandedCryptoCatalog:
-    expandedSymbols.every((symbol) => marketDataService.includes(`symbol: "${symbol}"`)) &&
-    expandedSymbols.every((symbol) => coinbaseProvider.includes(`"${symbol}"`)),
+    expandedSymbols.every((symbol) => cryptoMarkets.includes(`"${symbol}"`)) &&
+    marketDataService.includes('from "../markets/cryptoMarkets.js"') &&
+    coinbaseProvider.includes('from "../markets/cryptoMarkets.js"'),
   unsupportedPairsHandled:
     coinbaseProvider.includes("PROVIDER_UNSUPPORTED_MARKET") &&
     coinbaseProvider.includes("Coinbase does not support") &&

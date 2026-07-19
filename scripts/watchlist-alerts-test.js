@@ -47,7 +47,9 @@ const result = {
   ).includes("/api/signals/generate"),
   unreadSidebarCount: html.includes("unread-alert-count") && app.includes("renderUnreadAlertCount"),
   watchlistAndAlertsViews: html.includes('data-view="watchlist"') && html.includes('data-view="alerts"'),
-  bothAssetClassesRemainAvailable: app.includes("state.marketCatalog.filter((pair) => pair.status === \"active\")")
+  bothAssetClassesRemainAvailable:
+    app.includes('pair.category === "Crypto" ?') &&
+    app.includes('pair.status === "active"')
 };
 
 console.log(JSON.stringify(result, null, 2));

@@ -2,8 +2,18 @@ import { getMarketDataProvider, getPairProviderAvailability } from "./marketData
 import { MarketDataProviderError } from "./marketDataProviderError.js";
 import { analyzeMarketRegime } from "./marketRegimeService.js";
 import { analyzeAdvancedMarketStructure } from "./advancedMarketStructureService.js";
+import { cryptoMarketUniverse } from "../markets/cryptoMarkets.js";
+import {
+  canUseCryptoTimeframe,
+  getCryptoMarketState,
+  isCryptoMarketCoolingDown,
+  listPaperCryptoMarkets,
+  listScannerCryptoMarkets,
+  recordCryptoMarketFailure,
+  recordCryptoMarketSuccess
+} from "../markets/cryptoMarketService.js";
 
-const marketCatalog = [
+const legacyMarketCatalog = [
   { symbol: "BTC-USD", name: "Bitcoin", category: "Crypto", group: "Major crypto", assetClass: "Crypto", venue: "Coinbase", provider: "coinbase-exchange" },
   { symbol: "ETH-USD", name: "Ethereum", category: "Crypto", group: "Major crypto", assetClass: "Crypto", venue: "Coinbase", provider: "coinbase-exchange" },
   { symbol: "SOL-USD", name: "Solana", category: "Crypto", group: "Major crypto", assetClass: "Crypto", venue: "Coinbase", provider: "coinbase-exchange" },
@@ -58,6 +68,11 @@ const marketCatalog = [
   { symbol: "SPY", name: "S&P 500 ETF", category: "Stocks & ETFs", group: "Stocks & ETFs", assetClass: "ETF", venue: "NYSE Arca", provider: null }
 ];
 
+const marketCatalog = [
+  ...cryptoMarketUniverse,
+  ...legacyMarketCatalog.filter((market) => market.category !== "Crypto")
+];
+
 export function listPairs(query = "") {
   const normalized = query.trim().toLowerCase();
   const pairs = marketCatalog.map(withAvailability);
@@ -92,6 +107,18 @@ export function listActivePairs() {
   return marketCatalog.map(withAvailability).filter((pair) => pair.status === "active");
 }
 
+export function listScannerPairs() {
+  const crypto = listScannerCryptoMarkets().map(withAvailability);
+  const other = marketCatalog.filter((pair) => pair.category !== "Crypto").map(withAvailability).filter((pair) => pair.status === "active");
+  return [...crypto, ...other];
+}
+
+export function listPaperTradingPairs() {
+  const crypto = listPaperCryptoMarkets().map(withAvailability);
+  const other = marketCatalog.filter((pair) => pair.category !== "Crypto").map(withAvailability).filter((pair) => pair.status === "active");
+  return [...crypto, ...other];
+}
+
 export async function getMarketSnapshot(symbol, timeframe = "15m") {
   const marketData = await getOhlcv(symbol, timeframe);
 
@@ -114,13 +141,26 @@ export async function getOhlcv(symbol, timeframe) {
 
   if (pair.status !== "active") {
     throw new MarketDataProviderError(
-      pair.category === "Commodities" && pair.availabilityCode === "PROVIDER_NOT_CONFIGURED"
+      pair.category === "Crypto" && pair.availabilityCode === "MARKET_COOLDOWN"
+        ? `${pair.symbol} is temporarily paused after a provider failure.`
+        : pair.category === "Crypto" && pair.status === "unavailable"
+          ? `${pair.symbol}: ${pair.availabilityMessage || "No candle data from provider"}.`
+      : pair.category === "Commodities" && pair.availabilityCode === "PROVIDER_NOT_CONFIGURED"
         ? `${pair.symbol}: Data provider not configured.`
         : `${pair.symbol} market data is Coming Soon.`,
       {
         statusCode: 503,
         code: pair.availabilityCode || "MARKET_COMING_SOON"
       }
+    );
+  }
+
+  if (pair.category === "Crypto" && !canUseCryptoTimeframe(pair.symbol, timeframe)) {
+    throw new MarketDataProviderError(
+      isCryptoMarketCoolingDown(pair.symbol)
+        ? `${pair.symbol} is temporarily paused after a provider failure.`
+        : `${pair.symbol} does not have verified candle support for ${timeframe}.`,
+      { statusCode: 503, code: isCryptoMarketCoolingDown(pair.symbol) ? "MARKET_COOLDOWN" : "PROVIDER_UNSUPPORTED_MARKET" }
     );
   }
 
@@ -143,11 +183,27 @@ export async function getOhlcv(symbol, timeframe) {
     );
   }
 
-  console.info(
-    `[market-data] provider=${provider.id} category=${pair.category} symbol=${pair.symbol} timeframe=${timeframe}`
-  );
-  const marketData = await provider.getCandles(pair.symbol, timeframe);
+  let marketData;
+  try {
+    marketData = await provider.getCandles(pair.symbol, timeframe);
+  } catch (error) {
+    if (pair.category === "Crypto") await recordCryptoMarketFailure(pair.symbol, timeframe, error);
+    throw error;
+  }
   const marketStatus = resolveMarketStatus(pair, timeframe, marketData.candles, marketData.receivedAt);
+  if (pair.category === "Crypto") {
+    if (!Array.isArray(marketData.candles) || marketData.candles.length < 60) {
+      const error = new MarketDataProviderError(`${pair.symbol} returned insufficient OHLCV candles.`, { statusCode: 502, code: "INSUFFICIENT_CANDLES" });
+      await recordCryptoMarketFailure(pair.symbol, timeframe, error);
+      throw error;
+    }
+    if (marketStatus.stale) {
+      const error = new MarketDataProviderError(`${pair.symbol} latest candle is stale.`, { statusCode: 503, code: "STALE_CANDLES" });
+      await recordCryptoMarketFailure(pair.symbol, timeframe, error);
+      throw error;
+    }
+    await recordCryptoMarketSuccess(pair.symbol, timeframe, marketStatus.lastCandleAt);
+  }
   const advancedStructure = analyzeAdvancedMarketStructure(marketData.candles, {
     volumeAvailable: marketData.volumeAvailable !== false
   });
@@ -287,6 +343,22 @@ function isCommodityMarketOpen(date) {
 function withAvailability(pair) {
   const availability = getPairProviderAvailability(pair);
   const displaySymbol = getDisplaySymbol(pair);
+
+  if (pair.category === "Crypto") {
+    const operational = getCryptoMarketState(pair.symbol);
+    const coolingDown = isCryptoMarketCoolingDown(pair.symbol);
+    const available = availability.configured && operational?.enabled && operational.providerStatus !== "unavailable" && !coolingDown;
+    return {
+      ...pair,
+      ...operational,
+      displaySymbol,
+      providerLabel: `Coinbase · ${pair.symbol}`,
+      status: available ? "active" : operational?.enabled ? "unavailable" : "disabled",
+      selectable: available,
+      availabilityCode: coolingDown ? "MARKET_COOLDOWN" : operational?.failureCode || availability.code,
+      availabilityMessage: operational?.lastError || (operational?.providerStatus === "unchecked" ? "Provider verification pending" : availability.message)
+    };
+  }
 
   return {
     ...pair,

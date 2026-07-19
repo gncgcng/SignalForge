@@ -7,7 +7,7 @@ import {
   listWatchlistByUser,
   saveDetectedAlert
 } from "../../db/repositories.js";
-import { getPair, listActivePairs } from "../market-data/marketDataService.js";
+import { getPair, listScannerPairs } from "../market-data/marketDataService.js";
 import {
   enqueueMatchingTelegramNotifications,
   telegramPreferenceMatchesSetup
@@ -64,7 +64,7 @@ export async function runAutoCryptoAlertScan() {
     const watched = await runCandidateMarketWatch();
     const preferences = (await listAllEnabledAlertPreferences()).filter((preference) => {
       const pair = getPair(preference.symbol);
-      return pair?.category === "Crypto" && pair.status === "active";
+      return pair?.category === "Crypto" && pair.effectiveScannerEnabled && pair.supportedTimeframes.includes(preference.timeframe);
     });
 
     for (const preference of preferences) {
@@ -111,9 +111,8 @@ export async function runAutoCryptoAlertScan() {
     }
 
     const telegramSettings = await listAllEnabledTelegramSettings();
-    const cryptoSymbols = listActivePairs()
-      .filter((pair) => pair.category === "Crypto")
-      .map((pair) => pair.symbol);
+    const cryptoMarkets = listScannerPairs().filter((pair) => pair.category === "Crypto");
+    const cryptoSymbols = cryptoMarkets.map((pair) => pair.symbol);
 
     for (const settings of telegramSettings) {
       const user = await getPreferenceUser(settings.userId, users);
@@ -132,7 +131,8 @@ export async function runAutoCryptoAlertScan() {
       console.log(`[auto-scan] markets selected user=${user.id} count=${selectedSymbols.length}`);
 
       for (const symbol of selectedSymbols) {
-        for (const timeframe of settings.timeframes) {
+        const market = cryptoMarkets.find((item) => item.symbol === symbol);
+        for (const timeframe of settings.timeframes.filter((item) => market?.supportedTimeframes.includes(item))) {
           scanned += 1;
 
           try {

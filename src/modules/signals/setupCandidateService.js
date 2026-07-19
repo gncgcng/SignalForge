@@ -10,7 +10,7 @@ import {
   recordCandidateLearningEvent,
   upsertSetupCandidate
 } from "./setupCandidateRepository.js";
-import { getOhlcv, getPair, listActivePairs } from "../market-data/marketDataService.js";
+import { getOhlcv, getPair, listScannerPairs } from "../market-data/marketDataService.js";
 import { getMultiTimeframeMarketData } from "../market-data/multiTimeframeService.js";
 import { generateMarketDataSetup } from "./signalGenerator.js";
 import { buildMarketBriefObservation, refreshDailyMarketBrief } from "./dailyMarketBriefService.js";
@@ -150,7 +150,7 @@ export async function refreshCandidateLearningOutcomes() {
 }
 
 export async function runCandidateMarketWatch() {
-  const markets = listActivePairs().filter((pair) => pair.category === "Crypto");
+  const markets = listScannerPairs().filter((pair) => pair.category === "Crypto");
   if (!markets.length) return { scanned: 0, createdOrUpdated: 0 };
   const batchSize = Math.min(markets.length, Math.max(1, appConfig.candidates.marketsPerCycle));
   const selected = Array.from({ length: batchSize }, (_, index) => markets[(marketCursor + index) % markets.length]);
@@ -158,7 +158,7 @@ export async function runCandidateMarketWatch() {
   let scanned = 0; let createdOrUpdated = 0;
   const briefObservations = [];
   for (const pair of selected) {
-    for (const timeframe of watcherTimeframes) {
+    for (const timeframe of watcherTimeframes.filter((item) => pair.supportedTimeframes.includes(item))) {
       try {
         const marketData = await getMultiTimeframeMarketData(pair.symbol, timeframe);
         scanned += 1;

@@ -133,6 +133,7 @@ const state = {
   validationDashboard: null,
   candidateQuality: null,
   adminSignals: { signals: [], stats: {}, page: 1, totalPages: 1, total: 0, filters: {} },
+  adminCryptoMarkets: { markets: [], summary: {}, filters: {} },
   profile: null,
   publicProfile: null,
   leaderboards: null,
@@ -346,6 +347,7 @@ const onboardingPublicProfile = document.querySelector("#onboarding-public-profi
 const usernameOnboardingMessage = document.querySelector("#username-onboarding-message");
 const adminNavLink = document.querySelector("#admin-nav-link");
 const adminSignalsNavLink = document.querySelector("#admin-signals-nav-link");
+const adminCryptoMarketsNavLink = document.querySelector("#admin-crypto-markets-nav-link");
 const affiliateAdminNavLink = document.querySelector("#affiliate-admin-nav-link");
 const webhookEventsNavLink = document.querySelector("#webhook-events-nav-link");
 const adminSupportNavLink = document.querySelector("#admin-support-nav-link");
@@ -375,6 +377,8 @@ const adminSignalFilters = document.querySelector("#admin-signal-filters");
 const adminSignalsTable = document.querySelector("#admin-signals-table");
 const adminSignalModal = document.querySelector("#admin-signal-modal");
 const adminSignalDetail = document.querySelector("#admin-signal-detail");
+const adminCryptoFilters = document.querySelector("#admin-crypto-filters");
+const adminCryptoMarketList = document.querySelector("#admin-crypto-market-list");
 const backtestForm = document.querySelector("#backtest-form");
 const backtestSymbol = document.querySelector("#backtest-symbol");
 const backtestTimeframe = document.querySelector("#backtest-timeframe");
@@ -1360,9 +1364,12 @@ pairSearch.addEventListener("input", async () => {
 });
 
 scanAllButton.addEventListener("click", async () => {
-  const symbols = state.marketCatalog.filter((pair) => pair.status === "active").map((pair) => pair.symbol);
   const frames = ["1h", "4h", "15m", "5m"];
-  const total = symbols.length * frames.length;
+  const markets = state.marketCatalog.filter((pair) => pair.category === "Crypto" ? pair.effectiveScannerEnabled : pair.status === "active");
+  const scanTasks = markets.flatMap((pair) => frames
+    .filter((timeframe) => pair.category !== "Crypto" || pair.supportedTimeframes.includes(timeframe))
+    .map((timeframe) => ({ symbol: pair.symbol, timeframe })));
+  const total = scanTasks.length;
   let progressTimer = null;
   let progressIndex = 0;
 
@@ -1375,8 +1382,8 @@ scanAllButton.addEventListener("click", async () => {
   updateScanProgress(0, total, "Scanning all active crypto and commodity markets...");
   progressTimer = setInterval(() => {
     if (progressIndex >= total - 1) return;
-    const symbol = symbols[Math.floor(progressIndex / frames.length)] || symbols[0] || "market";
-    const timeframe = frames[progressIndex % frames.length] || "timeframe";
+    const symbol = scanTasks[progressIndex]?.symbol || scanTasks[0]?.symbol || "market";
+    const timeframe = scanTasks[progressIndex]?.timeframe || "timeframe";
     progressIndex += 1;
     updateScanProgress(
       progressIndex,
@@ -1699,6 +1706,40 @@ adminSignalsTable?.addEventListener("click", async (event) => {
 });
 adminSignalModal?.addEventListener("click", (event) => { if (event.target.closest("[data-admin-signal-close]")) closeAdminSignalModal(); });
 document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !adminSignalModal?.classList.contains("hidden")) closeAdminSignalModal(); });
+adminCryptoFilters?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  state.adminCryptoMarkets.filters = Object.fromEntries(new FormData(adminCryptoFilters).entries());
+  loadAdminCryptoMarkets();
+});
+document.querySelector("#admin-crypto-filter-clear")?.addEventListener("click", () => {
+  adminCryptoFilters.reset(); state.adminCryptoMarkets.filters = {}; loadAdminCryptoMarkets();
+});
+adminCryptoMarketList?.addEventListener("change", async (event) => {
+  const input = event.target.closest("[data-crypto-setting]");
+  if (!input) return;
+  input.disabled = true;
+  try {
+    await api.request(`/api/admin/crypto-markets/${encodeURIComponent(input.dataset.symbol)}`, {
+      method: "PATCH", body: JSON.stringify({ [input.dataset.cryptoSetting]: input.checked })
+    });
+    showToast("Crypto market setting updated");
+  } catch (error) {
+    input.checked = !input.checked;
+    showToast(error.message);
+  } finally {
+    await loadAdminCryptoMarkets();
+  }
+});
+adminCryptoMarketList?.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-crypto-verify]");
+  if (!button) return;
+  button.disabled = true; button.textContent = "Checking...";
+  try {
+    const result = await api.request(`/api/admin/crypto-markets/${encodeURIComponent(button.dataset.cryptoVerify)}/verify`, { method: "POST" });
+    showToast(result.verification.available ? "Candle support verified" : "Market remains unavailable");
+  } catch (error) { showToast(error.message); }
+  await loadAdminCryptoMarkets();
+});
 
 document.querySelector("#admin-error-filter")?.addEventListener("change", () => {
   renderAdminErrorLogs();
@@ -2738,6 +2779,7 @@ async function bootDashboard() {
   document.querySelector("#user-name").textContent = getUserDisplayName();
   adminNavLink.classList.toggle("hidden", !state.user.isAdmin);
   adminSignalsNavLink.classList.toggle("hidden", !state.user.isAdmin);
+  adminCryptoMarketsNavLink.classList.toggle("hidden", !state.user.isAdmin);
   adminSupportNavLink.classList.toggle("hidden", !state.user.isAdmin);
   affiliateAdminNavLink.classList.toggle("hidden", !state.user.isAdmin);
   webhookEventsNavLink.classList.toggle("hidden", !state.user.isAdmin);
@@ -3130,6 +3172,7 @@ async function loadPairs(query = "") {
 
   if (!query) {
     state.marketCatalog = pairs;
+    renderBacktestMarketOptions();
   }
 
   state.selectedPair = state.selectedPair ||
@@ -3140,6 +3183,16 @@ async function loadPairs(query = "") {
   renderPerformanceMarketOptions();
   renderPairs();
   renderSelectedMarket();
+}
+
+function renderBacktestMarketOptions() {
+  if (!backtestSymbol) return;
+  const current = backtestSymbol.value;
+  const markets = state.marketCatalog.filter((pair) =>
+    pair.category === "Crypto" && pair.selectable && pair.providerStatus === "available"
+  );
+  backtestSymbol.innerHTML = markets.map((pair) => `<option value="${escapeHtml(pair.symbol)}">${escapeHtml(pair.displaySymbol)} · ${escapeHtml(pair.name)}</option>`).join("");
+  backtestSymbol.value = markets.some((pair) => pair.symbol === current) ? current : markets[0]?.symbol || "BTC-USD";
 }
 
 function renderHistoryPairOptions() {
@@ -3331,6 +3384,51 @@ async function loadAdminSignals() {
   const result = await api.request(`/api/admin/signals?${params}`);
   state.adminSignals = { ...state.adminSignals, ...result, signals: result.signals || [], stats: result.stats || {} };
   renderAdminSignals();
+}
+
+async function loadAdminCryptoMarkets() {
+  if (!state.user?.isAdmin) throw new Error("Admin access required.");
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(state.adminCryptoMarkets.filters || {})) {
+    if (String(value || "").trim() && value !== "all") params.set(key, String(value).trim());
+  }
+  adminCryptoMarketList.innerHTML = `<div class="empty-state"><strong>Loading crypto markets...</strong></div>`;
+  const result = await api.request(`/api/admin/crypto-markets?${params}`);
+  state.adminCryptoMarkets = { ...state.adminCryptoMarkets, markets: result.markets || [], summary: result.summary || {} };
+  renderAdminCryptoMarkets();
+}
+
+function renderAdminCryptoMarkets() {
+  const { markets, summary } = state.adminCryptoMarkets;
+  document.querySelector("#admin-crypto-market-count").textContent = `${markets.length} markets`;
+  document.querySelector("#admin-crypto-summary").innerHTML = [
+    ["Total", summary.total], ["Enabled", summary.enabled], ["Scanner ready", summary.scannerReady],
+    ["Provider available", summary.available], ["Unavailable", summary.unavailable], ["Unchecked", summary.unchecked]
+  ].map(([label, value]) => `<article><span>${label}</span><strong>${Number(value || 0)}</strong></article>`).join("");
+  adminCryptoMarketList.innerHTML = markets.length ? markets.map(renderAdminCryptoMarket).join("") : `<div class="empty-state"><strong>No crypto markets match these filters.</strong></div>`;
+}
+
+function renderAdminCryptoMarket(market) {
+  const status = titleCase(market.providerStatus || "unchecked");
+  const available = market.providerStatus === "available";
+  const providerClass = available ? "available" : market.providerStatus === "unchecked" ? "unchecked" : "unavailable";
+  const timeframes = market.supportedTimeframes?.length ? market.supportedTimeframes.join(", ") : "None verified";
+  return `<article class="admin-crypto-market-card">
+    <header><div><strong>${escapeHtml(market.displaySymbol)}</strong><span>${escapeHtml(market.name)} &middot; Coinbase &middot; ${escapeHtml(market.providerSymbol)}</span></div><em class="crypto-provider-state ${providerClass}">${escapeHtml(status)}</em></header>
+    <div class="admin-crypto-market-meta"><span>Tier<strong>${escapeHtml(titleCase(market.liquidityTier))}</strong></span><span>Timeframes<strong>${escapeHtml(timeframes)}</strong></span><span>Last candle<strong>${market.lastSuccessfulCandleAt ? formatDateTime(market.lastSuccessfulCandleAt) : "Never"}</strong></span><span>Last checked<strong>${market.lastCheckedAt ? formatDateTime(market.lastCheckedAt) : "Never"}</strong></span></div>
+    ${market.lastError ? `<p class="admin-crypto-error">${escapeHtml(market.lastError)}</p>` : ""}
+    <div class="admin-crypto-toggles">
+      ${cryptoSettingToggle(market, "enabled", "Global")}
+      ${cryptoSettingToggle(market, "scannerEnabled", "Scanner", !available)}
+      ${cryptoSettingToggle(market, "paperTradingEnabled", "Paper trading")}
+      ${cryptoSettingToggle(market, "watchlistEnabled", "Watchlist")}
+      <button class="secondary-action" data-crypto-verify="${escapeHtml(market.symbol)}" type="button">Verify candles</button>
+    </div>
+  </article>`;
+}
+
+function cryptoSettingToggle(market, key, label, disabled = false) {
+  return `<label class="admin-crypto-toggle"><input type="checkbox" data-crypto-setting="${key}" data-symbol="${escapeHtml(market.symbol)}" ${market[key] ? "checked" : ""} ${disabled ? "disabled" : ""}><span>${label}</span></label>`;
 }
 
 function renderAdminSignals() {
@@ -3950,7 +4048,7 @@ function handleBrowserRouteChange() {
 
 function isRouteAllowed(route) {
   if (!Object.hasOwn(ROUTE_TO_VIEW, route)) return false;
-  return !["admin", "admin-signals", "admin-support", "affiliate-admin", "webhook-events"].includes(route) || Boolean(state.user?.isAdmin);
+  return !["admin", "admin-signals", "admin-crypto-markets", "admin-support", "affiliate-admin", "webhook-events"].includes(route) || Boolean(state.user?.isAdmin);
 }
 
 function resolvePaperTradingRouteSymbol(value) {
@@ -4009,7 +4107,7 @@ function removeHashParams(names) {
 function applyViewState(view, options = {}) {
   const allowedViews = ["scanner", "watchlist", "alerts", "notifications", "signals", "paper-portfolio", "journal", "backtesting", "performance", "how-it-works", "affiliate", "leaderboard", "profile", "settings", "support", "billing"];
   if (state.user?.isAdmin) {
-    allowedViews.push("admin", "admin-signals", "admin-support", "affiliate-admin", "webhook-events");
+    allowedViews.push("admin", "admin-signals", "admin-crypto-markets", "admin-support", "affiliate-admin", "webhook-events");
   }
   const normalizedView = allowedViews.includes(view) ? view : "scanner";
   if (normalizedView !== "admin-signals") closeAdminSignalModal();
@@ -4048,6 +4146,7 @@ function applyViewState(view, options = {}) {
     support: ["Account support", "Support"],
     admin: ["Administration", "Tester access requests"],
     "admin-signals": ["ADMIN SIGNALS", "All generated signals"],
+    "admin-crypto-markets": ["ADMIN", "Crypto Markets"],
     "admin-support": ["Administration", "Support Tickets"],
     "affiliate-admin": ["Administration", "Affiliate Program"],
     "webhook-events": ["Stripe operations", "Webhook Events"],
@@ -4073,6 +4172,12 @@ function applyViewState(view, options = {}) {
   if (normalizedView === "admin-signals") {
     loadAdminSignals().catch((error) => {
       adminSignalsTable.innerHTML = `<div class="empty-state"><strong>Generated signals unavailable</strong><p class="reasoning">${escapeHtml(error.message)}</p></div>`;
+    });
+  }
+
+  if (normalizedView === "admin-crypto-markets") {
+    loadAdminCryptoMarkets().catch((error) => {
+      adminCryptoMarketList.innerHTML = `<div class="empty-state"><strong>Crypto market settings unavailable</strong><p class="reasoning">${escapeHtml(error.message)}</p></div>`;
     });
   }
 
@@ -4201,11 +4306,17 @@ function renderPairs() {
 
 function getPairBadge(pair) {
   if (pair.status !== "active") {
+    if (pair.category === "Crypto") {
+      if (pair.status === "disabled") return "Disabled";
+      return pair.providerStatus === "provider_issue" ? "Provider issue" : "Unavailable";
+    }
     return pair.category === "Commodities" &&
       pair.availabilityCode === "PROVIDER_NOT_CONFIGURED"
       ? "Not configured"
       : "Coming Soon";
   }
+
+  if (pair.category === "Crypto" && pair.providerStatus === "unchecked") return "Pending verification";
 
   return pair.marketStatus?.label || (Number.isFinite(pair.change24h) ? formatPercent(pair.change24h) : "Ready");
 }
@@ -4241,7 +4352,9 @@ function renderSelectedMarket() {
     : state.selectedPair.availabilityMessage || "Coming Soon";
   document.querySelector("#selected-change").textContent = Number.isFinite(state.selectedPair.change24h) ? formatPercent(state.selectedPair.change24h) : "--";
   document.querySelector("#provider-status").textContent = state.selectedPair.marketStatus?.label ||
-    (state.selectedPair.status === "active" ? "Ready" : state.selectedPair.availabilityMessage || "Coming Soon");
+    (state.selectedPair.category === "Crypto" && state.selectedPair.providerStatus === "unchecked"
+      ? "Pending verification"
+      : state.selectedPair.status === "active" ? "Ready" : state.selectedPair.availabilityMessage || "Coming Soon");
   renderFavoriteButton();
 }
 
@@ -5965,7 +6078,7 @@ function renderScanResults(setups, errors, diagnostics = null, scanSummary = nul
   const activePairs = state.pairs
     .concat(state.marketCatalog)
     .filter((pair, index, pairs) => pairs.findIndex((item) => item.symbol === pair.symbol) === index)
-    .filter((pair) => pair.status === "active");
+    .filter((pair) => pair.category === "Crypto" ? pair.effectiveScannerEnabled : pair.status === "active");
   const frames = ["1h", "4h", "15m", "5m"];
   const scannedMarkets = activePairs.map((pair) => pair.symbol);
   state.lastScanSummary = {

@@ -18,10 +18,11 @@ import {
 import { getTradingSession, tradingSessions } from "../intelligence/sessionIntelligenceService.js";
 import { currentStrategyVersion } from "../analyst/signalAnalystService.js";
 import { saveGeneratedSignal } from "../admin-signals/generatedSignalService.js";
+import { cryptoMarketUniverse } from "../markets/cryptoMarkets.js";
 
 export const backtestSymbols = [
-  "BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "ADA-USD", "DOGE-USD",
-  "LINK-USD", "AVAX-USD", "LTC-USD", "XAU/USD", "XAG/USD", "WTI", "BRENT"
+  ...cryptoMarketUniverse.map((market) => market.symbol),
+  "XAU/USD", "XAG/USD", "WTI", "BRENT"
 ];
 export const backtestTimeframes = ["15m", "1h", "4h"];
 export const strategyComponentNames = [

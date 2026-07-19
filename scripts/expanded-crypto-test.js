@@ -93,6 +93,8 @@ await assert.rejects(
   "Coinbase product failures should return a clear market-specific error."
 );
 unavailableProduct = "";
+const { resetCryptoMarketCooldown } = await import("../src/modules/markets/cryptoMarketService.js");
+await resetCryptoMarketCooldown("XRP-USD");
 
 const combinations = [];
 for (const symbol of requiredCryptoSymbols) {
@@ -130,7 +132,7 @@ const result = {
     return item.source === "coinbase-exchange" && item.candleCount === 120;
   }),
   scanAllCoverage: requiredCryptoSymbols.every((symbol) => activeSymbols.has(symbol)) &&
-    signalService.includes("listActivePairs()"),
+    signalService.includes("listScannerPairs()"),
   uiGroupsPresent: ["Major crypto", "Altcoins", "Commodities"].every((group) => {
     return catalog.some((pair) => pair.group === group);
   }) && app.includes("pair.group || pair.category"),

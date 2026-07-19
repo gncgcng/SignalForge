@@ -670,6 +670,7 @@
                 <a href="#support" data-view-link="support">Support</a>
                 <a class="hidden" href="#admin" data-view-link="admin" id="admin-nav-link">Admin</a>
                 <a class="hidden" href="#admin-signals" data-view-link="admin-signals" id="admin-signals-nav-link">Admin Signals</a>
+                <a class="hidden" href="#admin-crypto-markets" data-view-link="admin-crypto-markets" id="admin-crypto-markets-nav-link">Crypto Markets</a>
                 <a class="hidden" href="#admin-support" data-view-link="admin-support" id="admin-support-nav-link">Support Tickets</a>
                 <a class="hidden" href="#affiliate-admin" data-view-link="affiliate-admin" id="affiliate-admin-nav-link">Affiliate Admin</a>
                 <a class="hidden" href="#webhook-events" data-view-link="webhook-events" id="webhook-events-nav-link">Webhook Events</a>
@@ -1987,6 +1988,21 @@
                 </div>
               </div>
             </section>
+          </section>
+
+          <section class="page-view hidden admin-crypto-markets-page" id="admin-crypto-markets-view" data-view="admin-crypto-markets">
+            <div class="section-title">
+              <div><span class="eyebrow">ADMIN · CRYPTO MARKETS</span><h3>Provider availability and scanner controls</h3><p>New pairs remain outside automatic scans until Coinbase candle support is verified.</p></div>
+              <span id="admin-crypto-market-count">0 markets</span>
+            </div>
+            <div class="admin-crypto-summary" id="admin-crypto-summary"></div>
+            <form class="admin-crypto-filters" id="admin-crypto-filters">
+              <input class="sf-input" name="q" type="search" placeholder="Search BTC, BTCUSD, Bitcoin...">
+              <select class="sf-select" name="status"><option value="all">All states</option><option value="enabled">Enabled</option><option value="scanner">Scanner ready</option><option value="unavailable">Unavailable</option></select>
+              <select class="sf-select" name="tier"><option value="all">All liquidity tiers</option><option value="major">Major</option><option value="standard">Standard</option><option value="high-volatility">High volatility</option></select>
+              <button type="submit">Apply</button><button class="secondary-action" id="admin-crypto-filter-clear" type="button">Clear</button>
+            </form>
+            <div class="admin-crypto-market-list" id="admin-crypto-market-list"><div class="empty-state"><strong>Loading crypto markets...</strong></div></div>
           </section>
 
           <section class="page-view hidden admin-signals-page" id="admin-signals-view" data-view="admin-signals">

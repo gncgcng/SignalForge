@@ -19,7 +19,8 @@ export const ROUTE_TO_VIEW = Object.freeze({
   "admin-support": "admin-support",
   "affiliate-admin": "affiliate-admin",
   "webhook-events": "webhook-events",
-  "admin-signals": "admin-signals"
+  "admin-signals": "admin-signals",
+  "admin-crypto-markets": "admin-crypto-markets"
 });
 
 export const PUBLIC_ROUTES = new Set([

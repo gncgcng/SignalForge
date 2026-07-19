@@ -3718,6 +3718,98 @@ polyline {
   color: var(--muted);
 }
 
+.admin-crypto-markets-page .section-title p {
+  margin: 5px 0 0;
+  color: var(--muted);
+}
+
+.admin-crypto-summary {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.admin-crypto-summary article,
+.admin-crypto-market-card {
+  border: 1px solid rgba(58, 207, 255, 0.16);
+  border-radius: 8px;
+  background: rgba(7, 18, 29, 0.82);
+}
+
+.admin-crypto-summary article {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+}
+
+.admin-crypto-summary span,
+.admin-crypto-market-card header span,
+.admin-crypto-market-meta span {
+  color: var(--muted);
+}
+
+.admin-crypto-summary strong { font-size: 1.35rem; }
+
+.admin-crypto-filters {
+  display: grid;
+  grid-template-columns: minmax(220px, 2fr) repeat(4, minmax(130px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.admin-crypto-market-list { display: grid; gap: 10px; }
+
+.admin-crypto-market-card { padding: 14px; }
+
+.admin-crypto-market-card header,
+.admin-crypto-toggles {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.admin-crypto-market-card header > div { display: grid; gap: 4px; }
+.admin-crypto-market-card header strong { font-size: 1.05rem; }
+
+.crypto-provider-state {
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-style: normal;
+  font-size: 0.76rem;
+}
+.crypto-provider-state.available { color: var(--success); border-color: rgba(48, 209, 139, 0.35); }
+.crypto-provider-state.unavailable { color: #ffb36b; border-color: rgba(255, 179, 107, 0.35); }
+.crypto-provider-state.unchecked { color: var(--muted); }
+
+.admin-crypto-market-meta {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+.admin-crypto-market-meta span { display: grid; gap: 4px; min-width: 0; }
+.admin-crypto-market-meta strong { color: var(--text); overflow-wrap: anywhere; }
+.admin-crypto-error { margin: 8px 0; color: #ffb36b; overflow-wrap: anywhere; }
+.admin-crypto-toggles { justify-content: flex-start; }
+.admin-crypto-toggle { display: inline-flex; align-items: center; gap: 7px; min-height: 38px; padding: 0 9px; border: 1px solid var(--border); border-radius: 7px; }
+.admin-crypto-toggle input { accent-color: var(--accent); }
+
+@media (max-width: 900px) {
+  .admin-crypto-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .admin-crypto-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 767px) {
+  .admin-crypto-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .admin-crypto-filters, .admin-crypto-market-meta { grid-template-columns: 1fr; }
+  .admin-crypto-toggles { display: grid; grid-template-columns: 1fr 1fr; }
+  .admin-crypto-toggle, .admin-crypto-toggles button { width: 100%; }
+}
+
 .admin-signal-stats {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));

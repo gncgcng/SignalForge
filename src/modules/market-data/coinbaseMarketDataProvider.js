@@ -1,5 +1,6 @@
 import { appConfig } from "../../config/appConfig.js";
 import { MarketDataProviderError } from "./marketDataProviderError.js";
+import { cryptoProviderSymbols } from "../markets/cryptoMarkets.js";
 
 const granularityByTimeframe = {
   "5m": 300,
@@ -8,53 +9,11 @@ const granularityByTimeframe = {
   "4h": 21600
 };
 
-export const coinbaseSymbols = [
-  "BTC-USD",
-  "ETH-USD",
-  "SOL-USD",
-  "XRP-USD",
-  "ADA-USD",
-  "DOGE-USD",
-  "LINK-USD",
-  "AVAX-USD",
-  "LTC-USD",
-  "BCH-USD",
-  "DOT-USD",
-  "UNI-USD",
-  "AAVE-USD",
-  "MKR-USD",
-  "ATOM-USD",
-  "ETC-USD",
-  "FIL-USD",
-  "ICP-USD",
-  "NEAR-USD",
-  "ARB-USD",
-  "OP-USD",
-  "APT-USD",
-  "SUI-USD",
-  "SEI-USD",
-  "INJ-USD",
-  "HBAR-USD",
-  "PEPE-USD",
-  "SHIB-USD",
-  "BONK-USD",
-  "WIF-USD",
-  "FLOKI-USD",
-  "ENA-USD",
-  "TIA-USD",
-  "JUP-USD",
-  "RNDR-USD",
-  "RUNE-USD",
-  "GRT-USD",
-  "ALGO-USD",
-  "XLM-USD",
-  "MATIC-USD",
-  "COMP-USD",
-  "SAND-USD",
-  "MANA-USD"
-];
+export const coinbaseSymbols = cryptoProviderSymbols;
 
 const cache = new Map();
+let activeRequests = 0;
+const requestQueue = [];
 
 export async function getCandlesFromCoinbase(symbol, timeframe) {
   const granularity = granularityByTimeframe[timeframe];
@@ -74,13 +33,15 @@ export async function getCandlesFromCoinbase(symbol, timeframe) {
   }
 
   const end = new Date();
-  const start = new Date(end.getTime() - granularity * appConfig.marketData.candleLimit * 1000);
+  const candleLimit = Math.min(appConfig.marketData.candleLimit, appConfig.cryptoMarkets.maxCandlesPerRequest);
+  const start = new Date(end.getTime() - granularity * candleLimit * 1000);
   const url = new URL(`/products/${encodeURIComponent(symbol)}/candles`, appConfig.marketData.baseUrl);
   url.searchParams.set("granularity", String(granularity));
   url.searchParams.set("start", start.toISOString());
   url.searchParams.set("end", end.toISOString());
 
   const controller = new AbortController();
+  await acquireRequestSlot();
   const timeout = setTimeout(() => controller.abort(), appConfig.marketData.requestTimeoutMs);
 
   try {
@@ -191,7 +152,26 @@ export async function getCandlesFromCoinbase(symbol, timeframe) {
     });
   } finally {
     clearTimeout(timeout);
+    releaseRequestSlot();
   }
+}
+
+export function getCoinbaseRequestState() {
+  return { active: activeRequests, queued: requestQueue.length, limit: appConfig.cryptoMarkets.maxConcurrentRequests };
+}
+
+async function acquireRequestSlot() {
+  if (activeRequests < appConfig.cryptoMarkets.maxConcurrentRequests) {
+    activeRequests += 1;
+    return;
+  }
+  await new Promise((resolve) => requestQueue.push(resolve));
+  activeRequests += 1;
+}
+
+function releaseRequestSlot() {
+  activeRequests = Math.max(0, activeRequests - 1);
+  requestQueue.shift()?.();
 }
 
 export const coinbaseMarketDataProvider = {

@@ -104,7 +104,7 @@ export async function markAlertRead(user, alertId) {
 function assertActiveMarket(symbol) {
   const pair = getPair(symbol);
 
-  if (!pair || pair.status !== "active") {
+  if (!pair || pair.status !== "active" || pair.category === "Crypto" && !pair.effectiveWatchlistEnabled) {
     throw validationError("Only active crypto and commodity markets can be added to the watchlist.");
   }
 }

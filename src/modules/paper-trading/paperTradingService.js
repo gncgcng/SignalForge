@@ -14,7 +14,7 @@ import {
 } from "../../db/repositories.js";
 import { updateSignalsForUser } from "../signals/signalOutcomeService.js";
 import { calculatePositionSizing } from "../risk/riskEngineService.js";
-import { getCachedOhlcv, getOhlcv, getPair, listPairs } from "../market-data/marketDataService.js";
+import { getCachedOhlcv, getOhlcv, getPair, listPaperTradingPairs } from "../market-data/marketDataService.js";
 import { isSignalExpired } from "../signals/signalValidityService.js";
 
 const supportedPaperTimeframes = ["5m", "15m", "1h", "4h"];
@@ -104,7 +104,7 @@ export async function getPaperTradingTerminal(user, input = {}) {
     orders: enriched,
     marketData,
     marketError,
-    markets: listPairs().filter((pair) => pair.selectable && pair.category !== "Stocks & ETFs"),
+    markets: listPaperTradingPairs(),
     supportedTimeframes: supportedPaperTimeframes,
     disclaimer: "Paper trading only. No real orders are placed."
   };
@@ -114,7 +114,7 @@ export async function placePaperOrder(user, input = {}) {
   const symbol = String(input.symbol || "").trim();
   const timeframe = String(input.timeframe || "15m");
   const pair = getPair(symbol);
-  if (!pair?.selectable || pair.category === "Stocks & ETFs") {
+  if (!pair?.selectable || pair.category === "Stocks & ETFs" || pair.category === "Crypto" && !pair.effectivePaperTradingEnabled) {
     throw validationError("Choose an available crypto or commodity market.");
   }
   if (!supportedPaperTimeframes.includes(timeframe)) {

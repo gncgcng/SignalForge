@@ -48,6 +48,7 @@
     "test:market-regime": "node scripts/market-regime-test.js",
     "test:multi-timeframe": "node scripts/multi-timeframe-test.js",
     "test:expanded-crypto": "node scripts/expanded-crypto-test.js",
+    "test:crypto-markets": "node scripts/crypto-market-operations-test.js",
     "test:scanner-ux": "node scripts/scanner-ux-test.js",
     "test:mobile-signals": "node scripts/mobile-signals-layout-test.js",
     "test:signal-filters": "node scripts/signal-history-filters-test.js",

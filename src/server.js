@@ -8,6 +8,9 @@ import { runPendingMigrations, verifySessionSchema } from "./db/migrations.js";
 import { attachAuth } from "./middleware/authMiddleware.js";
 import { handleAdminAnalyticsRoutes } from "./modules/admin/analyticsController.js";
 import { handleAdminGeneratedSignalRoutes } from "./modules/admin-signals/generatedSignalController.js";
+import { handleAdminCryptoMarketRoutes } from "./modules/markets/cryptoMarketController.js";
+import { initializeCryptoMarketSettings } from "./modules/markets/cryptoMarketService.js";
+import { startCryptoMarketAvailabilityMonitor } from "./modules/markets/cryptoMarketMonitor.js";
 import { handleAuthRoutes } from "./modules/auth/authController.js";
 import { handleBacktestRoutes } from "./modules/backtesting/backtestController.js";
 import { handleAlertRoutes } from "./modules/alerts/alertController.js";
@@ -87,6 +90,7 @@ const server = createServer(async (req, res) => {
       (await handleAuthRoutes(req, res, url.pathname)) ||
       (await handleAdminAnalyticsRoutes(req, res, url.pathname)) ||
       (await handleAdminGeneratedSignalRoutes(req, res, url.pathname, url)) ||
+      (await handleAdminCryptoMarketRoutes(req, res, url.pathname, url)) ||
       (await handleAffiliateRoutes(req, res, url.pathname)) ||
       (await handleAlertRoutes(req, res, url.pathname, url)) ||
       (await handleNotificationRoutes(req, res, url.pathname)) ||
@@ -192,11 +196,13 @@ logEmailConfiguration();
 await verifyDatabaseConnection();
 await runPendingMigrations();
 await verifySessionSchema();
+await initializeCryptoMarketSettings();
 
 server.listen(appConfig.port, () => {
   console.log(`${appConfig.appName} running at http://localhost:${appConfig.port}`);
   startSignalOutcomeTracker();
   startAutoCryptoAlertScanner();
+  startCryptoMarketAvailabilityMonitor();
   startTelegramNotificationQueue();
   startTelegramConnectionPoller();
   recalculateLeaderboardStats().catch((error) => {
