@@ -156,6 +156,49 @@ export async function getCandlesFromCoinbase(symbol, timeframe) {
   }
 }
 
+export async function getProductsFromCoinbase() {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), appConfig.marketData.requestTimeoutMs);
+  try {
+    const response = await fetch(new URL("/products", appConfig.marketData.baseUrl), {
+      signal: controller.signal,
+      headers: { accept: "application/json", "user-agent": "SignalForge/0.1" }
+    });
+    if (!response.ok) {
+      throw new MarketDataProviderError(`Coinbase products returned ${response.status}.`, {
+        statusCode: response.status,
+        code: "PROVIDER_RESPONSE_ERROR"
+      });
+    }
+    const products = await response.json();
+    if (!Array.isArray(products)) {
+      throw new MarketDataProviderError("Coinbase products response was invalid.", {
+        statusCode: 502,
+        code: "BAD_PROVIDER_RESPONSE"
+      });
+    }
+    return products;
+  } catch (error) {
+    if (error instanceof MarketDataProviderError) throw error;
+    if (error.name === "AbortError") {
+      throw new MarketDataProviderError("Coinbase product sync timed out.", {
+        statusCode: 504,
+        code: "MARKET_DATA_TIMEOUT"
+      });
+    }
+    throw new MarketDataProviderError("Unable to reach Coinbase product catalog.", {
+      statusCode: 503,
+      code: "PROVIDER_UNAVAILABLE"
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export function isCoinbaseUsdCryptoSymbol(symbol) {
+  return /^[A-Z0-9]{1,20}-USD$/.test(String(symbol || "").trim().toUpperCase());
+}
+
 export function getCoinbaseRequestState() {
   return { active: activeRequests, queued: requestQueue.length, limit: appConfig.cryptoMarkets.maxConcurrentRequests };
 }
@@ -181,7 +224,7 @@ export const coinbaseMarketDataProvider = {
     return true;
   },
   supports(symbol, timeframe) {
-    return coinbaseSymbols.includes(symbol) &&
+    return isCoinbaseUsdCryptoSymbol(symbol) &&
       Object.hasOwn(granularityByTimeframe, timeframe);
   },
   async getCandles(symbol, timeframe) {

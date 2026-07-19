@@ -57,7 +57,7 @@ const expandedSymbols = [
 const checks = {
   expandedCryptoCatalog:
     expandedSymbols.every((symbol) => cryptoMarkets.includes(`"${symbol}"`)) &&
-    marketDataService.includes('from "../markets/cryptoMarkets.js"') &&
+    marketDataService.includes("listCryptoMarketSettings") &&
     coinbaseProvider.includes('from "../markets/cryptoMarkets.js"'),
   unsupportedPairsHandled:
     coinbaseProvider.includes("PROVIDER_UNSUPPORTED_MARKET") &&

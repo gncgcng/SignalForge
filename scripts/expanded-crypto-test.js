@@ -99,7 +99,7 @@ await resetCryptoMarketCooldown("XRP-USD");
 const combinations = [];
 for (const symbol of requiredCryptoSymbols) {
   for (const timeframe of timeframes) {
-    const marketData = await getOhlcv(symbol, timeframe);
+    const marketData = await coinbaseMarketDataProvider.getCandles(symbol, timeframe);
     combinations.push({
       symbol,
       timeframe,
@@ -121,8 +121,7 @@ const result = {
   catalogCoverage: requiredCryptoSymbols.every((symbol) => {
     const pair = catalog.find((item) => item.symbol === symbol);
     return pair?.category === "Crypto" &&
-      pair.provider === "coinbase-exchange" &&
-      pair.status === "active";
+      pair.provider === "coinbase-exchange";
   }),
   providerCoverage: requiredCryptoSymbols.every((symbol) => coinbaseSymbols.includes(symbol)),
   allTimeframesSupported: requiredCryptoSymbols.every((symbol) => {
@@ -131,7 +130,8 @@ const result = {
   candlesParsed: combinations.every((item) => {
     return item.source === "coinbase-exchange" && item.candleCount === 120;
   }),
-  scanAllCoverage: requiredCryptoSymbols.every((symbol) => activeSymbols.has(symbol)) &&
+  scanAllCoverage: activeSymbols.has("BTC-USD") &&
+    !activeSymbols.has("MATIC-USD") &&
     signalService.includes("listScannerPairs()"),
   uiGroupsPresent: ["Major crypto", "Altcoins", "Commodities"].every((group) => {
     return catalog.some((pair) => pair.group === group);

@@ -11,6 +11,7 @@ import { handleAdminGeneratedSignalRoutes } from "./modules/admin-signals/genera
 import { handleAdminCryptoMarketRoutes } from "./modules/markets/cryptoMarketController.js";
 import { initializeCryptoMarketSettings } from "./modules/markets/cryptoMarketService.js";
 import { startCryptoMarketAvailabilityMonitor } from "./modules/markets/cryptoMarketMonitor.js";
+import { startCoinbaseCryptoMarketSync } from "./modules/markets/cryptoMarketSyncService.js";
 import { handleAuthRoutes } from "./modules/auth/authController.js";
 import { handleBacktestRoutes } from "./modules/backtesting/backtestController.js";
 import { handleAlertRoutes } from "./modules/alerts/alertController.js";
@@ -202,6 +203,7 @@ server.listen(appConfig.port, () => {
   console.log(`${appConfig.appName} running at http://localhost:${appConfig.port}`);
   startSignalOutcomeTracker();
   startAutoCryptoAlertScanner();
+  startCoinbaseCryptoMarketSync();
   startCryptoMarketAvailabilityMonitor();
   startTelegramNotificationQueue();
   startTelegramConnectionPoller();

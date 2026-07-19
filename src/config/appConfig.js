@@ -128,11 +128,15 @@ export const appConfig = {
     cacheTtlMs: 20000
   },
   cryptoMarkets: {
+    syncEnabled: process.env.COINBASE_MARKET_SYNC_ENABLED !== "false",
+    syncIntervalMs: Math.max(3600000, Number(process.env.COINBASE_MARKET_SYNC_INTERVAL_MS || 86400000)),
+    verificationEnabled: process.env.MARKET_VERIFICATION_ENABLED !== "false",
+    verificationIntervalMs: Math.max(60000, Number(process.env.MARKET_VERIFICATION_INTERVAL_MS || 300000)),
     maxActiveScannerPairs: Math.max(1, Number(process.env.CRYPTO_MAX_ACTIVE_SCANNER_PAIRS || 25)),
     maxConcurrentRequests: Math.min(5, Math.max(1, Number(process.env.CRYPTO_MAX_CONCURRENT_REQUESTS || 4))),
     maxCandlesPerRequest: Math.min(300, Math.max(60, Number(process.env.CRYPTO_MAX_CANDLES_PER_REQUEST || 120))),
     unavailableCooldownMs: Math.max(300000, Number(process.env.CRYPTO_UNAVAILABLE_COOLDOWN_MS || 21600000)),
-    verificationPairsPerCycle: Math.min(8, Math.max(1, Number(process.env.CRYPTO_VERIFY_PAIRS_PER_CYCLE || 4)))
+    verificationPairsPerCycle: Math.min(20, Math.max(1, Number(process.env.CRYPTO_VERIFY_PAIRS_PER_CYCLE || 12)))
   },
   twelveData: {
     baseUrl: process.env.TWELVEDATA_API_BASE_URL || "https://api.twelvedata.com",

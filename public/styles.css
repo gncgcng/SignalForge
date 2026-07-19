@@ -3725,10 +3725,39 @@ polyline {
 
 .admin-crypto-summary {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 10px;
   margin-bottom: 14px;
 }
+
+.admin-crypto-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.admin-crypto-actions .status-line { margin: 0; min-width: min(100%, 320px); }
+
+.admin-crypto-progress {
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  border: 1px solid rgba(63, 211, 255, 0.2);
+  border-radius: 8px;
+  background: rgba(4, 17, 25, 0.72);
+}
+
+.admin-crypto-progress > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.admin-crypto-progress progress { width: 100%; height: 7px; accent-color: var(--accent); }
 
 .admin-crypto-summary article,
 .admin-crypto-market-card {
@@ -3787,7 +3816,7 @@ polyline {
 
 .admin-crypto-market-meta {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
   gap: 10px;
   margin: 12px 0;
 }

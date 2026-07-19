@@ -2,11 +2,11 @@ import { getMarketDataProvider, getPairProviderAvailability } from "./marketData
 import { MarketDataProviderError } from "./marketDataProviderError.js";
 import { analyzeMarketRegime } from "./marketRegimeService.js";
 import { analyzeAdvancedMarketStructure } from "./advancedMarketStructureService.js";
-import { cryptoMarketUniverse } from "../markets/cryptoMarkets.js";
 import {
   canUseCryptoTimeframe,
   getCryptoMarketState,
   isCryptoMarketCoolingDown,
+  listCryptoMarketSettings,
   listPaperCryptoMarkets,
   listScannerCryptoMarkets,
   recordCryptoMarketFailure,
@@ -68,14 +68,15 @@ const legacyMarketCatalog = [
   { symbol: "SPY", name: "S&P 500 ETF", category: "Stocks & ETFs", group: "Stocks & ETFs", assetClass: "ETF", venue: "NYSE Arca", provider: null }
 ];
 
-const marketCatalog = [
-  ...cryptoMarketUniverse,
-  ...legacyMarketCatalog.filter((market) => market.category !== "Crypto")
-];
+const nonCryptoMarketCatalog = legacyMarketCatalog.filter((market) => market.category !== "Crypto");
+
+function currentMarketCatalog() {
+  return [...listCryptoMarketSettings(), ...nonCryptoMarketCatalog];
+}
 
 export function listPairs(query = "") {
   const normalized = query.trim().toLowerCase();
-  const pairs = marketCatalog.map(withAvailability);
+  const pairs = currentMarketCatalog().map(withAvailability);
 
   if (!normalized) {
     return pairs;
@@ -99,23 +100,23 @@ export function listPairs(query = "") {
 }
 
 export function getPair(symbol) {
-  const pair = marketCatalog.find((item) => item.symbol === symbol);
+  const pair = getCryptoMarketState(symbol) || nonCryptoMarketCatalog.find((item) => item.symbol === symbol);
   return pair ? withAvailability(pair) : null;
 }
 
 export function listActivePairs() {
-  return marketCatalog.map(withAvailability).filter((pair) => pair.status === "active");
+  return currentMarketCatalog().map(withAvailability).filter((pair) => pair.status === "active");
 }
 
 export function listScannerPairs() {
   const crypto = listScannerCryptoMarkets().map(withAvailability);
-  const other = marketCatalog.filter((pair) => pair.category !== "Crypto").map(withAvailability).filter((pair) => pair.status === "active");
+  const other = nonCryptoMarketCatalog.map(withAvailability).filter((pair) => pair.status === "active");
   return [...crypto, ...other];
 }
 
 export function listPaperTradingPairs() {
   const crypto = listPaperCryptoMarkets().map(withAvailability);
-  const other = marketCatalog.filter((pair) => pair.category !== "Crypto").map(withAvailability).filter((pair) => pair.status === "active");
+  const other = nonCryptoMarketCatalog.map(withAvailability).filter((pair) => pair.status === "active");
   return [...crypto, ...other];
 }
 
@@ -347,16 +348,16 @@ function withAvailability(pair) {
   if (pair.category === "Crypto") {
     const operational = getCryptoMarketState(pair.symbol);
     const coolingDown = isCryptoMarketCoolingDown(pair.symbol);
-    const available = availability.configured && operational?.enabled && operational.providerStatus !== "unavailable" && !coolingDown;
+    const available = availability.configured && operational?.enabled && operational.marketStatus === "active" && !coolingDown;
     return {
       ...pair,
       ...operational,
       displaySymbol,
       providerLabel: `Coinbase · ${pair.symbol}`,
-      status: available ? "active" : operational?.enabled ? "unavailable" : "disabled",
+      status: available ? "active" : operational?.marketStatus === "disabled" ? "disabled" : "unavailable",
       selectable: available,
       availabilityCode: coolingDown ? "MARKET_COOLDOWN" : operational?.failureCode || availability.code,
-      availabilityMessage: operational?.lastError || (operational?.providerStatus === "unchecked" ? "Provider verification pending" : availability.message)
+      availabilityMessage: operational?.lastError || operational?.statusLabel || availability.message
     };
   }
 

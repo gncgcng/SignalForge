@@ -65,7 +65,9 @@ for (const symbol of [...requiredCommoditySymbols, ...optionalCommoditySymbols])
 }
 
 const result = {
-  cryptoActive: crypto.every((pair) => pair.status === "active"),
+  cryptoActive: ["BTC-USD", "ETH-USD", "SOL-USD"].every((symbol) =>
+    crypto.some((pair) => pair.symbol === symbol && pair.status === "active")
+  ) && crypto.filter((pair) => pair.marketStatus === "pending").every((pair) => pair.selectable === false),
   commoditySymbols: commodities.map((pair) => pair.symbol),
   commoditiesComingSoon: commodities.every((pair) => pair.status === "coming-soon"),
   stocksComingSoon: stocks.every((pair) => pair.status === "coming-soon"),

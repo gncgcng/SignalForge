@@ -1992,13 +1992,19 @@
 
           <section class="page-view hidden admin-crypto-markets-page" id="admin-crypto-markets-view" data-view="admin-crypto-markets">
             <div class="section-title">
-              <div><span class="eyebrow">ADMIN · CRYPTO MARKETS</span><h3>Provider availability and scanner controls</h3><p>New pairs remain outside automatic scans until Coinbase candle support is verified.</p></div>
-              <span id="admin-crypto-market-count">0 markets</span>
+              <div><span class="eyebrow">ADMIN · CRYPTO MARKETS</span><h3>Coinbase market discovery and verification</h3><p>Only active, verified pairs can enter the scanner, Paper Trading, or Watchlist.</p></div>
+              <span id="admin-crypto-market-count">0 active markets</span>
             </div>
+            <div class="admin-crypto-actions">
+              <button id="admin-crypto-sync" type="button">Sync Coinbase markets</button>
+              <button class="secondary-action" id="admin-crypto-verify-pending" type="button">Verify all pending</button>
+              <span class="status-line" id="admin-crypto-operation-status" aria-live="polite"></span>
+            </div>
+            <div class="admin-crypto-progress hidden" id="admin-crypto-progress"><div><span id="admin-crypto-progress-label">Preparing verification...</span><strong id="admin-crypto-progress-count">0 / 0</strong></div><progress id="admin-crypto-progress-bar" max="1" value="0"></progress></div>
             <div class="admin-crypto-summary" id="admin-crypto-summary"></div>
             <form class="admin-crypto-filters" id="admin-crypto-filters">
-              <input class="sf-input" name="q" type="search" placeholder="Search BTC, BTCUSD, Bitcoin...">
-              <select class="sf-select" name="status"><option value="all">All states</option><option value="enabled">Enabled</option><option value="scanner">Scanner ready</option><option value="unavailable">Unavailable</option></select>
+              <input class="sf-input" name="q" type="search" placeholder="Search BTC, BTCUSD, BTC-USD, Bitcoin, Coinbase...">
+              <select class="sf-select" name="status"><option value="all">All states</option><option value="active">Active</option><option value="pending">Pending verification</option><option value="unavailable">Unavailable</option><option value="legacy">Legacy / migrated</option><option value="disabled">Disabled by admin</option><option value="provider_error">Provider error</option><option value="scanner">Scanner enabled</option><option value="paper">Paper trading enabled</option></select>
               <select class="sf-select" name="tier"><option value="all">All liquidity tiers</option><option value="major">Major</option><option value="standard">Standard</option><option value="high-volatility">High volatility</option></select>
               <button type="submit">Apply</button><button class="secondary-action" id="admin-crypto-filter-clear" type="button">Clear</button>
             </form>
