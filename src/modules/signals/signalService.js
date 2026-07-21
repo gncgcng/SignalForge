@@ -488,6 +488,7 @@ export async function scanAllMarketsDetailed(user, options = {}) {
   };
   const universe = options.universe || getManualScannerUniverse(options);
   const scanMarkets = universe.markets;
+  const marketsToScan = scanMarkets.slice(0, appConfig.manualScan.maxMarkets);
   const analystProfile = await getUserAnalystProfile(user);
   const activeCounts = universe.summary.activeMarkets || {};
   const scannerCounts = universe.summary.scannerEnabledMarkets || {};
@@ -504,23 +505,27 @@ export async function scanAllMarketsDetailed(user, options = {}) {
     `[manual-scan] selectedMarkets total=${universe.summary.selectedMarkets || scanMarkets.length} crypto=${universe.summary.crypto} commodities=${universe.summary.commodities}`
   );
   console.info(
-    `[manual-scan] scannedMarkets total=${universe.summary.scannedMarkets || scanMarkets.length} skipped=${universe.skipped.length}`
+    `[manual-scan] marketsToScan total=${marketsToScan.length} max=${appConfig.manualScan.maxMarkets}`
+  );
+  console.info(
+    `[manual-scan] scannedMarkets total=${marketsToScan.length} skipped=${universe.skipped.length}`
   );
   console.info(
     `[manual-scan] skippedReasons=${Object.entries(universe.summary.skippedByReason || {}).map(([reason, count]) => `${reason}:${count}`).join(",") || "none"}`
   );
   console.info(
-    `[manual-scan] firstSymbols=${scanMarkets.slice(0, 20).map((market) => market.symbol).join(",") || "none"}`
+    `[manual-scan] firstSymbols=${marketsToScan.slice(0, 20).map((market) => market.symbol).join(",") || "none"}`
   );
-  for (const market of scanMarkets.slice(0, 20)) {
-    console.info(`[manual-scan] ${market.symbol} provider=${market.provider || "missing"}`);
-  }
   console.info(
-    `[scanner] manual_universe market_type=${universe.marketType} selected=${scanMarkets.length} ` +
+    `[manual-scan] providerRoutes=${marketsToScan.slice(0, 20).map((market) => `${market.symbol}:${market.provider || "missing"}`).join(",") || "none"}`
+  );
+  console.info(
+    `[scanner] manual_universe market_type=${universe.marketType} selected=${universe.summary.selectedMarkets || scanMarkets.length} ` +
+    `markets_to_scan=${marketsToScan.length} ` +
     `skipped=${universe.skipped.length} crypto=${universe.summary.crypto} commodities=${universe.summary.commodities}`
   );
 
-  await runManualScanMarkets(scanMarkets, async (market) => {
+  await runManualScanMarkets(marketsToScan, async (market) => {
     const symbol = market.symbol;
     const supportedTimeframes = market.scannerTimeframes || scanTimeframes;
     for (const timeframe of scanTimeframes.filter((item) => supportedTimeframes.includes(item))) {

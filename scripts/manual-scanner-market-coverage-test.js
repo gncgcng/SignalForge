@@ -58,9 +58,15 @@ const checks = {
     !signalService.includes("slice(0, 24)") &&
     !marketDataService.includes("slice(0, 24)") &&
     marketDataService.includes("appConfig.manualScan.maxMarkets"),
+  manualScanLoopUsesConfiguredLimit:
+    signalService.includes("const marketsToScan = scanMarkets.slice(0, appConfig.manualScan.maxMarkets)") &&
+    signalService.includes("runManualScanMarkets(marketsToScan") &&
+    !signalService.includes("for (const market of scanMarkets.slice(0, 20))") &&
+    !signalService.includes("runManualScanMarkets(scanMarkets"),
   selectedAndScannedCountsReported:
     Number(manualAll.summary.selectedMarkets) >= Number(manualAll.summary.scannedMarkets) &&
     "skippedByReason" in manualAll.summary &&
+    signalService.includes("[manual-scan] marketsToScan") &&
     signalService.includes("[manual-scan] scannedMarkets") &&
     signalService.includes("[manual-scan] skippedReasons") &&
     app.includes("selected ·") &&
@@ -109,7 +115,7 @@ const checks = {
     signalService.includes("[manual-scan] scannerEnabled") &&
     signalService.includes("[manual-scan] selectedMarkets") &&
     signalService.includes("[manual-scan] firstSymbols=") &&
-    signalService.includes("provider=${market.provider")
+    signalService.includes("[manual-scan] providerRoutes=")
 };
 
 for (const [name, passed] of Object.entries(checks)) {
