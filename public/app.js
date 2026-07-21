@@ -1793,6 +1793,24 @@ document.querySelector("#admin-crypto-enable-active-scanner")?.addEventListener(
     button.disabled = false;
   }
 });
+document.querySelector("#admin-crypto-restore-recent")?.addEventListener("click", async (event) => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  adminCryptoOperationStatus.textContent = "Restoring recently active markets...";
+  try {
+    const result = await api.request("/api/admin/crypto-markets/restore-recently-active", { method: "POST" });
+    const restored = result.restored || {};
+    adminCryptoOperationStatus.textContent = `Restore complete: restored ${restored.restored || 0}, active ${restored.active || 0}, scanner enabled ${restored.scannerEnabled || 0}.`;
+    showToast("Recently active markets restored");
+    await loadAdminCryptoMarkets();
+    await loadPairs();
+  } catch (error) {
+    adminCryptoOperationStatus.textContent = error.message;
+    showToast(error.message);
+  } finally {
+    button.disabled = false;
+  }
+});
 adminCryptoSync?.addEventListener("click", async () => {
   adminCryptoSync.disabled = true;
   adminCryptoOperationStatus.textContent = "Syncing Coinbase USD markets...";
@@ -3633,9 +3651,11 @@ function renderAdminCryptoMarket(market) {
   const providerClass = available ? "available" : "unavailable";
   const timeframes = market.supportedTimeframes?.length ? market.supportedTimeframes.join(", ") : "None verified";
   const details = market.verificationDetails || {};
+  const lastFailed = details.lastFailedCheck || {};
+  const warningText = details.providerWarning || details.warning || details.lastWarning || "";
   return `<article class="admin-crypto-market-card">
     <header><div><strong>${escapeHtml(market.displaySymbol)}</strong><span>${escapeHtml(market.name)} &middot; Coinbase &middot; ${escapeHtml(market.providerSymbol)}</span></div><em class="crypto-provider-state ${providerClass}">${escapeHtml(status)}</em></header>
-    <div class="admin-crypto-market-meta"><span>Status<strong>${escapeHtml(status)}</strong></span><span>Verification<strong>${escapeHtml(titleCase(market.verificationStatus || "failed"))}</strong></span><span>Timeframes<strong>${escapeHtml(timeframes)}</strong></span><span>Last verified<strong>${market.lastVerifiedAt ? formatDateTime(market.lastVerifiedAt) : "Never"}</strong></span><span>Last candle<strong>${market.lastSuccessfulCandleAt ? formatDateTime(market.lastSuccessfulCandleAt) : "Never"}</strong></span></div>
+    <div class="admin-crypto-market-meta"><span>Status<strong>${escapeHtml(status)}</strong></span><span>Verification<strong>${escapeHtml(titleCase(market.verificationStatus || "failed"))}</strong></span><span>Timeframes<strong>${escapeHtml(timeframes)}</strong></span><span>Consecutive failures<strong>${Number(market.consecutiveFailures || lastFailed.consecutiveFailures || 0)}</strong></span><span>Last verified<strong>${market.lastVerifiedAt ? formatDateTime(market.lastVerifiedAt) : "Never"}</strong></span><span>Last candle<strong>${market.lastSuccessfulCandleAt ? formatDateTime(market.lastSuccessfulCandleAt) : "Never"}</strong></span></div>
     <details class="admin-crypto-verification-details" ${canonicalStatus !== "active" ? "open" : ""}>
       <summary>Verification details</summary>
       <div class="admin-crypto-detail-grid">
@@ -3645,14 +3665,16 @@ function renderAdminCryptoMarket(market) {
         <span>Latest candle<strong>${details.latestCandleTime ? formatDateTime(details.latestCandleTime) : market.lastSuccessfulCandleAt ? formatDateTime(market.lastSuccessfulCandleAt) : "Never"}</strong></span>
         <span>Last verified<strong>${details.lastVerifiedAt ? formatDateTime(details.lastVerifiedAt) : market.lastVerifiedAt ? formatDateTime(market.lastVerifiedAt) : "Never"}</strong></span>
         <span>Last attempt<strong>${details.lastVerificationAttempt ? formatDateTime(details.lastVerificationAttempt) : market.lastCheckedAt ? formatDateTime(market.lastCheckedAt) : "Never"}</strong></span>
+        <span>Last failed check<strong>${lastFailed.at ? `${formatDateTime(lastFailed.at)} · ${escapeHtml(lastFailed.code || "warning")}` : "None"}</strong></span>
         <span>Next retry<strong>${details.nextRetryTime ? formatDateTime(details.nextRetryTime) : market.cooldownUntil ? formatDateTime(market.cooldownUntil) : "Now"}</strong></span>
         <span>Final status<strong>${escapeHtml(status)}</strong></span>
       </div>
       <div class="admin-crypto-candle-checks">
         ${["5m", "15m", "1h", "4h"].map((timeframe) => renderCryptoCandleCheck(timeframe, details.candleChecks?.[timeframe], market)).join("")}
       </div>
-      <p class="admin-crypto-error">${escapeHtml(details.lastError || market.lastError || details.providerWarning || details.warning || "No verification error recorded.")}</p>
+      <p class="admin-crypto-error">${escapeHtml(details.lastError || market.lastError || warningText || "No verification error recorded.")}</p>
     </details>
+    ${warningText ? `<p class="admin-crypto-error">${escapeHtml(warningText)}</p>` : ""}
     ${market.lastError && !hasPassingCheck ? `<p class="admin-crypto-error">${escapeHtml(market.lastError)}</p>` : ""}
     <div class="admin-crypto-toggles">
       ${cryptoSettingToggle(market, "enabled", market.enabled ? "Market enabled" : "Disabled by admin")}

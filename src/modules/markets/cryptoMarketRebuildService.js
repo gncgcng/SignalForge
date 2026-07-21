@@ -178,6 +178,7 @@ async function rebuildProduct(product, existing = {}) {
         lastSuccessfulCandleAt: latestCandleAt,
         lastError: null,
         failureCode: null,
+        resetFailures: true,
         verificationDetails: details(product, checks, {
           productExists: true,
           productTradingEnabled: true,
@@ -192,27 +193,46 @@ async function rebuildProduct(product, existing = {}) {
   }
 
   const providerError = checks.some((check) => isProviderErrorCode(check.code));
-  const status = providerError ? "provider_error" : "unavailable";
+  const nextFailureCount = Number(existing.consecutive_failures || 0) + 1;
+  const existingActive = existing.status === "active" || existing.market_status === "active";
+  const recentSuccess = hasRecentSuccessfulCandle(existing);
+  const keepActive = existingActive && (
+    checks.some((check) => isRateLimitCode(check.code)) ||
+    recentSuccess ||
+    nextFailureCount < 3
+  );
+  const status = keepActive ? "active" : existingActive ? "provider_error" : providerError ? "provider_error" : "unavailable";
   const reason = checks.at(-1)?.error || "No candle data returned from provider.";
+  const cooldownUntil = new Date(Date.now() + appConfig.cryptoMarkets.unavailableCooldownMs);
   await updateMarket(product, {
     status,
     marketStatus: status,
-    verificationStatus: providerError ? "error" : "failed",
-    providerStatus: providerError ? "provider_issue" : "unavailable",
+    verificationStatus: status === "active" ? "verified" : status === "provider_error" ? "error" : "failed",
+    providerStatus: status === "active" ? "available" : status === "provider_error" ? "provider_issue" : "unavailable",
     enabled: true,
-    scannerEnabled: false,
-    paperTradingEnabled: false,
-    watchlistEnabled: false,
-    supportedTimeframes: [],
+    scannerEnabled: keepActive ? shouldEnableCapability(existing, "scanner_enabled") : false,
+    paperTradingEnabled: keepActive ? shouldEnableCapability(existing, "paper_trading_enabled") : false,
+    watchlistEnabled: keepActive ? shouldEnableCapability(existing, "watchlist_enabled") : false,
+    supportedTimeframes: keepActive ? existing.supported_timeframes || [] : [],
     unsupportedTimeframes: candleTestOrder,
-    lastSuccessfulCandleAt: null,
-    lastError: reason,
+    lastSuccessfulCandleAt: keepActive ? existing.last_successful_candle_at : null,
+    lastError: keepActive ? null : reason,
     failureCode: checks.at(-1)?.code || (providerError ? "PROVIDER_ERROR" : "NO_CANDLES"),
+    cooldownUntil,
+    resetFailures: false,
     verificationDetails: details(product, checks, {
       productExists: true,
       productTradingEnabled: true,
       finalStatus: status,
-      lastError: reason
+      lastError: keepActive ? null : reason,
+      providerWarning: keepActive ? `Temporary provider warning: ${reason}` : null,
+      nextRetryTime: cooldownUntil.toISOString(),
+      lastFailedCheck: {
+        error: reason,
+        code: checks.at(-1)?.code || (providerError ? "PROVIDER_ERROR" : "NO_CANDLES"),
+        at: new Date().toISOString(),
+        consecutiveFailures: nextFailureCount
+      }
     })
   });
   return result(product, status, reason, checks.map((check) => `${check.timeframe}:${check.code || "fail"}`).join(","), true);
@@ -227,7 +247,7 @@ async function updateMarket(product, state) {
     provider_status=$13, supported_timeframes=$14, unsupported_timeframes=$15,
     last_successful_candle_at=$16, last_checked_at=$17, last_verified_at=$17,
     last_verification_attempt_at=$17, last_error=$18, failure_code=$19,
-    cooldown_until=NULL, consecutive_failures=CASE WHEN $20='active' THEN 0 ELSE consecutive_failures+1 END,
+    cooldown_until=$24, consecutive_failures=CASE WHEN $25 THEN 0 ELSE consecutive_failures+1 END,
     market_status=$21, verification_status=$22, status=$20,
     verification_details=$23, updated_at=now()
     WHERE provider_symbol=$1`, [
@@ -236,7 +256,8 @@ async function updateMarket(product, state) {
     state.enabled, state.scannerEnabled, state.paperTradingEnabled, state.watchlistEnabled,
     state.providerStatus, state.supportedTimeframes, state.unsupportedTimeframes,
     state.lastSuccessfulCandleAt, checkedAt, state.lastError, state.failureCode,
-    state.status, state.marketStatus, state.verificationStatus, state.verificationDetails
+    state.status, state.marketStatus, state.verificationStatus, state.verificationDetails,
+    state.cooldownUntil || null, state.resetFailures === true
   ]);
 }
 
@@ -331,7 +352,8 @@ async function cleanRemovedLegacyAndPendingMarkets(discoveredProviderSymbols, pr
 
 async function loadExistingMarkets() {
   const result = await query(`SELECT symbol, provider_symbol, enabled, scanner_enabled,
-    paper_trading_enabled, watchlist_enabled, status, market_status
+    paper_trading_enabled, watchlist_enabled, status, market_status,
+    supported_timeframes, last_successful_candle_at, consecutive_failures
     FROM crypto_markets WHERE provider='coinbase-exchange'`);
   return result.rows;
 }
@@ -388,7 +410,10 @@ function details(product, checks, extra) {
     lastVerifiedAt: now,
     lastVerificationAttempt: now,
     lastError: extra.lastError || null,
-    nextRetryTime: null,
+    warning: extra.providerWarning || null,
+    providerWarning: extra.providerWarning || null,
+    lastFailedCheck: extra.lastFailedCheck || null,
+    nextRetryTime: extra.nextRetryTime || null,
     finalStatus: extra.finalStatus
   };
 }
@@ -432,6 +457,16 @@ function safeReason(value) {
 
 function isProviderErrorCode(code) {
   return ["PROVIDER_UNAVAILABLE", "PROVIDER_RESPONSE_ERROR", "MARKET_DATA_TIMEOUT", "RATE_LIMITED", "BAD_PROVIDER_RESPONSE"].includes(code);
+}
+
+function hasRecentSuccessfulCandle(existing = {}, windowMs = 24 * 60 * 60 * 1000) {
+  if (!existing.last_successful_candle_at) return false;
+  const age = Date.now() - new Date(existing.last_successful_candle_at).getTime();
+  return Number.isFinite(age) && age >= 0 && age <= windowMs;
+}
+
+function isRateLimitCode(code) {
+  return String(code || "").toUpperCase() === "RATE_LIMITED";
 }
 
 function error(message, code) {

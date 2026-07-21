@@ -35,8 +35,10 @@ await recordCryptoMarketSuccess("ATOM-USD", "15m", new Date().toISOString());
 assert.equal(listScannerCryptoMarkets().some((market) => market.symbol === "ATOM-USD"), true);
 await recordCryptoMarketFailure("ATOM-USD", "15m", { code: "EMPTY_CANDLES", message: "No candle data from provider" });
 assert.equal(getCryptoMarketState("ATOM-USD").cooldownUntil != null, true);
-assert.equal(listScannerCryptoMarkets().some((market) => market.symbol === "ATOM-USD"), false);
-assert.equal(listPaperCryptoMarkets().some((market) => market.symbol === "ATOM-USD"), false);
+assert.equal(getCryptoMarketState("ATOM-USD").lastError, null);
+assert.equal(getCryptoMarketState("ATOM-USD").consecutiveFailures >= 1, true);
+assert.equal(listScannerCryptoMarkets().some((market) => market.symbol === "ATOM-USD"), true);
+assert.equal(listPaperCryptoMarkets().some((market) => market.symbol === "ATOM-USD"), true);
 
 const state = { failureCode: "EMPTY_CANDLES", cooldownUntil: new Date(Date.now() + 10000).toISOString() };
 assert.equal(logCryptoMarketFailureOnce("TEST-USD", "15m", state), true);
