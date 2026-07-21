@@ -22,6 +22,7 @@ const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf
 const signalController = readFileSync(new URL("../src/modules/signals/signalController.js", import.meta.url), "utf8");
 const signalService = readFileSync(new URL("../src/modules/signals/signalService.js", import.meta.url), "utf8");
 const marketDataService = readFileSync(new URL("../src/modules/market-data/marketDataService.js", import.meta.url), "utf8");
+const appConfigSource = readFileSync(new URL("../src/config/appConfig.js", import.meta.url), "utf8");
 
 const checks = {
   manualIncludesCryptoAndCommodities:
@@ -53,9 +54,17 @@ const checks = {
     manualAll.markets.length > 0,
   noSilentTwentyFourCap:
     appConfig.manualScan.maxMarkets === 200 &&
+    appConfigSource.includes("Math.max(200, Number(process.env.MANUAL_SCAN_MAX_MARKETS || 200))") &&
     !signalService.includes("slice(0, 24)") &&
     !marketDataService.includes("slice(0, 24)") &&
     marketDataService.includes("appConfig.manualScan.maxMarkets"),
+  selectedAndScannedCountsReported:
+    Number(manualAll.summary.selectedMarkets) >= Number(manualAll.summary.scannedMarkets) &&
+    "skippedByReason" in manualAll.summary &&
+    signalService.includes("[manual-scan] scannedMarkets") &&
+    signalService.includes("[manual-scan] skippedReasons") &&
+    app.includes("selected ·") &&
+    app.includes("scanned ·"),
   skippedReasonsPresent:
     manualAll.skipped.every((item) => item.reasonCode && item.reason),
   providerRoutingPreserved:

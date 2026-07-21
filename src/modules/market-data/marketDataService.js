@@ -188,6 +188,7 @@ export function getManualScannerUniverse(options = {}) {
     });
   }
 
+  const selectedTotal = selected.length;
   const limited = selected.slice(0, appConfig.manualScan.maxMarkets);
   for (const pair of selected.slice(appConfig.manualScan.maxMarkets)) {
     skipped.push(toSkippedMarket(pair, "manual_scan_limit", `Manual scan limit reached (${appConfig.manualScan.maxMarkets} markets).`));
@@ -198,7 +199,7 @@ export function getManualScannerUniverse(options = {}) {
     markets: limited,
     skipped,
     summary: {
-      ...summarizeScannerUniverse(candidates, limited, skipped),
+      ...summarizeScannerUniverse(candidates, selectedTotal, selected, limited, skipped),
       selectedFilter: marketType
     },
     signature: `${marketType}:${limited.map((pair) => `${pair.symbol}:${(pair.scannerTimeframes || []).join(",")}`).join("|")}`
@@ -488,7 +489,7 @@ function toSkippedMarket(pair, reasonCode, reason) {
   };
 }
 
-function summarizeScannerUniverse(candidates, markets, skipped) {
+function summarizeScannerUniverse(candidates, selectedTotal, selectedMarkets, markets, skipped) {
   const countByType = (items, key) => items.filter((item) => getMarketTypeKey(item) === key).length;
   const timeframeSet = new Set(markets.flatMap((item) => item.scannerTimeframes || []));
   const autoMarkets = listScannerCryptoMarkets();
@@ -521,7 +522,9 @@ function summarizeScannerUniverse(candidates, markets, skipped) {
       commodities: countByType(scannerEnabledMarkets, "commodities")
     },
     scannerEnabled: markets.length,
+    selectedMarkets: selectedTotal,
     selectedManual: markets.length,
+    scannedMarkets: markets.length,
     selectedAuto: autoMarkets.length,
     timeframes: timeframeSet.size,
     scanTasks: markets.reduce((total, item) => total + (item.scannerTimeframes || []).length, 0),

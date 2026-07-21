@@ -6391,7 +6391,7 @@ function renderScanSummary(opportunitiesFound, marketsScanned, timeframesScanned
       ? "Probable setups were found, but confirmation or entry readiness is still incomplete. No credits used."
       : "SignalForge scanned the market but did not find enough confirmation for a valid setup. No credits used.";
   document.querySelector("#scan-summary-diagnostics-content").innerHTML = `
-    ${scanUniverse ? `<p><strong>Scanner universe:</strong> ${formatInteger(scanUniverse.selectedManual || marketsScanned)} selected · ${formatInteger(scanUniverse.scanTasks || 0)} checks · ${formatInteger(scanUniverse.crypto || 0)} crypto · ${formatInteger(scanUniverse.commodities || 0)} commodities · ${formatInteger(scanUniverse.skipped || skippedCount)} skipped</p>` : ""}
+    ${scanUniverse ? `<p><strong>Scanner universe:</strong> ${formatInteger(scanUniverse.selectedMarkets || scanUniverse.selectedManual || marketsScanned)} selected · ${formatInteger(scanUniverse.scannedMarkets || scanUniverse.selectedManual || marketsScanned)} scanned · ${formatInteger(scanUniverse.scanTasks || 0)} checks · ${formatInteger(scanUniverse.crypto || 0)} crypto · ${formatInteger(scanUniverse.commodities || 0)} commodities · ${formatInteger(scanUniverse.skipped || skippedCount)} skipped</p>` : ""}
     <p><strong>Most common avoid reason:</strong> ${escapeHtml(summary?.topAvoidReason || summary?.topRejectionReason || diagnostics?.topReasons?.[0]?.reason || "Strategy not matched")}</p>
     ${renderRejectionReasons((diagnostics?.topReasons || []).map((item) => `${item.reason} (${item.count})`))}
     ${renderDiagnosticSamples(diagnostics?.samples)}
@@ -6413,7 +6413,7 @@ function renderAdminScannerUniverseDebug(scanUniverse = null) {
     <details class="scan-diagnostics" open>
       <summary>Admin scanner debug</summary>
       <div>
-        <p><strong>Manual scan universe:</strong> filter ${escapeHtml(scanUniverse.selectedFilter || "all")} · selected ${formatInteger(scanUniverse.selectedManual || 0)} · first ${escapeHtml((scanUniverse.firstSymbols || []).join(", ") || "none")}</p>
+        <p><strong>Manual scan universe:</strong> filter ${escapeHtml(scanUniverse.selectedFilter || "all")} · selected ${formatInteger(scanUniverse.selectedMarkets || scanUniverse.selectedManual || 0)} · scanned ${formatInteger(scanUniverse.scannedMarkets || scanUniverse.selectedManual || 0)} · first ${escapeHtml((scanUniverse.firstSymbols || []).join(", ") || "none")}</p>
         <p><strong>Active markets:</strong> total ${formatInteger(active.total || 0)} · crypto ${formatInteger(active.crypto || 0)} · commodities ${formatInteger(active.commodities || 0)}</p>
         <p><strong>Scanner enabled:</strong> total ${formatInteger(scanner.total || 0)} · crypto ${formatInteger(scanner.crypto || 0)} · commodities ${formatInteger(scanner.commodities || 0)}</p>
         <p><strong>Auto scan universe:</strong> crypto-only ${auto.cryptoOnly !== false ? "true" : "false"} · selected ${formatInteger(auto.selected || 0)} · first ${escapeHtml((auto.firstSymbols || []).join(", ") || "none")}</p>
@@ -6438,7 +6438,7 @@ function renderScanResults(setups, errors, diagnostics = null, scanSummary = nul
   const frames = ["1h", "4h", "15m", "5m"];
   const scannedMarkets = activePairs.map((pair) => pair.symbol);
   state.lastScanSummary = {
-    marketsScanned: scanUniverse?.selectedManual || scannedMarkets.length,
+    marketsScanned: scanUniverse?.scannedMarkets || scanUniverse?.selectedManual || scannedMarkets.length,
     timeframesScanned: scanUniverse?.timeframes || frames.length,
     opportunitiesFound: setups.length,
     watchingSetups: scanSummary?.watching || 0,
@@ -6452,7 +6452,7 @@ function renderScanResults(setups, errors, diagnostics = null, scanSummary = nul
   };
   renderScanSummary(
     setups.length,
-    scanUniverse?.selectedManual || scannedMarkets.length,
+    scanUniverse?.scannedMarkets || scanUniverse?.selectedManual || scannedMarkets.length,
     scanUniverse?.timeframes || frames.length,
     errors,
     diagnostics,

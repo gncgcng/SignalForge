@@ -501,7 +501,13 @@ export async function scanAllMarketsDetailed(user, options = {}) {
     `[manual-scan] scannerEnabled total=${scannerCounts.total || 0} crypto=${scannerCounts.crypto || 0} commodities=${scannerCounts.commodities || 0}`
   );
   console.info(
-    `[manual-scan] selectedMarkets total=${scanMarkets.length} crypto=${universe.summary.crypto} commodities=${universe.summary.commodities}`
+    `[manual-scan] selectedMarkets total=${universe.summary.selectedMarkets || scanMarkets.length} crypto=${universe.summary.crypto} commodities=${universe.summary.commodities}`
+  );
+  console.info(
+    `[manual-scan] scannedMarkets total=${universe.summary.scannedMarkets || scanMarkets.length} skipped=${universe.skipped.length}`
+  );
+  console.info(
+    `[manual-scan] skippedReasons=${Object.entries(universe.summary.skippedByReason || {}).map(([reason, count]) => `${reason}:${count}`).join(",") || "none"}`
   );
   console.info(
     `[manual-scan] firstSymbols=${scanMarkets.slice(0, 20).map((market) => market.symbol).join(",") || "none"}`

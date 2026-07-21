@@ -148,7 +148,7 @@ export const appConfig = {
     cacheTtlMs: Number(process.env.TWELVEDATA_CACHE_TTL_MS || 300000)
   },
   manualScan: {
-    maxMarkets: Math.max(1, Number(process.env.MANUAL_SCAN_MAX_MARKETS || 200)),
+    maxMarkets: Math.max(200, Number(process.env.MANUAL_SCAN_MAX_MARKETS || 200)),
     concurrency: Math.max(1, Number(process.env.MANUAL_SCAN_CONCURRENCY || 2)),
     providerDelayMs: Math.max(0, Number(process.env.MANUAL_SCAN_PROVIDER_DELAY_MS || 750)),
     twelveDataEnabled: process.env.TWELVEDATA_MANUAL_SCAN_ENABLED !== "false"
