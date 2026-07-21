@@ -192,16 +192,15 @@ async function rebuildProduct(product, existing = {}) {
     }
   }
 
-  const providerError = checks.some((check) => isProviderErrorCode(check.code));
   const nextFailureCount = Number(existing.consecutive_failures || 0) + 1;
   const existingActive = existing.status === "active" || existing.market_status === "active";
   const recentSuccess = hasRecentSuccessfulCandle(existing);
-  const keepActive = existingActive && (
-    checks.some((check) => isRateLimitCode(check.code)) ||
+  const previouslyUsable = existingActive ||
     recentSuccess ||
-    nextFailureCount < 3
-  );
-  const status = keepActive ? "active" : existingActive ? "provider_error" : providerError ? "provider_error" : "unavailable";
+    (Array.isArray(existing.supported_timeframes) && existing.supported_timeframes.length > 0);
+  const providerError = checks.some((check) => isProviderErrorCode(check.code));
+  const keepActive = previouslyUsable;
+  const status = keepActive ? "active" : providerError ? "provider_error" : "unavailable";
   const reason = checks.at(-1)?.error || "No candle data returned from provider.";
   const cooldownUntil = new Date(Date.now() + appConfig.cryptoMarkets.unavailableCooldownMs);
   await updateMarket(product, {

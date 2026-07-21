@@ -4,6 +4,9 @@ import { readFileSync } from "node:fs";
 const service = readFileSync(new URL("../src/modules/markets/cryptoMarketService.js", import.meta.url), "utf8");
 const rebuildService = readFileSync(new URL("../src/modules/markets/cryptoMarketRebuildService.js", import.meta.url), "utf8");
 const controller = readFileSync(new URL("../src/modules/markets/cryptoMarketController.js", import.meta.url), "utf8");
+const marketDataService = readFileSync(new URL("../src/modules/market-data/marketDataService.js", import.meta.url), "utf8");
+const signalService = readFileSync(new URL("../src/modules/signals/signalService.js", import.meta.url), "utf8");
+const autoScanService = readFileSync(new URL("../src/modules/alerts/autoScanService.js", import.meta.url), "utf8");
 const app = readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
 const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
 
@@ -20,21 +23,33 @@ const checks = {
     service.includes("status: \"active\"") &&
     service.includes("lastError: null"),
   oldRateLimitDoesNotDemoteActiveMarkets:
-    service.includes("isRateLimitCode(error?.code)") &&
     service.includes("isRateLimitCode(check.code)") &&
     service.includes("market_status='active', verification_status='verified'") &&
     service.includes("providerWarning") &&
     service.includes("finalStatus: \"active\""),
   oneTimeoutDoesNotDemoteActiveMarket:
-    service.includes("nextFailureCount < 3") &&
     service.includes("keepActiveAfterFailure") &&
-    rebuildService.includes("nextFailureCount < 3") &&
-    rebuildService.includes("const keepActive = existingActive"),
+    service.includes("const keepActiveAfterFailure = !enough && !confirmedUnavailable && activeOrRecent") &&
+    rebuildService.includes("const previouslyUsable = existingActive") &&
+    rebuildService.includes("const keepActive = previouslyUsable"),
   oneNoCandleDoesNotDemoteActiveMarket:
     service.includes("hasRecentSuccessfulCandle(current)") &&
     service.includes("current.supportedTimeframes.length > 0") &&
     rebuildService.includes("hasRecentSuccessfulCandle(existing)") &&
     rebuildService.includes("supportedTimeframes: keepActive ? existing.supported_timeframes || [] : []"),
+  scanFailuresDoNotDemoteActiveMarkets:
+    service.includes("export async function recordCryptoMarketFailure") &&
+    service.includes("status: activeOrRecent ? \"active\" : current.status") &&
+    service.includes("marketStatus: activeOrRecent ? \"active\" : current.marketStatus") &&
+    !service.includes("const marketStatus = activeOrRecent ? \"provider_error\""),
+  manualScanDoesNotDemoteMarkets:
+    signalService.includes("scanAllMarketsDetailed") &&
+    marketDataService.includes("recordCryptoMarketFailure(pair.symbol, timeframe, error)") &&
+    service.includes("lastError: activeOrRecent ? null : current.lastError"),
+  autoScanDoesNotDemoteMarkets:
+    autoScanService.includes("scanMarketSetupDetailed") &&
+    marketDataService.includes("recordCryptoMarketFailure(pair.symbol, timeframe, error)") &&
+    service.includes("providerStatus: activeOrRecent ? \"available\" : current.providerStatus"),
   confirmedMissingProductCanBecomeUnavailable:
     service.includes("function isConfirmedUnavailable") &&
     service.includes("details.productTradingEnabled === false") &&
@@ -64,7 +79,8 @@ const checks = {
     app.includes("Scanner enabled for active markets"),
   restoreRecentlyActiveMarkets:
     service.includes("export async function restoreRecentlyActiveCryptoMarkets") &&
-    service.includes("last_successful_candle_at >= now() - interval '24 hours'") &&
+    service.includes("last_successful_candle_at IS NOT NULL") &&
+    service.includes("COALESCE(failure_code, '') NOT IN ('PRODUCT_NOT_FOUND', 'PRODUCT_NOT_RETURNED', 'PRODUCT_TRADING_DISABLED', 'LEGACY_MARKET')") &&
     controller.includes("/api/admin/crypto-markets/restore-recently-active") &&
     html.includes("Restore recently active markets") &&
     app.includes("/api/admin/crypto-markets/restore-recently-active"),
