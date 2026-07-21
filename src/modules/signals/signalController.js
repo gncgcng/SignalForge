@@ -3,9 +3,12 @@ import { detectMatchingAlerts } from "../alerts/alertService.js";
 import { enqueueMatchingTelegramNotifications } from "../notifications/notificationService.js";
 import {
   createSignal,
+  cancelScanAllJob,
+  getScanAllJobStatus,
   listUserSignals,
   scanAllMarkets,
   scanMarketSetup,
+  startScanAllJob,
   unlockTelegramSignal
 } from "./signalService.js";
 import { getCandidateQualitySummary, listSetupCandidates } from "./setupCandidateService.js";
@@ -52,6 +55,48 @@ export async function handleSignalRoutes(req, res, pathname) {
       return sendError(res, error.statusCode || 400, error.message, {
         subscription: error.subscription
       });
+    }
+  }
+
+  if (pathname === "/api/signals/scan-all/start" && req.method === "POST") {
+    try {
+      const body = await readJson(req).catch(() => ({}));
+      const result = await startScanAllJob(req.user, body, {
+        onComplete: async (scanResult) => {
+          const detectedAlerts = await detectMatchingAlerts(req.user, scanResult.setups);
+          const queuedTelegramAlerts = await enqueueMatchingTelegramNotifications(
+            req.user,
+            scanResult.fullSetups
+          );
+          return {
+            detectedAlerts,
+            queuedTelegramAlerts: queuedTelegramAlerts.length
+          };
+        }
+      });
+      return sendJson(res, 202, result);
+    } catch (error) {
+      return sendError(res, error.statusCode || 400, error.message, {
+        subscription: error.subscription
+      });
+    }
+  }
+
+  if (pathname === "/api/signals/scan-all/status" && req.method === "GET") {
+    try {
+      const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+      return sendJson(res, 200, getScanAllJobStatus(req.user, url.searchParams.get("jobId")));
+    } catch (error) {
+      return sendError(res, error.statusCode || 400, error.message);
+    }
+  }
+
+  if (pathname === "/api/signals/scan-all/cancel" && req.method === "POST") {
+    try {
+      const body = await readJson(req).catch(() => ({}));
+      return sendJson(res, 200, cancelScanAllJob(req.user, body.jobId));
+    } catch (error) {
+      return sendError(res, error.statusCode || 400, error.message);
     }
   }
 

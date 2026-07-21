@@ -53,6 +53,8 @@ import {
 } from "./dailyMarketBriefService.js";
 
 const scanTimeframes = ["1h", "4h", "15m", "5m"];
+const scanAllJobs = new Map();
+const SCAN_JOB_TTL_MS = 60 * 60 * 1000;
 
 export async function createSignal(user, { symbol, timeframe, setupKey }) {
   const scanKey = `single:${symbol}:${timeframe}`;
@@ -422,16 +424,173 @@ export async function scanAllMarkets(user, options = {}) {
   const scanKey = `scan-all:${universe.signature}:5m-15m-1h-4h`;
   const cached = await getCachedScanResult(user.id, scanKey);
   if (cached) {
-    await trackScanAllAnalytics(user, cached.publicResult.scanned, true);
-    return {
-      ...cached.publicResult,
-      fullSetups: cached.fullSetups,
-      cached: true,
-      subscription: getSubscriptionSummary(user)
-    };
+    return getCachedScanAllResult(user, cached);
   }
   assertDiscoveryAvailable(user);
   const result = await scanAllMarketsDetailed(user, { ...options, universe });
+  return meterScanAllResult(user, result, scanKey);
+}
+
+export async function startScanAllJob(user, options = {}, hooks = {}) {
+  cleanupScanAllJobs();
+  const universe = getManualScannerUniverse(options);
+  const scanKey = `scan-all:${universe.signature}:5m-15m-1h-4h`;
+  const jobId = createId("scanjob");
+  const cached = await getCachedScanResult(user.id, scanKey);
+  const job = {
+    id: jobId,
+    userId: user.id,
+    status: cached ? "completed" : "queued",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    marketType: universe.marketType,
+    totalMarkets: universe.markets.length,
+    scannedMarkets: cached ? universe.markets.length : 0,
+    totalTasks: universe.summary.scanTasks || 0,
+    scannedTasks: cached?.publicResult?.scanned?.length || 0,
+    currentMarket: null,
+    currentTimeframe: null,
+    batchSize: appConfig.manualScan.batchSize,
+    cancelRequested: false,
+    selectedMarketsCount: universe.summary.selectedMarkets || universe.markets.length,
+    skippedMarketsCount: universe.skipped.length,
+    skippedByReason: universe.summary.skippedByReason || {},
+    result: null,
+    privateFullSetups: [],
+    detectedAlerts: [],
+    queuedTelegramAlerts: 0,
+    error: null
+  };
+  scanAllJobs.set(jobId, job);
+
+  if (cached) {
+    job.result = await getCachedScanAllResult(user, cached);
+    job.privateFullSetups = cached.fullSetups || [];
+    if (hooks.onComplete) {
+      const hookResult = await hooks.onComplete(job.result);
+      job.detectedAlerts = hookResult?.detectedAlerts || [];
+      job.queuedTelegramAlerts = Number(hookResult?.queuedTelegramAlerts || 0);
+    }
+    job.updatedAt = new Date().toISOString();
+    return toScanAllJobStatus(job);
+  }
+
+  try {
+    assertDiscoveryAvailable(user);
+  } catch (error) {
+    job.status = "failed";
+    job.error = error.message;
+    job.subscription = error.subscription || getSubscriptionSummary(user);
+    job.updatedAt = new Date().toISOString();
+    return toScanAllJobStatus(job);
+  }
+
+  Promise.resolve().then(() => runScanAllJob(job, user, { ...options, universe, scanKey }, hooks));
+  return toScanAllJobStatus(job);
+}
+
+export function getScanAllJobStatus(user, jobId) {
+  cleanupScanAllJobs();
+  const job = scanAllJobs.get(String(jobId || ""));
+  if (!job || job.userId !== user.id) {
+    const error = new Error("Scan job not found.");
+    error.statusCode = 404;
+    throw error;
+  }
+  return toScanAllJobStatus(job);
+}
+
+export function cancelScanAllJob(user, jobId) {
+  const job = scanAllJobs.get(String(jobId || ""));
+  if (!job || job.userId !== user.id) {
+    const error = new Error("Scan job not found.");
+    error.statusCode = 404;
+    throw error;
+  }
+  if (!["completed", "failed", "cancelled"].includes(job.status)) {
+    job.cancelRequested = true;
+    job.status = "cancelling";
+    job.updatedAt = new Date().toISOString();
+  }
+  return toScanAllJobStatus(job);
+}
+
+async function runScanAllJob(job, user, options = {}, hooks = {}) {
+  try {
+    const context = await createManualScanContext(user, options);
+    job.status = "running";
+    job.totalMarkets = context.marketsToScan.length;
+    job.totalTasks = context.marketsToScan.reduce((total, market) =>
+      total + scanTimeframes.filter((timeframe) => (market.scannerTimeframes || scanTimeframes).includes(timeframe)).length,
+      0
+    );
+    job.scanUniverse = context.universe.summary;
+    job.updatedAt = new Date().toISOString();
+    updateScanJobSnapshot(job, context);
+
+    const batchSize = Math.max(1, appConfig.manualScan.batchSize);
+    for (let index = 0; index < context.marketsToScan.length; index += batchSize) {
+      if (job.cancelRequested) {
+        job.status = "cancelled";
+        job.updatedAt = new Date().toISOString();
+        updateScanJobSnapshot(job, context);
+        return;
+      }
+
+      const batch = context.marketsToScan.slice(index, index + batchSize);
+      job.currentBatch = {
+        index: Math.floor(index / batchSize) + 1,
+        total: Math.ceil(context.marketsToScan.length / batchSize),
+        size: batch.length
+      };
+      await processManualScanMarkets(context, batch, (market, marketScanned, timeframe) => {
+        job.currentMarket = market?.symbol || null;
+        job.currentTimeframe = timeframe || null;
+        if (marketScanned) job.scannedMarkets += 1;
+        job.scannedTasks = context.scanned.length;
+        job.updatedAt = new Date().toISOString();
+        updateScanJobSnapshot(job, context);
+      }, () => job.cancelRequested);
+      updateScanJobSnapshot(job, context);
+    }
+
+    const rawResult = await finalizeManualScanContext(context);
+    const metered = await meterScanAllResult(user, rawResult, options.scanKey);
+    job.privateFullSetups = metered.fullSetups || [];
+    const { fullSetups, ...publicResult } = metered;
+    job.result = publicResult;
+    job.subscription = metered.subscription;
+    job.status = "completed";
+    job.currentMarket = null;
+    job.currentTimeframe = null;
+    job.scannedMarkets = context.marketsToScan.length;
+    job.scannedTasks = context.scanned.length;
+    if (hooks.onComplete) {
+      const hookResult = await hooks.onComplete(metered);
+      job.detectedAlerts = hookResult?.detectedAlerts || [];
+      job.queuedTelegramAlerts = Number(hookResult?.queuedTelegramAlerts || 0);
+    }
+    job.updatedAt = new Date().toISOString();
+  } catch (error) {
+    job.status = job.cancelRequested ? "cancelled" : "failed";
+    job.error = error.message;
+    job.subscription = error.subscription || getSubscriptionSummary(user);
+    job.updatedAt = new Date().toISOString();
+    console.warn(`[manual-scan-job] failed job_id=${job.id} reason=${error.message}`);
+  }
+}
+
+async function getCachedScanAllResult(user, cached) {
+  await trackScanAllAnalytics(user, cached.publicResult.scanned, true);
+  return {
+    ...cached.publicResult,
+    fullSetups: cached.fullSetups,
+    cached: true,
+    subscription: getSubscriptionSummary(user)
+  };
+}
+
+async function meterScanAllResult(user, result, scanKey) {
   const summary = getSubscriptionSummary(user);
   const remaining = user.role === "tester"
     ? result.publicResult.setups.length
@@ -474,6 +633,12 @@ async function trackScanAllAnalytics(user, scanned = [], cached = false) {
 }
 
 export async function scanAllMarketsDetailed(user, options = {}) {
+  const context = await createManualScanContext(user, options);
+  await processManualScanMarkets(context, context.marketsToScan);
+  return finalizeManualScanContext(context);
+}
+
+async function createManualScanContext(user, options = {}) {
   const scanned = [];
   const setups = [];
   const fullSetups = [];
@@ -525,86 +690,121 @@ export async function scanAllMarketsDetailed(user, options = {}) {
     `skipped=${universe.skipped.length} crypto=${universe.summary.crypto} commodities=${universe.summary.commodities}`
   );
 
-  await runManualScanMarkets(marketsToScan, async (market) => {
-    const symbol = market.symbol;
-    const supportedTimeframes = market.scannerTimeframes || scanTimeframes;
-    for (const timeframe of scanTimeframes.filter((item) => supportedTimeframes.includes(item))) {
-      try {
-        const detailed = await scanMarketSetupDetailed(
-          user,
-          { symbol, timeframe },
-          analystProfile
-        );
-        const result = detailed.publicResult;
-        const analysis = result.analysis || {};
-        if (detailed.briefObservation) briefObservations.push(detailed.briefObservation);
-        scanned.push({
-          symbol,
-          timeframe,
-          valid: result.valid,
-          resultType: result.resultType,
-          rejectionReasonCodes: analysis.rejectionReasonCodes || [],
-          rejectionReasons: analysis.rejectionReasons || []
-        });
+  return {
+    user,
+    universe,
+    scanMarkets,
+    marketsToScan,
+    analystProfile,
+    scanned,
+    setups,
+    fullSetups,
+    candidatesById,
+    avoidTrades,
+    briefObservations,
+    errors,
+    diagnostics
+  };
+}
 
-        if (result.candidate && !result.valid) {
-          candidatesById.set(result.candidate.id, result.candidate);
-        }
-
-        if (result.valid) {
-          setups.push(result.setup);
-          fullSetups.push(detailed.fullSetup);
-        } else {
-          if (result.avoidTrade) {
-            avoidTrades.push(result.avoidTrade);
-          }
-          recordScanDiagnostics(diagnostics, symbol, timeframe, analysis);
-        }
-      } catch (error) {
-        const publicReason = humanizeScanFailure(error);
-        const code = failureDiagnosticCode(error);
-        const failureAnalysis = {
-          message: publicReason,
-          rejectionSummary: publicReason,
-          rejectionReasonCodes: [code],
-          rejectionReasons: [publicReason]
-        };
-        const resultType = classifyScannerResult({
-          valid: false,
-          analysis: failureAnalysis,
-          providerError: true
-        });
-        scanned.push({
-          symbol,
-          timeframe,
-          valid: false,
-          providerError: true,
-          resultType,
-          rejectionReasonCodes: [code],
-          rejectionReasons: [publicReason]
-        });
-        if (resultType === SCANNER_RESULT_TYPES.AVOID) {
-          const avoidTrade = buildAvoidTradeResult({ symbol, timeframe, analysis: failureAnalysis });
-          if (avoidTrade) {
-            avoidTrades.push(avoidTrade);
-            await recordAvoidTradeSafely(avoidTrade);
-          }
-        }
-        recordScanDiagnostics(diagnostics, symbol, timeframe, failureAnalysis);
-        errors.push({
-          symbol,
-          timeframe,
-          message: publicReason
-        });
-      }
-    }
+async function processManualScanMarkets(context, markets, onProgress = null, shouldCancel = null) {
+  await runManualScanMarkets(markets, async (market) => {
+    if (shouldCancel?.()) return;
+    await scanManualMarket(context, market, onProgress, shouldCancel);
+    onProgress?.(market, true, null);
   });
+}
 
-  rankSetups(setups);
-  const candidates = [...candidatesById.values()];
-  const finalizedDiagnostics = finalizeScanDiagnostics(diagnostics);
-  const scanSummary = summarizeScanBatch(scanned, setups, candidates, finalizedDiagnostics, avoidTrades, universe.skipped);
-  const marketBrief = await refreshMarketBriefSafely(briefObservations, scanSummary);
+async function scanManualMarket(context, market, onProgress = null, shouldCancel = null) {
+  const symbol = market.symbol;
+  const supportedTimeframes = market.scannerTimeframes || scanTimeframes;
+  for (const timeframe of scanTimeframes.filter((item) => supportedTimeframes.includes(item))) {
+    if (shouldCancel?.()) return;
+    onProgress?.(market, false, timeframe);
+    try {
+      const detailed = await scanMarketSetupDetailed(
+        context.user,
+        { symbol, timeframe },
+        context.analystProfile
+      );
+      const result = detailed.publicResult;
+      const analysis = result.analysis || {};
+      if (detailed.briefObservation) context.briefObservations.push(detailed.briefObservation);
+      context.scanned.push({
+        symbol,
+        timeframe,
+        valid: result.valid,
+        resultType: result.resultType,
+        rejectionReasonCodes: analysis.rejectionReasonCodes || [],
+        rejectionReasons: analysis.rejectionReasons || []
+      });
+
+      if (result.candidate && !result.valid) {
+        context.candidatesById.set(result.candidate.id, result.candidate);
+      }
+
+      if (result.valid) {
+        context.setups.push(result.setup);
+        context.fullSetups.push(detailed.fullSetup);
+      } else {
+        if (result.avoidTrade) {
+          context.avoidTrades.push(result.avoidTrade);
+        }
+        recordScanDiagnostics(context.diagnostics, symbol, timeframe, analysis);
+      }
+    } catch (error) {
+      const publicReason = humanizeScanFailure(error);
+      const code = failureDiagnosticCode(error);
+      const failureAnalysis = {
+        message: publicReason,
+        rejectionSummary: publicReason,
+        rejectionReasonCodes: [code],
+        rejectionReasons: [publicReason]
+      };
+      const resultType = classifyScannerResult({
+        valid: false,
+        analysis: failureAnalysis,
+        providerError: true
+      });
+      context.scanned.push({
+        symbol,
+        timeframe,
+        valid: false,
+        providerError: true,
+        resultType,
+        rejectionReasonCodes: [code],
+        rejectionReasons: [publicReason]
+      });
+      if (resultType === SCANNER_RESULT_TYPES.AVOID) {
+        const avoidTrade = buildAvoidTradeResult({ symbol, timeframe, analysis: failureAnalysis });
+        if (avoidTrade) {
+          context.avoidTrades.push(avoidTrade);
+          await recordAvoidTradeSafely(avoidTrade);
+        }
+      }
+      recordScanDiagnostics(context.diagnostics, symbol, timeframe, failureAnalysis);
+      context.errors.push({
+        symbol,
+        timeframe,
+        message: publicReason
+      });
+    }
+  }
+}
+
+async function finalizeManualScanContext(context) {
+  rankSetups(context.setups);
+  const candidates = [...context.candidatesById.values()];
+  const finalizedDiagnostics = finalizeScanDiagnostics(context.diagnostics);
+  const scanSummary = summarizeScanBatch(
+    context.scanned,
+    context.setups,
+    candidates,
+    finalizedDiagnostics,
+    context.avoidTrades,
+    context.universe.skipped
+  );
+  const marketBrief = await refreshMarketBriefSafely(context.briefObservations, scanSummary);
   console.info(
     `[scanner] ready=${scanSummary.ready} watching=${scanSummary.watching} ` +
     `avoid=${scanSummary.avoidTrade} rejected=${scanSummary.rejected} expired=${scanSummary.expired}`
@@ -613,20 +813,127 @@ export async function scanAllMarketsDetailed(user, options = {}) {
 
   return {
     publicResult: {
-      setups,
+      setups: context.setups,
       candidates,
-      avoidTrades,
-      scanned,
-      errors,
+      avoidTrades: context.avoidTrades,
+      scanned: context.scanned,
+      errors: context.errors,
       diagnostics: finalizedDiagnostics,
       scanSummary,
-      scanUniverse: universe.summary,
-      skippedMarkets: universe.skipped,
+      scanUniverse: context.universe.summary,
+      skippedMarkets: context.universe.skipped,
       marketBrief,
-      message: setups.length ? "Valid setups found." : "No high-probability setups right now"
+      message: context.setups.length ? "Valid setups found." : "No high-probability setups right now"
     },
-    fullSetups
+    fullSetups: context.fullSetups
   };
+}
+
+function updateScanJobSnapshot(job, context) {
+  const candidates = [...context.candidatesById.values()];
+  const diagnostics = finalizeScanDiagnostics(context.diagnostics);
+  const scanSummary = summarizeScanBatch(
+    context.scanned,
+    context.setups,
+    candidates,
+    diagnostics,
+    context.avoidTrades,
+    context.universe.skipped
+  );
+  job.result = {
+    setups: rankSetups([...context.setups]),
+    candidates,
+    avoidTrades: context.avoidTrades,
+    scanned: context.scanned,
+    errors: context.errors,
+    diagnostics,
+    scanSummary,
+    scanUniverse: {
+      ...context.universe.summary,
+      scannedMarkets: job.scannedMarkets,
+      scanTasks: job.totalTasks,
+      batchSize: job.batchSize
+    },
+    skippedMarkets: context.universe.skipped,
+    marketBrief: null,
+    message: context.setups.length ? "Valid setups found." : "Scanning markets..."
+  };
+}
+
+function toScanAllJobStatus(job) {
+  const result = job.result || {};
+  return {
+    jobId: job.id,
+    status: job.status,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+    progress: {
+      selectedMarkets: job.selectedMarketsCount || job.totalMarkets || 0,
+      scannedMarkets: job.scannedMarkets || 0,
+      totalMarkets: job.totalMarkets || 0,
+      skippedMarkets: job.skippedMarketsCount || 0,
+      scannedTasks: job.scannedTasks || result.scanned?.length || 0,
+      totalTasks: job.totalTasks || 0,
+      currentMarket: job.currentMarket,
+      currentTimeframe: job.currentTimeframe,
+      currentBatch: job.currentBatch || null,
+      batchSize: job.batchSize || appConfig.manualScan.batchSize,
+      skippedByReason: job.skippedByReason || {}
+    },
+    setups: result.setups || [],
+    candidates: result.candidates || [],
+    avoidTrades: result.avoidTrades || [],
+    scanned: result.scanned || [],
+    errors: result.errors || [],
+    diagnostics: result.diagnostics || finalizeScanDiagnostics({
+      rejectionReasonCodes: {},
+      rejectionReasons: {},
+      samples: []
+    }),
+    scanSummary: result.scanSummary || {
+      ready: 0,
+      watching: 0,
+      avoidTrade: 0,
+      rejected: 0,
+      expired: 0,
+      skipped: job.skippedMarketsCount || 0,
+      providerErrors: 0,
+      noData: 0
+    },
+    scanUniverse: result.scanUniverse || job.scanUniverse || {
+      selectedMarkets: job.selectedMarketsCount || 0,
+      scannedMarkets: job.scannedMarkets || 0,
+      skipped: job.skippedMarketsCount || 0,
+      skippedByReason: job.skippedByReason || {}
+    },
+    skippedMarkets: result.skippedMarkets || [],
+    marketBrief: result.marketBrief || null,
+    subscription: job.subscription || result.subscription || null,
+    detectedAlerts: job.detectedAlerts || [],
+    queuedTelegramAlerts: job.queuedTelegramAlerts || 0,
+    cached: Boolean(result.cached),
+    cancelled: job.status === "cancelled" || job.cancelRequested,
+    error: job.error,
+    message: result.message || (
+      job.status === "completed"
+        ? "Market scan complete"
+        : job.status === "failed"
+          ? "Market scan failed"
+          : job.status === "cancelled"
+            ? "Market scan cancelled"
+            : "Market scan running"
+    )
+  };
+}
+
+function cleanupScanAllJobs() {
+  const now = Date.now();
+  for (const [jobId, job] of scanAllJobs.entries()) {
+    const updatedAt = new Date(job.updatedAt || job.createdAt || 0).getTime();
+    if (Number.isFinite(updatedAt) && now - updatedAt > SCAN_JOB_TTL_MS) {
+      scanAllJobs.delete(jobId);
+    }
+  }
 }
 
 export function summarizeScanBatch(scanned, setups, candidates, diagnostics, avoidTrades = [], skippedMarkets = []) {

@@ -62,11 +62,14 @@ const checks = {
   unsupportedPairsHandled:
     coinbaseProvider.includes("PROVIDER_UNSUPPORTED_MARKET") &&
     coinbaseProvider.includes("Coinbase does not support") &&
-    app.includes("renderScanResults(result.setups, result.errors, result.diagnostics, result.scanSummary"),
+    app.includes("applyScanJobSnapshot") &&
+    app.includes("result.errors || []") &&
+    app.includes("renderScanResults("),
   scanSummaryVisible:
     html.includes('id="scan-summary-panel"') &&
     html.includes('id="view-opportunities-button"') &&
-    app.includes("renderScanSummary(setups.length") &&
+    app.includes("renderScanSummary(") &&
+    app.includes("scanSummaryPanel.classList.remove(\"hidden\")") &&
     css.includes(".scan-summary-panel"),
   compactCards:
     app.includes("compact-signal-card") &&

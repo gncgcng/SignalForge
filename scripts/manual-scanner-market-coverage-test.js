@@ -54,15 +54,29 @@ const checks = {
     manualAll.markets.length > 0,
   noSilentTwentyFourCap:
     appConfig.manualScan.maxMarkets === 200 &&
-    appConfigSource.includes("Math.max(200, Number(process.env.MANUAL_SCAN_MAX_MARKETS || 200))") &&
+    appConfig.manualScan.batchSize === 50 &&
+    appConfigSource.includes("Math.max(200, Number(process.env.MANUAL_SCAN_MAX_MARKETS || 500))") &&
+    appConfigSource.includes("MANUAL_SCAN_BATCH_SIZE") &&
     !signalService.includes("slice(0, 24)") &&
     !marketDataService.includes("slice(0, 24)") &&
     marketDataService.includes("appConfig.manualScan.maxMarkets"),
   manualScanLoopUsesConfiguredLimit:
     signalService.includes("const marketsToScan = scanMarkets.slice(0, appConfig.manualScan.maxMarkets)") &&
-    signalService.includes("runManualScanMarkets(marketsToScan") &&
+    signalService.includes("processManualScanMarkets(context, context.marketsToScan)") &&
+    signalService.includes("appConfig.manualScan.batchSize") &&
     !signalService.includes("for (const market of scanMarkets.slice(0, 20))") &&
     !signalService.includes("runManualScanMarkets(scanMarkets"),
+  backgroundScanJobEndpointsPresent:
+    signalController.includes("/api/signals/scan-all/start") &&
+    signalController.includes("/api/signals/scan-all/status") &&
+    signalController.includes("/api/signals/scan-all/cancel") &&
+    signalService.includes("export async function startScanAllJob") &&
+    signalService.includes("export function getScanAllJobStatus") &&
+    signalService.includes("export function cancelScanAllJob"),
+  batchSizeDoesNotReduceCoverage:
+    signalService.includes("context.marketsToScan.slice(index, index + batchSize)") &&
+    signalService.includes("job.totalMarkets = context.marketsToScan.length") &&
+    !signalService.includes("marketsToScan = scanMarkets.slice(0, appConfig.manualScan.batchSize)"),
   selectedAndScannedCountsReported:
     Number(manualAll.summary.selectedMarkets) >= Number(manualAll.summary.scannedMarkets) &&
     "skippedByReason" in manualAll.summary &&
@@ -90,10 +104,15 @@ const checks = {
   frontendSelectorPresent:
     html.includes('id="scanner-market-type"') &&
     app.includes("getManualScanMarkets") &&
+    app.includes("/api/signals/scan-all/start") &&
+    app.includes("/api/signals/scan-all/status?jobId=") &&
+    app.includes("/api/signals/scan-all/cancel") &&
     app.includes("body: JSON.stringify({ marketType })"),
   progressDenominatorUsesSelectedMarkets:
     app.includes("const total = markets.length") &&
-    app.includes("Selected markets: Crypto"),
+    app.includes("Selected markets: Crypto") &&
+    app.includes("applyScanJobSnapshot") &&
+    html.includes('id="cancel-scan-button"'),
   summaryCountsPresent:
     html.includes('id="scan-summary-skipped"') &&
     html.includes('id="scan-summary-provider-errors"') &&

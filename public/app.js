@@ -74,6 +74,7 @@ const state = {
   telegramExpiredNotice: null,
   riskCalculations: new Map(),
   lastScanSummary: null,
+  activeScanJob: null,
   activeView: "scanner",
   activeRoute: "scanner",
   lastAppliedRouteHash: "",
@@ -238,6 +239,7 @@ const pairList = document.querySelector("#pair-list");
 const timeframes = document.querySelector("#timeframes");
 const generateButton = document.querySelector("#generate-button");
 const scanAllButton = document.querySelector("#scan-all-button");
+const cancelScanButton = document.querySelector("#cancel-scan-button");
 const scanProgress = document.querySelector("#scan-progress");
 const scanProgressText = document.querySelector("#scan-progress-text");
 const scanProgressCount = document.querySelector("#scan-progress-count");
@@ -1379,8 +1381,6 @@ scanAllButton.addEventListener("click", async () => {
     .filter((timeframe) => getFrontendSupportedScanTimeframes(pair).includes(timeframe))
     .map((timeframe) => ({ symbol: pair.symbol, timeframe })));
   const total = markets.length;
-  let progressTimer = null;
-  let progressIndex = 0;
 
   if (total === 0) {
     statusLine.textContent = "No active scannable markets selected.";
@@ -1403,57 +1403,126 @@ scanAllButton.addEventListener("click", async () => {
 
   scanAllButton.disabled = true;
   generateButton.disabled = true;
+  cancelScanButton?.classList.remove("hidden");
+  if (cancelScanButton) cancelScanButton.disabled = false;
   scanProgress.classList.remove("hidden");
   scanSummaryPanel.classList.add("hidden");
   state.scanResults = [];
+  state.activeScanJob = null;
   signalsGrid.innerHTML = "";
   updateScanProgress(
     0,
     total,
     `Selected markets: Crypto ${selectedUniverse.crypto} · Commodities ${selectedUniverse.commodities} · Total ${selectedUniverse.total}`
   );
-  progressTimer = setInterval(() => {
-    if (progressIndex >= total - 1) return;
-    const symbol = markets[progressIndex]?.symbol || scanTasks[progressIndex]?.symbol || scanTasks[0]?.symbol || "market";
-    const timeframe = scanTasks.find((task) => task.symbol === symbol)?.timeframe || "timeframe";
-    progressIndex += 1;
-    updateScanProgress(
-      progressIndex,
-      total,
-      `Scanning ${symbol} ${timeframe} · found ${state.lastScanSummary?.opportunitiesFound || 0} opportunities so far`
-    );
-  }, 180);
-
   try {
-    const result = await api.request("/api/signals/scan-all", {
+    const started = await api.request("/api/signals/scan-all/start", {
       method: "POST",
       body: JSON.stringify({ marketType })
     });
-    state.subscription = result.subscription || state.subscription;
-    renderSubscription();
-    updateScanProgress(total, total, "Market scan complete");
-    await loadAlerts();
-    await loadCandidates();
-    markFirstScanCompleted();
-    renderScanResults(
-      result.setups,
-      result.errors,
-      result.diagnostics,
-      result.scanSummary,
-      result.avoidTrades,
-      result.marketBrief,
-      result.scanUniverse,
-      result.skippedMarkets
-    );
+    state.activeScanJob = started.jobId;
+    applyScanJobSnapshot(started, total);
+    await pollScanAllJob(started.jobId, total);
   } catch (error) {
     updateScanProgress(0, total, "Scan All failed");
     renderScanResults([], [{ symbol: "Scan All", timeframe: "", message: error.message }], null, null, []);
   } finally {
-    clearInterval(progressTimer);
     scanAllButton.disabled = false;
     generateButton.disabled = false;
+    cancelScanButton?.classList.add("hidden");
+    if (cancelScanButton) cancelScanButton.disabled = false;
+    state.activeScanJob = null;
   }
 });
+
+cancelScanButton?.addEventListener("click", async () => {
+  if (!state.activeScanJob) return;
+  cancelScanButton.disabled = true;
+  statusLine.textContent = "Cancelling scan...";
+  try {
+    const result = await api.request("/api/signals/scan-all/cancel", {
+      method: "POST",
+      body: JSON.stringify({ jobId: state.activeScanJob })
+    });
+    applyScanJobSnapshot(result);
+    updateScanProgress(
+      result.progress?.scannedMarkets || 0,
+      result.progress?.totalMarkets || 1,
+      "Scan cancellation requested"
+    );
+  } catch (error) {
+    statusLine.textContent = error.message;
+    cancelScanButton.disabled = false;
+  }
+});
+
+async function pollScanAllJob(jobId, fallbackTotal) {
+  let latest = null;
+  while (true) {
+    await wait(1200);
+    latest = await api.request(`/api/signals/scan-all/status?jobId=${encodeURIComponent(jobId)}`);
+    applyScanJobSnapshot(latest, fallbackTotal);
+
+    if (["completed", "failed", "cancelled"].includes(latest.status)) break;
+  }
+
+  if (latest?.status === "completed") {
+    state.subscription = latest.subscription || state.subscription;
+    renderSubscription();
+    updateScanProgress(
+      latest.progress?.totalMarkets || fallbackTotal,
+      latest.progress?.totalMarkets || fallbackTotal,
+      "Market scan complete"
+    );
+    await loadAlerts();
+    await loadCandidates();
+    markFirstScanCompleted();
+    applyScanJobSnapshot(latest, fallbackTotal, true);
+    return;
+  }
+
+  if (latest?.status === "cancelled") {
+    statusLine.textContent = "Scan cancelled. Partial results are still shown below.";
+    applyScanJobSnapshot(latest, fallbackTotal, true);
+    return;
+  }
+
+  throw new Error(latest?.error || "Scan All failed");
+}
+
+function applyScanJobSnapshot(result, fallbackTotal = 1, final = false) {
+  const progress = result.progress || {};
+  const done = Number(progress.scannedMarkets || 0);
+  const total = Math.max(1, Number(progress.totalMarkets || fallbackTotal || 1));
+  const current = progress.currentMarket
+    ? `Scanning ${progress.currentMarket}${progress.currentTimeframe ? ` ${progress.currentTimeframe}` : ""}`
+    : result.status === "queued"
+      ? "Preparing scan job"
+      : result.status === "completed"
+        ? "Market scan complete"
+        : "Scanning markets";
+  const found = Number(result.scanSummary?.ready || result.setups?.length || 0);
+  updateScanProgress(done, total, `${current} · found ${found} ready setups so far`);
+  renderScanResults(
+    result.setups || [],
+    result.errors || [],
+    result.diagnostics || null,
+    result.scanSummary || null,
+    result.avoidTrades || [],
+    result.marketBrief || null,
+    result.scanUniverse || null,
+    result.skippedMarkets || [],
+    { scroll: final }
+  );
+  if (!final && scanSummaryPanel) {
+    scanSummaryPanel.classList.remove("hidden");
+    statusLine.textContent = `${current}. Partial results update as each batch finishes.`;
+  }
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 generateButton.addEventListener("click", async () => {
   if (!state.selectedPair) {
@@ -6435,7 +6504,7 @@ function renderScanSummary(opportunitiesFound, marketsScanned, timeframesScanned
       ? "Probable setups were found, but confirmation or entry readiness is still incomplete. No credits used."
       : "SignalForge scanned the market but did not find enough confirmation for a valid setup. No credits used.";
   document.querySelector("#scan-summary-diagnostics-content").innerHTML = `
-    ${scanUniverse ? `<p><strong>Scanner universe:</strong> ${formatInteger(scanUniverse.selectedMarkets || scanUniverse.selectedManual || marketsScanned)} selected · ${formatInteger(scanUniverse.scannedMarkets || scanUniverse.selectedManual || marketsScanned)} scanned · ${formatInteger(scanUniverse.scanTasks || 0)} checks · ${formatInteger(scanUniverse.crypto || 0)} crypto · ${formatInteger(scanUniverse.commodities || 0)} commodities · ${formatInteger(scanUniverse.skipped || skippedCount)} skipped</p>` : ""}
+    ${scanUniverse ? `<p><strong>Scanner universe:</strong> ${formatInteger(scanUniverse.selectedMarkets ?? scanUniverse.selectedManual ?? marketsScanned)} selected · ${formatInteger(scanUniverse.scannedMarkets ?? scanUniverse.selectedManual ?? marketsScanned)} scanned · ${formatInteger(scanUniverse.scanTasks || 0)} checks · ${formatInteger(scanUniverse.crypto || 0)} crypto · ${formatInteger(scanUniverse.commodities || 0)} commodities · ${formatInteger(scanUniverse.skipped || skippedCount)} skipped</p>` : ""}
     <p><strong>Most common avoid reason:</strong> ${escapeHtml(summary?.topAvoidReason || summary?.topRejectionReason || diagnostics?.topReasons?.[0]?.reason || "Strategy not matched")}</p>
     ${renderRejectionReasons((diagnostics?.topReasons || []).map((item) => `${item.reason} (${item.count})`))}
     ${renderDiagnosticSamples(diagnostics?.samples)}
@@ -6457,7 +6526,7 @@ function renderAdminScannerUniverseDebug(scanUniverse = null) {
     <details class="scan-diagnostics" open>
       <summary>Admin scanner debug</summary>
       <div>
-        <p><strong>Manual scan universe:</strong> filter ${escapeHtml(scanUniverse.selectedFilter || "all")} · selected ${formatInteger(scanUniverse.selectedMarkets || scanUniverse.selectedManual || 0)} · scanned ${formatInteger(scanUniverse.scannedMarkets || scanUniverse.selectedManual || 0)} · first ${escapeHtml((scanUniverse.firstSymbols || []).join(", ") || "none")}</p>
+        <p><strong>Manual scan universe:</strong> filter ${escapeHtml(scanUniverse.selectedFilter || "all")} · selected ${formatInteger(scanUniverse.selectedMarkets ?? scanUniverse.selectedManual ?? 0)} · scanned ${formatInteger(scanUniverse.scannedMarkets ?? scanUniverse.selectedManual ?? 0)} · first ${escapeHtml((scanUniverse.firstSymbols || []).join(", ") || "none")}</p>
         <p><strong>Active markets:</strong> total ${formatInteger(active.total || 0)} · crypto ${formatInteger(active.crypto || 0)} · commodities ${formatInteger(active.commodities || 0)}</p>
         <p><strong>Scanner enabled:</strong> total ${formatInteger(scanner.total || 0)} · crypto ${formatInteger(scanner.crypto || 0)} · commodities ${formatInteger(scanner.commodities || 0)}</p>
         <p><strong>Auto scan universe:</strong> crypto-only ${auto.cryptoOnly !== false ? "true" : "false"} · selected ${formatInteger(auto.selected || 0)} · first ${escapeHtml((auto.firstSymbols || []).join(", ") || "none")}</p>
@@ -6467,7 +6536,7 @@ function renderAdminScannerUniverseDebug(scanUniverse = null) {
   `;
 }
 
-function renderScanResults(setups, errors, diagnostics = null, scanSummary = null, avoidTrades = [], marketBrief = null, scanUniverse = null, skippedMarkets = []) {
+function renderScanResults(setups, errors, diagnostics = null, scanSummary = null, avoidTrades = [], marketBrief = null, scanUniverse = null, skippedMarkets = [], options = {}) {
   state.scanResults = setups;
   if (marketBrief) state.marketBrief = marketBrief;
   renderMarketBrief();
@@ -6482,7 +6551,7 @@ function renderScanResults(setups, errors, diagnostics = null, scanSummary = nul
   const frames = ["1h", "4h", "15m", "5m"];
   const scannedMarkets = activePairs.map((pair) => pair.symbol);
   state.lastScanSummary = {
-    marketsScanned: scanUniverse?.scannedMarkets || scanUniverse?.selectedManual || scannedMarkets.length,
+    marketsScanned: scanUniverse?.scannedMarkets ?? scanUniverse?.selectedManual ?? scannedMarkets.length,
     timeframesScanned: scanUniverse?.timeframes || frames.length,
     opportunitiesFound: setups.length,
     watchingSetups: scanSummary?.watching || 0,
@@ -6496,7 +6565,7 @@ function renderScanResults(setups, errors, diagnostics = null, scanSummary = nul
   };
   renderScanSummary(
     setups.length,
-    scanUniverse?.scannedMarkets || scanUniverse?.selectedManual || scannedMarkets.length,
+    scanUniverse?.scannedMarkets ?? scanUniverse?.selectedManual ?? scannedMarkets.length,
     scanUniverse?.timeframes || frames.length,
     errors,
     diagnostics,
@@ -6527,13 +6596,13 @@ function renderScanResults(setups, errors, diagnostics = null, scanSummary = nul
       </article>
     `;
     statusLine.textContent = "No high-probability setups right now. Trial credits were not used.";
-    scanSummaryPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (options.scroll !== false) scanSummaryPanel.scrollIntoView({ behavior: "smooth", block: "start" });
     return;
   }
 
   signalsGrid.innerHTML = setups.map((setup) => renderScanCard(setup)).join("");
   statusLine.textContent = `Found ${setups.length} high-probability setup${setups.length === 1 ? "" : "s"}. Unlocking one will use a trial credit.`;
-  scanSummaryPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+  if (options.scroll !== false) scanSummaryPanel.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function renderRejectionReasons(reasons = []) {
