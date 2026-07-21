@@ -72,7 +72,7 @@ const checks = {
   slowReliableControls: monitorSource.includes("verificationDelayMs") && monitorSource.includes("verificationRetries") && monitorSource.includes("verificationTimeframes"),
   canonicalStatusSynced: activeStatusMigration.includes("status IN ('active', 'unavailable', 'provider_error', 'legacy', 'disabled')") &&
     activeStatusMigration.includes("status = 'pending'") &&
-    serviceSource.includes('market.status === "active"') &&
+    serviceSource.includes("isReadyStatus(market.status || market.marketStatus)") &&
     serviceSource.includes("canonicalStatusFromMarketStatus"),
   rebuildScriptPresent: packageJson.includes('"market:rebuild-active"') &&
     rebuildScript.includes("rebuildActiveCryptoMarkets") &&

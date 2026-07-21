@@ -3,7 +3,7 @@ import { isAdminUser } from "../auth/authService.js";
 import { getPendingCryptoVerificationJob, startPendingCryptoVerification, testCoinbaseProviderDiagnostics, verifyCryptoMarket, verifyPendingCryptoMarkets } from "./cryptoMarketMonitor.js";
 import { rebuildActiveCryptoMarkets } from "./cryptoMarketRebuildService.js";
 import { syncCoinbaseCryptoMarkets } from "./cryptoMarketSyncService.js";
-import { listCryptoMarketSettings, replaceLegacyCryptoMarket, updateCryptoMarketSettings } from "./cryptoMarketService.js";
+import { enableScannerForAllActiveCryptoMarkets, listCryptoMarketSettings, replaceLegacyCryptoMarket, updateCryptoMarketSettings } from "./cryptoMarketService.js";
 
 export async function handleAdminCryptoMarketRoutes(req, res, pathname, url) {
   if (!pathname.startsWith("/api/admin/crypto-markets")) return false;
@@ -45,6 +45,14 @@ export async function handleAdminCryptoMarketRoutes(req, res, pathname, url) {
       return sendJson(res, 200, { diagnostics: await testCoinbaseProviderDiagnostics() });
     } catch (error) {
       return sendError(res, error.statusCode || 502, error.message);
+    }
+  }
+
+  if (pathname === "/api/admin/crypto-markets/enable-active-scanner" && req.method === "POST") {
+    try {
+      return sendJson(res, 200, { enabled: await enableScannerForAllActiveCryptoMarkets() });
+    } catch (error) {
+      return sendError(res, error.statusCode || 500, error.message);
     }
   }
 

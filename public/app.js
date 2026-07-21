@@ -1775,6 +1775,24 @@ adminCryptoRebuildActive?.addEventListener("click", async () => {
     adminCryptoRebuildActive.disabled = false;
   }
 });
+document.querySelector("#admin-crypto-enable-active-scanner")?.addEventListener("click", async (event) => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  adminCryptoOperationStatus.textContent = "Enabling scanner for active markets...";
+  try {
+    const result = await api.request("/api/admin/crypto-markets/enable-active-scanner", { method: "POST" });
+    const enabled = result.enabled || {};
+    adminCryptoOperationStatus.textContent = `Scanner enabled for active markets: updated ${enabled.enabled || 0}, scanner enabled ${enabled.scannerEnabled || 0}, paper trading ${enabled.paperTradingEnabled || 0}.`;
+    showToast("Scanner enabled for active markets");
+    await loadAdminCryptoMarkets();
+    await loadPairs();
+  } catch (error) {
+    adminCryptoOperationStatus.textContent = error.message;
+    showToast(error.message);
+  } finally {
+    button.disabled = false;
+  }
+});
 adminCryptoSync?.addEventListener("click", async () => {
   adminCryptoSync.disabled = true;
   adminCryptoOperationStatus.textContent = "Syncing Coinbase USD markets...";
@@ -3605,8 +3623,12 @@ function renderAdminCryptoMarkets() {
 }
 
 function renderAdminCryptoMarket(market) {
-  const canonicalStatus = market.status || (market.marketStatus === "active" ? "active" : market.marketStatus) || "unavailable";
-  const status = market.statusLabel || titleCase(canonicalStatus);
+  const checks = market.verificationDetails?.candleChecks || {};
+  const hasPassingCheck = Object.values(checks).some((check) => check?.pass === true);
+  const canonicalStatus = hasPassingCheck && market.status === "provider_error"
+    ? "active"
+    : market.status || (market.marketStatus === "active" ? "active" : market.marketStatus) || "unavailable";
+  const status = canonicalStatus === "active" ? "Ready" : market.statusLabel || titleCase(canonicalStatus);
   const available = canonicalStatus === "active";
   const providerClass = available ? "available" : "unavailable";
   const timeframes = market.supportedTimeframes?.length ? market.supportedTimeframes.join(", ") : "None verified";
@@ -3629,9 +3651,9 @@ function renderAdminCryptoMarket(market) {
       <div class="admin-crypto-candle-checks">
         ${["5m", "15m", "1h", "4h"].map((timeframe) => renderCryptoCandleCheck(timeframe, details.candleChecks?.[timeframe], market)).join("")}
       </div>
-      <p class="admin-crypto-error">${escapeHtml(details.lastError || market.lastError || "No verification error recorded.")}</p>
+      <p class="admin-crypto-error">${escapeHtml(details.lastError || market.lastError || details.providerWarning || details.warning || "No verification error recorded.")}</p>
     </details>
-    ${market.lastError ? `<p class="admin-crypto-error">${escapeHtml(market.lastError)}</p>` : ""}
+    ${market.lastError && !hasPassingCheck ? `<p class="admin-crypto-error">${escapeHtml(market.lastError)}</p>` : ""}
     <div class="admin-crypto-toggles">
       ${cryptoSettingToggle(market, "enabled", market.enabled ? "Market enabled" : "Disabled by admin")}
       ${cryptoSettingToggle(market, "scannerEnabled", "Scanner", !available)}

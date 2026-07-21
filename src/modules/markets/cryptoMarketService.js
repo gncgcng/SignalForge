@@ -68,25 +68,25 @@ export function listCryptoMarketSettings() {
 
 export function listScannerCryptoMarkets() {
   return listCryptoMarketSettings()
-    .filter((market) => isReadyStatus(market.status || market.marketStatus) && market.enabled && market.scannerEnabled && !isCoolingDown(market))
+    .filter((market) => isReadyStatus(market.status || market.marketStatus) && market.enabled && market.scannerEnabled && !isBlockingCooldown(market))
     .slice(0, appConfig.cryptoMarkets.maxActiveScannerPairs);
 }
 
 export function listPaperCryptoMarkets() {
   return listCryptoMarketSettings().filter((market) =>
-    isReadyStatus(market.status || market.marketStatus) && market.enabled && market.paperTradingEnabled && !isCoolingDown(market)
+    isReadyStatus(market.status || market.marketStatus) && market.enabled && market.paperTradingEnabled && !isBlockingCooldown(market)
   );
 }
 
 export function listWatchlistCryptoMarkets() {
   return listCryptoMarketSettings().filter((market) =>
-    isReadyStatus(market.status || market.marketStatus) && market.enabled && market.watchlistEnabled && !isCoolingDown(market)
+    isReadyStatus(market.status || market.marketStatus) && market.enabled && market.watchlistEnabled && !isBlockingCooldown(market)
   );
 }
 
 export function canUseCryptoTimeframe(symbol, timeframe, capability = "market") {
   const market = getCryptoMarketState(symbol);
-  if (!market || !isReadyStatus(market.status || market.marketStatus) || !market.enabled || isCoolingDown(market)) return false;
+  if (!market || !isReadyStatus(market.status || market.marketStatus) || !market.enabled || isBlockingCooldown(market)) return false;
   if (capability === "scanner" && !market.scannerEnabled) return false;
   if (capability === "paper" && !market.paperTradingEnabled) return false;
   if (capability === "watchlist" && !market.watchlistEnabled) return false;
@@ -207,15 +207,17 @@ export async function saveCryptoMarketVerification(symbol, checks, details = {})
   const status = canonicalStatusFromMarketStatus(marketStatus);
   const lastSuccess = passed.map((check) => check.lastCandleAt).filter(Boolean).sort().at(-1) || null;
   const lastFailure = checks.findLast?.((check) => !check.available) || [...checks].reverse().find((check) => !check.available);
-  const lastError = enough && unsupported.length
+  const verificationWarning = enough && unsupported.length
     ? `Verified with ${supported.length}/${cryptoTimeframes.length} timeframes. Unsupported: ${unsupported.join(", ")}.`
-    : lastFailure?.error || (enough ? null : "No candle data returned from provider.");
+    : null;
+  const lastError = enough ? null : lastFailure?.error || "No candle data returned from provider.";
   const cooldownUntil = enough ? null : new Date(Date.now() + appConfig.cryptoMarkets.unavailableCooldownMs);
   const checkedAt = new Date();
   const verificationDetails = buildVerificationDetails(current, checks, {
     ...details,
     finalStatus: status,
     lastError,
+    warning: verificationWarning,
     nextRetryAt: cooldownUntil?.toISOString() || null,
     lastVerificationAttempt: checkedAt.toISOString()
   });
@@ -224,10 +226,13 @@ export async function saveCryptoMarketVerification(symbol, checks, details = {})
     last_successful_candle_at=$7, last_checked_at=$11, last_verified_at=$11,
     last_verification_attempt_at=$11,
     last_error=$8, failure_code=$9, cooldown_until=$10, verification_details=$12,
+    scanner_enabled=CASE WHEN $2='active' AND enabled=true THEN true ELSE scanner_enabled END,
+    paper_trading_enabled=CASE WHEN $2='active' AND enabled=true THEN true ELSE paper_trading_enabled END,
+    watchlist_enabled=CASE WHEN $2='active' AND enabled=true THEN true ELSE watchlist_enabled END,
     consecutive_failures=CASE WHEN $2='active' THEN 0 ELSE consecutive_failures+1 END,
     updated_at=now() WHERE symbol=$1 RETURNING *`, [
     current.symbol, marketStatus, verificationStatus, providerStatus, supported, unsupported,
-    lastSuccess, lastError, lastFailure?.code || null, cooldownUntil, checkedAt, verificationDetails, status
+    lastSuccess, lastError, enough ? null : lastFailure?.code || null, cooldownUntil, checkedAt, verificationDetails, status
   ]);
   runtime.set(current.symbol, mapRow(result.rows[0]));
   if (marketStatus === "active") await markVerifiedLegacyReplacements(current.symbol);
@@ -318,6 +323,37 @@ export async function recordCryptoMarketFailure(symbol, timeframe, error) {
   const current = getCryptoMarketState(symbol);
   if (!current) return;
   const unavailable = ["PROVIDER_UNSUPPORTED_MARKET", "EMPTY_CANDLES", "BAD_CANDLES", "INSUFFICIENT_CANDLES", "STALE_CANDLES"].includes(error?.code);
+  const providerError = !unavailable;
+  if (providerError && isReadyStatus(current.status || current.marketStatus) && current.supportedTimeframes.length > 0) {
+    const cooldownUntil = new Date(Date.now() + appConfig.cryptoMarkets.unavailableCooldownMs);
+    const warning = publicError(error);
+    const details = {
+      ...(current.verificationDetails || {}),
+      providerWarning: warning,
+      lastWarning: warning,
+      nextRetryTime: cooldownUntil.toISOString(),
+      finalStatus: "active"
+    };
+    const next = {
+      ...current,
+      status: "active",
+      marketStatus: "active",
+      verificationStatus: "verified",
+      providerStatus: "available",
+      lastCheckedAt: new Date().toISOString(),
+      lastError: null,
+      failureCode: error?.code || "PROVIDER_ERROR",
+      cooldownUntil: cooldownUntil.toISOString(),
+      verificationDetails: details
+    };
+    runtime.set(current.symbol, next);
+    await query(`UPDATE crypto_markets SET market_status='active', verification_status='verified',
+      status='active', provider_status='available', last_checked_at=now(), last_error=NULL,
+      failure_code=$2, cooldown_until=$3, verification_details=$4, updated_at=now()
+      WHERE symbol=$1`, [current.symbol, next.failureCode, cooldownUntil, details]).catch(() => {});
+    logCryptoMarketFailureOnce(current.symbol, timeframe, next);
+    return;
+  }
   const marketStatus = unavailable ? "unavailable" : "provider_error";
   const status = canonicalStatusFromMarketStatus(marketStatus);
   const verificationStatus = unavailable ? "failed" : "error";
@@ -331,6 +367,35 @@ export async function recordCryptoMarketFailure(symbol, timeframe, error) {
     failure_code=$7, cooldown_until=$8, consecutive_failures=consecutive_failures+1,
     updated_at=now() WHERE symbol=$1`, [current.symbol, marketStatus, verificationStatus, providerStatus, unsupported, next.lastError, next.failureCode, cooldownUntil, status]).catch(() => {});
   logCryptoMarketFailureOnce(current.symbol, timeframe, next);
+}
+
+export async function enableScannerForAllActiveCryptoMarkets() {
+  const result = await query(`UPDATE crypto_markets
+    SET scanner_enabled=true,
+      paper_trading_enabled=true,
+      watchlist_enabled=true,
+      market_status='active',
+      verification_status='verified',
+      status='active',
+      provider_status='available',
+      last_error=NULL,
+      failure_code=NULL,
+      cooldown_until=NULL,
+      updated_at=now()
+    WHERE enabled=true
+      AND provider IS NOT NULL
+      AND cardinality(supported_timeframes) > 0
+      AND (status IN ('active', 'ready', 'provider_error') OR market_status IN ('active', 'ready', 'provider_error'))
+      AND status NOT IN ('unavailable', 'legacy', 'disabled')
+      AND COALESCE(market_status, status) NOT IN ('legacy', 'disabled')
+    RETURNING *`);
+  for (const row of result.rows) runtime.set(row.symbol, mapRow(row));
+  console.info(`[crypto-markets] enabled_scanner_active=${result.rows.length}`);
+  return {
+    enabled: result.rows.length,
+    scannerEnabled: listCryptoMarketSettings().filter((market) => market.effectiveScannerEnabled).length,
+    paperTradingEnabled: listCryptoMarketSettings().filter((market) => market.effectivePaperTradingEnabled).length
+  };
 }
 
 export function logCryptoMarketFailureOnce(symbol, timeframe, state) {
@@ -348,7 +413,7 @@ export function isCryptoMarketCoolingDown(symbol) {
 }
 
 function effectiveFlags(market) {
-  const ready = isReadyStatus(market.status || market.marketStatus) && market.enabled && !isCoolingDown(market);
+  const ready = isReadyStatus(market.status || market.marketStatus) && market.enabled && !isBlockingCooldown(market);
   return {
     statusLabel: market.enabled === false ? "Disabled by admin" : statusLabel(market.status),
     effectiveScannerEnabled: Boolean(ready && market.scannerEnabled),
@@ -379,7 +444,7 @@ function defaultState(market) {
 }
 
 function mapRow(row) {
-  return {
+  const raw = {
     symbol: row.symbol, displaySymbol: row.display_symbol, providerSymbol: row.provider_symbol,
     name: row.name, category: "Crypto", group: row.liquidity_tier === "major" ? "Major crypto" : "Altcoins",
     assetClass: "Crypto", venue: "Coinbase", provider: row.provider,
@@ -399,6 +464,7 @@ function mapRow(row) {
     replacementSymbol: row.replacement_symbol, verificationDetails: row.verification_details || {},
     createdAt: row.created_at, updatedAt: row.updated_at
   };
+  return reconcileSuccessfulVerification(raw);
 }
 
 function buildVerificationDetails(market, checks, details) {
@@ -430,8 +496,44 @@ function buildVerificationDetails(market, checks, details) {
     lastVerifiedAt: details.lastVerificationAttempt || null,
     lastVerificationAttempt: details.lastVerificationAttempt || null,
     lastError: details.lastError || null,
+    warning: details.warning || details.providerWarning || null,
+    providerWarning: details.providerWarning || null,
     nextRetryTime: details.nextRetryAt || null,
     finalStatus: details.finalStatus || "unavailable"
+  };
+}
+
+function reconcileSuccessfulVerification(market) {
+  const hasSupported = Array.isArray(market.supportedTimeframes) && market.supportedTimeframes.length > 0;
+  const checks = market.verificationDetails?.candleChecks || {};
+  const hasPassingDetails = Object.values(checks).some((check) => check?.pass === true);
+  if (!market.enabled || !market.provider || (!hasSupported && !hasPassingDetails)) return market;
+  if (["legacy", "disabled", "unavailable"].includes(normalizeStatus(market.status)) ||
+    ["legacy", "disabled", "unavailable"].includes(normalizeStatus(market.marketStatus))) {
+    return market;
+  }
+  if (normalizeStatus(market.status) !== "provider_error" &&
+    normalizeStatus(market.marketStatus) !== "provider_error" &&
+    normalizeStatus(market.providerStatus) !== "provider_issue") {
+    return market;
+  }
+  return {
+    ...market,
+    status: "active",
+    marketStatus: "active",
+    verificationStatus: "verified",
+    providerStatus: "available",
+    lastError: null,
+    failureCode: null,
+    cooldownUntil: null,
+    scannerEnabled: true,
+    paperTradingEnabled: true,
+    watchlistEnabled: true,
+    verificationDetails: {
+      ...(market.verificationDetails || {}),
+      lastError: null,
+      finalStatus: "active"
+    }
   };
 }
 
@@ -454,6 +556,7 @@ function legacyProviderStatus(row) { return row.provider_status === "available" 
 function legacyVerificationStatus(row) { return row.provider_status === "available" ? "verified" : row.provider_status === "provider_issue" ? "error" : "failed"; }
 function normalizeSymbol(value) { return String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, ""); }
 function isCoolingDown(market) { return Boolean(market.cooldownUntil && new Date(market.cooldownUntil).getTime() > Date.now()); }
+function isBlockingCooldown(market) { return !isReadyStatus(market.status || market.marketStatus) && isCoolingDown(market); }
 function booleanValue(value, fallback) { return typeof value === "boolean" ? value : fallback; }
 function publicError(error) { return String(error?.message || "No candle data returned from provider.").slice(0, 300); }
 function marketError(message, statusCode) { const error = new Error(message); error.statusCode = statusCode; return error; }

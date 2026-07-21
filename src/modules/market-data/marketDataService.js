@@ -553,7 +553,7 @@ function withAvailability(pair) {
 
   if (isCryptoMarket(pair)) {
     const operational = getCryptoMarketState(pair.symbol);
-    const coolingDown = isCryptoMarketCoolingDown(pair.symbol);
+    const coolingDown = !isReadyStatus(operational?.marketStatus || operational?.status) && isCryptoMarketCoolingDown(pair.symbol);
     const available = availability.configured && operational?.enabled && isReadyStatus(operational.marketStatus || operational.status) && !coolingDown;
     return {
       ...pair,
