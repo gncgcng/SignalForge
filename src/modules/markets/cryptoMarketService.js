@@ -68,25 +68,25 @@ export function listCryptoMarketSettings() {
 
 export function listScannerCryptoMarkets() {
   return listCryptoMarketSettings()
-    .filter((market) => market.status === "active" && market.enabled && market.scannerEnabled && !isCoolingDown(market))
+    .filter((market) => isReadyStatus(market.status || market.marketStatus) && market.enabled && market.scannerEnabled && !isCoolingDown(market))
     .slice(0, appConfig.cryptoMarkets.maxActiveScannerPairs);
 }
 
 export function listPaperCryptoMarkets() {
   return listCryptoMarketSettings().filter((market) =>
-    market.status === "active" && market.enabled && market.paperTradingEnabled && !isCoolingDown(market)
+    isReadyStatus(market.status || market.marketStatus) && market.enabled && market.paperTradingEnabled && !isCoolingDown(market)
   );
 }
 
 export function listWatchlistCryptoMarkets() {
   return listCryptoMarketSettings().filter((market) =>
-    market.status === "active" && market.enabled && market.watchlistEnabled && !isCoolingDown(market)
+    isReadyStatus(market.status || market.marketStatus) && market.enabled && market.watchlistEnabled && !isCoolingDown(market)
   );
 }
 
 export function canUseCryptoTimeframe(symbol, timeframe, capability = "market") {
   const market = getCryptoMarketState(symbol);
-  if (!market || market.status !== "active" || !market.enabled || isCoolingDown(market)) return false;
+  if (!market || !isReadyStatus(market.status || market.marketStatus) || !market.enabled || isCoolingDown(market)) return false;
   if (capability === "scanner" && !market.scannerEnabled) return false;
   if (capability === "paper" && !market.paperTradingEnabled) return false;
   if (capability === "watchlist" && !market.watchlistEnabled) return false;
@@ -348,7 +348,7 @@ export function isCryptoMarketCoolingDown(symbol) {
 }
 
 function effectiveFlags(market) {
-  const ready = market.status === "active" && market.enabled && !isCoolingDown(market);
+  const ready = isReadyStatus(market.status || market.marketStatus) && market.enabled && !isCoolingDown(market);
   return {
     statusLabel: market.enabled === false ? "Disabled by admin" : statusLabel(market.status),
     effectiveScannerEnabled: Boolean(ready && market.scannerEnabled),
@@ -442,11 +442,13 @@ async function markVerifiedLegacyReplacements(replacementSymbol) {
 }
 
 function statusLabel(status) {
-  return ({ active: "Ready", unavailable: "Unavailable", legacy: "Legacy / migrated", disabled: "Disabled by admin", provider_error: "Provider error" })[status] || "Unavailable";
+  return ({ active: "Ready", ready: "Ready", unavailable: "Unavailable", legacy: "Legacy / migrated", disabled: "Disabled by admin", provider_error: "Provider error" })[normalizeStatus(status)] || "Unavailable";
 }
 function canonicalStatusFromMarketStatus(status) {
-  return ({ active: "active", ready: "active", provider_error: "provider_error", unavailable: "unavailable", legacy: "legacy", disabled: "disabled" })[status] || "unavailable";
+  return ({ active: "active", ready: "active", provider_error: "provider_error", unavailable: "unavailable", legacy: "legacy", disabled: "disabled" })[normalizeStatus(status)] || "unavailable";
 }
+function isReadyStatus(status) { return ["active", "ready"].includes(normalizeStatus(status)); }
+function normalizeStatus(status) { return String(status || "").trim().toLowerCase(); }
 function safeLogReason(value) { return String(value || "unknown").replace(/[\r\n]+/g, " ").slice(0, 160); }
 function legacyProviderStatus(row) { return row.provider_status === "available" ? "active" : row.provider_status === "provider_issue" ? "provider_error" : "unavailable"; }
 function legacyVerificationStatus(row) { return row.provider_status === "available" ? "verified" : row.provider_status === "provider_issue" ? "error" : "failed"; }

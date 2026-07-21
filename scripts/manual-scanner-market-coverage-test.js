@@ -11,6 +11,8 @@ const marketData = await import("../src/modules/market-data/marketDataService.js
 const { appConfig } = await import("../src/config/appConfig.js");
 
 const manualAll = marketData.getManualScannerUniverse({ marketType: "all" });
+const manualDefault = marketData.getManualScannerUniverse();
+const manualCapitalizedCrypto = marketData.getManualScannerUniverse({ marketType: "Crypto" });
 const manualCrypto = marketData.getManualScannerUniverse({ marketType: "crypto" });
 const manualCommodities = marketData.getManualScannerUniverse({ marketType: "commodities" });
 const autoMarkets = marketData.listAutoScannerPairs();
@@ -31,6 +33,17 @@ const checks = {
   commoditiesFilterOnlyCommodities:
     manualCommodities.markets.length > 0 &&
     manualCommodities.markets.every((pair) => pair.category === "Commodities"),
+  defaultMarketTypeIsAll:
+    manualDefault.marketType === "all" &&
+    manualDefault.markets.some((pair) => pair.category === "Crypto") &&
+    manualDefault.markets.some((pair) => pair.category === "Commodities"),
+  marketTypeCapitalizationDoesNotExcludeCrypto:
+    manualCapitalizedCrypto.marketType === "crypto" &&
+    manualCapitalizedCrypto.markets.some((pair) => pair.symbol === "BTC-USD" || pair.symbol === "ETH-USD" || pair.symbol === "SOL-USD"),
+  statusCapitalizationSupported:
+    marketDataService.includes("function isReadyStatus") &&
+    marketDataService.includes("\"ready\"") &&
+    readFileSync(new URL("../src/modules/markets/cryptoMarketService.js", import.meta.url), "utf8").includes("function isReadyStatus"),
   autoScanCryptoOnly:
     appConfig.autoScan.cryptoOnly === true &&
     autoMarkets.length > 0 &&
@@ -52,22 +65,42 @@ const checks = {
     manualAll.markets
       .filter((pair) => pair.category === "Commodities")
       .every((pair) => pair.provider === "twelve-data"),
+  providerExamplesPreserved:
+    ["BTC-USD", "ETH-USD", "SOL-USD"].some((symbol) =>
+      manualAll.markets.find((pair) => pair.symbol === symbol)?.provider === "coinbase-exchange"
+    ) &&
+    manualAll.markets.find((pair) => pair.symbol === "XAG/USD")?.provider === "twelve-data",
   unsupportedMarketsNotReady:
     manualAll.skipped.some((item) => ["provider_not_configured", "market_type_excluded", "scanner_disabled"].includes(item.reasonCode)),
   frontendSelectorPresent:
     html.includes('id="scanner-market-type"') &&
     app.includes("getManualScanMarkets") &&
     app.includes("body: JSON.stringify({ marketType })"),
+  progressDenominatorUsesSelectedMarkets:
+    app.includes("const total = markets.length") &&
+    app.includes("Selected markets: Crypto"),
   summaryCountsPresent:
     html.includes('id="scan-summary-skipped"') &&
     html.includes('id="scan-summary-provider-errors"') &&
     html.includes('id="scan-summary-no-data"') &&
     app.includes("skippedMarkets") &&
     app.includes("scanUniverse"),
+  adminDebugPanelPresent:
+    app.includes("renderAdminScannerUniverseDebug") &&
+    app.includes("Admin scanner debug") &&
+    marketDataService.includes("firstSymbols") &&
+    marketDataService.includes("autoScan"),
   backendReadsMarketType:
     signalController.includes("scanAllMarkets(req.user, body)") &&
     signalService.includes("scan-all:${universe.signature}") &&
-    signalService.includes("manual_universe")
+    signalService.includes("manual_universe"),
+  manualScanProofLogsPresent:
+    signalService.includes("[manual-scan] selectedFilter=") &&
+    signalService.includes("[manual-scan] activeMarkets") &&
+    signalService.includes("[manual-scan] scannerEnabled") &&
+    signalService.includes("[manual-scan] selectedMarkets") &&
+    signalService.includes("[manual-scan] firstSymbols=") &&
+    signalService.includes("provider=${market.provider")
 };
 
 for (const [name, passed] of Object.entries(checks)) {
@@ -77,7 +110,9 @@ for (const [name, passed] of Object.entries(checks)) {
 console.log(JSON.stringify({
   ...checks,
   manualSelected: manualAll.markets.length,
+  manualDefaultSelected: manualDefault.markets.length,
   cryptoSelected: manualCrypto.markets.length,
+  capitalizedCryptoSelected: manualCapitalizedCrypto.markets.length,
   commoditiesSelected: manualCommodities.markets.length,
   autoSelected: autoMarkets.length,
   skipped: manualAll.skipped.length

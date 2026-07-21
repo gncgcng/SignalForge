@@ -73,7 +73,7 @@ const nonCryptoMarketCatalog = legacyMarketCatalog.filter((market) => market.cat
 
 function currentMarketCatalog() {
   const activeCryptoMarkets = listCryptoMarketSettings().filter((market) =>
-    market.status === "active" && market.enabled
+    isReadyStatus(market.status || market.marketStatus) && market.enabled
   );
   return [...activeCryptoMarkets, ...nonCryptoMarketCatalog];
 }
@@ -109,7 +109,7 @@ export function getPair(symbol) {
 }
 
 export function listActivePairs() {
-  return currentMarketCatalog().map(withAvailability).filter((pair) => pair.status === "active");
+  return currentMarketCatalog().map(withAvailability).filter((pair) => isReadyStatus(pair.status));
 }
 
 export function listScannerPairs() {
@@ -117,7 +117,7 @@ export function listScannerPairs() {
 }
 
 export function listAutoScannerPairs() {
-  const crypto = listScannerCryptoMarkets().map(withAvailability).filter((pair) => pair.status === "active");
+  const crypto = listScannerCryptoMarkets().map(withAvailability).filter((pair) => isReadyStatus(pair.status));
   if (appConfig.autoScan.cryptoOnly) {
     return crypto;
   }
@@ -126,6 +126,10 @@ export function listAutoScannerPairs() {
 
 export function listManualScannerPairs(options = {}) {
   return getManualScannerUniverse(options).markets;
+}
+
+export function getManualScanMarkets(options = {}) {
+  return listManualScannerPairs(options);
 }
 
 export function getManualScannerUniverse(options = {}) {
@@ -144,12 +148,12 @@ export function getManualScannerUniverse(options = {}) {
       continue;
     }
 
-    if (pair.category === "Crypto" && (!pair.enabled || !pair.scannerEnabled)) {
+    if (isCryptoMarket(pair) && (!pair.enabled || !pair.scannerEnabled)) {
       skipped.push(toSkippedMarket(pair, "scanner_disabled", "Scanner is disabled for this crypto market."));
       continue;
     }
 
-    if (pair.category === "Commodities" && !appConfig.manualScan.twelveDataEnabled) {
+    if (isCommodityMarket(pair) && !appConfig.manualScan.twelveDataEnabled) {
       skipped.push(toSkippedMarket(pair, "manual_provider_disabled", "Twelve Data manual scanning is disabled."));
       continue;
     }
@@ -159,7 +163,7 @@ export function getManualScannerUniverse(options = {}) {
       continue;
     }
 
-    if (pair.status !== "active") {
+    if (!isReadyStatus(pair.status || pair.marketStatus)) {
       skipped.push(toSkippedMarket(pair, pair.availabilityCode || "market_unavailable", pair.availabilityMessage || "Market is not ready for scanning."));
       continue;
     }
@@ -193,7 +197,10 @@ export function getManualScannerUniverse(options = {}) {
     marketType,
     markets: limited,
     skipped,
-    summary: summarizeScannerUniverse(limited, skipped),
+    summary: {
+      ...summarizeScannerUniverse(candidates, limited, skipped),
+      selectedFilter: marketType
+    },
     signature: `${marketType}:${limited.map((pair) => `${pair.symbol}:${(pair.scannerTimeframes || []).join(",")}`).join("|")}`
   };
 }
@@ -206,7 +213,7 @@ export function getSupportedScannerTimeframes(pair, provider = null) {
     return [];
   }
   return appConfig.supportedTimeframes.filter((timeframe) => {
-    if (pair.category === "Crypto" && !canUseCryptoTimeframe(pair.symbol, timeframe)) {
+    if (isCryptoMarket(pair) && !canUseCryptoTimeframe(pair.symbol, timeframe)) {
       return false;
     }
     return dataProvider.supports(pair.symbol, timeframe);
@@ -215,7 +222,7 @@ export function getSupportedScannerTimeframes(pair, provider = null) {
 
 export function listPaperTradingPairs() {
   const crypto = listPaperCryptoMarkets().map(withAvailability);
-  const other = nonCryptoMarketCatalog.map(withAvailability).filter((pair) => pair.status === "active");
+  const other = nonCryptoMarketCatalog.map(withAvailability).filter((pair) => isReadyStatus(pair.status));
   return [...crypto, ...other];
 }
 
@@ -239,13 +246,13 @@ export async function getOhlcv(symbol, timeframe) {
     });
   }
 
-  if (pair.status !== "active") {
+  if (!isReadyStatus(pair.status)) {
     throw new MarketDataProviderError(
-      pair.category === "Crypto" && pair.availabilityCode === "MARKET_COOLDOWN"
+      isCryptoMarket(pair) && pair.availabilityCode === "MARKET_COOLDOWN"
         ? `${pair.symbol} is temporarily paused after a provider failure.`
-        : pair.category === "Crypto" && pair.status === "unavailable"
+        : isCryptoMarket(pair) && pair.status === "unavailable"
           ? `${pair.symbol}: ${pair.availabilityMessage || "No candle data from provider"}.`
-      : pair.category === "Commodities" && pair.availabilityCode === "PROVIDER_NOT_CONFIGURED"
+      : isCommodityMarket(pair) && pair.availabilityCode === "PROVIDER_NOT_CONFIGURED"
         ? `${pair.symbol}: Data provider not configured.`
         : `${pair.symbol} market data is Coming Soon.`,
       {
@@ -255,7 +262,7 @@ export async function getOhlcv(symbol, timeframe) {
     );
   }
 
-  if (pair.category === "Crypto" && !canUseCryptoTimeframe(pair.symbol, timeframe)) {
+  if (isCryptoMarket(pair) && !canUseCryptoTimeframe(pair.symbol, timeframe)) {
     throw new MarketDataProviderError(
       isCryptoMarketCoolingDown(pair.symbol)
         ? `${pair.symbol} is temporarily paused after a provider failure.`
@@ -267,8 +274,8 @@ export async function getOhlcv(symbol, timeframe) {
   const provider = getMarketDataProvider(pair);
 
   if (
-    (pair.category === "Crypto" && provider.id !== "coinbase-exchange") ||
-    (pair.category === "Commodities" && provider.id !== "twelve-data")
+    (isCryptoMarket(pair) && provider.id !== "coinbase-exchange") ||
+    (isCommodityMarket(pair) && !["twelve-data", "twelvedata"].includes(provider.id))
   ) {
     throw new MarketDataProviderError(
       `Invalid provider routing for ${pair.symbol}: ${provider.id}.`,
@@ -287,11 +294,11 @@ export async function getOhlcv(symbol, timeframe) {
   try {
     marketData = await provider.getCandles(pair.symbol, timeframe);
   } catch (error) {
-    if (pair.category === "Crypto") await recordCryptoMarketFailure(pair.symbol, timeframe, error);
+    if (isCryptoMarket(pair)) await recordCryptoMarketFailure(pair.symbol, timeframe, error);
     throw error;
   }
   const marketStatus = resolveMarketStatus(pair, timeframe, marketData.candles, marketData.receivedAt);
-  if (pair.category === "Crypto") {
+  if (isCryptoMarket(pair)) {
     if (!Array.isArray(marketData.candles) || marketData.candles.length < 60) {
       const error = new MarketDataProviderError(`${pair.symbol} returned insufficient OHLCV candles.`, { statusCode: 502, code: "INSUFFICIENT_CANDLES" });
       await recordCryptoMarketFailure(pair.symbol, timeframe, error);
@@ -329,7 +336,7 @@ export async function getOhlcv(symbol, timeframe) {
 export function getCachedOhlcv(symbol, timeframe) {
   const pair = getPair(symbol);
 
-  if (!pair || pair.status !== "active") {
+  if (!pair || !isReadyStatus(pair.status)) {
     return null;
   }
 
@@ -431,7 +438,9 @@ function timeframeToMilliseconds(timeframe) {
 }
 
 export function normalizeMarketType(value = "all") {
-  const normalized = String(value || "all").trim().toLowerCase();
+  const normalized = normalizeText(value || "all");
+  if (normalized === "commodity") return "commodities";
+  if (normalized === "stock" || normalized === "stocks_etfs" || normalized === "stocks_and_etfs") return "stocks";
   if (["crypto", "commodities", "forex", "stocks"].includes(normalized)) {
     return normalized;
   }
@@ -439,11 +448,31 @@ export function normalizeMarketType(value = "all") {
 }
 
 function getMarketTypeKey(pair) {
-  if (pair.category === "Crypto") return "crypto";
-  if (pair.category === "Commodities") return "commodities";
-  if (pair.category === "Forex") return "forex";
-  if (pair.category === "Stocks & ETFs" || pair.assetClass === "Stock" || pair.assetClass === "ETF") return "stocks";
-  return String(pair.category || "").toLowerCase();
+  if (isCryptoMarket(pair)) return "crypto";
+  if (isCommodityMarket(pair)) return "commodities";
+  if (normalizeText(pair.marketType || pair.category) === "forex") return "forex";
+  if (["stocks_etfs", "stocks_and_etfs", "stock", "etf"].includes(normalizeText(pair.marketType || pair.category || pair.assetClass))) return "stocks";
+  return normalizeText(pair.category);
+}
+
+function isCryptoMarket(pair) {
+  return normalizeText(pair.marketType || pair.category || pair.assetClass) === "crypto" ||
+    normalizeText(pair.provider) === "coinbase_exchange" ||
+    /-[A-Z]{3,5}$/i.test(String(pair.providerSymbol || pair.symbol || ""));
+}
+
+function isCommodityMarket(pair) {
+  const type = normalizeText(pair.marketType || pair.category || pair.assetClass);
+  return ["commodity", "commodities"].includes(type) ||
+    ["twelve_data", "twelvedata"].includes(normalizeText(pair.provider));
+}
+
+function isReadyStatus(status) {
+  return ["active", "ready"].includes(normalizeText(status));
+}
+
+function normalizeText(value) {
+  return String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_").replace(/&/g, "and");
 }
 
 function toSkippedMarket(pair, reasonCode, reason) {
@@ -459,9 +488,14 @@ function toSkippedMarket(pair, reasonCode, reason) {
   };
 }
 
-function summarizeScannerUniverse(markets, skipped) {
+function summarizeScannerUniverse(candidates, markets, skipped) {
   const countByType = (items, key) => items.filter((item) => getMarketTypeKey(item) === key).length;
   const timeframeSet = new Set(markets.flatMap((item) => item.scannerTimeframes || []));
+  const autoMarkets = listScannerCryptoMarkets();
+  const activeMarkets = candidates.filter((item) => isReadyStatus(item.status || item.marketStatus));
+  const scannerEnabledMarkets = activeMarkets.filter((item) =>
+    isCryptoMarket(item) ? item.enabled !== false && item.scannerEnabled !== false : item.selectable !== false && Boolean(item.provider)
+  );
   const skippedByReason = skipped.reduce((acc, item) => {
     acc[item.reasonCode] = (acc[item.reasonCode] || 0) + 1;
     return acc;
@@ -469,9 +503,26 @@ function summarizeScannerUniverse(markets, skipped) {
 
   return {
     totalActive: listActivePairs().length,
+    firstSymbols: markets.slice(0, 20).map((item) => item.symbol),
+    skippedReasons: skippedByReason,
+    autoScan: {
+      cryptoOnly: appConfig.autoScan.cryptoOnly,
+      selected: autoMarkets.length,
+      firstSymbols: autoMarkets.slice(0, 20).map((item) => item.symbol)
+    },
+    activeMarkets: {
+      total: activeMarkets.length,
+      crypto: countByType(activeMarkets, "crypto"),
+      commodities: countByType(activeMarkets, "commodities")
+    },
+    scannerEnabledMarkets: {
+      total: scannerEnabledMarkets.length,
+      crypto: countByType(scannerEnabledMarkets, "crypto"),
+      commodities: countByType(scannerEnabledMarkets, "commodities")
+    },
     scannerEnabled: markets.length,
     selectedManual: markets.length,
-    selectedAuto: listScannerCryptoMarkets().length,
+    selectedAuto: autoMarkets.length,
     timeframes: timeframeSet.size,
     scanTasks: markets.reduce((total, item) => total + (item.scannerTimeframes || []).length, 0),
     crypto: countByType(markets, "crypto"),
@@ -497,10 +548,10 @@ function withAvailability(pair) {
   const availability = getPairProviderAvailability(pair);
   const displaySymbol = getDisplaySymbol(pair);
 
-  if (pair.category === "Crypto") {
+  if (isCryptoMarket(pair)) {
     const operational = getCryptoMarketState(pair.symbol);
     const coolingDown = isCryptoMarketCoolingDown(pair.symbol);
-    const available = availability.configured && operational?.enabled && operational.marketStatus === "active" && !coolingDown;
+    const available = availability.configured && operational?.enabled && isReadyStatus(operational.marketStatus || operational.status) && !coolingDown;
     return {
       ...pair,
       ...operational,

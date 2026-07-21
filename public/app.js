@@ -1374,10 +1374,11 @@ scanAllButton.addEventListener("click", async () => {
   const frames = ["1h", "4h", "15m", "5m"];
   const marketType = scannerMarketType?.value || "all";
   const markets = getManualScanMarkets(marketType);
+  const selectedUniverse = summarizeFrontendScanUniverse(markets);
   const scanTasks = markets.flatMap((pair) => frames
     .filter((timeframe) => getFrontendSupportedScanTimeframes(pair).includes(timeframe))
     .map((timeframe) => ({ symbol: pair.symbol, timeframe })));
-  const total = scanTasks.length;
+  const total = markets.length;
   let progressTimer = null;
   let progressIndex = 0;
 
@@ -1406,11 +1407,15 @@ scanAllButton.addEventListener("click", async () => {
   scanSummaryPanel.classList.add("hidden");
   state.scanResults = [];
   signalsGrid.innerHTML = "";
-  updateScanProgress(0, total, `Scanning ${formatMarketTypeLabel(marketType).toLowerCase()} markets...`);
+  updateScanProgress(
+    0,
+    total,
+    `Selected markets: Crypto ${selectedUniverse.crypto} · Commodities ${selectedUniverse.commodities} · Total ${selectedUniverse.total}`
+  );
   progressTimer = setInterval(() => {
     if (progressIndex >= total - 1) return;
-    const symbol = scanTasks[progressIndex]?.symbol || scanTasks[0]?.symbol || "market";
-    const timeframe = scanTasks[progressIndex]?.timeframe || "timeframe";
+    const symbol = markets[progressIndex]?.symbol || scanTasks[progressIndex]?.symbol || scanTasks[0]?.symbol || "market";
+    const timeframe = scanTasks.find((task) => task.symbol === symbol)?.timeframe || "timeframe";
     progressIndex += 1;
     updateScanProgress(
       progressIndex,
@@ -6293,21 +6298,57 @@ function getManualScanMarkets(marketType = "all") {
   const selected = String(marketType || "all").toLowerCase();
   return state.marketCatalog
     .filter((pair) => selected === "all" || getMarketTypeKey(pair) === selected)
-    .filter((pair) => pair.category === "Crypto" ? pair.effectiveScannerEnabled : pair.status === "active" && pair.selectable !== false);
+    .filter(isFrontendScannableMarket);
 }
 
 function getFrontendSupportedScanTimeframes(pair) {
   if (Array.isArray(pair.scannerTimeframes) && pair.scannerTimeframes.length) return pair.scannerTimeframes;
-  if (pair.category === "Crypto") return pair.supportedTimeframes || [];
+  if (isFrontendCryptoMarket(pair)) return pair.supportedTimeframes || [];
   return ["5m", "15m", "1h", "4h"];
 }
 
+function summarizeFrontendScanUniverse(markets = []) {
+  return {
+    total: markets.length,
+    crypto: markets.filter((pair) => getMarketTypeKey(pair) === "crypto").length,
+    commodities: markets.filter((pair) => getMarketTypeKey(pair) === "commodities").length
+  };
+}
+
 function getMarketTypeKey(pair) {
-  if (pair.category === "Crypto") return "crypto";
-  if (pair.category === "Commodities") return "commodities";
-  if (pair.category === "Forex") return "forex";
-  if (pair.category === "Stocks & ETFs" || pair.assetClass === "Stock" || pair.assetClass === "ETF") return "stocks";
-  return String(pair.category || "").toLowerCase();
+  if (isFrontendCryptoMarket(pair)) return "crypto";
+  if (isFrontendCommodityMarket(pair)) return "commodities";
+  if (normalizeFrontendText(pair.marketType || pair.category) === "forex") return "forex";
+  if (["stocks_etfs", "stocks_and_etfs", "stock", "etf"].includes(normalizeFrontendText(pair.marketType || pair.category || pair.assetClass))) return "stocks";
+  return normalizeFrontendText(pair.category);
+}
+
+function isFrontendScannableMarket(pair) {
+  if (!isFrontendReadyStatus(pair.status || pair.marketStatus)) return false;
+  if (isFrontendCryptoMarket(pair)) {
+    return pair.effectiveScannerEnabled !== false && pair.scannerEnabled !== false;
+  }
+  return pair.selectable !== false && Boolean(pair.provider);
+}
+
+function isFrontendCryptoMarket(pair) {
+  return normalizeFrontendText(pair.marketType || pair.category || pair.assetClass) === "crypto" ||
+    normalizeFrontendText(pair.provider) === "coinbase_exchange" ||
+    /-[A-Z]{3,5}$/i.test(String(pair.providerSymbol || pair.symbol || ""));
+}
+
+function isFrontendCommodityMarket(pair) {
+  const type = normalizeFrontendText(pair.marketType || pair.category || pair.assetClass);
+  return ["commodity", "commodities"].includes(type) ||
+    ["twelve_data", "twelvedata"].includes(normalizeFrontendText(pair.provider));
+}
+
+function isFrontendReadyStatus(status) {
+  return ["active", "ready"].includes(normalizeFrontendText(status));
+}
+
+function normalizeFrontendText(value) {
+  return String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_").replace(/&/g, "and");
 }
 
 function formatMarketTypeLabel(marketType = "all") {
@@ -6354,8 +6395,31 @@ function renderScanSummary(opportunitiesFound, marketsScanned, timeframesScanned
     <p><strong>Most common avoid reason:</strong> ${escapeHtml(summary?.topAvoidReason || summary?.topRejectionReason || diagnostics?.topReasons?.[0]?.reason || "Strategy not matched")}</p>
     ${renderRejectionReasons((diagnostics?.topReasons || []).map((item) => `${item.reason} (${item.count})`))}
     ${renderDiagnosticSamples(diagnostics?.samples)}
+    ${renderAdminScannerUniverseDebug(scanUniverse)}
     ${errors.length ? `<p>${errors.length} provider warning${errors.length === 1 ? "" : "s"} occurred during this scan.</p>` : ""}
     ${skippedMarkets?.length ? `<details class="scan-diagnostics"><summary>Skipped markets (${skippedMarkets.length})</summary><div>${skippedMarkets.slice(0, 25).map((item) => `<p><strong>${escapeHtml(item.displaySymbol || item.symbol)}</strong> · ${escapeHtml(item.reason || item.reasonCode || "Skipped")}</p>`).join("")}${skippedMarkets.length > 25 ? `<p>${skippedMarkets.length - 25} more skipped markets hidden.</p>` : ""}</div></details>` : ""}
+  `;
+}
+
+function renderAdminScannerUniverseDebug(scanUniverse = null) {
+  if (!state.user?.isAdmin || !scanUniverse) return "";
+  const active = scanUniverse.activeMarkets || {};
+  const scanner = scanUniverse.scannerEnabledMarkets || {};
+  const auto = scanUniverse.autoScan || {};
+  const skippedReasons = Object.entries(scanUniverse.skippedByReason || scanUniverse.skippedReasons || {})
+    .map(([reason, count]) => `${reason}: ${count}`)
+    .join(" · ") || "None";
+  return `
+    <details class="scan-diagnostics" open>
+      <summary>Admin scanner debug</summary>
+      <div>
+        <p><strong>Manual scan universe:</strong> filter ${escapeHtml(scanUniverse.selectedFilter || "all")} · selected ${formatInteger(scanUniverse.selectedManual || 0)} · first ${escapeHtml((scanUniverse.firstSymbols || []).join(", ") || "none")}</p>
+        <p><strong>Active markets:</strong> total ${formatInteger(active.total || 0)} · crypto ${formatInteger(active.crypto || 0)} · commodities ${formatInteger(active.commodities || 0)}</p>
+        <p><strong>Scanner enabled:</strong> total ${formatInteger(scanner.total || 0)} · crypto ${formatInteger(scanner.crypto || 0)} · commodities ${formatInteger(scanner.commodities || 0)}</p>
+        <p><strong>Auto scan universe:</strong> crypto-only ${auto.cryptoOnly !== false ? "true" : "false"} · selected ${formatInteger(auto.selected || 0)} · first ${escapeHtml((auto.firstSymbols || []).join(", ") || "none")}</p>
+        <p><strong>Skipped reasons:</strong> ${escapeHtml(skippedReasons)}</p>
+      </div>
+    </details>
   `;
 }
 
@@ -6370,7 +6434,7 @@ function renderScanResults(setups, errors, diagnostics = null, scanSummary = nul
   const activePairs = state.pairs
     .concat(state.marketCatalog)
     .filter((pair, index, pairs) => pairs.findIndex((item) => item.symbol === pair.symbol) === index)
-    .filter((pair) => pair.category === "Crypto" ? pair.effectiveScannerEnabled : pair.status === "active");
+    .filter(isFrontendScannableMarket);
   const frames = ["1h", "4h", "15m", "5m"];
   const scannedMarkets = activePairs.map((pair) => pair.symbol);
   state.lastScanSummary = {

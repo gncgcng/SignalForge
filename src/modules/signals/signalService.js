@@ -489,6 +489,26 @@ export async function scanAllMarketsDetailed(user, options = {}) {
   const universe = options.universe || getManualScannerUniverse(options);
   const scanMarkets = universe.markets;
   const analystProfile = await getUserAnalystProfile(user);
+  const activeCounts = universe.summary.activeMarkets || {};
+  const scannerCounts = universe.summary.scannerEnabledMarkets || {};
+  console.info(
+    `[manual-scan] selectedFilter=${universe.marketType}`
+  );
+  console.info(
+    `[manual-scan] activeMarkets total=${activeCounts.total || 0} crypto=${activeCounts.crypto || 0} commodities=${activeCounts.commodities || 0}`
+  );
+  console.info(
+    `[manual-scan] scannerEnabled total=${scannerCounts.total || 0} crypto=${scannerCounts.crypto || 0} commodities=${scannerCounts.commodities || 0}`
+  );
+  console.info(
+    `[manual-scan] selectedMarkets total=${scanMarkets.length} crypto=${universe.summary.crypto} commodities=${universe.summary.commodities}`
+  );
+  console.info(
+    `[manual-scan] firstSymbols=${scanMarkets.slice(0, 20).map((market) => market.symbol).join(",") || "none"}`
+  );
+  for (const market of scanMarkets.slice(0, 20)) {
+    console.info(`[manual-scan] ${market.symbol} provider=${market.provider || "missing"}`);
+  }
   console.info(
     `[scanner] manual_universe market_type=${universe.marketType} selected=${scanMarkets.length} ` +
     `skipped=${universe.skipped.length} crypto=${universe.summary.crypto} commodities=${universe.summary.commodities}`
