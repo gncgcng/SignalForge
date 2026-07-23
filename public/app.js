@@ -1826,7 +1826,9 @@ document.querySelector("#admin-signal-quality-panel")?.addEventListener("click",
       method: "POST",
       body: JSON.stringify({
         groupKey: button.dataset.groupKey,
-        status: button.dataset.signalQualityStatus
+        status: button.dataset.signalQualityStatus,
+        penaltyOverride: button.dataset.penaltyOverride || null,
+        confidenceCapOverride: button.dataset.confidenceCapOverride || null
       })
     });
     showToast(`Group set to ${titleCase(button.dataset.signalQualityStatus)}`);
@@ -3850,34 +3852,74 @@ function renderAdminSignalQualityPanel(quality = {}) {
   const panel = document.querySelector("#admin-signal-quality-panel");
   if (!panel) return;
   const warning = quality.warning || {};
+  const summary = quality.summary || {};
   const groups = [
-    ["Worst strategies", quality.worstStrategies || []],
-    ["Worst pair/timeframes", quality.worstPairTimeframes || []],
-    ["Most expired strategies", quality.mostExpiredStrategies || []],
-    ["Most overconfident strategies", quality.mostOverconfidentStrategies || []]
+    ["Best strategies", quality.bestStrategies || [], "best"],
+    ["Worst strategies", quality.worstStrategies || [], "worst"],
+    ["Best pair/timeframes", quality.bestPairTimeframes || [], "best"],
+    ["Worst pair/timeframes", quality.worstPairTimeframes || [], "worst"],
+    ["Best pairs", quality.bestPairs || [], "best"],
+    ["Worst pairs", quality.worstPairs || [], "worst"],
+    ["Best timeframes", quality.bestTimeframes || [], "best"],
+    ["Worst timeframes", quality.worstTimeframes || [], "worst"],
+    ["Best directions", quality.bestDirections || [], "best"],
+    ["Worst directions", quality.worstDirections || [], "worst"],
+    ["Best patterns", quality.bestPatterns || [], "best"],
+    ["Worst patterns", quality.worstPatterns || [], "worst"],
+    ["Underconfident winners", quality.underconfidentWinners || [], "best"],
+    ["Most overconfident strategies", quality.mostOverconfidentStrategies || [], "worst"],
+    ["Most reliable strategies", quality.mostReliableStrategies || [], "best"],
+    ["Most expired strategies", quality.mostExpiredStrategies || [], "worst"],
+    ["Best market regimes", quality.bestMarketRegimes || [], "best"],
+    ["Best sources", quality.bestSources || [], "best"]
   ];
   panel.innerHTML = `
     ${warning.active ? `<article class="signal-quality-warning"><strong>Signal quality warning</strong><p>${escapeHtml(warning.message)}</p><small>Win rate excludes expired signals. Expired signals still reduce the quality score because they represent setups that failed to complete.</small></article>` : ""}
+    <article class="signal-quality-summary">
+      ${renderSignalQualitySummaryItem("Best performer", summary.bestPerformer)}
+      ${renderSignalQualitySummaryItem("Worst performer", summary.worstPerformer)}
+      ${renderSignalQualitySummaryItem("Most overconfident", summary.overconfidenceWarning)}
+      ${renderSignalQualitySummaryItem("Opportunity", summary.opportunity)}
+    </article>
     <div class="signal-quality-groups">
-      ${groups.map(([title, items]) => renderSignalQualityGroupList(title, items)).join("")}
+      ${groups.map(([title, items, mode]) => renderSignalQualityGroupList(title, items, mode)).join("")}
     </div>
     <article class="signal-quality-buckets"><h4>Confidence buckets</h4>${renderSignalQualityBucketRows(quality.confidenceBuckets || [])}</article>`;
 }
 
-function renderSignalQualityGroupList(title, items) {
+function renderSignalQualitySummaryItem(label, group) {
+  return `<div><span>${escapeHtml(label)}</span><strong>${group ? escapeHtml(group.groupValue) : "Not enough data yet"}</strong><small>${group ? `${Number(group.estimatedExpectancy || 0).toFixed(2)}R · ${Number(group.winRate || 0).toFixed(1)}% win` : "Waiting for completed signals"}</small></div>`;
+}
+
+function renderSignalQualityGroupList(title, items, mode = "worst") {
   const rows = items.length
     ? items.map((group) => `<div class="signal-quality-row">
-      <span><strong>${escapeHtml(group.groupValue)}</strong><small>${escapeHtml(titleCase(group.status || "active"))} · ${Number(group.closedSignals || 0)} closed · BE ${Number(group.breakEvenWinRate || 0).toFixed(1)}%</small></span>
-      <span><strong>${Number(group.winRate || 0).toFixed(1)}%</strong><small>${Number(group.estimatedExpectancy || 0).toFixed(2)}R expectancy · ${Number(group.expiredRate || 0).toFixed(1)}% expired</small></span>
+      <span><strong>${escapeHtml(group.groupValue)}</strong><small>${escapeHtml(group.performanceLabel || titleCase(group.status || "active"))} · ${Number(group.totalSignals || 0)} total · ${Number(group.closedSignals || 0)} closed · BE ${Number(group.breakEvenWinRate || 0).toFixed(1)}%</small></span>
+      <span><strong>${Number(group.winRate || 0).toFixed(1)}%</strong><small>${Number(group.estimatedExpectancy || 0).toFixed(2)}R expectancy · ${Number(group.expiredRate || 0).toFixed(1)}% expired · ${Number(group.averageRiskReward || 0).toFixed(2)}R avg RR</small><small>TP ${Number(group.hitTp || 0)} · SL ${Number(group.hitSl || 0)} · Exp ${Number(group.expired || 0)} · Conf ${Number(group.averageConfidence || 0).toFixed(1)}%</small></span>
       <span class="signal-quality-actions">
-        <button class="secondary-action" data-signal-quality-status="active" data-group-key="${escapeHtml(group.groupKey)}" type="button">Restore</button>
-        <button class="secondary-action" data-signal-quality-status="reduced_confidence" data-group-key="${escapeHtml(group.groupKey)}" type="button">Reduce</button>
-        <button class="secondary-action" data-signal-quality-status="quarantined" data-group-key="${escapeHtml(group.groupKey)}" type="button">Quarantine</button>
-        <button class="secondary-action" data-signal-quality-status="disabled_by_admin" data-group-key="${escapeHtml(group.groupKey)}" type="button">Disable</button>
+        ${mode === "best" ? renderBestSignalQualityActions(group) : renderWorstSignalQualityActions(group)}
       </span>
     </div>`).join("")
     : `<p class="reasoning">Not enough data yet.</p>`;
   return `<article class="signal-quality-card"><h4>${escapeHtml(title)}</h4>${rows}</article>`;
+}
+
+function renderBestSignalQualityActions(group) {
+  const carefulCap = Number(group.closedSignals || 0) >= 30 && Number(group.estimatedExpectancy || 0) >= 0.25 ? 92 : 88;
+  return `
+    <button class="secondary-action" data-signal-quality-status="active" data-penalty-override="0" data-confidence-cap-override="${carefulCap}" data-group-key="${escapeHtml(group.groupKey)}" type="button">Trust more</button>
+    <button class="secondary-action" data-signal-quality-status="active" data-penalty-override="0" data-group-key="${escapeHtml(group.groupKey)}" type="button">Restore</button>
+    <button class="secondary-action" data-signal-quality-status="active" data-penalty-override="0" data-confidence-cap-override="${carefulCap}" data-group-key="${escapeHtml(group.groupKey)}" type="button">Increase confidence carefully</button>
+    <button class="secondary-action" data-signal-quality-status="watchlist" data-group-key="${escapeHtml(group.groupKey)}" type="button">Watchlist</button>
+    <button class="secondary-action" data-signal-quality-status="active" data-group-key="${escapeHtml(group.groupKey)}" type="button">Keep active</button>`;
+}
+
+function renderWorstSignalQualityActions(group) {
+  return `
+    <button class="secondary-action" data-signal-quality-status="active" data-group-key="${escapeHtml(group.groupKey)}" type="button">Restore</button>
+    <button class="secondary-action" data-signal-quality-status="reduced_confidence" data-group-key="${escapeHtml(group.groupKey)}" type="button">Reduce</button>
+    <button class="secondary-action" data-signal-quality-status="quarantined" data-group-key="${escapeHtml(group.groupKey)}" type="button">Quarantine</button>
+    <button class="secondary-action" data-signal-quality-status="disabled_by_admin" data-group-key="${escapeHtml(group.groupKey)}" type="button">Disable</button>`;
 }
 
 function renderSignalQualityBucketRows(items) {

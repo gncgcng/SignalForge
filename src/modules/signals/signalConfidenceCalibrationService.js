@@ -29,12 +29,22 @@ export function buildConfidenceBucket(confidence) {
 }
 
 export function calculateGroupStatus(metrics = {}, override = null) {
-  if (override?.status && override.status !== "active") {
+  if (
+    override?.status &&
+    (override.status !== "active" ||
+      override.penaltyOverride !== undefined ||
+      override.penalty_override !== null ||
+      override.confidenceCapOverride !== undefined ||
+      override.confidence_cap_override !== null)
+  ) {
     return {
       status: override.status,
       suggestedStatus: override.status,
       penalty: Number(override.penaltyOverride ?? override.penalty_override ?? metrics.penalty ?? 0),
       confidenceCap: override.confidenceCapOverride ?? override.confidence_cap_override ?? metrics.confidenceCap ?? null,
+      confidenceCapLift: 0,
+      performanceLabel: override.status === "active" ? "Above break-even" : titleCase(override.status),
+      recommendedAction: override.status === "active" ? "Keep active" : "Admin override",
       adminControlled: true
     };
   }
@@ -45,29 +55,62 @@ export function calculateGroupStatus(metrics = {}, override = null) {
   const expectancy = Number(metrics.estimatedExpectancy || 0);
   const belowBreakEven = Number(metrics.winRate || 0) < Number(metrics.breakEvenWinRate || 0);
   const confidenceGap = Number(metrics.confidenceGap || 0);
+  const aboveBreakEven = Number(metrics.winRate || 0) >= Number(metrics.breakEvenWinRate || 0);
   let status = "active";
   let penalty = 0;
   let confidenceCap = null;
+  let performanceLabel = closed < 5 ? "Needs more data" : "Above break-even";
+  let recommendedAction = closed < 5 ? "Watchlist" : "Keep active";
+  let confidenceCapLift = 0;
 
   if (closed >= 10 && belowBreakEven) {
     status = "watchlist";
     penalty = -5;
+    performanceLabel = "Underperforming";
+    recommendedAction = "Watchlist";
   }
   if (closed >= 20 && expectancy < 0) {
     status = "reduced_confidence";
     penalty = -10;
+    performanceLabel = "Reduced confidence";
+    recommendedAction = "Reduce confidence";
   }
   if (closed >= 25 && expectancy < -0.2 && hitSl >= Math.max(12, Number(metrics.hitTp || 0) * 2) && confidenceGap >= 20) {
     status = "quarantined";
     penalty = -15;
     confidenceCap = 72;
+    performanceLabel = "Quarantined";
+    recommendedAction = "Quarantine";
   }
   if (expiredRate >= 35 && Number(metrics.totalSignals || 0) >= 10) {
     penalty = Math.min(penalty, -5);
     confidenceCap = Math.min(confidenceCap ?? 99, 78);
+    if (status === "active") {
+      performanceLabel = "Expired-heavy";
+      recommendedAction = "Watchlist";
+    }
+  }
+  if (status === "active" && closed >= 5 && aboveBreakEven && expectancy > 0) {
+    performanceLabel = closed >= 10 ? "Strong performer" : "Promising";
+    recommendedAction = closed >= 20
+      ? "Trust more"
+      : "Keep active";
+    confidenceCapLift = closed >= 30 && expectancy >= 0.25 ? 5 : closed >= 20 ? 3 : 0;
+  }
+  if (status === "active" && closed >= 10 && aboveBreakEven && expectancy > 0 && Number(metrics.averageConfidence || 0) <= 80) {
+    recommendedAction = "Increase confidence carefully";
   }
 
-  return { status, suggestedStatus: status, penalty, confidenceCap, adminControlled: false };
+  return {
+    status,
+    suggestedStatus: status,
+    penalty,
+    confidenceCap,
+    confidenceCapLift,
+    performanceLabel,
+    recommendedAction,
+    adminControlled: false
+  };
 }
 
 export function calculateGroupMetrics(row = {}) {
@@ -122,14 +165,20 @@ export function isSignalBlockedByCalibration(signal) {
 
 export function applyCalibrationContext(signal, context = {}) {
   const originalConfidence = Number(signal.confidenceScore || 0);
-  let confidenceCap = 99;
+  let ruleCap = 99;
+  let historicalCap = context.noHistory ? 85 : 99;
   let penalty = 0;
   const caps = [];
   const penalties = [];
+  const capRecovery = [];
 
-  const addCap = (cap, reason) => {
-    if (cap < confidenceCap) confidenceCap = cap;
-    caps.push({ cap, reason });
+  const addCap = (cap, reason, type = "rule") => {
+    if (type === "historical") {
+      if (cap < historicalCap) historicalCap = cap;
+    } else if (cap < ruleCap) {
+      ruleCap = cap;
+    }
+    caps.push({ cap, reason, type });
   };
   const addPenalty = (points, reason, group = null) => {
     if (!points) return;
@@ -137,7 +186,7 @@ export function applyCalibrationContext(signal, context = {}) {
     penalties.push({ points: Number(points), reason, group });
   };
 
-  if (context.noHistory) addCap(85, "No generated-signal history yet for this strategy or pair/timeframe.");
+  if (context.noHistory) caps.push({ cap: 85, reason: "No generated-signal history yet for this strategy or pair/timeframe.", type: "historical" });
   if (hasMissingHigherTimeframe(signal)) addCap(82, "Missing or partial higher-timeframe confirmation.");
   if (hasWeakVolume(signal)) addCap(80, "Weak volume confirmation.");
   if (isChoppy(signal)) addCap(72, "Choppy or ranging market conditions.");
@@ -153,22 +202,41 @@ export function applyCalibrationContext(signal, context = {}) {
   const quarantined = (context.groups || []).find((group) => ["quarantined", "disabled_by_admin"].includes(group.status));
   const recentPoor = (context.groups || []).find((group) => group.groupType === "recent_strategy" && group.closedSignals >= 5 && group.winRate < group.breakEvenWinRate);
   const expiredHeavy = (context.groups || []).find((group) => group.expiredRate >= 35 && group.totalSignals >= 10);
+  const positiveGroups = (context.groups || []).filter((group) =>
+    group.closedSignals >= 20 &&
+    Number(group.estimatedExpectancy || 0) > 0 &&
+    Number(group.winRate || 0) >= Number(group.breakEvenWinRate || 0)
+  );
 
   for (const group of context.groups || []) {
     if (group.penalty < 0) {
       addPenalty(group.penalty, `${titleCase(group.groupType)} underperformance: ${group.status}.`, group.groupKey);
     }
     if (group.confidenceCap) {
-      addCap(group.confidenceCap, `${titleCase(group.groupType)} confidence cap from generated-signal performance.`);
+      addCap(group.confidenceCap, `${titleCase(group.groupType)} confidence cap from generated-signal performance.`, "historical");
     }
   }
-  if (recentPoor) addCap(78, "Recent generated outcomes are below break-even.");
-  if (expiredHeavy) addCap(78, "This group has an elevated expired-signal rate.");
-  if (severeStrategy) addCap(75, "Strategy has negative generated-signal expectancy.");
-  if (severePairTimeframe) addCap(75, "Pair/timeframe has negative generated-signal expectancy.");
-  if (severeStrategy && severePairTimeframe) addCap(68, "Strategy and pair/timeframe are both underperforming.");
-  if (quarantined) addCap(68, `${titleCase(quarantined.groupType)} is ${quarantined.status}.`);
+  if (recentPoor) addCap(78, "Recent generated outcomes are below break-even.", "historical");
+  if (expiredHeavy) addCap(78, "This group has an elevated expired-signal rate.", "historical");
+  if (severeStrategy) addCap(75, "Strategy has negative generated-signal expectancy.", "historical");
+  if (severePairTimeframe) addCap(75, "Pair/timeframe has negative generated-signal expectancy.", "historical");
+  if (severeStrategy && severePairTimeframe) addCap(68, "Strategy and pair/timeframe are both underperforming.", "historical");
+  if (quarantined) addCap(68, `${titleCase(quarantined.groupType)} is ${quarantined.status}.`, "historical");
 
+  const strongestPositive = positiveGroups
+    .sort((a, b) => b.confidenceCapLift - a.confidenceCapLift || b.estimatedExpectancy - a.estimatedExpectancy)[0];
+  if (strongestPositive && !poorGroups.length && !quarantined && !expiredHeavy) {
+    const recoveryTarget = strongestPositive.confidenceCapLift >= 5 ? 92 : 88;
+    if (historicalCap < recoveryTarget) {
+      historicalCap = recoveryTarget;
+      capRecovery.push({
+        cap: recoveryTarget,
+        reason: `${titleCase(strongestPositive.groupType)} has positive expectancy over ${strongestPositive.closedSignals} closed signals.`
+      });
+    }
+  }
+
+  const confidenceCap = Math.min(ruleCap, historicalCap);
   const finalConfidence = Math.max(50, Math.min(confidenceCap, originalConfidence + penalty));
   const status = quarantined?.status || (severeStrategy || severePairTimeframe ? "reduced_confidence" : poorGroups.length ? "watchlist" : "active");
   const message = status === "active"
@@ -184,6 +252,7 @@ export function applyCalibrationContext(signal, context = {}) {
       confidenceCap,
       totalPenalty: penalty,
       caps,
+      capRecovery,
       penalties,
       status,
       blocked: ["quarantined", "disabled_by_admin"].includes(status),
@@ -198,6 +267,7 @@ export function applyCalibrationContext(signal, context = {}) {
         confidenceCap,
         totalPenalty: penalty,
         caps,
+        capRecovery,
         penalties,
         status,
         blocked: ["quarantined", "disabled_by_admin"].includes(status),
@@ -238,16 +308,53 @@ export async function getAdminSignalQualityBreakdown() {
   ];
   await upsertPerformanceGroups(groups);
   const stats = await getOverallQualityWarning();
+  const bestStrategies = bestGroups(groups, "strategy");
+  const bestPairTimeframes = bestGroups(groups, "pair_timeframe");
+  const bestPairs = bestGroups(groups, "pair");
+  const bestTimeframes = bestGroups(groups, "timeframe");
+  const bestDirections = bestGroups(groups, "direction");
+  const bestPatterns = bestGroups(groups, "pattern");
+  const bestConfidenceBuckets = bestGroups(groups, "confidence_bucket");
+  const bestMarketRegimes = bestGroups(groups, "market_regime");
+  const bestSources = bestGroups(groups, "source");
+  const worstStrategies = worstGroups(groups, "strategy");
+  const worstPairTimeframes = worstGroups(groups, "pair_timeframe");
+  const worstPairs = worstGroups(groups, "pair");
+  const worstTimeframes = worstGroups(groups, "timeframe");
+  const worstDirections = worstGroups(groups, "direction");
+  const worstPatterns = worstGroups(groups, "pattern");
+  const underconfident = underconfidentWinners(groups);
+  const overconfident = groups.filter((group) => group.groupType === "strategy" && group.closedSignals >= 10).sort((a, b) => b.confidenceGap - a.confidenceGap).slice(0, 5);
   return {
     warning: stats,
+    summary: buildBestWorstSummary({
+      bestStrategies,
+      bestPairTimeframes,
+      worstStrategies,
+      worstPairTimeframes,
+      overconfident,
+      underconfident
+    }),
     groups,
-    worstStrategies: worstGroups(groups, "strategy"),
-    worstPairs: worstGroups(groups, "pair"),
-    worstTimeframes: worstGroups(groups, "timeframe"),
-    worstPairTimeframes: worstGroups(groups, "pair_timeframe"),
-    worstDirections: worstGroups(groups, "direction"),
+    bestStrategies,
+    bestPairTimeframes,
+    bestPairs,
+    bestTimeframes,
+    bestDirections,
+    bestPatterns,
+    bestConfidenceBuckets,
+    bestMarketRegimes,
+    bestSources,
+    worstStrategies,
+    worstPairs,
+    worstTimeframes,
+    worstPairTimeframes,
+    worstDirections,
+    worstPatterns,
     mostExpiredStrategies: groups.filter((group) => group.groupType === "strategy" && group.totalSignals >= 10).sort((a, b) => b.expiredRate - a.expiredRate).slice(0, 5),
-    mostOverconfidentStrategies: groups.filter((group) => group.groupType === "strategy" && group.closedSignals >= 10).sort((a, b) => b.confidenceGap - a.confidenceGap).slice(0, 5),
+    mostOverconfidentStrategies: overconfident,
+    underconfidentWinners: underconfident,
+    mostReliableStrategies: bestStrategies,
     confidenceBuckets: groups.filter((group) => group.groupType === "confidence_bucket").sort((a, b) => a.groupValue.localeCompare(b.groupValue))
   };
 }
@@ -461,6 +568,53 @@ function worstGroups(groups, type) {
     .slice(0, 5);
 }
 
+export function bestGroups(groups, type) {
+  return groups
+    .filter((group) =>
+      group.groupType === type &&
+      group.closedSignals >= 5 &&
+      Number(group.estimatedExpectancy || 0) > 0 &&
+      Number(group.winRate || 0) >= Number(group.breakEvenWinRate || 0)
+    )
+    .sort(bestGroupSort)
+    .slice(0, 5);
+}
+
+export function underconfidentWinners(groups) {
+  return groups
+    .filter((group) =>
+      group.closedSignals >= 10 &&
+      Number(group.estimatedExpectancy || 0) > 0 &&
+      Number(group.winRate || 0) >= Number(group.breakEvenWinRate || 0) + 5 &&
+      Number(group.averageConfidence || 0) <= 80
+    )
+    .sort(bestGroupSort)
+    .slice(0, 5);
+}
+
+function bestGroupSort(a, b) {
+  const aEdge = Number(a.winRate || 0) - Number(a.breakEvenWinRate || 0);
+  const bEdge = Number(b.winRate || 0) - Number(b.breakEvenWinRate || 0);
+  return Number(b.estimatedExpectancy || 0) - Number(a.estimatedExpectancy || 0) ||
+    bEdge - aEdge ||
+    Number(a.expiredRate || 0) - Number(b.expiredRate || 0) ||
+    Number(b.closedSignals || 0) - Number(a.closedSignals || 0) ||
+    Math.abs(Number(a.confidenceGap || 0)) - Math.abs(Number(b.confidenceGap || 0));
+}
+
+function buildBestWorstSummary({ bestStrategies, bestPairTimeframes, worstStrategies, worstPairTimeframes, overconfident, underconfident }) {
+  const best = [bestStrategies?.[0], bestPairTimeframes?.[0]].filter(Boolean).sort(bestGroupSort)[0] || null;
+  const worst = [worstStrategies?.[0], worstPairTimeframes?.[0]]
+    .filter(Boolean)
+    .sort((a, b) => Number(a.estimatedExpectancy || 0) - Number(b.estimatedExpectancy || 0))[0] || null;
+  return {
+    bestPerformer: best,
+    worstPerformer: worst,
+    overconfidenceWarning: overconfident?.[0] || null,
+    opportunity: underconfident?.[0] || null
+  };
+}
+
 function summarizeGroupForSignal(group) {
   return {
     groupKey: group.groupKey,
@@ -471,6 +625,12 @@ function summarizeGroupForSignal(group) {
     breakEvenWinRate: group.breakEvenWinRate,
     estimatedExpectancy: group.estimatedExpectancy,
     expiredRate: group.expiredRate,
+    averageRiskReward: group.averageRiskReward,
+    averageConfidence: group.averageConfidence,
+    confidenceGap: group.confidenceGap,
+    performanceLabel: group.performanceLabel,
+    recommendedAction: group.recommendedAction,
+    confidenceCapLift: group.confidenceCapLift,
     status: group.status,
     penalty: group.penalty,
     confidenceCap: group.confidenceCap

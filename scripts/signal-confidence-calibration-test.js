@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   applyCalibrationContext,
+  bestGroups,
   breakEvenWinRate,
   calculateClosedWinRate,
   calculateGroupStatus,
-  calculateQualityAdjustedScore
+  calculateQualityAdjustedScore,
+  underconfidentWinners
 } from "../src/modules/signals/signalConfidenceCalibrationService.js";
 
 const service = readFileSync("src/modules/signals/signalConfidenceCalibrationService.js", "utf8");
@@ -83,6 +85,49 @@ const blocked = applyCalibrationContext({ ...baseSignal, confidenceScore: 90, ri
 });
 assert.equal(blocked.indicators.confidenceCalibration.blocked, true, "quarantined groups must block promotion/alerts");
 
+const sampleGroups = [
+  { groupKey: "strategy:tiny", groupType: "strategy", groupValue: "Tiny Winner", closedSignals: 3, winRate: 100, breakEvenWinRate: 30, estimatedExpectancy: 2.1, expiredRate: 0, confidenceGap: -10 },
+  { groupKey: "strategy:steady", groupType: "strategy", groupValue: "Steady Retest", closedSignals: 30, winRate: 48, breakEvenWinRate: 28, estimatedExpectancy: 0.52, expiredRate: 5, confidenceGap: 2 },
+  { groupKey: "strategy:hot", groupType: "strategy", groupValue: "Hot But Smaller", closedSignals: 7, winRate: 70, breakEvenWinRate: 35, estimatedExpectancy: 0.32, expiredRate: 0, confidenceGap: -8 }
+];
+assert.equal(bestGroups(sampleGroups, "strategy")[0].groupValue, "Steady Retest", "best sorting must prioritize expectancy and sample size, not tiny 100% records");
+assert.ok(!bestGroups(sampleGroups, "strategy").some((group) => group.groupValue === "Tiny Winner"), "best groups require at least 5 closed samples");
+assert.equal(underconfidentWinners([
+  { groupKey: "strategy:under", groupType: "strategy", groupValue: "Undertrusted", closedSignals: 12, winRate: 50, breakEvenWinRate: 30, estimatedExpectancy: 0.4, averageConfidence: 72, expiredRate: 4, confidenceGap: 22 },
+  { groupKey: "strategy:trusted", groupType: "strategy", groupValue: "Already Trusted", closedSignals: 12, winRate: 50, breakEvenWinRate: 30, estimatedExpectancy: 0.4, averageConfidence: 88, expiredRate: 4, confidenceGap: -38 }
+])[0].groupValue, "Undertrusted");
+
+const recovered = applyCalibrationContext({
+  ...baseSignal,
+  confidenceScore: 90,
+  riskRewardRatio: 2.4,
+  alignmentBadge: "Full Alignment",
+  confluenceScore: 82,
+  indicators: { regime: "Trend Up", readinessScore: 95, entryQuality: "excellent" },
+  entryQuality: "excellent",
+  confirmations: [{ name: "Volume", passed: true }]
+}, {
+  noHistory: true,
+  groups: [{ groupKey: "strategy:steady", groupType: "strategy", groupValue: "Steady Retest", closedSignals: 30, winRate: 48, breakEvenWinRate: 28, estimatedExpectancy: 0.52, expiredRate: 5, confidenceCapLift: 5, status: "active" }]
+});
+assert.equal(recovered.confidenceScore, 90, "strong performers can recover the historical cap carefully");
+assert.ok(recovered.indicators.confidenceCalibration.capRecovery.some((item) => item.cap === 92));
+
+const stillCappedByRules = applyCalibrationContext({
+  ...baseSignal,
+  confidenceScore: 90,
+  riskRewardRatio: 2.4,
+  alignmentBadge: "Full Alignment",
+  confluenceScore: 82,
+  indicators: { regime: "Trend Up", readinessScore: 95, entryQuality: "excellent" },
+  entryQuality: "excellent",
+  confirmations: [{ name: "Volume", passed: false }]
+}, {
+  noHistory: true,
+  groups: [{ groupKey: "strategy:steady", groupType: "strategy", groupValue: "Steady Retest", closedSignals: 30, winRate: 48, breakEvenWinRate: 28, estimatedExpectancy: 0.52, expiredRate: 5, confidenceCapLift: 5, status: "active" }]
+});
+assert.equal(stillCappedByRules.confidenceScore, 80, "good performance cannot bypass weak-volume rule caps");
+
 assert.match(migration, /CREATE TABLE IF NOT EXISTS signal_performance_groups/);
 assert.match(migration, /CREATE TABLE IF NOT EXISTS signal_confidence_adjustments/);
 assert.match(migration, /CREATE TABLE IF NOT EXISTS signal_strategy_statuses/);
@@ -96,9 +141,18 @@ assert.match(signalService, /Performance calibration quarantined or disabled thi
 assert.match(repository, /recordGeneratedSignalConfidenceAdjustment/);
 assert.match(controller, /\/api\/admin\/signals\/quality\/status/);
 assert.match(app, /admin-signal-quality-panel/);
+assert.match(app, /Best strategies/);
+assert.match(app, /Best pair\/timeframes/);
+assert.match(app, /Underconfident winners/);
+assert.match(app, /Trust more/);
+assert.match(app, /Increase confidence carefully/);
 assert.match(app, /data-signal-quality-status="quarantined"/);
 assert.match(app, /Original confidence/);
 assert.match(html, /admin-signal-quality-panel/);
+assert.match(service, /function bestGroupSort/);
+assert.match(service, /underconfidentWinners/);
+assert.match(service, /capRecovery/);
+assert.match(service, /Strong performer/);
 assert.match(signalService, /confidenceCalibration: undefined/);
 assert.match(quality, /not a guaranteed win rate or probability of profit/);
 

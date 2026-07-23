@@ -3938,6 +3938,33 @@ polyline {
   gap: 12px;
 }
 
+.signal-quality-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(58, 207, 255, 0.22);
+  border-radius: 8px;
+  background: rgba(7, 18, 29, 0.78);
+}
+
+.signal-quality-summary div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.signal-quality-summary span,
+.signal-quality-summary small {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.signal-quality-summary strong {
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
 .signal-quality-row {
   display: grid;
   grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr) minmax(220px, 1fr);
@@ -4114,6 +4141,7 @@ polyline {
   .admin-signal-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .admin-signal-filters { grid-template-columns: 1fr; }
   .signal-quality-groups,
+  .signal-quality-summary,
   .signal-quality-row,
   .signal-quality-row.compact,
   .signal-quality-actions {
