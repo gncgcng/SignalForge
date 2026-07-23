@@ -29,6 +29,7 @@ import { handleProfileRoutes } from "./modules/profiles/profileController.js";
 import { startTelegramNotificationQueue } from "./modules/notifications/notificationQueue.js";
 import { startTelegramConnectionPoller } from "./modules/notifications/telegramConnectionService.js";
 import { handleSignalRoutes } from "./modules/signals/signalController.js";
+import { startAvoidTradeLearningCleanupJob } from "./modules/signals/setupCandidateRepository.js";
 import { startSignalOutcomeTracker } from "./modules/signals/signalOutcomeService.js";
 import { handleSubscriptionRoutes } from "./modules/subscriptions/subscriptionController.js";
 import { handleSupportRoutes } from "./modules/support/supportController.js";
@@ -202,6 +203,7 @@ await initializeCryptoMarketSettings();
 server.listen(appConfig.port, () => {
   console.log(`${appConfig.appName} running at http://localhost:${appConfig.port}`);
   startSignalOutcomeTracker();
+  startAvoidTradeLearningCleanupJob();
   startAutoCryptoAlertScanner();
   startCoinbaseCryptoMarketSync();
   startCryptoMarketAvailabilityMonitor();

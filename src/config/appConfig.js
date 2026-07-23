@@ -184,6 +184,11 @@ export const appConfig = {
     readyThreshold: Number(process.env.CANDIDATE_READY_THRESHOLD || 80),
     marketsPerCycle: Number(process.env.CANDIDATE_SCAN_MARKETS_PER_CYCLE || 4)
   },
+  avoidTradeLearning: {
+    retentionDays: Math.max(1, Number(process.env.AVOID_TRADE_EVENT_RETENTION_DAYS || 7)),
+    maxRows: Math.max(1000, Number(process.env.AVOID_TRADE_EVENT_MAX_ROWS || 25000)),
+    dedupMinutes: Math.max(1, Number(process.env.AVOID_TRADE_EVENT_DEDUP_MINUTES || 60))
+  },
   stripe: {
     publishableKey: process.env.STRIPE_PUBLISHABLE_KEY || "",
     secretKey: process.env.STRIPE_SECRET_KEY || "",

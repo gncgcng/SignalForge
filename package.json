@@ -85,6 +85,7 @@
     "test:admin-account-recovery": "node scripts/admin-account-recovery-tools-test.js",
     "test:setup-candidates": "node scripts/setup-candidate-system-test.js",
     "test:watching-explanations": "node scripts/watching-setup-explanations-test.js",
+    "test:avoid-trade-learning-storage": "node scripts/avoid-trade-learning-storage-test.js",
     "test:form-controls": "node scripts/form-control-style-test.js",
     "test:backtesting": "node scripts/backtest-test.js",
     "test:backtesting-lab": "node scripts/backtesting-lab-test.js",

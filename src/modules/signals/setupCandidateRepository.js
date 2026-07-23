@@ -1,5 +1,10 @@
 import { query } from "../../db/client.js";
+import { appConfig } from "../../config/appConfig.js";
 import { createId } from "../../shared/ids.js";
+
+const AVOID_TRADE_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
+let avoidTradeLearningCleanupTimer = null;
+let nextAvoidTradeLearningCleanupAt = 0;
 
 export async function upsertSetupCandidate(candidate) {
   const result = await query(`
@@ -273,21 +278,24 @@ export async function getCandidateQualitySummary() {
     FROM setup_candidates GROUP BY entry_quality ORDER BY count DESC
   `), query(`
     SELECT
-      COUNT(*) FILTER (WHERE created_at::date = current_date)::integer AS today,
+      COALESCE((SELECT SUM(count)::integer FROM avoid_trade_learning_stats WHERE day = current_date), 0) AS today,
       COUNT(*) FILTER (WHERE became_good_signal IS TRUE)::integer AS became_signal,
       COUNT(*) FILTER (WHERE would_have_failed IS TRUE)::integer AS would_fail
     FROM avoid_trade_learning_events
   `), query(`
-    SELECT reason, COUNT(*)::integer AS count
-    FROM avoid_trade_learning_events
+    SELECT reason, SUM(count)::integer AS count
+    FROM avoid_trade_learning_stats
+    WHERE day >= current_date - interval '7 days'
     GROUP BY reason ORDER BY count DESC LIMIT 6
   `), query(`
-    SELECT market, COUNT(*)::integer AS count
-    FROM avoid_trade_learning_events
+    SELECT market, SUM(count)::integer AS count
+    FROM avoid_trade_learning_stats
+    WHERE day >= current_date - interval '7 days'
     GROUP BY market ORDER BY count DESC LIMIT 6
   `), query(`
-    SELECT timeframe, COUNT(*)::integer AS count
-    FROM avoid_trade_learning_events
+    SELECT timeframe, SUM(count)::integer AS count
+    FROM avoid_trade_learning_stats
+    WHERE day >= current_date - interval '7 days'
     GROUP BY timeframe ORDER BY count DESC LIMIT 6
   `), query(`
     SELECT detected_pattern AS pattern, COUNT(*)::integer AS count,
@@ -337,10 +345,23 @@ export async function getCandidateQualitySummary() {
 
 export async function recordAvoidTradeLearningEvent(avoidTrade) {
   const observedAt = new Date(avoidTrade.createdAt || Date.now());
-  const bucket = Math.floor(observedAt.getTime() / (5 * 60 * 1000));
-  const eventKey = [avoidTrade.symbol, avoidTrade.timeframe, avoidTrade.reason, bucket]
+  const market = avoidTrade.symbol || avoidTrade.market || "unknown";
+  const timeframe = avoidTrade.timeframe || "unknown";
+  const reason = avoidTrade.reason || "Unspecified avoid-trade condition.";
+  const dedupMinutes = appConfig.avoidTradeLearning.dedupMinutes;
+  const bucket = Math.floor(observedAt.getTime() / (dedupMinutes * 60 * 1000));
+  const eventKey = [market, timeframe, reason, bucket]
     .map((value) => String(value || "unknown").toLowerCase().replace(/[^a-z0-9]+/g, "-"))
     .join(":");
+
+  await recordAvoidTradeLearningStat({
+    market,
+    timeframe,
+    reason,
+    result: avoidTrade.result || "avoid_trade",
+    observedAt
+  });
+
   await query(`
     INSERT INTO avoid_trade_learning_events (
       id, event_key, market, timeframe, reason, reasons, market_condition,
@@ -353,10 +374,18 @@ export async function recordAvoidTradeLearningEvent(avoidTrade) {
       entry_readiness_score = EXCLUDED.entry_readiness_score,
       last_observed_at = EXCLUDED.last_observed_at
   `, [
-    createId("avoid"), eventKey, avoidTrade.symbol, avoidTrade.timeframe,
-    avoidTrade.reason, JSON.stringify(avoidTrade.reasons || []), avoidTrade.marketCondition,
+    createId("avoid"), eventKey, market, timeframe,
+    reason, JSON.stringify(avoidTrade.reasons || []), avoidTrade.marketCondition || "unknown",
     avoidTrade.setupQualityScore || 0, avoidTrade.entryReadinessScore || 0, observedAt
   ]);
+
+  const now = Date.now();
+  if (now >= nextAvoidTradeLearningCleanupAt) {
+    nextAvoidTradeLearningCleanupAt = now + AVOID_TRADE_CLEANUP_INTERVAL_MS;
+    cleanupAvoidTradeLearningEvents().catch((error) => {
+      console.warn(`[avoid-learning] cleanup failed reason=${safeCleanupReason(error)}`);
+    });
+  }
 }
 
 export async function markRelatedAvoidTradesPromoted(symbol, timeframe) {
@@ -370,6 +399,90 @@ export async function markRelatedAvoidTradesPromoted(symbol, timeframe) {
       AND last_observed_at >= now() - interval '72 hours'
   `, [symbol, timeframe]);
   return result.rowCount;
+}
+
+async function recordAvoidTradeLearningStat({ market, timeframe, reason, result, observedAt }) {
+  await query(`
+    INSERT INTO avoid_trade_learning_stats (
+      id, market, timeframe, reason, day, result, count, first_seen_at, last_seen_at
+    ) VALUES ($1,$2,$3,$4,$5::date,$6,1,$7,$7)
+    ON CONFLICT (market, timeframe, reason, day, result) DO UPDATE SET
+      count = avoid_trade_learning_stats.count + 1,
+      last_seen_at = EXCLUDED.last_seen_at
+  `, [
+    createId("avoidstat"), market, timeframe, reason,
+    observedAt.toISOString().slice(0, 10), result || "avoid_trade", observedAt
+  ]);
+}
+
+export async function cleanupAvoidTradeLearningEvents() {
+  const retentionDays = appConfig.avoidTradeLearning.retentionDays;
+  const maxRows = appConfig.avoidTradeLearning.maxRows;
+
+  const oldRows = await query(`
+    WITH deleted AS (
+      DELETE FROM avoid_trade_learning_events
+      WHERE created_at < now() - make_interval(days => $1::int)
+      RETURNING 1
+    )
+    SELECT COUNT(*)::integer AS deleted FROM deleted
+  `, [retentionDays]);
+
+  const cappedRows = await query(`
+    WITH ranked AS (
+      SELECT id, row_number() OVER (ORDER BY created_at DESC, id DESC) AS row_number
+      FROM avoid_trade_learning_events
+    ), deleted AS (
+      DELETE FROM avoid_trade_learning_events e
+      USING ranked r
+      WHERE e.id = r.id
+        AND r.row_number > $1
+      RETURNING 1
+    )
+    SELECT COUNT(*)::integer AS deleted FROM deleted
+  `, [maxRows]);
+
+  const deletedOld = Number(oldRows.rows[0]?.deleted || 0);
+  const deletedOverCap = Number(cappedRows.rows[0]?.deleted || 0);
+  if (deletedOld || deletedOverCap) {
+    try {
+      await query("VACUUM (ANALYZE) avoid_trade_learning_events");
+      await query("ANALYZE avoid_trade_learning_stats");
+    } catch (error) {
+      console.warn(`[avoid-learning] vacuum skipped reason=${safeCleanupReason(error)}`);
+      await query("ANALYZE avoid_trade_learning_events").catch(() => {});
+      await query("ANALYZE avoid_trade_learning_stats").catch(() => {});
+    }
+  }
+
+  console.info(
+    `[avoid-learning] cleanup deleted_old=${deletedOld} deleted_over_cap=${deletedOverCap} ` +
+    `retention_days=${retentionDays} max_rows=${maxRows}`
+  );
+
+  return { deletedOld, deletedOverCap };
+}
+
+export function startAvoidTradeLearningCleanupJob() {
+  if (avoidTradeLearningCleanupTimer) return avoidTradeLearningCleanupTimer;
+
+  cleanupAvoidTradeLearningEvents().catch((error) => {
+    console.warn(`[avoid-learning] startup cleanup failed reason=${safeCleanupReason(error)}`);
+  });
+
+  avoidTradeLearningCleanupTimer = setInterval(() => {
+    cleanupAvoidTradeLearningEvents().catch((error) => {
+      console.warn(`[avoid-learning] scheduled cleanup failed reason=${safeCleanupReason(error)}`);
+    });
+  }, AVOID_TRADE_CLEANUP_INTERVAL_MS);
+  avoidTradeLearningCleanupTimer.unref?.();
+  return avoidTradeLearningCleanupTimer;
+}
+
+function safeCleanupReason(error) {
+  return String(error?.code || error?.message || "unknown")
+    .replace(/[^a-zA-Z0-9_-]/g, "_")
+    .slice(0, 80);
 }
 
 function mapCandidate(row) {
