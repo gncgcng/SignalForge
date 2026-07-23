@@ -7,6 +7,10 @@ const appConfig = readFileSync(new URL("src/config/appConfig.js", root), "utf8")
 const server = readFileSync(new URL("src/server.js", root), "utf8");
 const envExample = readFileSync(new URL(".env.example", root), "utf8");
 const migration = readFileSync(new URL("migrations/049_avoid_trade_learning_retention.sql", root), "utf8");
+const hourlyDedupeMigration = readFileSync(
+  new URL("migrations/051_avoid_trade_learning_hourly_dedupe.sql", root),
+  "utf8"
+);
 
 assert.match(appConfig, /AVOID_TRADE_EVENT_RETENTION_DAYS \|\| 7/);
 assert.match(appConfig, /AVOID_TRADE_EVENT_MAX_ROWS \|\| 25000/);
@@ -26,6 +30,15 @@ assert.match(migration, /row_number\(\) OVER \(ORDER BY created_at DESC, id DESC
 assert.match(migration, /r\.row_number > 25000/);
 assert.match(migration, /ANALYZE avoid_trade_learning_events/);
 
+assert.match(hourlyDedupeMigration, /PARTITION BY\s+market,\s+timeframe,\s+reason,/);
+assert.match(hourlyDedupeMigration, /floor\(extract\(epoch from created_at\) \/ \(60 \* 60\)\)/);
+assert.match(hourlyDedupeMigration, /WHERE created_at >= now\(\) - interval '7 days'/);
+assert.match(hourlyDedupeMigration, /DELETE FROM avoid_trade_learning_events[\s\S]*r\.row_number > 1/);
+assert.match(hourlyDedupeMigration, /DELETE FROM avoid_trade_learning_events[\s\S]*interval '7 days'/);
+assert.match(hourlyDedupeMigration, /r\.row_number > 25000/);
+assert.doesNotMatch(hourlyDedupeMigration, /DELETE FROM generated_signals/i);
+assert.doesNotMatch(hourlyDedupeMigration, /DELETE FROM saved_signals/i);
+
 assert.match(repository, /const dedupMinutes = appConfig\.avoidTradeLearning\.dedupMinutes/);
 assert.match(repository, /dedupMinutes \* 60 \* 1000/);
 assert.match(repository, /ON CONFLICT \(event_key\) DO UPDATE/);
@@ -37,9 +50,14 @@ assert.match(repository, /count = avoid_trade_learning_stats\.count \+ 1/);
 
 assert.match(repository, /export async function cleanupAvoidTradeLearningEvents/);
 assert.match(repository, /make_interval\(days => \$1::int\)/);
+assert.match(repository, /PARTITION BY\s+market,\s+timeframe,\s+reason,/);
+assert.match(repository, /floor\(extract\(epoch from created_at\) \/ \(\$1::numeric \* 60\)\)/);
+assert.match(repository, /r\.row_number > 1/);
 assert.match(repository, /r\.row_number > \$1/);
 assert.match(repository, /VACUUM \(ANALYZE\) avoid_trade_learning_events/);
 assert.match(repository, /AVOID_TRADE_CLEANUP_INTERVAL_MS = 24 \* 60 \* 60 \* 1000/);
+assert.doesNotMatch(repository, /DELETE FROM generated_signals/i);
+assert.doesNotMatch(repository, /DELETE FROM saved_signals/i);
 
 assert.match(server, /startAvoidTradeLearningCleanupJob/);
 assert.match(server, /startAvoidTradeLearningCleanupJob\(\)/);

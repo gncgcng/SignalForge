@@ -418,6 +418,7 @@ async function recordAvoidTradeLearningStat({ market, timeframe, reason, result,
 export async function cleanupAvoidTradeLearningEvents() {
   const retentionDays = appConfig.avoidTradeLearning.retentionDays;
   const maxRows = appConfig.avoidTradeLearning.maxRows;
+  const dedupMinutes = appConfig.avoidTradeLearning.dedupMinutes;
 
   const oldRows = await query(`
     WITH deleted AS (
@@ -427,6 +428,30 @@ export async function cleanupAvoidTradeLearningEvents() {
     )
     SELECT COUNT(*)::integer AS deleted FROM deleted
   `, [retentionDays]);
+
+  const duplicateRows = await query(`
+    WITH ranked AS (
+      SELECT
+        id,
+        row_number() OVER (
+          PARTITION BY
+            market,
+            timeframe,
+            reason,
+            floor(extract(epoch from created_at) / ($1::numeric * 60))
+          ORDER BY created_at DESC, id DESC
+        ) AS row_number
+      FROM avoid_trade_learning_events
+      WHERE created_at >= now() - make_interval(days => $2::int)
+    ), deleted AS (
+      DELETE FROM avoid_trade_learning_events e
+      USING ranked r
+      WHERE e.id = r.id
+        AND r.row_number > 1
+      RETURNING 1
+    )
+    SELECT COUNT(*)::integer AS deleted FROM deleted
+  `, [dedupMinutes, retentionDays]);
 
   const cappedRows = await query(`
     WITH ranked AS (
@@ -443,8 +468,9 @@ export async function cleanupAvoidTradeLearningEvents() {
   `, [maxRows]);
 
   const deletedOld = Number(oldRows.rows[0]?.deleted || 0);
+  const deletedDuplicates = Number(duplicateRows.rows[0]?.deleted || 0);
   const deletedOverCap = Number(cappedRows.rows[0]?.deleted || 0);
-  if (deletedOld || deletedOverCap) {
+  if (deletedOld || deletedDuplicates || deletedOverCap) {
     try {
       await query("VACUUM (ANALYZE) avoid_trade_learning_events");
       await query("ANALYZE avoid_trade_learning_stats");
@@ -456,11 +482,12 @@ export async function cleanupAvoidTradeLearningEvents() {
   }
 
   console.info(
-    `[avoid-learning] cleanup deleted_old=${deletedOld} deleted_over_cap=${deletedOverCap} ` +
-    `retention_days=${retentionDays} max_rows=${maxRows}`
+    `[avoid-learning] cleanup deleted_old=${deletedOld} deleted_duplicates=${deletedDuplicates} ` +
+    `deleted_over_cap=${deletedOverCap} retention_days=${retentionDays} ` +
+    `max_rows=${maxRows} dedup_minutes=${dedupMinutes}`
   );
 
-  return { deletedOld, deletedOverCap };
+  return { deletedOld, deletedDuplicates, deletedOverCap };
 }
 
 export function startAvoidTradeLearningCleanupJob() {
