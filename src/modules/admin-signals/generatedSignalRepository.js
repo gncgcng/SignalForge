@@ -11,13 +11,17 @@ export async function upsertGeneratedSignal(signal, context = {}) {
     INSERT INTO generated_signals (
       id, signal_id, dedupe_key, setup_key, pair, display_pair, provider, timeframe, direction,
       strategy, pattern, pattern_context, entry, stop_loss, take_profit, risk_reward, confidence,
+      original_confidence, confidence_calibration,
       setup_quality_score, entry_readiness_score, status, valid_until, source, source_history,
       generated_by, promoted_from_candidate_id, validation_summary, warning_reasons,
       quality_breakdown, full_analysis, created_at, updated_at
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,'Active',$20,$21,jsonb_build_array($21::text),$22,$23,$24,$25,$26,$27,$28,now())
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,'Active',$22,$23,jsonb_build_array($23::text),$24,$25,$26,$27,$28,$29,$30,now())
     ON CONFLICT (dedupe_key) DO UPDATE SET
       source_history = (SELECT jsonb_agg(DISTINCT value) FROM jsonb_array_elements_text(generated_signals.source_history || jsonb_build_array(EXCLUDED.source)) AS sources(value)),
       promoted_from_candidate_id = COALESCE(generated_signals.promoted_from_candidate_id, EXCLUDED.promoted_from_candidate_id),
+      confidence = EXCLUDED.confidence,
+      original_confidence = COALESCE(generated_signals.original_confidence, EXCLUDED.original_confidence),
+      confidence_calibration = EXCLUDED.confidence_calibration,
       validation_summary = EXCLUDED.validation_summary,
       warning_reasons = EXCLUDED.warning_reasons,
       quality_breakdown = EXCLUDED.quality_breakdown,
@@ -29,7 +33,9 @@ export async function upsertGeneratedSignal(signal, context = {}) {
     displayPair(signal.symbol), signal.marketSource || "unknown", signal.timeframe, signal.direction,
     signal.setupType || "Qualified setup", pattern?.pattern || null, JSON.stringify(pattern || {}),
     signal.entryPrice, signal.stopLoss, signal.takeProfit, signal.riskRewardRatio,
-    signal.confidenceScore, signal.qualityScore || 0,
+    signal.confidenceScore, signal.confidenceCalibration?.originalConfidence ?? signal.indicators?.confidenceCalibration?.originalConfidence ?? signal.confidenceScore,
+    JSON.stringify(signal.confidenceCalibration || signal.indicators?.confidenceCalibration || {}),
+    signal.qualityScore || 0,
     signal.readinessScore ?? signal.indicators?.readinessScore ?? 0, signal.validUntil,
     source, String(context.generatedBy || "system"), context.candidateId || null,
     JSON.stringify({ passed: signal.validationPassed !== false, score: signal.validationScore ?? 100, reasons: signal.rejectedReasons || [] }),
@@ -38,6 +44,7 @@ export async function upsertGeneratedSignal(signal, context = {}) {
     JSON.stringify(toFullAnalysis(signal)),
     signal.generatedAt || new Date()
   ]);
+  await recordGeneratedSignalConfidenceAdjustment(result.rows[0], signal);
   return mapGeneratedSignal(result.rows[0]);
 }
 
@@ -171,4 +178,42 @@ function toFullAnalysis(signal) { return { reasoning: signal.reasoning, confirma
 function normalizeSource(source) { return ["manual_scan","auto_crypto_watcher","telegram_alert","candidate_promotion","backtest_shadow","admin_test","legacy_saved_signal","legacy_unlocked_signal"].includes(source) ? source : "manual_scan"; }
 function finiteOrNull(value) { const number = Number(value); return Number.isFinite(number) ? number : null; }
 function displayPair(symbol) { return String(symbol || "").toUpperCase().replace(/[-/]/g, ""); }
-function mapGeneratedSignal(row) { if (!row) return null; return { id: row.id, signalId: row.signal_id, setupKey: row.setup_key, pair: row.pair, displayPair: row.display_pair, provider: row.provider, timeframe: row.timeframe, direction: row.direction, strategy: row.strategy, pattern: row.pattern, patternContext: row.pattern_context || {}, entry: Number(row.entry), stopLoss: Number(row.stop_loss), takeProfit: Number(row.take_profit), riskReward: Number(row.risk_reward), confidence: Number(row.confidence), setupQualityScore: Number(row.setup_quality_score || 0), entryReadinessScore: Number(row.entry_readiness_score || 0), status: row.status, expiringSoon: Boolean(row.expiring_soon), validUntil: row.valid_until, expiredAt: row.expired_at, hitTpAt: row.hit_tp_at, hitSlAt: row.hit_sl_at, source: row.source, sourceHistory: row.source_history || [], generatedBy: row.generated_by, promotedFromCandidateId: row.promoted_from_candidate_id, validationSummary: row.validation_summary || {}, warningReasons: row.warning_reasons || [], qualityBreakdown: row.quality_breakdown || {}, fullAnalysis: row.full_analysis || {}, postMortemTags: row.resolved_post_mortem_tags || row.post_mortem_tags || [], maxFavorableExcursion: row.max_favorable_excursion == null ? null : Number(row.max_favorable_excursion), maxAdverseExcursion: row.max_adverse_excursion == null ? null : Number(row.max_adverse_excursion), resultReason: row.result_reason, candidateOrigin: row.candidate_status ? { status: row.candidate_status, setupQualityScore: Number(row.candidate_score || 0), entryReadinessScore: Number(row.readiness_score || 0), missingConfirmations: row.missing_confirmations || [], firstDetectedAt: row.first_detected_at, lastCheckedAt: row.last_checked_at } : null, createdAt: row.created_at, updatedAt: row.updated_at }; }
+function mapGeneratedSignal(row) { if (!row) return null; return { id: row.id, signalId: row.signal_id, setupKey: row.setup_key, pair: row.pair, displayPair: row.display_pair, provider: row.provider, timeframe: row.timeframe, direction: row.direction, strategy: row.strategy, pattern: row.pattern, patternContext: row.pattern_context || {}, entry: Number(row.entry), stopLoss: Number(row.stop_loss), takeProfit: Number(row.take_profit), riskReward: Number(row.risk_reward), confidence: Number(row.confidence), originalConfidence: row.original_confidence == null ? Number(row.confidence) : Number(row.original_confidence), finalConfidence: Number(row.confidence), confidenceCalibration: row.confidence_calibration || {}, setupQualityScore: Number(row.setup_quality_score || 0), entryReadinessScore: Number(row.entry_readiness_score || 0), status: row.status, expiringSoon: Boolean(row.expiring_soon), validUntil: row.valid_until, expiredAt: row.expired_at, hitTpAt: row.hit_tp_at, hitSlAt: row.hit_sl_at, source: row.source, sourceHistory: row.source_history || [], generatedBy: row.generated_by, promotedFromCandidateId: row.promoted_from_candidate_id, validationSummary: row.validation_summary || {}, warningReasons: row.warning_reasons || [], qualityBreakdown: row.quality_breakdown || {}, fullAnalysis: row.full_analysis || {}, postMortemTags: row.resolved_post_mortem_tags || row.post_mortem_tags || [], maxFavorableExcursion: row.max_favorable_excursion == null ? null : Number(row.max_favorable_excursion), maxAdverseExcursion: row.max_adverse_excursion == null ? null : Number(row.max_adverse_excursion), resultReason: row.result_reason, candidateOrigin: row.candidate_status ? { status: row.candidate_status, setupQualityScore: Number(row.candidate_score || 0), entryReadinessScore: Number(row.readiness_score || 0), missingConfirmations: row.missing_confirmations || [], firstDetectedAt: row.first_detected_at, lastCheckedAt: row.last_checked_at } : null, createdAt: row.created_at, updatedAt: row.updated_at }; }
+
+async function recordGeneratedSignalConfidenceAdjustment(row, signal) {
+  const calibration = signal.confidenceCalibration || signal.indicators?.confidenceCalibration || {};
+  if (!calibration?.originalConfidence && !calibration?.totalPenalty && !calibration?.confidenceCap) return;
+  await query(`
+    INSERT INTO signal_confidence_adjustments (
+      id, signal_id, group_key, original_confidence, final_confidence,
+      confidence_cap, penalty, reason, context, created_at
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,now())
+    ON CONFLICT (id) DO UPDATE SET
+      original_confidence = EXCLUDED.original_confidence,
+      final_confidence = EXCLUDED.final_confidence,
+      confidence_cap = EXCLUDED.confidence_cap,
+      penalty = EXCLUDED.penalty,
+      reason = EXCLUDED.reason,
+      context = EXCLUDED.context,
+      created_at = now()
+  `, [
+    `scadj_${hash(row.id)}`,
+    row.signal_id,
+    calibration.groups?.[0]?.groupKey || null,
+    calibration.originalConfidence ?? row.original_confidence ?? row.confidence,
+    calibration.finalConfidence ?? row.confidence,
+    calibration.confidenceCap ?? null,
+    calibration.totalPenalty ?? 0,
+    calibration.message || null,
+    JSON.stringify(calibration)
+  ]);
+}
+
+function hash(value) {
+  let result = 0;
+  const text = String(value || "");
+  for (let index = 0; index < text.length; index += 1) {
+    result = ((result << 5) - result + text.charCodeAt(index)) | 0;
+  }
+  return Math.abs(result).toString(16);
+}

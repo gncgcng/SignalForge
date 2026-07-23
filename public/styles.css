@@ -3904,6 +3904,66 @@ polyline {
   border-radius: 8px;
 }
 
+.admin-signal-quality-panel {
+  display: grid;
+  gap: 12px;
+  margin: 0 0 14px;
+}
+
+.signal-quality-warning,
+.signal-quality-card,
+.signal-quality-buckets {
+  border: 1px solid rgba(245, 158, 11, 0.34);
+  border-radius: 8px;
+  background: rgba(20, 14, 5, 0.72);
+  padding: 14px;
+}
+
+.signal-quality-warning strong,
+.signal-quality-card h4,
+.signal-quality-buckets h4 {
+  color: #f8c56a;
+}
+
+.signal-quality-warning p,
+.signal-quality-warning small {
+  margin: 6px 0 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.signal-quality-groups {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.signal-quality-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr) minmax(220px, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 10px 0;
+  border-top: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.signal-quality-row.compact {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+.signal-quality-row span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  overflow-wrap: anywhere;
+}
+
+.signal-quality-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
 .admin-generated-table {
   min-width: 1120px;
 }
@@ -4053,6 +4113,12 @@ polyline {
 @media (max-width: 767px) {
   .admin-signal-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .admin-signal-filters { grid-template-columns: 1fr; }
+  .signal-quality-groups,
+  .signal-quality-row,
+  .signal-quality-row.compact,
+  .signal-quality-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
   .admin-signals-table-wrap { overflow: visible; border: 0; }
   .admin-generated-table { min-width: 0; display: grid; gap: 10px; }
   .admin-generated-head { display: none; }

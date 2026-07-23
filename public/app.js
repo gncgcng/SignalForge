@@ -1817,6 +1817,26 @@ adminSignalsTable?.addEventListener("click", async (event) => {
   if (!button) return;
   try { const { signal } = await api.request(`/api/admin/signals/${encodeURIComponent(button.dataset.adminSignalView)}`); renderAdminSignalDetail(signal); adminSignalModal.classList.remove("hidden"); document.body.classList.add("modal-open"); } catch (error) { showToast(error.message); }
 });
+document.querySelector("#admin-signal-quality-panel")?.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-signal-quality-status]");
+  if (!button) return;
+  button.disabled = true;
+  try {
+    await api.request("/api/admin/signals/quality/status", {
+      method: "POST",
+      body: JSON.stringify({
+        groupKey: button.dataset.groupKey,
+        status: button.dataset.signalQualityStatus
+      })
+    });
+    showToast(`Group set to ${titleCase(button.dataset.signalQualityStatus)}`);
+    await loadAdminSignals();
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    button.disabled = false;
+  }
+});
 adminSignalModal?.addEventListener("click", (event) => { if (event.target.closest("[data-admin-signal-close]")) closeAdminSignalModal(); });
 document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !adminSignalModal?.classList.contains("hidden")) closeAdminSignalModal(); });
 adminCryptoFilters?.addEventListener("submit", (event) => {
@@ -3815,6 +3835,7 @@ function renderAdminSignals() {
     ["Win rate", `${Number(stats.winRate || 0).toFixed(1)}%`], ["Average R/R", `${Number(stats.averageRiskReward || 0).toFixed(2)}R`],
     ["Average confidence", `${Number(stats.averageConfidence || 0).toFixed(1)}%`], ["Today", stats.today], ["This week", stats.week]
   ].map(([label, value]) => `<article><span>${label}</span><strong>${value ?? 0}</strong></article>`).join("");
+  renderAdminSignalQualityPanel(data.qualityBreakdown || {});
   adminSignalsTable.innerHTML = data.signals.length ? `
     <div class="admin-generated-table">
       <div class="admin-generated-row admin-generated-head"><span>Pair</span><span>Setup</span><span>Levels</span><span>Scores</span><span>Status</span><span>Source / created</span><span>Actions</span></div>
@@ -3823,6 +3844,45 @@ function renderAdminSignals() {
   document.querySelector("#admin-signals-page-label").textContent = `Page ${data.page || 1} of ${data.totalPages || 1}`;
   document.querySelector("#admin-signals-prev").disabled = Number(data.page || 1) <= 1;
   document.querySelector("#admin-signals-next").disabled = Number(data.page || 1) >= Number(data.totalPages || 1);
+}
+
+function renderAdminSignalQualityPanel(quality = {}) {
+  const panel = document.querySelector("#admin-signal-quality-panel");
+  if (!panel) return;
+  const warning = quality.warning || {};
+  const groups = [
+    ["Worst strategies", quality.worstStrategies || []],
+    ["Worst pair/timeframes", quality.worstPairTimeframes || []],
+    ["Most expired strategies", quality.mostExpiredStrategies || []],
+    ["Most overconfident strategies", quality.mostOverconfidentStrategies || []]
+  ];
+  panel.innerHTML = `
+    ${warning.active ? `<article class="signal-quality-warning"><strong>Signal quality warning</strong><p>${escapeHtml(warning.message)}</p><small>Win rate excludes expired signals. Expired signals still reduce the quality score because they represent setups that failed to complete.</small></article>` : ""}
+    <div class="signal-quality-groups">
+      ${groups.map(([title, items]) => renderSignalQualityGroupList(title, items)).join("")}
+    </div>
+    <article class="signal-quality-buckets"><h4>Confidence buckets</h4>${renderSignalQualityBucketRows(quality.confidenceBuckets || [])}</article>`;
+}
+
+function renderSignalQualityGroupList(title, items) {
+  const rows = items.length
+    ? items.map((group) => `<div class="signal-quality-row">
+      <span><strong>${escapeHtml(group.groupValue)}</strong><small>${escapeHtml(titleCase(group.status || "active"))} · ${Number(group.closedSignals || 0)} closed · BE ${Number(group.breakEvenWinRate || 0).toFixed(1)}%</small></span>
+      <span><strong>${Number(group.winRate || 0).toFixed(1)}%</strong><small>${Number(group.estimatedExpectancy || 0).toFixed(2)}R expectancy · ${Number(group.expiredRate || 0).toFixed(1)}% expired</small></span>
+      <span class="signal-quality-actions">
+        <button class="secondary-action" data-signal-quality-status="active" data-group-key="${escapeHtml(group.groupKey)}" type="button">Restore</button>
+        <button class="secondary-action" data-signal-quality-status="reduced_confidence" data-group-key="${escapeHtml(group.groupKey)}" type="button">Reduce</button>
+        <button class="secondary-action" data-signal-quality-status="quarantined" data-group-key="${escapeHtml(group.groupKey)}" type="button">Quarantine</button>
+        <button class="secondary-action" data-signal-quality-status="disabled_by_admin" data-group-key="${escapeHtml(group.groupKey)}" type="button">Disable</button>
+      </span>
+    </div>`).join("")
+    : `<p class="reasoning">Not enough data yet.</p>`;
+  return `<article class="signal-quality-card"><h4>${escapeHtml(title)}</h4>${rows}</article>`;
+}
+
+function renderSignalQualityBucketRows(items) {
+  if (!items.length) return `<p class="reasoning">Not enough data yet.</p>`;
+  return items.map((group) => `<div class="signal-quality-row compact"><span><strong>${escapeHtml(group.groupValue)}</strong><small>${Number(group.totalSignals || 0)} signals</small></span><span>${Number(group.winRate || 0).toFixed(1)}% win · ${Number(group.expiredRate || 0).toFixed(1)}% expired</span><span>Gap ${Number(group.confidenceGap || 0).toFixed(1)} pts</span></div>`).join("");
 }
 
 function renderAdminSignalRow(signal) {
@@ -3843,10 +3903,22 @@ function renderAdminSignalDetail(signal) {
   const analysis = signal.fullAnalysis || {};
   const pattern = signal.patternContext || {};
   const candidate = signal.candidateOrigin;
+  const calibration = signal.confidenceCalibration || {};
+  const calibrationRows = [
+    `Original confidence: ${Number(signal.originalConfidence ?? calibration.originalConfidence ?? signal.confidence).toFixed(0)}%`,
+    `Final confidence: ${Number(signal.finalConfidence ?? calibration.finalConfidence ?? signal.confidence).toFixed(0)}%`,
+    calibration.confidenceCap ? `Cap applied: ${Number(calibration.confidenceCap).toFixed(0)}%` : null,
+    calibration.totalPenalty ? `Total penalty: ${Number(calibration.totalPenalty)} points` : null,
+    calibration.status ? `Calibration status: ${titleCase(calibration.status)}` : null,
+    ...(calibration.caps || []).map((item) => `Cap ${item.cap}: ${item.reason}`),
+    ...(calibration.penalties || []).map((item) => `Penalty ${item.points}: ${item.reason}`),
+    ...(calibration.groups || []).map((group) => `${titleCase(group.groupType)} ${group.groupValue}: ${Number(group.winRate || 0).toFixed(1)}% win vs ${Number(group.breakEvenWinRate || 0).toFixed(1)}% break-even`)
+  ];
   document.querySelector("#admin-signal-modal-title").textContent = `${signal.displayPair} / ${signal.timeframe} / ${String(signal.direction).toUpperCase()}`;
   adminSignalDetail.innerHTML = `
     <section class="admin-detail-levels"><div><span>Entry</span><strong>${formatCurrency(signal.entry)}</strong></div><div><span>Stop loss</span><strong>${formatCurrency(signal.stopLoss)}</strong></div><div><span>Take profit</span><strong>${formatCurrency(signal.takeProfit)}</strong></div><div><span>Risk/reward</span><strong>${Number(signal.riskReward).toFixed(2)}R</strong></div></section>
     <section class="admin-detail-meta"><span class="status-pill ${adminSignalStatusClass(signal.status)}">${escapeHtml(signal.status)}</span><span>${escapeHtml(signal.strategy)}</span><span>${Number(signal.confidence).toFixed(0)}% confidence</span><span>${Number(signal.setupQualityScore).toFixed(0)} quality</span><span>${Number(signal.entryReadinessScore).toFixed(0)} readiness</span></section>
+    ${renderAdminDetailSection("Confidence calibration", calibrationRows)}
     ${renderAdminDetailSection("Signal quality breakdown", Object.values(quality).map((item) => `${item.label}: ${titleCase(item.status)} - ${item.reason}`))}
     ${renderAdminDetailSection("Why it was generated", [analysis.reasoning, ...(analysis.confirmations || []).map((item) => `${item.passed ? "Passed" : "Failed"}: ${item.name} - ${item.detail}`), ...(signal.warningReasons || []).map((item) => `Warning: ${typeof item === "string" ? item : item.reason}`)])}
     ${signal.pattern ? renderAdminDetailSection("Pattern context", [`${pattern.label || titleCase(signal.pattern)} - ${titleCase(pattern.bias)} ${pattern.category || "pattern"}`, `Pattern confidence: ${Math.round(Number(pattern.confidence || 0) * 100)}%`, ...(pattern.reasons || []), ...(pattern.warnings || []).map((item) => `Warning: ${item}`)]) : ""}

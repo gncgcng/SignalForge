@@ -1,11 +1,27 @@
-import { sendError, sendJson } from "../../shared/http.js";
+import { readJson, sendError, sendJson } from "../../shared/http.js";
 import { isAdminUser } from "../auth/authService.js";
-import { getAdminGeneratedSignal, getAdminGeneratedSignals } from "./generatedSignalService.js";
+import { getAdminGeneratedSignal, getAdminGeneratedSignals, updateAdminSignalGroupStatus } from "./generatedSignalService.js";
 
 export async function handleAdminGeneratedSignalRoutes(req, res, pathname, url) {
   if (!pathname.startsWith("/api/admin/signals")) return false;
   if (!req.user) return sendError(res, 401, "Authentication required.");
   if (!isAdminUser(req.user)) return sendError(res, 403, "Admin access required.");
+
+  if (pathname === "/api/admin/signals/quality/status" && req.method === "POST") {
+    const body = await readJson(req);
+    const groupKey = clean(body.groupKey, 160);
+    if (!groupKey) return sendError(res, 400, "Performance group is required.");
+    const status = clean(body.status, 40);
+    const updated = await updateAdminSignalGroupStatus({
+      groupKey,
+      status,
+      adminNote: clean(body.adminNote, 500),
+      penaltyOverride: numberFromBody(body.penaltyOverride),
+      confidenceCapOverride: numberFromBody(body.confidenceCapOverride)
+    }, req.user);
+    return sendJson(res, 200, { ok: true, status: updated });
+  }
+
   if (req.method !== "GET") return sendError(res, 405, "Method not allowed.");
 
   if (pathname === "/api/admin/signals") {
@@ -31,3 +47,8 @@ function parseFilters(params) {
   };
 }
 function clean(value, max) { return String(value || "").trim().slice(0, max); }
+function numberFromBody(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}

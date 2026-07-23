@@ -1,5 +1,9 @@
 import { getCachedOhlcv, getOhlcv, getPair } from "../market-data/marketDataService.js";
 import {
+  getAdminSignalQualityBreakdown,
+  updateSignalGroupStatus
+} from "../signals/signalConfidenceCalibrationService.js";
+import {
   getGeneratedSignalById,
   getGeneratedSignalStats,
   listActiveGeneratedSignals,
@@ -21,12 +25,20 @@ export async function saveGeneratedSignal(signal, context = {}) {
 }
 
 export async function getAdminGeneratedSignals(filters) {
-  const [listing, stats] = await Promise.all([listGeneratedSignals(filters), getGeneratedSignalStats()]);
-  return { ...listing, stats };
+  const [listing, stats, qualityBreakdown] = await Promise.all([
+    listGeneratedSignals(filters),
+    getGeneratedSignalStats(),
+    getAdminSignalQualityBreakdown()
+  ]);
+  return { ...listing, stats, qualityBreakdown };
 }
 
 export async function getAdminGeneratedSignal(id) {
   return getGeneratedSignalById(id);
+}
+
+export async function updateAdminSignalGroupStatus(input, user) {
+  return updateSignalGroupStatus({ ...input, userId: user?.id || "admin" });
 }
 
 export async function updateAllGeneratedSignalOutcomes() {

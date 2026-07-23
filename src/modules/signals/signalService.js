@@ -40,6 +40,10 @@ import {
 } from "./signalValidityService.js";
 import { toLockedSignalQuality, withSignalQuality } from "./signalQualityService.js";
 import {
+  applyConfidenceCalibration,
+  isSignalBlockedByCalibration
+} from "./signalConfidenceCalibrationService.js";
+import {
   SCANNER_RESULT_TYPES,
   buildAvoidTradeResult,
   classifyScannerResult
@@ -319,7 +323,8 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
   const learnedSignal = valid
     ? withSignalValidity(await applyLearningToValidatedSignal(applyValidationToSignal(readySignal, validation)))
     : null;
-  const signal = learnedSignal
+  const calibrationBlocked = isSignalBlockedByCalibration(learnedSignal);
+  const signal = learnedSignal && !calibrationBlocked
     ? withSignalQuality({ ...learnedSignal, confidenceScore: Math.min(learnedSignal.confidenceScore, candidate?.confidenceEstimate || 99) })
     : null;
   if (signal && candidate) {
@@ -339,11 +344,14 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
       });
     }
   }
-  if (readySignal && validation && !validation.passed && candidate) {
-    candidate = await markCandidateRejected(candidate, validation.reasons?.[0]?.reason || "Final signal validation failed.") || {
+  if (readySignal && validation && (!validation.passed || calibrationBlocked) && candidate) {
+    const rejectionReason = calibrationBlocked
+      ? "Performance calibration quarantined or disabled this group."
+      : validation.reasons?.[0]?.reason || "Final signal validation failed.";
+    candidate = await markCandidateRejected(candidate, rejectionReason) || {
       ...candidate,
       status: "rejected",
-      rejectionReason: validation.reasons?.[0]?.reason || "Final signal validation failed."
+      rejectionReason
     };
   }
   const analysis = result.valid && !readiness?.ready
@@ -1096,13 +1104,12 @@ export async function listUserSignals(user) {
 function toUserSignal(signal) {
   if (!signal?.signalQuality) return signal;
   const signalQuality = { ...signal.signalQuality, debug: undefined };
+  const indicators = { ...(signal.indicators || {}), confidenceCalibration: undefined };
   return {
     ...signal,
+    confidenceCalibration: undefined,
     signalQuality,
-    indicators: {
-      ...(signal.indicators || {}),
-      signalQuality
-    }
+    indicators: { ...indicators, signalQuality }
   };
 }
 
@@ -1134,7 +1141,7 @@ function toScanPreview(signal) {
     rejectedReasons: signal.rejectedReasons || [],
     reasoning: signal.reasoning,
     confirmations: signal.confirmations,
-    indicators: { ...(signal.indicators || {}), signalQuality: undefined },
+    indicators: { ...(signal.indicators || {}), signalQuality: undefined, confidenceCalibration: undefined },
     generatedAt: signal.generatedAt,
     validUntil: signal.validUntil,
     validityDurationMs: signal.validityDurationMs,
@@ -1154,9 +1161,11 @@ async function validateSignalForPublication(signal, marketData, user, options = 
 
 async function applyLearningToValidatedSignal(signal) {
   if (!signal) return signal;
-  if (signal.indicators?.learningApplied) return signal;
+  if (signal.indicators?.learningApplied) {
+    return signal.indicators?.confidenceCalibrationApplied ? signal : applyConfidenceCalibration(signal);
+  }
   const learning = await getLearningContextForSignal(signal);
-  return applyLearningAdjustment(signal, learning);
+  return applyConfidenceCalibration(applyLearningAdjustment(signal, learning));
 }
 
 async function getUserAnalystProfile(user) {

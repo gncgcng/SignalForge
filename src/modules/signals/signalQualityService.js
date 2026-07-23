@@ -83,7 +83,7 @@ export function buildSignalQuality(signal = {}) {
     categories,
     strengths,
     risks,
-    confidenceExplanation: "Confidence reflects rule alignment and setup quality. It is not a guarantee or probability of profit.",
+    confidenceExplanation: "Confidence reflects rule alignment and historical calibration. It is not a guaranteed win rate or probability of profit.",
     debug: buildDebug(signal, list, indicators)
   };
 }
