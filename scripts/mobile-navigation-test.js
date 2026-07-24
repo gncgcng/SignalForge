@@ -8,6 +8,7 @@ const app = readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
 const result = {
   hamburgerPresent:
     html.includes('id="mobile-menu-toggle"') &&
+    html.includes('id="mobile-nav-close"') &&
     html.includes('aria-controls="mobile-navigation"') &&
     html.includes('aria-expanded="false"') &&
     html.includes(">☰</button>"),
@@ -16,6 +17,7 @@ const result = {
     css.includes(".mobile-menu-toggle {\n  display: none;") &&
     css.includes(".dashboard {\n    display: block;") &&
     css.includes("transform: translateX(-105%)") &&
+    css.includes("width: min(88vw, 360px)") &&
     css.includes(".dashboard.mobile-nav-open .sidebar") &&
     css.includes("transform: translateX(0)"),
   desktopSidebarPreserved:
@@ -33,6 +35,7 @@ const result = {
     css.includes("display: none"),
   menuClosesOnSelection:
     app.includes("mobileMenuToggle.addEventListener") &&
+    app.includes("mobileNavClose?.addEventListener") &&
     app.includes("setMobileNavigationOpen(!dashboard.classList.contains(\"mobile-nav-open\"))") &&
     app.includes("navigateTo(link.dataset.viewLink);") &&
     app.includes("setMobileNavigationOpen(false);"),
@@ -43,7 +46,12 @@ const result = {
     app.includes("window.addEventListener(\"resize\""),
   accessibilityStateUpdates:
     app.includes("mobileMenuToggle.setAttribute(\"aria-expanded\", String(open))") &&
-    app.includes("mobileMenuToggle.setAttribute(\"aria-label\", open ? \"Close navigation\" : \"Open navigation\")"),
+    app.includes("mobileMenuToggle.setAttribute(\"aria-label\", open ? \"Close navigation\" : \"Open navigation\")") &&
+    app.includes("sidebar?.setAttribute(\"aria-hidden\""),
+  portraitPreferred:
+    app.includes("requestPortraitOrientationLock") &&
+    app.includes("orientation.lock(\"portrait\")") &&
+    css.includes("@media (max-width: 900px) and (orientation: landscape)"),
   pwaCacheBumped: css.includes("mobile-nav-open") &&
     /signalforge-static-v\d+/.test(
       readFileSync(new URL("../public/service-worker.js", import.meta.url), "utf8")

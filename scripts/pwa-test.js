@@ -27,8 +27,9 @@ const result = {
     manifest.start_url === "/?source=pwa" &&
     manifest.scope === "/" &&
     manifest.display === "standalone" &&
-    manifest.theme_color === "#000000" &&
-    manifest.background_color === "#000000" &&
+    manifest.orientation === "portrait" &&
+    manifest.theme_color === "#061B22" &&
+    manifest.background_color === "#061B22" &&
     manifest.icons.some((icon) => icon.sizes === "16x16") &&
     manifest.icons.some((icon) => icon.sizes === "32x32") &&
     manifest.icons.some((icon) => icon.sizes === "180x180") &&

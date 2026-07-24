@@ -81,7 +81,12 @@ const checks = {
     signalService.includes("saveUnlockedSignal(user.id, signal)"),
   mobileSafe:
     css.includes(".admin-generated-row") && css.includes(".admin-signal-detail-card") &&
-    css.includes("@media (max-width: 760px)") && css.includes("grid-template-columns: 1fr")
+    css.includes("@media (max-width: 767px)") && css.includes("grid-template-columns: 1fr") &&
+    css.includes(".admin-signal-row-actions") &&
+    css.includes("grid-template-columns: repeat(2, minmax(0, 1fr))") &&
+    css.includes("word-break: normal") &&
+    app.includes("Show details") &&
+    app.includes("Raw ${Number(signal.rawSetupScore")
 };
 
 for (const [name, passed] of Object.entries(checks)) {

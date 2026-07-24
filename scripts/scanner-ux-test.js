@@ -97,7 +97,11 @@ const checks = {
     css.includes("@media (max-width: 767px)") &&
     css.includes(".signals-grid") &&
     css.includes("grid-template-columns: 1fr") &&
-    css.includes(".compact-actions"),
+    css.includes(".compact-actions") &&
+    css.includes("#pair-search") &&
+    css.includes("#scanner-market-type") &&
+    css.includes("#scan-all-button") &&
+    css.includes(".chart-panel canvas"),
   creditsNotDeductedForScanning:
     app.includes("No unlock credits used yet") &&
     app.includes("No credits used") &&

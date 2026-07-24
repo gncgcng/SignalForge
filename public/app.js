@@ -54,6 +54,7 @@ const FIRST_SCAN_KEY = "signalforge-first-scan-complete";
 const PAPER_INDICATORS_KEY = "signalforge-paper-indicators";
 const RISK_ACCOUNT_SIZE_KEY = "signalforge-risk-account-size";
 const RISK_PERCENT_KEY = "signalforge-risk-percent";
+const MARKET_BRIEF_COLLAPSED_KEY = "signalforge_market_brief_collapsed";
 const authStorage = window.SignalForgeAuthStorage;
 
 const state = {
@@ -99,6 +100,7 @@ const state = {
   signals: [],
   candidates: [],
   marketBrief: null,
+  marketBriefCollapsed: getStoredMarketBriefCollapsed(),
   avoidTrades: [],
   showAllAvoidTrades: false,
   scanResults: [],
@@ -183,6 +185,7 @@ const clearSessionPage = document.querySelector("#clear-session-page");
 const candidateGrid = document.querySelector("#candidate-grid");
 const candidateCount = document.querySelector("#candidate-count");
 const dailyMarketBrief = document.querySelector("#daily-market-brief");
+const dailyBriefToggle = document.querySelector("#daily-brief-toggle");
 const dailyBriefContent = document.querySelector("#daily-brief-content");
 const dailyBriefUpdated = document.querySelector("#daily-brief-updated");
 const avoidTradeSection = document.querySelector("#avoid-trade-section");
@@ -206,6 +209,7 @@ const authRestoreSignIn = document.querySelector("#auth-restore-sign-in");
 const authRestoreClear = document.querySelector("#auth-restore-clear");
 const installAppButton = document.querySelector("#install-app-button");
 const mobileMenuToggle = document.querySelector("#mobile-menu-toggle");
+const mobileNavClose = document.querySelector("#mobile-nav-close");
 const sidebar = document.querySelector(".sidebar");
 const authForm = document.querySelector("#auth-form");
 const authNote = document.querySelector("#auth-note");
@@ -1289,6 +1293,10 @@ mobileMenuToggle.addEventListener("click", () => {
   setMobileNavigationOpen(!dashboard.classList.contains("mobile-nav-open"));
 });
 
+mobileNavClose?.addEventListener("click", () => {
+  setMobileNavigationOpen(false);
+});
+
 dashboard.addEventListener("click", (event) => {
   const clickedBackdrop = dashboard.classList.contains("mobile-nav-open") &&
     window.matchMedia("(max-width: 767px)").matches &&
@@ -1308,10 +1316,13 @@ window.addEventListener("resize", () => {
   }
 });
 
+document.addEventListener("pointerdown", requestPortraitOrientationLock, { once: true, passive: true });
+
 document.querySelectorAll("[data-view-link]").forEach((link) => {
   link.addEventListener("click", (event) => {
     event.preventDefault();
     navigateTo(link.dataset.viewLink);
+    setMobileNavigationOpen(false);
   });
 });
 
@@ -1755,8 +1766,13 @@ avoidTradeMore?.addEventListener("click", () => {
 });
 
 dailyMarketBrief?.addEventListener("click", (event) => {
-  if (!event.target.closest("#daily-brief-refresh")) return;
-  scanAllButton?.click();
+  if (event.target.closest("#daily-brief-toggle") || event.target.closest("[data-daily-brief-show]")) {
+    state.marketBriefCollapsed = !state.marketBriefCollapsed;
+    localStorage.setItem(MARKET_BRIEF_COLLAPSED_KEY, String(state.marketBriefCollapsed));
+    renderMarketBrief();
+    return;
+  }
+  if (event.target.closest("#daily-brief-refresh")) scanAllButton?.click();
 });
 
 requestTesterAccessButton.addEventListener("click", async () => {
@@ -3956,14 +3972,17 @@ function renderSignalQualityBucketRows(items) {
 
 function renderAdminSignalRow(signal) {
   const effectiveStatus = signal.expiringSoon && signal.status === "Active" ? "Expiring Soon" : signal.status;
+  const calibration = signal.confidenceCalibration || {};
+  const calibrationStatus = calibration.label || calibration.status || "Calibrated";
+  const engineMarker = ["legacy_saved_signal", "legacy_unlocked_signal"].includes(signal.source) ? "Legacy" : "Current engine";
   return `<article class="admin-generated-row">
     <span data-label="Pair"><strong>${escapeHtml(signal.displayPair || signal.pair)}</strong><small>${escapeHtml(signal.provider)} &middot; ${escapeHtml(signal.pair)}</small></span>
     <span data-label="Setup"><strong class="direction ${escapeHtml(signal.direction)}">${escapeHtml(String(signal.direction).toUpperCase())} &middot; ${escapeHtml(signal.timeframe)}</strong><small>${escapeHtml(signal.strategy)}${signal.pattern ? ` &middot; ${escapeHtml(titleCase(signal.pattern))}` : ""}</small></span>
     <span data-label="Levels"><small>Entry ${formatCurrency(signal.entry)}</small><small>SL ${formatCurrency(signal.stopLoss)} &middot; TP ${formatCurrency(signal.takeProfit)}</small><strong>${Number(signal.riskReward).toFixed(2)}R</strong></span>
-    <span data-label="Scores"><small>Confidence ${Number(signal.confidence).toFixed(0)}%</small><small>Quality ${Number(signal.setupQualityScore).toFixed(0)} &middot; Readiness ${Number(signal.entryReadinessScore).toFixed(0)}</small></span>
+    <span data-label="Scores"><small>Confidence ${Number(signal.confidence).toFixed(0)}%</small><small>Raw ${Number(signal.rawSetupScore ?? signal.originalConfidence ?? signal.confidence).toFixed(0)} &middot; Calibrated ${Number(signal.calibratedConfidence ?? signal.confidence).toFixed(0)}</small><small>Quality ${Number(signal.setupQualityScore).toFixed(0)} &middot; Readiness ${Number(signal.entryReadinessScore).toFixed(0)}</small></span>
     <span data-label="Status"><em class="status-pill ${adminSignalStatusClass(effectiveStatus)}">${escapeHtml(effectiveStatus)}</em><small>${escapeHtml(signal.resultReason || "Tracking")}</small></span>
-    <span data-label="Source"><strong>${escapeHtml(titleCase(signal.source))}</strong><small>${formatDateTime(signal.createdAt)}</small><small>Valid until ${formatDateTime(signal.validUntil)}</small></span>
-    <span data-label="Actions" class="admin-signal-row-actions"><button data-admin-signal-view="${escapeHtml(signal.id)}" type="button">View details</button><button class="secondary-action" data-admin-signal-copy="${escapeHtml(signal.signalId)}" type="button">Copy ID</button>${signal.promotedFromCandidateId ? `<button class="secondary-action" data-admin-signal-view="${escapeHtml(signal.id)}" type="button">Candidate source</button>` : ""}${signal.status !== "Active" ? `<button class="secondary-action" data-admin-signal-view="${escapeHtml(signal.id)}" type="button">Post-mortem</button>` : ""}</span>
+    <span data-label="Source"><strong>${escapeHtml(titleCase(signal.source))}</strong><small>${escapeHtml(engineMarker)} &middot; ${escapeHtml(titleCase(calibrationStatus))}</small><small>${formatDateTime(signal.createdAt)}</small><small>Valid until ${formatDateTime(signal.validUntil)}</small></span>
+    <span data-label="Actions" class="admin-signal-row-actions"><button data-admin-signal-view="${escapeHtml(signal.id)}" type="button">Show details</button><button class="secondary-action" data-admin-signal-copy="${escapeHtml(signal.signalId)}" type="button">Copy ID</button>${signal.promotedFromCandidateId ? `<button class="secondary-action" data-admin-signal-view="${escapeHtml(signal.id)}" type="button">Candidate source</button>` : ""}${signal.status !== "Active" ? `<button class="secondary-action" data-admin-signal-view="${escapeHtml(signal.id)}" type="button">Post-mortem</button>` : ""}</span>
   </article>`;
 }
 
@@ -4094,6 +4113,11 @@ function renderAvoidTrades() {
 function renderMarketBrief() {
   if (!dailyBriefContent || !dailyBriefUpdated) return;
   const brief = state.marketBrief;
+  dailyMarketBrief?.classList.toggle("collapsed", Boolean(state.marketBriefCollapsed));
+  if (dailyBriefToggle) {
+    dailyBriefToggle.textContent = state.marketBriefCollapsed ? "Show brief" : "Hide brief";
+    dailyBriefToggle.setAttribute("aria-expanded", String(!state.marketBriefCollapsed));
+  }
   if (!brief?.available) {
     dailyBriefUpdated.textContent = "Waiting for scanner data";
     dailyBriefContent.innerHTML = `
@@ -4111,6 +4135,16 @@ function renderMarketBrief() {
     ? brief.mainReasons
     : ["No single reason dominates the current scanner results."];
   const advanced = state.scannerMode === "advanced";
+  const conditionExplanation = explainMarketCondition(brief.marketCondition, mainReasons);
+  const summaryReason = noSignal ? "No clean signal yet" : "Setups developing";
+  if (state.marketBriefCollapsed) {
+    dailyBriefContent.innerHTML = `
+      <div class="daily-brief-collapsed-row">
+        <span><strong>Market Brief:</strong> ${escapeHtml(brief.marketCondition || "Market context")} · ${escapeHtml(summaryReason)} · Updated ${escapeHtml(formatBriefAge(brief.generatedAt))}</span>
+        <button class="secondary-action daily-brief-toggle-inline" data-daily-brief-show type="button">Show</button>
+      </div>`;
+    return;
+  }
   dailyBriefContent.innerHTML = `
     <div class="daily-brief-overview">
       <div class="daily-brief-condition"><span>Market condition</span><strong>${escapeHtml(brief.marketCondition)}</strong></div>
@@ -4121,10 +4155,14 @@ function renderMarketBrief() {
         <span><strong>${Number(brief.pairsScanned || 0)}</strong> pairs</span>
       </div>` : ""}
     </div>
+    <section class="daily-brief-meaning">
+      <strong>What it means</strong>
+      <p>${escapeHtml(conditionExplanation)}</p>
+    </section>
     <div class="daily-brief-columns">
       ${renderBriefPairList("Stronger pairs", brief.strongestPairs, "No directional strength stands out yet.")}
       ${renderBriefPairList("Weak or choppy", brief.weakestPairs, "No weak pair context is available yet.")}
-      <section><strong>${noSignal ? "No clean signal yet because" : "What to watch next"}</strong><ul>${mainReasons.map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul></section>
+      <details class="daily-brief-detail-card" ${advanced ? "open" : ""}><summary>${noSignal ? "No clean signal yet because" : "What to watch next"}</summary><ul>${mainReasons.map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul></details>
     </div>
     ${advanced && brief.watchingBreakdown?.length ? `<div class="daily-brief-watching"><strong>Watching:</strong> ${brief.watchingBreakdown.map((item) => `${Number(item.count)} ${escapeHtml(item.setupType)}`).join(" · ")}</div>` : ""}
     ${advanced ? `<details class="daily-brief-pairs"><summary>View scanner and timeframe detail</summary><div>${(brief.pairSummaries || []).map((item) => `<article><strong>${escapeHtml(item.displaySymbol || getDisplaySymbol(item.symbol))}</strong><span>${escapeHtml(item.timeframe)} · ${escapeHtml(item.summary)}</span></article>`).join("")}</div></details>` : ""}
@@ -4132,9 +4170,10 @@ function renderMarketBrief() {
 }
 
 function renderBriefPairList(title, pairs = [], emptyCopy) {
-  return `<section><strong>${escapeHtml(title)}</strong>${pairs.length
+  const open = window.matchMedia("(max-width: 767px)").matches ? "" : "open";
+  return `<details class="daily-brief-detail-card" ${open}><summary>${escapeHtml(title)}</summary>${pairs.length
     ? `<ul>${pairs.map((item) => `<li><b>${escapeHtml(item.displaySymbol || getDisplaySymbol(item.symbol))}</b> ${escapeHtml(item.summary)}</li>`).join("")}</ul>`
-    : `<p>${escapeHtml(emptyCopy)}</p>`}</section>`;
+    : `<p>${escapeHtml(emptyCopy)}</p>`}</details>`;
 }
 
 function renderAdminMarketBrief(brief) {
@@ -4165,6 +4204,20 @@ function formatBriefAge(value) {
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
   return formatDateTime(value);
+}
+
+function explainMarketCondition(condition, reasons = []) {
+  const text = `${condition || ""} ${(reasons || []).join(" ")}`.toLowerCase();
+  if (text.includes("range")) return "The market is moving sideways between support and resistance. SignalForge may wait for a clear breakout or retest before calling a signal.";
+  if (text.includes("trend") && (text.includes("up") || text.includes("bull"))) return "Buyers are in control. Long setups may have better follow-through if volume confirms.";
+  if (text.includes("trend") && (text.includes("down") || text.includes("bear"))) return "Sellers are in control. Short setups may have better follow-through if volume confirms.";
+  if (text.includes("choppy")) return "Price is moving unevenly with mixed signals. SignalForge is being more selective.";
+  if (text.includes("high volatility")) return "Price is moving fast. Entries can be riskier, so stops and position size matter more.";
+  if (text.includes("low volatility")) return "Price is quiet. SignalForge may wait for expansion before calling a setup.";
+  if (text.includes("higher timeframe") || text.includes("conflict")) return "The short-term chart and larger trend do not agree yet. SignalForge may wait for alignment.";
+  if (text.includes("risk/reward") || text.includes("rr")) return "The possible reward is not large enough compared to the stop loss.";
+  if (text.includes("no clean") || text.includes("no signal")) return "The setup does not have enough confirmation yet.";
+  return "SignalForge is summarizing current scanner context and may wait for clearer confirmation before promoting a setup.";
 }
 
 async function loadPaperPortfolio() {
@@ -4782,6 +4835,16 @@ function setMobileNavigationOpen(open) {
   document.body.classList.toggle("mobile-nav-open", open);
   mobileMenuToggle.setAttribute("aria-expanded", String(open));
   mobileMenuToggle.setAttribute("aria-label", open ? "Close navigation" : "Open navigation");
+  sidebar?.setAttribute("aria-hidden", String(!open && window.matchMedia("(max-width: 767px)").matches));
+}
+
+function requestPortraitOrientationLock() {
+  const orientation = window.screen?.orientation;
+  const canTryLock = orientation?.lock &&
+    window.matchMedia("(max-width: 900px)").matches &&
+    (window.matchMedia("(display-mode: standalone)").matches || document.fullscreenElement);
+  if (!canTryLock) return;
+  orientation.lock("portrait").catch(() => {});
 }
 
 function renderPairs() {
@@ -9262,6 +9325,13 @@ function getStoredAffiliateCode() {
 function getStoredScannerMode() {
   const stored = localStorage.getItem(SIGNAL_VIEW_MODE_KEY) || localStorage.getItem(LEGACY_SCANNER_MODE_KEY);
   return stored === "advanced" ? "advanced" : "beginner";
+}
+
+function getStoredMarketBriefCollapsed() {
+  const stored = localStorage.getItem(MARKET_BRIEF_COLLAPSED_KEY);
+  if (stored === "true") return true;
+  if (stored === "false") return false;
+  return window.matchMedia("(max-width: 767px)").matches;
 }
 
 function persistSignalViewMode(mode) {
