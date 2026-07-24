@@ -2,6 +2,8 @@ import { query } from "../../db/client.js";
 
 const terminalStatuses = new Set(["Hit TP", "Hit SL", "Expired", "Manually closed"]);
 const adminStatuses = new Set(["active", "watchlist", "reduced_confidence", "quarantined", "disabled_by_admin"]);
+const HIGH_CONFIDENCE_EXPECTANCY_CAP = 88;
+const EXACT_SOURCE_STRATEGY_TIMEFRAME_MIN_CLOSED = 20;
 
 export function breakEvenWinRate(averageRiskReward) {
   const rr = Number(averageRiskReward || 0);
@@ -167,6 +169,7 @@ export function applyCalibrationContext(signal, context = {}) {
   const originalConfidence = Number(signal.confidenceScore || 0);
   let ruleCap = 99;
   let historicalCap = context.noHistory ? 85 : 99;
+  let expectancyCap = HIGH_CONFIDENCE_EXPECTANCY_CAP;
   let penalty = 0;
   const caps = [];
   const penalties = [];
@@ -207,6 +210,21 @@ export function applyCalibrationContext(signal, context = {}) {
     Number(group.estimatedExpectancy || 0) > 0 &&
     Number(group.winRate || 0) >= Number(group.breakEvenWinRate || 0)
   );
+  const exactPositiveGroup = findProvenExactSourceStrategyTimeframe(context.groups || []);
+
+  if (exactPositiveGroup) {
+    expectancyCap = 99;
+    capRecovery.push({
+      cap: 99,
+      reason: `Exact source, strategy, and timeframe has positive expectancy over ${exactPositiveGroup.closedSignals} closed signals.`
+    });
+  } else {
+    caps.push({
+      cap: HIGH_CONFIDENCE_EXPECTANCY_CAP,
+      reason: `Confidence above ${HIGH_CONFIDENCE_EXPECTANCY_CAP}% requires positive expectancy from at least ${EXACT_SOURCE_STRATEGY_TIMEFRAME_MIN_CLOSED} closed signals for this exact source, strategy, and timeframe.`,
+      type: "historical"
+    });
+  }
 
   for (const group of context.groups || []) {
     if (group.penalty < 0) {
@@ -236,7 +254,7 @@ export function applyCalibrationContext(signal, context = {}) {
     }
   }
 
-  const confidenceCap = Math.min(ruleCap, historicalCap);
+  const confidenceCap = Math.min(ruleCap, historicalCap, expectancyCap);
   const finalConfidence = Math.max(50, Math.min(confidenceCap, originalConfidence + penalty));
   const status = quarantined?.status || (severeStrategy || severePairTimeframe ? "reduced_confidence" : poorGroups.length ? "watchlist" : "active");
   const message = status === "active"
@@ -286,11 +304,12 @@ export async function getSignalCalibrationContext(signal) {
     const group = await loadSignalGroup(definition);
     if (group) groups.push(group);
   }
-  const hasStrategyHistory = groups.some((group) => group.groupType === "strategy" && group.closedSignals >= 3);
-  const hasPairTimeframeHistory = groups.some((group) => group.groupType === "pair_timeframe" && group.closedSignals >= 3);
+  const hasExactSourceStrategyTimeframeHistory = groups.some((group) =>
+    group.groupType === "source_strategy_timeframe" && group.closedSignals >= 3
+  );
   return {
     groups,
-    noHistory: !hasStrategyHistory || !hasPairTimeframeHistory
+    noHistory: !hasExactSourceStrategyTimeframeHistory
   };
 }
 
@@ -528,8 +547,10 @@ function buildSignalGroupDefinitions(signal) {
   const pair = signal.symbol || signal.pair || "unknown";
   const timeframe = signal.timeframe || "unknown";
   const direction = signal.direction || "unknown";
+  const source = signal.generationSource || signal.source || signal.indicators?.generationSource || "manual_scan";
   const pattern = signal.patternContext?.pattern || signal.indicators?.patternContext?.pattern || "";
   return [
+    { groupType: "source_strategy_timeframe", groupValue: `${source}:${strategy}:${timeframe}`, where: "source = $1 AND strategy = $2 AND timeframe = $3", params: [source, strategy, timeframe] },
     { groupType: "strategy", groupValue: strategy, where: "strategy = $1", params: [strategy] },
     { groupType: "pair_timeframe", groupValue: `${pair}:${timeframe}`, where: "pair = $1 AND timeframe = $2", params: [pair, timeframe] },
     { groupType: "pair", groupValue: pair, where: "pair = $1", params: [pair] },
@@ -538,6 +559,15 @@ function buildSignalGroupDefinitions(signal) {
     { groupType: "recent_strategy", groupValue: strategy, where: "strategy = $1 AND created_at >= now() - interval '7 days'", params: [strategy] },
     ...(pattern ? [{ groupType: "pattern", groupValue: pattern, where: "pattern = $1", params: [pattern] }] : [])
   ];
+}
+
+function findProvenExactSourceStrategyTimeframe(groups = []) {
+  return groups.find((group) =>
+    group.groupType === "source_strategy_timeframe" &&
+    Number(group.closedSignals || 0) >= EXACT_SOURCE_STRATEGY_TIMEFRAME_MIN_CLOSED &&
+    Number(group.estimatedExpectancy || 0) > 0 &&
+    Number(group.winRate || 0) >= Number(group.breakEvenWinRate || 0)
+  ) || null;
 }
 
 function groupStatsSql(where) {

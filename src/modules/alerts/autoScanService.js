@@ -9,6 +9,10 @@ import {
 } from "../../db/repositories.js";
 import { getPair, listAutoScannerPairs } from "../market-data/marketDataService.js";
 import {
+  applyConfidenceCalibration,
+  isSignalBlockedByCalibration
+} from "../signals/signalConfidenceCalibrationService.js";
+import {
   enqueueMatchingTelegramNotifications,
   telegramPreferenceMatchesSetup
 } from "../notifications/notificationService.js";
@@ -80,30 +84,32 @@ export async function runAutoCryptoAlertScan() {
         }, null, { source: "auto_crypto_watcher", generatedBy: "auto_crypto_watcher" });
         const setup = detailed.fullSetup;
 
-        if (!setup || !preferenceMatchesSetup(preference, setup)) {
+        const telegramSetup = setup ? await calibrateTelegramAlertSetup(setup) : null;
+
+        if (!telegramSetup || !preferenceMatchesSetup(preference, telegramSetup)) {
           continue;
         }
 
-        if (await hasRecentDetectedAlert(user.id, setup, appConfig.autoScan.duplicateCooldownMs)) {
+        if (await hasRecentDetectedAlert(user.id, telegramSetup, appConfig.autoScan.duplicateCooldownMs)) {
           skippedDuplicates += 1;
           continue;
         }
 
-        const alert = await saveDetectedAlert(user.id, preference, setup);
+        const alert = await saveDetectedAlert(user.id, preference, telegramSetup);
         if (!alert) {
           skippedDuplicates += 1;
           continue;
         }
 
         alertsCreated += 1;
-        console.log(`[auto-scan] matched alert user=${user.id} symbol=${setup.symbol} timeframe=${setup.timeframe} direction=${setup.direction}`);
-        const queuedTelegramAlerts = await enqueueMatchingTelegramNotifications(user, [setup]);
+        console.log(`[auto-scan] matched alert user=${user.id} symbol=${telegramSetup.symbol} timeframe=${telegramSetup.timeframe} direction=${telegramSetup.direction}`);
+        const queuedTelegramAlerts = await enqueueMatchingTelegramNotifications(user, [telegramSetup]);
         if (!queuedTelegramAlerts.length) {
-          console.log(`[auto-scan] matched alert telegram_queued=0 user=${user.id} symbol=${setup.symbol} timeframe=${setup.timeframe}`);
+          console.log(`[auto-scan] matched alert telegram_queued=0 user=${user.id} symbol=${telegramSetup.symbol} timeframe=${telegramSetup.timeframe}`);
         } else {
           telegramAlertsQueued += queuedTelegramAlerts.length;
-          await saveGeneratedSignal(setup, { source: "telegram_alert", generatedBy: "auto_crypto_watcher" });
-          console.log(`[auto-scan] telegram alert sent user=${user.id} symbol=${setup.symbol} timeframe=${setup.timeframe}`);
+          await saveGeneratedSignal(telegramSetup, { source: "telegram_alert", generatedBy: "auto_crypto_watcher" });
+          console.log(`[auto-scan] telegram alert sent user=${user.id} symbol=${telegramSetup.symbol} timeframe=${telegramSetup.timeframe}`);
         }
       } catch (error) {
         console.warn(`[auto-scan] ${preference.symbol} ${preference.timeframe} skipped: ${error.message}`);
@@ -139,17 +145,19 @@ export async function runAutoCryptoAlertScan() {
             const detailed = await scanMarketSetupDetailed(user, { symbol, timeframe }, null, { source: "auto_crypto_watcher", generatedBy: "auto_crypto_watcher" });
             const setup = detailed.fullSetup;
 
-            if (!setup || !telegramPreferenceMatchesSetup(settings, favoriteSymbols, setup)) {
+            const telegramSetup = setup ? await calibrateTelegramAlertSetup(setup) : null;
+
+            if (!telegramSetup || !telegramPreferenceMatchesSetup(settings, favoriteSymbols, telegramSetup)) {
               continue;
             }
 
-            const queuedTelegramAlerts = await enqueueMatchingTelegramNotifications(user, [setup]);
+            const queuedTelegramAlerts = await enqueueMatchingTelegramNotifications(user, [telegramSetup]);
 
             if (queuedTelegramAlerts.length) {
               telegramAlertsQueued += queuedTelegramAlerts.length;
-              await saveGeneratedSignal(setup, { source: "telegram_alert", generatedBy: "auto_crypto_watcher" });
-              console.log(`[auto-scan] matched alert user=${user.id} symbol=${setup.symbol} timeframe=${setup.timeframe} direction=${setup.direction}`);
-              console.log(`[auto-scan] telegram alert sent user=${user.id} symbol=${setup.symbol} timeframe=${setup.timeframe}`);
+              await saveGeneratedSignal(telegramSetup, { source: "telegram_alert", generatedBy: "auto_crypto_watcher" });
+              console.log(`[auto-scan] matched alert user=${user.id} symbol=${telegramSetup.symbol} timeframe=${telegramSetup.timeframe} direction=${telegramSetup.direction}`);
+              console.log(`[auto-scan] telegram alert sent user=${user.id} symbol=${telegramSetup.symbol} timeframe=${telegramSetup.timeframe}`);
             } else {
               skippedDuplicates += 1;
             }
@@ -177,6 +185,20 @@ export async function runAutoCryptoAlertScan() {
   } finally {
     autoScanRunning = false;
   }
+}
+
+async function calibrateTelegramAlertSetup(setup) {
+  const calibrated = await applyConfidenceCalibration({
+    ...setup,
+    generationSource: "telegram_alert",
+    indicators: {
+      ...(setup.indicators || {}),
+      generationSource: "telegram_alert",
+      confidenceCalibration: undefined,
+      confidenceCalibrationApplied: undefined
+    }
+  });
+  return isSignalBlockedByCalibration(calibrated) ? null : calibrated;
 }
 
 async function getPreferenceUser(userId, cache) {

@@ -122,7 +122,11 @@ export async function createSignal(user, { symbol, timeframe, setupKey }) {
   }
 
   const learningAdjusted = await applyLearningToValidatedSignal(
-    applyValidationToSignal(fullSetup, unlockValidation)
+    applyValidationToSignal({
+      ...fullSetup,
+      generationSource: fullSetup.generationSource || "manual_scan"
+    }, unlockValidation),
+    { source: fullSetup.generationSource || "manual_scan" }
   );
   const signal = {
     ...withSignalQuality(withSignalValidity(learningAdjusted)),
@@ -222,7 +226,8 @@ export async function unlockTelegramSignal(user, { setupKey }) {
   }
 
   const learningAdjustedSignal = await applyLearningToValidatedSignal(
-    applyValidationToSignal(signal, validation)
+    applyValidationToSignal({ ...signal, generationSource: "telegram_alert" }, validation),
+    { source: "telegram_alert" }
   );
   const validatedSignal = withSignalQuality(withSignalValidity(learningAdjustedSignal));
   await saveGeneratedSignal(validatedSignal, { source: "telegram_alert", generatedBy: user.id });
@@ -295,6 +300,7 @@ export async function scanMarketSetup(user, { symbol, timeframe }) {
 }
 
 export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analystProfile = null, generationContext = {}) {
+  const generationSource = generationContext.source || "manual_scan";
   const marketData = await getMultiTimeframeMarketData(symbol, timeframe);
   const profile = analystProfile || await getUserAnalystProfile(user);
   const result = generateMarketDataSetup(marketData, timeframe, { analystProfile: profile });
@@ -303,11 +309,13 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
   const readySignal = result.valid && readiness?.ready
     ? {
       ...result.signal,
+      generationSource,
       confidenceScore: Math.min(Number(result.signal.confidenceScore || 0), Number(candidate?.confidenceEstimate || 99)),
       entryQuality: readiness.entryQuality,
       readinessScore: readiness.readinessScore,
       indicators: {
         ...(result.signal.indicators || {}),
+        generationSource,
         entryQuality: readiness.entryQuality,
         readinessScore: readiness.readinessScore
       }
@@ -321,7 +329,9 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
     : null;
   const valid = Boolean(readySignal && validation?.passed);
   const learnedSignal = valid
-    ? withSignalValidity(await applyLearningToValidatedSignal(applyValidationToSignal(readySignal, validation)))
+    ? withSignalValidity(await applyLearningToValidatedSignal(applyValidationToSignal(readySignal, validation), {
+      source: generationSource
+    }))
     : null;
   const calibrationBlocked = isSignalBlockedByCalibration(learnedSignal);
   const signal = learnedSignal && !calibrationBlocked
@@ -332,12 +342,22 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
   }
   if (signal) {
     await saveGeneratedSignal(signal, {
-      source: generationContext.source || "manual_scan",
+      source: generationSource,
       generatedBy: generationContext.generatedBy || user?.id || "system",
       candidateId: candidate?.id || null
     });
     if (candidate?.id) {
-      await saveGeneratedSignal(signal, {
+      const candidatePromotionSignal = await applyConfidenceCalibration({
+        ...signal,
+        generationSource: "candidate_promotion",
+        indicators: {
+          ...(signal.indicators || {}),
+          generationSource: "candidate_promotion",
+          confidenceCalibration: undefined,
+          confidenceCalibrationApplied: undefined
+        }
+      });
+      await saveGeneratedSignal(candidatePromotionSignal, {
         source: "candidate_promotion",
         generatedBy: generationContext.generatedBy || user?.id || "system",
         candidateId: candidate.id
@@ -1159,13 +1179,22 @@ async function validateSignalForPublication(signal, marketData, user, options = 
   });
 }
 
-async function applyLearningToValidatedSignal(signal) {
+async function applyLearningToValidatedSignal(signal, options = {}) {
   if (!signal) return signal;
-  if (signal.indicators?.learningApplied) {
-    return signal.indicators?.confidenceCalibrationApplied ? signal : applyConfidenceCalibration(signal);
+  const source = options.source || signal.generationSource || signal.source || signal.indicators?.generationSource || "manual_scan";
+  const sourcedSignal = {
+    ...signal,
+    generationSource: source,
+    indicators: {
+      ...(signal.indicators || {}),
+      generationSource: source
+    }
+  };
+  if (sourcedSignal.indicators?.learningApplied) {
+    return sourcedSignal.indicators?.confidenceCalibrationApplied ? sourcedSignal : applyConfidenceCalibration(sourcedSignal);
   }
-  const learning = await getLearningContextForSignal(signal);
-  return applyConfidenceCalibration(applyLearningAdjustment(signal, learning));
+  const learning = await getLearningContextForSignal(sourcedSignal);
+  return applyConfidenceCalibration(applyLearningAdjustment(sourcedSignal, learning));
 }
 
 async function getUserAnalystProfile(user) {

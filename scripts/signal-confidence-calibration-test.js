@@ -12,6 +12,7 @@ import {
 
 const service = readFileSync("src/modules/signals/signalConfidenceCalibrationService.js", "utf8");
 const signalService = readFileSync("src/modules/signals/signalService.js", "utf8");
+const autoScanService = readFileSync("src/modules/alerts/autoScanService.js", "utf8");
 const repository = readFileSync("src/modules/admin-signals/generatedSignalRepository.js", "utf8");
 const controller = readFileSync("src/modules/admin-signals/generatedSignalController.js", "utf8");
 const app = readFileSync("public/app.js", "utf8");
@@ -110,8 +111,36 @@ const recovered = applyCalibrationContext({
   noHistory: true,
   groups: [{ groupKey: "strategy:steady", groupType: "strategy", groupValue: "Steady Retest", closedSignals: 30, winRate: 48, breakEvenWinRate: 28, estimatedExpectancy: 0.52, expiredRate: 5, confidenceCapLift: 5, status: "active" }]
 });
-assert.equal(recovered.confidenceScore, 90, "strong performers can recover the historical cap carefully");
-assert.ok(recovered.indicators.confidenceCalibration.capRecovery.some((item) => item.cap === 92));
+assert.equal(recovered.confidenceScore, 88, "broad positive history cannot lift confidence above 88 without exact source/strategy/timeframe proof");
+assert.ok(recovered.indicators.confidenceCalibration.caps.some((item) => item.cap === 88));
+
+const exactRecovered = applyCalibrationContext({
+  ...baseSignal,
+  generationSource: "manual_scan",
+  confidenceScore: 94,
+  riskRewardRatio: 2.4,
+  alignmentBadge: "Full Alignment",
+  confluenceScore: 82,
+  indicators: { regime: "Trend Up", readinessScore: 95, entryQuality: "excellent", generationSource: "manual_scan" },
+  entryQuality: "excellent",
+  confirmations: [{ name: "Volume", passed: true }]
+}, {
+  noHistory: false,
+  groups: [{
+    groupKey: "source_strategy_timeframe:manual-scan:breakout-retest:15m",
+    groupType: "source_strategy_timeframe",
+    groupValue: "manual_scan:Breakout Retest:15m",
+    closedSignals: 24,
+    winRate: 54,
+    breakEvenWinRate: 32,
+    estimatedExpectancy: 0.42,
+    expiredRate: 4,
+    confidenceCapLift: 5,
+    status: "active"
+  }]
+});
+assert.equal(exactRecovered.confidenceScore, 94, "only exact source/strategy/timeframe positive expectancy can allow confidence above 88");
+assert.ok(exactRecovered.indicators.confidenceCalibration.capRecovery.some((item) => item.cap === 99));
 
 const stillCappedByRules = applyCalibrationContext({
   ...baseSignal,
@@ -136,8 +165,16 @@ assert.match(migration, /ADD COLUMN IF NOT EXISTS confidence_calibration/);
 
 assert.match(service, /status = 'Hit TP' THEN risk_reward WHEN status = 'Hit SL' THEN -1 WHEN status = 'Expired' THEN -0\.35/);
 assert.match(service, /Confidence reflects rule alignment and historical calibration/);
+assert.match(service, /HIGH_CONFIDENCE_EXPECTANCY_CAP = 88/);
+assert.match(service, /EXACT_SOURCE_STRATEGY_TIMEFRAME_MIN_CLOSED = 20/);
+assert.match(service, /source_strategy_timeframe/);
 assert.match(signalService, /isSignalBlockedByCalibration/);
 assert.match(signalService, /Performance calibration quarantined or disabled this group/);
+assert.match(signalService, /generationSource/);
+assert.match(signalService, /generationSource: "candidate_promotion"/);
+assert.match(autoScanService, /calibrateTelegramAlertSetup/);
+assert.match(autoScanService, /generationSource: "telegram_alert"/);
+assert.match(autoScanService, /isSignalBlockedByCalibration/);
 assert.match(repository, /recordGeneratedSignalConfidenceAdjustment/);
 assert.match(controller, /\/api\/admin\/signals\/quality\/status/);
 assert.match(app, /admin-signal-quality-panel/);
