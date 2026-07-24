@@ -2,11 +2,14 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   applyCalibrationContext,
+  analyzeConfidenceBucketCalibration,
   bestGroups,
   breakEvenWinRate,
   calculateClosedWinRate,
   calculateGroupStatus,
   calculateQualityAdjustedScore,
+  calibrationStatusForGroup,
+  sampleSizeStatusForGroup,
   underconfidentWinners
 } from "../src/modules/signals/signalConfidenceCalibrationService.js";
 
@@ -18,6 +21,7 @@ const controller = readFileSync("src/modules/admin-signals/generatedSignalContro
 const app = readFileSync("public/app.js", "utf8");
 const html = readFileSync("public/index.html", "utf8");
 const migration = readFileSync("migrations/050_signal_confidence_calibration.sql", "utf8");
+const calibratedMigration = readFileSync("migrations/053_generated_signal_calibrated_confidence.sql", "utf8");
 const quality = readFileSync("src/modules/signals/signalQualityService.js", "utf8");
 
 assert.equal(breakEvenWinRate(2.42), 29.2, "break-even win rate should use 1 / (1 + average RR)");
@@ -50,7 +54,7 @@ const veryPoor = calculateGroupStatus({
   confidenceGap: 70
 });
 assert.equal(veryPoor.status, "quarantined");
-assert.equal(veryPoor.confidenceCap, 72);
+assert.equal(veryPoor.confidenceCap, 68);
 
 const baseSignal = {
   symbol: "BTC-USD",
@@ -66,6 +70,9 @@ const baseSignal = {
 
 const noHistory = applyCalibrationContext(baseSignal, { noHistory: true, groups: [] });
 assert.equal(noHistory.confidenceScore, 72, "choppy/range cap should dominate weaker no-history cap");
+assert.equal(noHistory.confidenceCalibration.rawSetupScore, 91);
+assert.equal(noHistory.confidenceCalibration.calibratedConfidence, 72);
+assert.equal(noHistory.confidenceCalibration.version, "calibration_v2");
 assert.ok(noHistory.indicators.confidenceCalibration.caps.some((item) => item.cap === 85));
 assert.ok(noHistory.indicators.confidenceCalibration.caps.some((item) => item.cap === 80));
 assert.ok(noHistory.indicators.confidenceCalibration.caps.some((item) => item.cap === 72));
@@ -139,8 +146,20 @@ const exactRecovered = applyCalibrationContext({
     status: "active"
   }]
 });
-assert.equal(exactRecovered.confidenceScore, 92, "only exact source/strategy/timeframe positive expectancy can allow confidence above 88, with careful recovery caps");
-assert.ok(exactRecovered.indicators.confidenceCalibration.capRecovery.some((item) => item.cap === 99));
+assert.equal(exactRecovered.confidenceScore, 88, "even exact source/strategy/timeframe proof cannot bypass the high-confidence bucket and timeframe caps yet");
+assert.ok(exactRecovered.indicators.confidenceCalibration.caps.some((item) => item.cap === 88));
+
+const invertedBuckets = analyzeConfidenceBucketCalibration([
+  { groupKey: "confidence_bucket:70-79", groupType: "confidence_bucket", groupValue: "70-79", closedSignals: 12, winRate: 45, breakEvenWinRate: 30, estimatedExpectancy: 0.25, expiredRate: 5, confidenceGap: 30 },
+  { groupKey: "confidence_bucket:80-89", groupType: "confidence_bucket", groupValue: "80-89", closedSignals: 12, winRate: 35, breakEvenWinRate: 30, estimatedExpectancy: 0.05, expiredRate: 5, confidenceGap: 50 },
+  { groupKey: "confidence_bucket:90-100", groupType: "confidence_bucket", groupValue: "90-100", closedSignals: 12, winRate: 20, breakEvenWinRate: 30, estimatedExpectancy: -0.4, expiredRate: 12, confidenceGap: 72 }
+]);
+assert.equal(invertedBuckets.active, true);
+assert.match(invertedBuckets.message, /higher confidence buckets are not outperforming lower buckets/i);
+assert.equal(invertedBuckets.worstBucket.groupValue, "90-100");
+assert.equal(sampleSizeStatusForGroup({ closedSignals: 9 }), "Small sample size. Do not trust this result yet.");
+assert.equal(sampleSizeStatusForGroup({ closedSignals: 12 }), "Early data. Calibration may change.");
+assert.equal(calibrationStatusForGroup({ closedSignals: 12, winRate: 20, breakEvenWinRate: 30, estimatedExpectancy: -0.2 }), "Overconfident");
 
 const stillCappedByRules = applyCalibrationContext({
   ...baseSignal,
@@ -162,12 +181,17 @@ assert.match(migration, /CREATE TABLE IF NOT EXISTS signal_confidence_adjustment
 assert.match(migration, /CREATE TABLE IF NOT EXISTS signal_strategy_statuses/);
 assert.match(migration, /ADD COLUMN IF NOT EXISTS original_confidence/);
 assert.match(migration, /ADD COLUMN IF NOT EXISTS confidence_calibration/);
+assert.match(calibratedMigration, /ADD COLUMN IF NOT EXISTS calibrated_confidence/);
+assert.match(calibratedMigration, /ADD COLUMN IF NOT EXISTS confidence_version/);
+assert.match(calibratedMigration, /ADD COLUMN IF NOT EXISTS calibration_reason/);
 
 assert.match(service, /status = 'Hit TP' THEN risk_reward WHEN status = 'Hit SL' THEN -1 WHEN status = 'Expired' THEN -0\.35/);
-assert.match(service, /Confidence reflects rule alignment and historical calibration/);
+assert.match(service, /Confidence reflects setup alignment after historical calibration/);
 assert.match(service, /HIGH_CONFIDENCE_EXPECTANCY_CAP = 88/);
 assert.match(service, /EXACT_SOURCE_STRATEGY_TIMEFRAME_MIN_CLOSED = 20/);
 assert.match(service, /source_strategy_timeframe/);
+assert.match(service, /analyzeConfidenceBucketCalibration/);
+assert.match(service, /CONFIDENCE_WARNING_COPY/);
 assert.match(signalService, /isSignalBlockedByCalibration/);
 assert.match(signalService, /Performance calibration quarantined or disabled this group/);
 assert.match(signalService, /generationSource/);
@@ -176,6 +200,9 @@ assert.match(autoScanService, /calibrateTelegramAlertSetup/);
 assert.match(autoScanService, /generationSource: "telegram_alert"/);
 assert.match(autoScanService, /isSignalBlockedByCalibration/);
 assert.match(repository, /recordGeneratedSignalConfidenceAdjustment/);
+assert.match(repository, /calibrated_confidence/);
+assert.match(repository, /confidence_version/);
+assert.match(repository, /calibration_reason/);
 assert.match(controller, /\/api\/admin\/signals\/quality\/status/);
 assert.match(app, /admin-signal-quality-panel/);
 assert.match(app, /Best strategies/);
@@ -185,12 +212,15 @@ assert.match(app, /Trust more/);
 assert.match(app, /Increase confidence carefully/);
 assert.match(app, /data-signal-quality-status="quarantined"/);
 assert.match(app, /Original confidence/);
+assert.match(app, /Raw setup score/);
+assert.match(app, /Calibrated confidence/);
+assert.match(app, /Quality Calibration Summary/);
 assert.match(html, /admin-signal-quality-panel/);
 assert.match(service, /function bestGroupSort/);
 assert.match(service, /underconfidentWinners/);
 assert.match(service, /capRecovery/);
 assert.match(service, /Strong performer/);
 assert.match(signalService, /confidenceCalibration: undefined/);
-assert.match(quality, /not a guaranteed win rate or probability of profit/);
+assert.match(quality, /Confidence reflects setup alignment after historical calibration/);
 
 console.log("Signal confidence calibration, loss analysis, quarantine, admin diagnostics, and privacy tests passed.");

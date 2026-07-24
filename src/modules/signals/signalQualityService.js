@@ -69,7 +69,11 @@ export function buildSignalQuality(signal = {}) {
     .filter((item) => ["fair", "weak", "missing", "failed", "limited"].includes(item.status))
     .map((item) => item.reason || `${item.label} does not have enough data.`)
     .slice(0, 4);
-  const overall = statusFromScore(Number(signal.qualityScore || signal.confidenceScore || 0));
+  const calibration = signal.confidenceCalibration || indicators.confidenceCalibration || {};
+  const calibratedConfidence = finiteScore(calibration.calibratedConfidence ?? calibration.finalConfidence ?? signal.calibratedConfidence ?? signal.confidenceScore);
+  const rawSetupScore = finiteScore(calibration.rawSetupScore ?? calibration.originalConfidence ?? signal.rawSetupScore ?? signal.qualityScore);
+  const overall = statusFromCalibratedConfidence(calibratedConfidence, calibration.status);
+  const label = labelFromCalibratedConfidence(calibratedConfidence, calibration.status);
   const positiveLabels = list.filter((item) => ["strong", "good"].includes(item.status)).map((item) => item.label);
   const mainReason = positiveLabels.length
     ? `${joinLabels(positiveLabels.slice(0, 2))} passed validation.`
@@ -78,12 +82,16 @@ export function buildSignalQuality(signal = {}) {
   return {
     version: 1,
     overall,
-    score: finiteScore(signal.qualityScore),
+    label,
+    score: calibratedConfidence,
+    rawSetupScore,
+    calibratedConfidence,
+    calibrationStatus: calibration.status || "active",
     mainReason,
     categories,
     strengths,
     risks,
-    confidenceExplanation: "Confidence reflects rule alignment and historical calibration. It is not a guaranteed win rate or probability of profit.",
+    confidenceExplanation: "Confidence reflects setup alignment after historical calibration. It is not a guaranteed win rate.",
     debug: buildDebug(signal, list, indicators)
   };
 }
@@ -248,6 +256,26 @@ function statusFromScore(score) {
   if (score >= 65) return "fair";
   if (score > 0) return "weak";
   return "missing";
+}
+
+function statusFromCalibratedConfidence(score, calibrationStatus = "active") {
+  if (["quarantined", "disabled_by_admin"].includes(calibrationStatus)) return "weak";
+  if (calibrationStatus === "reduced_confidence") return "fair";
+  if (calibrationStatus === "watchlist") return "fair";
+  return statusFromScore(Number(score || 0));
+}
+
+function labelFromCalibratedConfidence(score, calibrationStatus = "active") {
+  if (calibrationStatus === "quarantined") return "Quarantined";
+  if (calibrationStatus === "disabled_by_admin") return "Disabled by admin";
+  if (calibrationStatus === "reduced_confidence") return "Reduced confidence";
+  if (calibrationStatus === "watchlist") return "Under calibration";
+  const value = Number(score || 0);
+  if (value >= 89) return "Proven elite";
+  if (value >= 85) return "Very strong";
+  if (value >= 80) return "Strong";
+  if (value >= 70) return "Moderate";
+  return "Experimental";
 }
 
 function normalizeStatus(status) {

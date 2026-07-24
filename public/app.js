@@ -3879,6 +3879,7 @@ function renderAdminSignalQualityPanel(quality = {}) {
   panel.innerHTML = `
     <article class="signal-quality-warning muted"><strong>${quality.scope === "legacy" ? "Legacy only" : quality.scope === "all" ? "All signals" : "Current engine only"}</strong><p>Admin Signal Quality defaults to current-engine records so legacy unlocked/saved signals do not distort live calibration.</p></article>
     ${warning.active ? `<article class="signal-quality-warning"><strong>Signal quality warning</strong><p>${escapeHtml(warning.message)}</p><small>Win rate excludes expired signals. Expired signals still reduce the quality score because they represent setups that failed to complete.</small></article>` : ""}
+    ${renderConfidenceCalibrationSummary(quality.calibrationSummary || {})}
     <article class="signal-quality-summary">
       ${renderSignalQualitySummaryItem("Best performer", summary.bestPerformer)}
       ${renderSignalQualitySummaryItem("Worst performer", summary.worstPerformer)}
@@ -3889,6 +3890,23 @@ function renderAdminSignalQualityPanel(quality = {}) {
       ${groups.map(([title, items, mode]) => renderSignalQualityGroupList(title, items, mode)).join("")}
     </div>
     <article class="signal-quality-buckets"><h4>Confidence buckets</h4>${renderSignalQualityBucketRows(quality.confidenceBuckets || [])}</article>`;
+}
+
+function renderConfidenceCalibrationSummary(summary = {}) {
+  const active = Boolean(summary.active);
+  const worst = summary.worstBucket;
+  const overconfident = summary.mostOverconfidentBucket;
+  return `<article class="signal-quality-warning ${active ? "" : "muted"}">
+    <strong>Quality Calibration Summary</strong>
+    <p>${escapeHtml(summary.message || "Confidence buckets are waiting for enough closed samples.")}</p>
+    <div class="signal-quality-summary">
+      <div><span>Calibrated</span><strong>${summary.calibrated ? "Yes" : "No"}</strong><small>Current engine scope</small></div>
+      <div><span>Higher buckets outperforming</span><strong>${summary.higherBucketsOutperforming ? "Yes" : "No"}</strong><small>${active ? "Tighten promotion" : "No inversion detected"}</small></div>
+      <div><span>Worst bucket</span><strong>${worst ? escapeHtml(worst.groupValue) : "n/a"}</strong><small>${worst ? `${Number(worst.estimatedExpectancy || 0).toFixed(2)}R expectancy` : "Waiting for data"}</small></div>
+      <div><span>Most overconfident bucket</span><strong>${overconfident ? escapeHtml(overconfident.groupValue) : "n/a"}</strong><small>${overconfident ? `Gap ${Number(overconfident.confidenceGap || 0).toFixed(1)} pts` : "Waiting for data"}</small></div>
+    </div>
+    <small>${escapeHtml(summary.recommendedAction || "Keep confidence capped until closed outcomes prove higher buckets deserve higher scores.")}</small>
+  </article>`;
 }
 
 function renderSignalQualitySummaryItem(label, group) {
@@ -3928,7 +3946,12 @@ function renderWorstSignalQualityActions(group) {
 
 function renderSignalQualityBucketRows(items) {
   if (!items.length) return `<p class="reasoning">Not enough data yet.</p>`;
-  return items.map((group) => `<div class="signal-quality-row compact"><span><strong>${escapeHtml(group.groupValue)}</strong><small>${Number(group.totalSignals || 0)} signals</small></span><span>${Number(group.winRate || 0).toFixed(1)}% win · ${Number(group.expiredRate || 0).toFixed(1)}% expired</span><span>Gap ${Number(group.confidenceGap || 0).toFixed(1)} pts</span></div>`).join("");
+  return items.map((group) => `<div class="signal-quality-row compact">
+    <span><strong>${escapeHtml(group.groupValue)}</strong><small>${Number(group.totalSignals || 0)} total · ${Number(group.closedSignals || 0)} closed</small><small>${escapeHtml(group.sampleSizeStatus || "Sample status unavailable")}</small></span>
+    <span><strong>${Number(group.winRate || 0).toFixed(1)}% win</strong><small>BE ${Number(group.breakEvenWinRate || 0).toFixed(1)}% · TP ${Number(group.hitTp || 0)} · SL ${Number(group.hitSl || 0)} · Exp ${Number(group.expired || 0)}</small></span>
+    <span><strong>${Number(group.estimatedExpectancy || 0).toFixed(2)}R</strong><small>Avg RR ${Number(group.averageRiskReward || 0).toFixed(2)}R · Expired ${Number(group.expiredRate || 0).toFixed(1)}%</small></span>
+    <span><strong>${escapeHtml(group.calibrationStatus || titleCase(group.status || "active"))}</strong><small>Avg confidence ${Number(group.averageConfidence || 0).toFixed(1)}% · Gap ${Number(group.confidenceGap || 0).toFixed(1)} pts</small></span>
+  </div>`).join("");
 }
 
 function renderAdminSignalRow(signal) {
@@ -3951,8 +3974,11 @@ function renderAdminSignalDetail(signal) {
   const candidate = signal.candidateOrigin;
   const calibration = signal.confidenceCalibration || {};
   const calibrationRows = [
+    `Raw setup score: ${Number(signal.rawSetupScore ?? signal.originalConfidence ?? calibration.rawSetupScore ?? calibration.originalConfidence ?? signal.confidence).toFixed(0)}%`,
     `Original confidence: ${Number(signal.originalConfidence ?? calibration.originalConfidence ?? signal.confidence).toFixed(0)}%`,
-    `Final confidence: ${Number(signal.finalConfidence ?? calibration.finalConfidence ?? signal.confidence).toFixed(0)}%`,
+    `Calibrated confidence: ${Number(signal.calibratedConfidence ?? signal.finalConfidence ?? calibration.calibratedConfidence ?? calibration.finalConfidence ?? signal.confidence).toFixed(0)}%`,
+    `Confidence version: ${signal.confidenceVersion || calibration.version || "calibration_v1"}`,
+    signal.calibrationReason || calibration.calibrationReason ? `Calibration reason: ${signal.calibrationReason || calibration.calibrationReason}` : null,
     calibration.confidenceCap ? `Cap applied: ${Number(calibration.confidenceCap).toFixed(0)}%` : null,
     calibration.totalPenalty ? `Total penalty: ${Number(calibration.totalPenalty)} points` : null,
     calibration.status ? `Calibration status: ${titleCase(calibration.status)}` : null,
@@ -7196,7 +7222,7 @@ function renderConfidenceSummary(signal) {
     <section class="unlocked-confidence-summary">
       <span>Confidence summary ${renderConfidenceHelp()}</span>
       <strong>${getConfidenceBand(signal.confidenceScore)} · ${Number(signal.confidenceScore || 0)}%</strong>
-      <small>${passed}/${confirmations.length} confirmations passed. Confidence measures rule alignment, not probability of profit.</small>
+      <small>${passed}/${confirmations.length} confirmations passed. Confidence reflects calibrated setup alignment, not probability of profit.</small>
     </section>
   `;
 }
@@ -7206,7 +7232,7 @@ function renderConfidenceHelp() {
     <span class="confidence-help" tabindex="0" aria-label="About SignalForge confidence">
       <span aria-hidden="true">i</span>
       <span class="confidence-tooltip" role="tooltip">
-        Confidence reflects rule alignment and setup quality. It is not a win probability.
+        Confidence reflects setup alignment after historical calibration. It is not a win probability.
         <button type="button" data-how-it-works-link>Learn more</button>
       </span>
     </span>`;
@@ -7307,7 +7333,7 @@ function getSignalQualityData(signal) {
     categories,
     strengths: list.filter((item) => ["strong", "good"].includes(item.status)).map((item) => item.reason).slice(0, 4),
     risks: list.filter((item) => ["fair", "weak", "missing", "failed", "limited"].includes(item.status)).map((item) => item.reason).slice(0, 4),
-    confidenceExplanation: "Confidence reflects rule alignment and setup quality. It is not a guarantee or probability of profit."
+    confidenceExplanation: "Confidence reflects setup alignment after historical calibration. It is not a guaranteed win rate."
   };
 }
 

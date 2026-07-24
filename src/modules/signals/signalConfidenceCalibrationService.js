@@ -4,6 +4,11 @@ const terminalStatuses = new Set(["Hit TP", "Hit SL", "Expired", "Manually close
 const adminStatuses = new Set(["active", "watchlist", "reduced_confidence", "quarantined", "disabled_by_admin"]);
 const HIGH_CONFIDENCE_EXPECTANCY_CAP = 88;
 const EXACT_SOURCE_STRATEGY_TIMEFRAME_MIN_CLOSED = 20;
+const CONFIDENCE_CALIBRATION_VERSION = "calibration_v2";
+const SAMPLE_SMALL = "Small sample size. Do not trust this result yet.";
+const SAMPLE_EARLY = "Early data. Calibration may change.";
+const CONFIDENCE_COPY = "Confidence reflects setup alignment after historical calibration. It is not a guaranteed win rate.";
+const CONFIDENCE_WARNING_COPY = "Confidence calibration warning: higher confidence buckets are not outperforming lower buckets. Confidence should be tightened before promotion.";
 
 export function breakEvenWinRate(averageRiskReward) {
   const rr = Number(averageRiskReward || 0);
@@ -68,23 +73,28 @@ export function calculateGroupStatus(metrics = {}, override = null) {
   if (closed >= 10 && belowBreakEven) {
     status = "watchlist";
     penalty = -5;
+    confidenceCap = Math.min(confidenceCap ?? 99, 82);
     performanceLabel = "Underperforming";
     recommendedAction = "Watchlist";
   }
   if (closed >= 20 && expectancy < 0) {
     status = "reduced_confidence";
     penalty = -10;
+    confidenceCap = Math.min(confidenceCap ?? 99, 75);
     performanceLabel = "Reduced confidence";
     recommendedAction = "Reduce confidence";
+  }
+  if (closed >= 20 && expectancy <= -0.5) {
+    confidenceCap = Math.min(confidenceCap ?? 99, 68);
   }
   if (closed >= 25 && expectancy < -0.2 && hitSl >= Math.max(12, Number(metrics.hitTp || 0) * 2) && confidenceGap >= 20) {
     status = "quarantined";
     penalty = -15;
-    confidenceCap = 72;
+    confidenceCap = Math.min(confidenceCap ?? 99, 68);
     performanceLabel = "Quarantined";
     recommendedAction = "Quarantine";
   }
-  if (expiredRate >= 35 && Number(metrics.totalSignals || 0) >= 10) {
+  if (expiredRate > 25 && Number(metrics.totalSignals || 0) >= 10) {
     penalty = Math.min(penalty, -5);
     confidenceCap = Math.min(confidenceCap ?? 99, 78);
     if (status === "active") {
@@ -167,6 +177,7 @@ export function isSignalBlockedByCalibration(signal) {
 
 export function applyCalibrationContext(signal, context = {}) {
   const originalConfidence = Number(signal.confidenceScore || 0);
+  const rawSetupScore = originalConfidence;
   let ruleCap = 99;
   let historicalCap = context.noHistory ? 85 : 99;
   let expectancyCap = HIGH_CONFIDENCE_EXPECTANCY_CAP;
@@ -213,8 +224,9 @@ export function applyCalibrationContext(signal, context = {}) {
     Number(group.winRate || 0) >= Number(group.breakEvenWinRate || 0)
   );
   const exactPositiveGroup = findProvenExactSourceStrategyTimeframe(context.groups || []);
+  const eliteConfidenceAllowed = canAllowEliteConfidence(signal, context.groups || [], exactPositiveGroup);
 
-  if (exactPositiveGroup) {
+  if (exactPositiveGroup && eliteConfidenceAllowed) {
     expectancyCap = 99;
     capRecovery.push({
       cap: 99,
@@ -223,7 +235,7 @@ export function applyCalibrationContext(signal, context = {}) {
   } else {
     caps.push({
       cap: HIGH_CONFIDENCE_EXPECTANCY_CAP,
-      reason: `Confidence above ${HIGH_CONFIDENCE_EXPECTANCY_CAP}% requires positive expectancy from at least ${EXACT_SOURCE_STRATEGY_TIMEFRAME_MIN_CLOSED} closed signals for this exact source, strategy, and timeframe.`,
+      reason: `Confidence above ${HIGH_CONFIDENCE_EXPECTANCY_CAP}% requires monotonic high-confidence bucket performance, positive expectancy from at least ${EXACT_SOURCE_STRATEGY_TIMEFRAME_MIN_CLOSED} exact source/strategy/timeframe closed signals, and no quarantine or red flags.`,
       type: "historical"
     });
   }
@@ -234,6 +246,18 @@ export function applyCalibrationContext(signal, context = {}) {
     }
     if (group.confidenceCap) {
       addCap(group.confidenceCap, `${titleCase(group.groupType)} confidence cap from generated-signal performance.`, "historical");
+    }
+    if (Number(group.closedSignals || 0) >= 10 && Number(group.winRate || 0) < Number(group.breakEvenWinRate || 0)) {
+      addCap(82, `${titleCase(group.groupType)} is below break-even with enough closed signals.`, "historical");
+    }
+    if (Number(group.closedSignals || 0) >= 20 && Number(group.estimatedExpectancy || 0) < 0) {
+      addCap(75, `${titleCase(group.groupType)} has negative expectancy over 20+ closed signals.`, "historical");
+    }
+    if (Number(group.closedSignals || 0) >= 20 && Number(group.estimatedExpectancy || 0) <= -0.5) {
+      addCap(68, `${titleCase(group.groupType)} has very negative expectancy.`, "historical");
+    }
+    if (Number(group.expiredRate || 0) > 25 && Number(group.totalSignals || 0) >= 10) {
+      addCap(78, `${titleCase(group.groupType)} has more than 25% expired outcomes.`, "historical");
     }
   }
   if (recentPoor) addCap(78, "Recent generated outcomes are below break-even.", "historical");
@@ -259,41 +283,41 @@ export function applyCalibrationContext(signal, context = {}) {
   const confidenceCap = Math.min(ruleCap, historicalCap, expectancyCap);
   const finalConfidence = Math.max(50, Math.min(confidenceCap, originalConfidence + penalty));
   const status = quarantined?.status || (severeStrategy || severePairTimeframe ? "reduced_confidence" : poorGroups.length ? "watchlist" : "active");
-  const message = status === "active"
-    ? "Confidence reflects rule alignment and historical calibration. It is not a guaranteed win rate."
+  const calibrationReason = status === "active"
+    ? CONFIDENCE_COPY
     : "Confidence was reduced because generated-signal outcomes for similar setups are below calibration thresholds.";
+  const roundedFinalConfidence = Math.round(finalConfidence);
+  const calibrationPayload = {
+    version: CONFIDENCE_CALIBRATION_VERSION,
+    rawSetupScore,
+    originalConfidence,
+    calibratedConfidence: roundedFinalConfidence,
+    finalConfidence: roundedFinalConfidence,
+    confidenceCap,
+    totalPenalty: penalty,
+    caps,
+    capRecovery,
+    penalties,
+    status,
+    label: confidenceQualityLabel(roundedFinalConfidence, status),
+    blocked: ["quarantined", "disabled_by_admin"].includes(status),
+    calibrationReason,
+    message: CONFIDENCE_COPY,
+    groups: (context.groups || []).map(summarizeGroupForSignal)
+  };
 
   return {
     ...signal,
-    confidenceScore: Math.round(finalConfidence),
-    confidenceCalibration: {
-      originalConfidence,
-      finalConfidence: Math.round(finalConfidence),
-      confidenceCap,
-      totalPenalty: penalty,
-      caps,
-      capRecovery,
-      penalties,
-      status,
-      blocked: ["quarantined", "disabled_by_admin"].includes(status),
-      message,
-      groups: (context.groups || []).map(summarizeGroupForSignal)
-    },
+    confidenceScore: roundedFinalConfidence,
+    calibratedConfidence: roundedFinalConfidence,
+    rawSetupScore,
+    confidenceVersion: CONFIDENCE_CALIBRATION_VERSION,
+    calibrationReason,
+    confidenceCalibration: calibrationPayload,
     indicators: {
       ...(signal.indicators || {}),
-      confidenceCalibration: {
-        originalConfidence,
-        finalConfidence: Math.round(finalConfidence),
-        confidenceCap,
-        totalPenalty: penalty,
-        caps,
-        capRecovery,
-        penalties,
-        status,
-        blocked: ["quarantined", "disabled_by_admin"].includes(status),
-        message
-      },
-      confidenceCalibrationMessage: message,
+      confidenceCalibration: calibrationPayload,
+      confidenceCalibrationMessage: CONFIDENCE_COPY,
       confidenceCalibrationApplied: true
     }
   };
@@ -328,7 +352,7 @@ export async function getAdminSignalQualityBreakdown(scope = "current") {
     ...(await aggregatePerformanceGroups("pair_timeframe", "pair || ':' || timeframe", "pair IS NOT NULL AND timeframe IS NOT NULL", scope))
   ];
   await upsertPerformanceGroups(groups);
-  const stats = await getOverallQualityWarning();
+  const stats = await getOverallQualityWarning(scope);
   const bestStrategies = bestGroups(groups, "strategy");
   const bestPairTimeframes = bestGroups(groups, "pair_timeframe");
   const bestPairs = bestGroups(groups, "pair");
@@ -346,8 +370,11 @@ export async function getAdminSignalQualityBreakdown(scope = "current") {
   const worstPatterns = worstGroups(groups, "pattern");
   const underconfident = underconfidentWinners(groups);
   const overconfident = groups.filter((group) => group.groupType === "strategy" && group.closedSignals >= 10).sort((a, b) => b.confidenceGap - a.confidenceGap).slice(0, 5);
+  const confidenceBuckets = groups.filter((group) => group.groupType === "confidence_bucket").sort((a, b) => a.groupValue.localeCompare(b.groupValue));
+  const calibrationSummary = analyzeConfidenceBucketCalibration(confidenceBuckets);
   return {
     warning: stats,
+    calibrationSummary,
     scope: normalizeStatsScope(scope),
     summary: buildBestWorstSummary({
       bestStrategies,
@@ -377,7 +404,7 @@ export async function getAdminSignalQualityBreakdown(scope = "current") {
     mostOverconfidentStrategies: overconfident,
     underconfidentWinners: underconfident,
     mostReliableStrategies: bestStrategies,
-    confidenceBuckets: groups.filter((group) => group.groupType === "confidence_bucket").sort((a, b) => a.groupValue.localeCompare(b.groupValue))
+    confidenceBuckets
   };
 }
 
@@ -513,7 +540,51 @@ async function upsertPerformanceGroups(groups = []) {
   }
 }
 
-async function getOverallQualityWarning() {
+export function analyzeConfidenceBucketCalibration(bucketGroups = []) {
+  const byBucket = new Map((bucketGroups || []).map((group) => [group.groupValue, group]));
+  const mid = byBucket.get("80-89");
+  const high = byBucket.get("90-100");
+  const good = byBucket.get("70-79");
+  const warnings = [];
+  const enoughBucketSamples = Boolean(
+    good && mid && high &&
+    Number(good.closedSignals || 0) >= 10 &&
+    Number(mid.closedSignals || 0) >= 10 &&
+    Number(high.closedSignals || 0) >= 10
+  );
+  const beats = (upper, lower) => {
+    if (!upper || !lower) return true;
+    if (Number(upper.closedSignals || 0) < 10 || Number(lower.closedSignals || 0) < 10) return true;
+    return Number(upper.estimatedExpectancy || 0) > Number(lower.estimatedExpectancy || 0) &&
+      Number(upper.winRate || 0) >= Number(lower.winRate || 0);
+  };
+  if (!beats(high, mid)) warnings.push("90-100 is not outperforming 80-89.");
+  if (!beats(mid, good)) warnings.push("80-89 is not outperforming 70-79.");
+  if (high && Number(high.closedSignals || 0) >= 10 && Number(high.winRate || 0) < Number(high.breakEvenWinRate || 0)) {
+    warnings.push("90-100 is below break-even.");
+  }
+  const sampled = bucketGroups.filter((group) => Number(group.closedSignals || 0) >= 10);
+  const worstBucket = sampled.slice().sort((a, b) => Number(a.estimatedExpectancy || 0) - Number(b.estimatedExpectancy || 0))[0] || null;
+  const mostOverconfidentBucket = sampled.slice().sort((a, b) => Number(b.confidenceGap || 0) - Number(a.confidenceGap || 0))[0] || null;
+  return {
+    calibrated: !warnings.length && enoughBucketSamples,
+    higherBucketsOutperforming: !warnings.length,
+    active: Boolean(warnings.length),
+    message: warnings.length
+      ? CONFIDENCE_WARNING_COPY
+      : enoughBucketSamples
+        ? "Confidence buckets are monotonic across current-engine closed outcomes."
+        : "Confidence buckets do not have enough closed samples yet.",
+    details: warnings,
+    worstBucket: worstBucket ? summarizeGroupForSignal(worstBucket) : null,
+    mostOverconfidentBucket: mostOverconfidentBucket ? summarizeGroupForSignal(mostOverconfidentBucket) : null,
+    recommendedAction: warnings.length
+      ? "Keep future confidence capped at 88 and tighten promotion until higher buckets outperform lower buckets."
+      : "Keep collecting closed outcomes before allowing wider confidence ranges."
+  };
+}
+
+async function getOverallQualityWarning(scope = "current") {
   const result = await query(`
     SELECT
       COUNT(*) FILTER (WHERE status = 'Hit TP')::integer AS hit_tp,
@@ -522,7 +593,7 @@ async function getOverallQualityWarning() {
       COALESCE(AVG(risk_reward), 0) AS average_rr,
       COALESCE(AVG(confidence), 0) AS average_confidence
     FROM generated_signals
-    WHERE status IN ('Hit TP', 'Hit SL', 'Expired')
+    WHERE status IN ('Hit TP', 'Hit SL', 'Expired') AND ${statsScopeSql(scope)}
   `);
   const metrics = calculateGroupMetrics({ ...result.rows[0], total_signals: Number(result.rows[0]?.hit_tp || 0) + Number(result.rows[0]?.hit_sl || 0) + Number(result.rows[0]?.expired || 0) });
   const warning = metrics.averageConfidence > 85 && metrics.closedSignals >= 20 && metrics.winRate < metrics.breakEvenWinRate;
@@ -552,6 +623,7 @@ function buildSignalGroupDefinitions(signal) {
   const direction = signal.direction || "unknown";
   const source = signal.generationSource || signal.source || signal.indicators?.generationSource || "manual_scan";
   const pattern = signal.patternContext?.pattern || signal.indicators?.patternContext?.pattern || "";
+  const confidenceBucket = buildConfidenceBucket(signal.confidenceScore);
   return [
     { groupType: "source_strategy_timeframe", groupValue: `${source}:${strategy}:${timeframe}`, where: "source = $1 AND strategy = $2 AND timeframe = $3", params: [source, strategy, timeframe] },
     { groupType: "strategy", groupValue: strategy, where: "strategy = $1", params: [strategy] },
@@ -559,6 +631,7 @@ function buildSignalGroupDefinitions(signal) {
     { groupType: "pair", groupValue: pair, where: "pair = $1", params: [pair] },
     { groupType: "timeframe", groupValue: timeframe, where: "timeframe = $1", params: [timeframe] },
     { groupType: "direction", groupValue: direction, where: "direction = $1", params: [direction] },
+    { groupType: "confidence_bucket", groupValue: confidenceBucket, where: `${confidenceBucketSql()} = $1`, params: [confidenceBucket] },
     { groupType: "recent_strategy", groupValue: strategy, where: "strategy = $1 AND created_at >= now() - interval '7 days'", params: [strategy] },
     ...(pattern ? [{ groupType: "pattern", groupValue: pattern, where: "pattern = $1", params: [pattern] }] : [])
   ];
@@ -571,6 +644,23 @@ function findProvenExactSourceStrategyTimeframe(groups = []) {
     Number(group.estimatedExpectancy || 0) > 0 &&
     Number(group.winRate || 0) >= Number(group.breakEvenWinRate || 0)
   ) || null;
+}
+
+function canAllowEliteConfidence(signal, groups = [], exactPositiveGroup = null) {
+  if (!exactPositiveGroup) return false;
+  if (Number(signal.readinessScore ?? signal.indicators?.readinessScore ?? 0) <= 0) return false;
+  if (["5m", "1h"].includes(signal.timeframe)) return false;
+  if (Number(signal.riskRewardRatio || 0) < 1.5) return false;
+  if (hasMissingHigherTimeframe(signal) || hasWeakVolume(signal) || isChoppy(signal) || entryReadinessBelowExcellent(signal)) return false;
+  const bucket = groups.find((group) => group.groupType === "confidence_bucket" && group.groupValue === "90-100");
+  if (!bucket || Number(bucket.closedSignals || 0) < 10) return false;
+  if (Number(bucket.winRate || 0) < Number(bucket.breakEvenWinRate || 0)) return false;
+  if (Number(bucket.estimatedExpectancy || 0) <= 0 || Number(bucket.expiredRate || 0) >= 15) return false;
+  const strategy = groups.find((group) => group.groupType === "strategy");
+  if (!strategy || Number(strategy.closedSignals || 0) < 20 || Number(strategy.estimatedExpectancy || 0) <= 0) return false;
+  const pairTimeframe = groups.find((group) => group.groupType === "pair_timeframe");
+  if (pairTimeframe && Number(pairTimeframe.closedSignals || 0) >= 20 && Number(pairTimeframe.estimatedExpectancy || 0) <= 0) return false;
+  return !groups.some((group) => ["quarantined", "disabled_by_admin", "reduced_confidence"].includes(group.status));
 }
 
 function getStaticTimeframePolicy(timeframe) {
@@ -615,7 +705,7 @@ function normalizeStatsScope(scope = "current") {
 }
 
 function confidenceBucketSql() {
-  return "CASE WHEN confidence < 70 THEN '60-69' WHEN confidence < 80 THEN '70-79' WHEN confidence < 90 THEN '80-89' ELSE '90-100' END";
+  return "CASE WHEN COALESCE(calibrated_confidence, confidence) < 70 THEN '60-69' WHEN COALESCE(calibrated_confidence, confidence) < 80 THEN '70-79' WHEN COALESCE(calibrated_confidence, confidence) < 90 THEN '80-89' ELSE '90-100' END";
 }
 
 function worstGroups(groups, type) {
@@ -685,6 +775,8 @@ function summarizeGroupForSignal(group) {
     averageRiskReward: group.averageRiskReward,
     averageConfidence: group.averageConfidence,
     confidenceGap: group.confidenceGap,
+    sampleSizeStatus: sampleSizeStatusForGroup(group),
+    calibrationStatus: calibrationStatusForGroup(group),
     performanceLabel: group.performanceLabel,
     recommendedAction: group.recommendedAction,
     confidenceCapLift: group.confidenceCapLift,
@@ -692,6 +784,34 @@ function summarizeGroupForSignal(group) {
     penalty: group.penalty,
     confidenceCap: group.confidenceCap
   };
+}
+
+export function sampleSizeStatusForGroup(group = {}) {
+  const closed = Number(group.closedSignals || 0);
+  if (closed < 10) return SAMPLE_SMALL;
+  if (closed < 20) return SAMPLE_EARLY;
+  return "Enough closed samples for calibration.";
+}
+
+export function calibrationStatusForGroup(group = {}) {
+  if (["quarantined", "disabled_by_admin"].includes(group.status)) return group.status === "quarantined" ? "Quarantined" : "Disabled by admin";
+  if (Number(group.closedSignals || 0) < 10) return "Needs more data";
+  if (Number(group.winRate || 0) < Number(group.breakEvenWinRate || 0)) return "Overconfident";
+  if (Number(group.estimatedExpectancy || 0) < 0) return "Reduced confidence";
+  if (Number(group.expiredRate || 0) > 25) return "Under calibration";
+  return "Calibrated";
+}
+
+function confidenceQualityLabel(confidence, status = "active") {
+  if (["quarantined", "disabled_by_admin"].includes(status)) return "Quarantined";
+  if (status === "reduced_confidence") return "Reduced confidence";
+  if (status === "watchlist") return "Under calibration";
+  const score = Number(confidence || 0);
+  if (score >= 89) return "Proven elite";
+  if (score >= 85) return "Very strong";
+  if (score >= 80) return "Strong";
+  if (score >= 70) return "Moderate";
+  return "Experimental";
 }
 
 function hasMissingHigherTimeframe(signal) {
