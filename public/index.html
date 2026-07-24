@@ -2038,7 +2038,8 @@
             <div class="admin-signal-quality-panel" id="admin-signal-quality-panel"></div>
             <form class="admin-signal-filters" id="admin-signal-filters">
               <input class="sf-input" name="search" type="search" placeholder="Search pair, strategy, pattern, notes, or signal ID">
-              <select class="sf-select" name="status"><option value="all">All statuses</option><option>Active</option><option value="expiring-soon">Expiring Soon</option><option>Hit TP</option><option>Hit SL</option><option>Expired</option><option value="closed">Closed</option></select>
+              <select class="sf-select" name="status"><option value="all">All statuses</option><option>Active</option><option value="expiring-soon">Expiring Soon</option><option>Hit TP</option><option>Hit SL</option><option>Expired</option><option value="closed">Closed</option><option>Duplicate blocked</option><option>Cooldown blocked</option><option>Correlated duplicate</option><option>Quarantined timeframe</option><option>Readiness failed</option><option>Invalid legacy ready signal</option></select>
+              <select class="sf-select" name="performanceScope"><option value="current">Current engine only</option><option value="legacy">Legacy only</option><option value="all">All signals</option></select>
               <input class="sf-input" name="pair" placeholder="Pair">
               <select class="sf-select" name="timeframe"><option value="">All timeframes</option><option>1m</option><option>5m</option><option>15m</option><option>1h</option><option>4h</option></select>
               <select class="sf-select" name="direction"><option value="">Both directions</option><option value="long">Long</option><option value="short">Short</option></select>

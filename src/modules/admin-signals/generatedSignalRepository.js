@@ -14,8 +14,8 @@ export async function upsertGeneratedSignal(signal, context = {}) {
       original_confidence, confidence_calibration,
       setup_quality_score, entry_readiness_score, status, valid_until, source, source_history,
       generated_by, promoted_from_candidate_id, validation_summary, warning_reasons,
-      quality_breakdown, full_analysis, created_at, updated_at
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,'Active',$22,$23,jsonb_build_array($23::text),$24,$25,$26,$27,$28,$29,$30,now())
+      quality_breakdown, full_analysis, result_reason, created_at, updated_at
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,jsonb_build_array($24::text),$25,$26,$27,$28,$29,$30,$31,$32,now())
     ON CONFLICT (dedupe_key) DO UPDATE SET
       source_history = (SELECT jsonb_agg(DISTINCT value) FROM jsonb_array_elements_text(generated_signals.source_history || jsonb_build_array(EXCLUDED.source)) AS sources(value)),
       promoted_from_candidate_id = COALESCE(generated_signals.promoted_from_candidate_id, EXCLUDED.promoted_from_candidate_id),
@@ -26,6 +26,7 @@ export async function upsertGeneratedSignal(signal, context = {}) {
       warning_reasons = EXCLUDED.warning_reasons,
       quality_breakdown = EXCLUDED.quality_breakdown,
       full_analysis = EXCLUDED.full_analysis,
+      result_reason = COALESCE(EXCLUDED.result_reason, generated_signals.result_reason),
       updated_at = now()
     RETURNING *
   `, [
@@ -36,12 +37,14 @@ export async function upsertGeneratedSignal(signal, context = {}) {
     signal.confidenceScore, signal.confidenceCalibration?.originalConfidence ?? signal.indicators?.confidenceCalibration?.originalConfidence ?? signal.confidenceScore,
     JSON.stringify(signal.confidenceCalibration || signal.indicators?.confidenceCalibration || {}),
     signal.qualityScore || 0,
-    signal.readinessScore ?? signal.indicators?.readinessScore ?? 0, signal.validUntil,
+    signal.readinessScore ?? signal.indicators?.readinessScore ?? 0,
+    signal.status || "Active", signal.validUntil,
     source, String(context.generatedBy || "system"), context.candidateId || null,
     JSON.stringify({ passed: signal.validationPassed !== false, score: signal.validationScore ?? 100, reasons: signal.rejectedReasons || [] }),
     JSON.stringify(signal.rejectedReasons || pattern?.warnings || []),
     JSON.stringify(signal.signalQuality || {}),
     JSON.stringify(toFullAnalysis(signal)),
+    signal.resultReason || signal.statusReason || signal.indicators?.generatedQualityBlockReason || null,
     signal.generatedAt || new Date()
   ]);
   await recordGeneratedSignalConfidenceAdjustment(result.rows[0], signal);
@@ -117,6 +120,12 @@ export async function getGeneratedSignalStats() {
       COUNT(*) FILTER (WHERE status = 'Hit TP')::integer AS hit_tp,
       COUNT(*) FILTER (WHERE status = 'Hit SL')::integer AS hit_sl,
       COUNT(*) FILTER (WHERE status = 'Expired')::integer AS expired,
+      COUNT(*) FILTER (WHERE status = 'Duplicate blocked')::integer AS duplicate_blocked,
+      COUNT(*) FILTER (WHERE status = 'Cooldown blocked')::integer AS cooldown_blocked,
+      COUNT(*) FILTER (WHERE status = 'Correlated duplicate')::integer AS correlated_duplicate,
+      COUNT(*) FILTER (WHERE status = 'Quarantined timeframe')::integer AS quarantined_timeframe,
+      COUNT(*) FILTER (WHERE status = 'Readiness failed')::integer AS readiness_failed,
+      COUNT(*) FILTER (WHERE status = 'Invalid legacy ready signal')::integer AS invalid_legacy_ready,
       COUNT(*) FILTER (WHERE created_at::date = current_date)::integer AS today,
       COUNT(*) FILTER (WHERE created_at >= now() - interval '7 days')::integer AS week,
       COALESCE(AVG(risk_reward),0) AS average_rr,
@@ -125,7 +134,7 @@ export async function getGeneratedSignalStats() {
   `);
   const row = result.rows[0] || {};
   const closed = Number(row.hit_tp || 0) + Number(row.hit_sl || 0);
-  return { total: Number(row.total || 0), active: Number(row.active || 0), expiringSoon: Number(row.expiring_soon || 0), hitTp: Number(row.hit_tp || 0), hitSl: Number(row.hit_sl || 0), expired: Number(row.expired || 0), today: Number(row.today || 0), week: Number(row.week || 0), winRate: closed ? Number(((Number(row.hit_tp) / closed) * 100).toFixed(1)) : 0, averageRiskReward: Number(Number(row.average_rr || 0).toFixed(2)), averageConfidence: Number(Number(row.average_confidence || 0).toFixed(1)) };
+  return { total: Number(row.total || 0), active: Number(row.active || 0), expiringSoon: Number(row.expiring_soon || 0), hitTp: Number(row.hit_tp || 0), hitSl: Number(row.hit_sl || 0), expired: Number(row.expired || 0), duplicateBlocked: Number(row.duplicate_blocked || 0), cooldownBlocked: Number(row.cooldown_blocked || 0), correlatedDuplicate: Number(row.correlated_duplicate || 0), quarantinedTimeframe: Number(row.quarantined_timeframe || 0), readinessFailed: Number(row.readiness_failed || 0), invalidLegacyReady: Number(row.invalid_legacy_ready || 0), today: Number(row.today || 0), week: Number(row.week || 0), winRate: closed ? Number(((Number(row.hit_tp) / closed) * 100).toFixed(1)) : 0, averageRiskReward: Number(Number(row.average_rr || 0).toFixed(2)), averageConfidence: Number(Number(row.average_confidence || 0).toFixed(1)) };
 }
 
 export async function listActiveGeneratedSignals(limit = 500) {

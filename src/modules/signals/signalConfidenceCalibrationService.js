@@ -190,6 +190,8 @@ export function applyCalibrationContext(signal, context = {}) {
   };
 
   if (context.noHistory) caps.push({ cap: 85, reason: "No generated-signal history yet for this strategy or pair/timeframe.", type: "historical" });
+  const timeframePolicy = getStaticTimeframePolicy(signal.timeframe);
+  if (timeframePolicy.confidenceCap) addCap(timeframePolicy.confidenceCap, timeframePolicy.reason, "historical");
   if (hasMissingHigherTimeframe(signal)) addCap(82, "Missing or partial higher-timeframe confirmation.");
   if (hasWeakVolume(signal)) addCap(80, "Weak volume confirmation.");
   if (isChoppy(signal)) addCap(72, "Choppy or ranging market conditions.");
@@ -313,17 +315,17 @@ export async function getSignalCalibrationContext(signal) {
   };
 }
 
-export async function getAdminSignalQualityBreakdown() {
+export async function getAdminSignalQualityBreakdown(scope = "current") {
   const groups = [
-    ...(await aggregatePerformanceGroups("strategy", "strategy", "strategy IS NOT NULL")),
-    ...(await aggregatePerformanceGroups("pair", "pair", "pair IS NOT NULL")),
-    ...(await aggregatePerformanceGroups("timeframe", "timeframe", "timeframe IS NOT NULL")),
-    ...(await aggregatePerformanceGroups("direction", "direction", "direction IS NOT NULL")),
-    ...(await aggregatePerformanceGroups("pattern", "COALESCE(pattern, 'No pattern')", "true")),
-    ...(await aggregatePerformanceGroups("source", "source", "source IS NOT NULL")),
-    ...(await aggregatePerformanceGroups("market_regime", "COALESCE(full_analysis->'indicators'->>'regime', 'Unknown')", "true")),
-    ...(await aggregatePerformanceGroups("confidence_bucket", confidenceBucketSql(), "true")),
-    ...(await aggregatePerformanceGroups("pair_timeframe", "pair || ':' || timeframe", "pair IS NOT NULL AND timeframe IS NOT NULL"))
+    ...(await aggregatePerformanceGroups("strategy", "strategy", "strategy IS NOT NULL", scope)),
+    ...(await aggregatePerformanceGroups("pair", "pair", "pair IS NOT NULL", scope)),
+    ...(await aggregatePerformanceGroups("timeframe", "timeframe", "timeframe IS NOT NULL", scope)),
+    ...(await aggregatePerformanceGroups("direction", "direction", "direction IS NOT NULL", scope)),
+    ...(await aggregatePerformanceGroups("pattern", "COALESCE(pattern, 'No pattern')", "true", scope)),
+    ...(await aggregatePerformanceGroups("source", "source", "source IS NOT NULL", scope)),
+    ...(await aggregatePerformanceGroups("market_regime", "COALESCE(full_analysis->'indicators'->>'regime', 'Unknown')", "true", scope)),
+    ...(await aggregatePerformanceGroups("confidence_bucket", confidenceBucketSql(), "true", scope)),
+    ...(await aggregatePerformanceGroups("pair_timeframe", "pair || ':' || timeframe", "pair IS NOT NULL AND timeframe IS NOT NULL", scope))
   ];
   await upsertPerformanceGroups(groups);
   const stats = await getOverallQualityWarning();
@@ -346,6 +348,7 @@ export async function getAdminSignalQualityBreakdown() {
   const overconfident = groups.filter((group) => group.groupType === "strategy" && group.closedSignals >= 10).sort((a, b) => b.confidenceGap - a.confidenceGap).slice(0, 5);
   return {
     warning: stats,
+    scope: normalizeStatsScope(scope),
     summary: buildBestWorstSummary({
       bestStrategies,
       bestPairTimeframes,
@@ -423,7 +426,7 @@ async function loadSignalGroup(definition) {
   };
 }
 
-async function aggregatePerformanceGroups(groupType, groupExpression, where = "true") {
+async function aggregatePerformanceGroups(groupType, groupExpression, where = "true", scope = "current") {
   const result = await query(`
     SELECT ${groupExpression} AS group_value,
       COUNT(*)::integer AS total_signals,
@@ -437,7 +440,7 @@ async function aggregatePerformanceGroups(groupType, groupExpression, where = "t
       COUNT(*) FILTER (WHERE created_at >= now() - interval '7 days')::integer AS last_7_days,
       COUNT(*) FILTER (WHERE created_at >= now() - interval '30 days')::integer AS last_30_days
     FROM generated_signals
-    WHERE ${where}
+    WHERE ${where} AND ${statsScopeSql(scope)}
     GROUP BY group_value
   `);
   const overrides = await loadStatusOverrides();
@@ -570,6 +573,19 @@ function findProvenExactSourceStrategyTimeframe(groups = []) {
   ) || null;
 }
 
+function getStaticTimeframePolicy(timeframe) {
+  if (timeframe === "5m" || timeframe === "1h") {
+    return { confidenceCap: 72, reason: `${timeframe} generated signals are quarantined and capped at 72%.` };
+  }
+  if (timeframe === "15m") {
+    return { confidenceCap: 88, reason: "15m confidence is capped below 90 until stronger current-engine performance develops." };
+  }
+  if (timeframe === "4h") {
+    return { confidenceCap: 88, reason: "4h confidence is capped while it remains watchlist/promising." };
+  }
+  return { confidenceCap: null, reason: "" };
+}
+
 function groupStatsSql(where) {
   return `
     SELECT COUNT(*)::integer AS total_signals,
@@ -583,8 +599,19 @@ function groupStatsSql(where) {
       COUNT(*) FILTER (WHERE created_at >= now() - interval '7 days')::integer AS last_7_days,
       COUNT(*) FILTER (WHERE created_at >= now() - interval '30 days')::integer AS last_30_days
     FROM generated_signals
-    WHERE ${where}
+    WHERE ${where} AND ${statsScopeSql("current")}
   `;
+}
+
+function statsScopeSql(scope = "current") {
+  const normalized = normalizeStatsScope(scope);
+  if (normalized === "legacy") return "source IN ('legacy_saved_signal','legacy_unlocked_signal')";
+  if (normalized === "all") return "true";
+  return "source NOT IN ('legacy_saved_signal','legacy_unlocked_signal')";
+}
+
+function normalizeStatsScope(scope = "current") {
+  return ["current", "legacy", "all"].includes(scope) ? scope : "current";
 }
 
 function confidenceBucketSql() {

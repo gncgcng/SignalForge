@@ -3834,6 +3834,9 @@ function renderAdminSignals() {
   document.querySelector("#admin-signal-stats").innerHTML = [
     ["Total generated", stats.total], ["Active", stats.active], ["Expiring soon", stats.expiringSoon],
     ["Hit TP", stats.hitTp], ["Hit SL", stats.hitSl], ["Expired", stats.expired],
+    ["Duplicate blocked", stats.duplicateBlocked], ["Cooldown blocked", stats.cooldownBlocked],
+    ["Correlated blocked", stats.correlatedDuplicate], ["Timeframe blocked", stats.quarantinedTimeframe],
+    ["Readiness failed", stats.readinessFailed], ["Invalid legacy", stats.invalidLegacyReady],
     ["Win rate", `${Number(stats.winRate || 0).toFixed(1)}%`], ["Average R/R", `${Number(stats.averageRiskReward || 0).toFixed(2)}R`],
     ["Average confidence", `${Number(stats.averageConfidence || 0).toFixed(1)}%`], ["Today", stats.today], ["This week", stats.week]
   ].map(([label, value]) => `<article><span>${label}</span><strong>${value ?? 0}</strong></article>`).join("");
@@ -3874,6 +3877,7 @@ function renderAdminSignalQualityPanel(quality = {}) {
     ["Best sources", quality.bestSources || [], "best"]
   ];
   panel.innerHTML = `
+    <article class="signal-quality-warning muted"><strong>${quality.scope === "legacy" ? "Legacy only" : quality.scope === "all" ? "All signals" : "Current engine only"}</strong><p>Admin Signal Quality defaults to current-engine records so legacy unlocked/saved signals do not distort live calibration.</p></article>
     ${warning.active ? `<article class="signal-quality-warning"><strong>Signal quality warning</strong><p>${escapeHtml(warning.message)}</p><small>Win rate excludes expired signals. Expired signals still reduce the quality score because they represent setups that failed to complete.</small></article>` : ""}
     <article class="signal-quality-summary">
       ${renderSignalQualitySummaryItem("Best performer", summary.bestPerformer)}

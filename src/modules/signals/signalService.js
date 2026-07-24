@@ -44,6 +44,11 @@ import {
   isSignalBlockedByCalibration
 } from "./signalConfidenceCalibrationService.js";
 import {
+  applyGeneratedSignalQualityBlock,
+  applyTimeframeConfidencePolicy,
+  evaluateGeneratedSignalQualityGate
+} from "./generatedSignalQualityGate.js";
+import {
   SCANNER_RESULT_TYPES,
   buildAvoidTradeResult,
   classifyScannerResult
@@ -333,9 +338,17 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
       source: generationSource
     }))
     : null;
-  const calibrationBlocked = isSignalBlockedByCalibration(learnedSignal);
-  const signal = learnedSignal && !calibrationBlocked
-    ? withSignalQuality({ ...learnedSignal, confidenceScore: Math.min(learnedSignal.confidenceScore, candidate?.confidenceEstimate || 99) })
+  const cappedSignal = learnedSignal ? applyTimeframeConfidencePolicy(learnedSignal) : null;
+  const calibrationBlocked = isSignalBlockedByCalibration(cappedSignal);
+  const qualityGate = cappedSignal && !calibrationBlocked
+    ? await evaluateGeneratedSignalQualityGate(cappedSignal, { source: generationSource })
+    : { passed: !cappedSignal || calibrationBlocked };
+  const qualityBlocked = Boolean(cappedSignal && !qualityGate.passed);
+  const signal = cappedSignal && !calibrationBlocked && !qualityBlocked
+    ? withSignalQuality({ ...cappedSignal, confidenceScore: Math.min(cappedSignal.confidenceScore, candidate?.confidenceEstimate || 99) })
+    : null;
+  const blockedSignal = qualityBlocked
+    ? withSignalQuality(applyGeneratedSignalQualityBlock(cappedSignal, qualityGate))
     : null;
   if (signal && candidate) {
     candidate = await markCandidatePromoted(candidate, signal) || { ...candidate, status: "promoted_to_signal" };
@@ -364,10 +377,19 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
       });
     }
   }
-  if (readySignal && validation && (!validation.passed || calibrationBlocked) && candidate) {
+  if (blockedSignal) {
+    await saveGeneratedSignal(blockedSignal, {
+      source: generationSource,
+      generatedBy: generationContext.generatedBy || user?.id || "system",
+      candidateId: candidate?.id || null
+    });
+  }
+  if (readySignal && validation && (!validation.passed || calibrationBlocked || qualityBlocked) && candidate) {
     const rejectionReason = calibrationBlocked
       ? "Performance calibration quarantined or disabled this group."
-      : validation.reasons?.[0]?.reason || "Final signal validation failed.";
+      : qualityBlocked
+        ? qualityGate.reason
+        : validation.reasons?.[0]?.reason || "Final signal validation failed.";
     candidate = await markCandidateRejected(candidate, rejectionReason) || {
       ...candidate,
       status: "rejected",
@@ -383,10 +405,15 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
       rejectionReasonCodes: readiness.reasons.map((reason) => reason.includes("entry") ? "entry_not_ready" : "readiness_pending"),
       candidate: candidate ? toCandidatePreview(candidate) : null
     }
-    : result.valid && validation && !validation.passed
-      ? validationNoSetupAnalysis(readySignal, validation)
+    : result.valid && validation && (!validation.passed || qualityBlocked || calibrationBlocked)
+      ? validationNoSetupAnalysis(readySignal, qualityBlocked
+        ? qualityGateToValidation(readySignal, qualityGate)
+        : calibrationBlocked
+          ? qualityGateToValidation(readySignal, { stage: "generated_quality_calibration", reason: "Performance calibration quarantined or disabled this group." })
+          : validation)
       : result.analysis;
-  const resultType = classifyScannerResult({ valid, candidate, analysis });
+  const publishable = Boolean(valid && signal);
+  const resultType = classifyScannerResult({ valid: publishable, candidate, analysis });
   const avoidTrade = resultType === SCANNER_RESULT_TYPES.AVOID
     ? buildAvoidTradeResult({ symbol, timeframe, analysis, candidate })
     : null;
@@ -406,14 +433,14 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
     publicResult: {
       symbol,
       timeframe,
-      valid,
+      valid: publishable,
       resultType,
-      setup: valid ? toScanPreview(signal) : null,
+      setup: publishable ? toScanPreview(signal) : null,
       analysis,
       candidate: candidate ? toCandidatePreview(candidate) : null,
       avoidTrade
     },
-    fullSetup: signal,
+    fullSetup: publishable ? signal : null,
     analysis,
     briefObservation
   };
@@ -1130,6 +1157,23 @@ function toUserSignal(signal) {
     confidenceCalibration: undefined,
     signalQuality,
     indicators: { ...indicators, signalQuality }
+  };
+}
+
+function qualityGateToValidation(signal, gate = {}) {
+  const reason = gate.reason || "Generated signal quality gate blocked promotion.";
+  return {
+    passed: false,
+    validationScore: Number(signal?.validationScore || 0),
+    confidenceBand: signal?.confidenceBand || "No signal",
+    validatedAt: gate.checkedAt || new Date().toISOString(),
+    rejectedReasons: [{
+      stage: gate.stage || "generated_quality",
+      reason,
+      timestamp: gate.checkedAt || new Date().toISOString(),
+      market: signal?.symbol,
+      strategy: signal?.setupType
+    }]
   };
 }
 

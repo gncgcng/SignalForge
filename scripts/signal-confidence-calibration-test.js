@@ -139,7 +139,7 @@ const exactRecovered = applyCalibrationContext({
     status: "active"
   }]
 });
-assert.equal(exactRecovered.confidenceScore, 94, "only exact source/strategy/timeframe positive expectancy can allow confidence above 88");
+assert.equal(exactRecovered.confidenceScore, 92, "only exact source/strategy/timeframe positive expectancy can allow confidence above 88, with careful recovery caps");
 assert.ok(exactRecovered.indicators.confidenceCalibration.capRecovery.some((item) => item.cap === 99));
 
 const stillCappedByRules = applyCalibrationContext({

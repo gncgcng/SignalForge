@@ -28,7 +28,7 @@ export async function getAdminGeneratedSignals(filters) {
   const [listing, stats, qualityBreakdown] = await Promise.all([
     listGeneratedSignals(filters),
     getGeneratedSignalStats(),
-    getAdminSignalQualityBreakdown()
+    getAdminSignalQualityBreakdown(filters?.performanceScope || "current")
   ]);
   return { ...listing, stats, qualityBreakdown };
 }

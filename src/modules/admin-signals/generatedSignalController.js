@@ -43,6 +43,7 @@ function parseFilters(params) {
     strategy: clean(params.get("strategy"), 80), pattern: clean(params.get("pattern"), 80), source: clean(params.get("source"), 40),
     confidenceMin: number("confidenceMin"), confidenceMax: number("confidenceMax"), qualityMin: number("qualityMin"), qualityMax: number("qualityMax"),
     from: clean(params.get("from"), 40), to: clean(params.get("to"), 40), search: clean(params.get("search"), 120),
+    performanceScope: ["current", "legacy", "all"].includes(params.get("performanceScope")) ? params.get("performanceScope") : "current",
     sort: clean(params.get("sort"), 20), page: number("page"), limit: number("limit")
   };
 }
