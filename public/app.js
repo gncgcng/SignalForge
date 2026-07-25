@@ -136,6 +136,8 @@ const state = {
   validationDashboard: null,
   candidateQuality: null,
   adminSignals: { signals: [], stats: {}, page: 1, totalPages: 1, total: 0, filters: {} },
+  adminTelegramHealth: null,
+  adminStrategyLab: null,
   adminCryptoMarkets: { markets: [], summary: {}, filters: {} },
   profile: null,
   publicProfile: null,
@@ -354,6 +356,7 @@ const onboardingPublicProfile = document.querySelector("#onboarding-public-profi
 const usernameOnboardingMessage = document.querySelector("#username-onboarding-message");
 const adminNavLink = document.querySelector("#admin-nav-link");
 const adminSignalsNavLink = document.querySelector("#admin-signals-nav-link");
+const adminStrategyLabNavLink = document.querySelector("#admin-strategy-lab-nav-link");
 const adminCryptoMarketsNavLink = document.querySelector("#admin-crypto-markets-nav-link");
 const affiliateAdminNavLink = document.querySelector("#affiliate-admin-nav-link");
 const webhookEventsNavLink = document.querySelector("#webhook-events-nav-link");
@@ -384,6 +387,11 @@ const adminSignalFilters = document.querySelector("#admin-signal-filters");
 const adminSignalsTable = document.querySelector("#admin-signals-table");
 const adminSignalModal = document.querySelector("#admin-signal-modal");
 const adminSignalDetail = document.querySelector("#admin-signal-detail");
+const adminTelegramHealthStats = document.querySelector("#admin-telegram-health-stats");
+const adminTelegramSimulation = document.querySelector("#admin-telegram-simulation");
+const adminTelegramSimulate = document.querySelector("#admin-telegram-simulate");
+const adminTelegramTestMessage = document.querySelector("#admin-telegram-test-message");
+const adminStrategyBacktestStart = document.querySelector("#admin-strategy-backtest-start");
 const adminCryptoFilters = document.querySelector("#admin-crypto-filters");
 const adminCryptoMarketList = document.querySelector("#admin-crypto-market-list");
 const adminCryptoRebuildActive = document.querySelector("#admin-crypto-rebuild-active");
@@ -1826,6 +1834,53 @@ document.querySelector("#admin-signal-filters-clear")?.addEventListener("click",
 });
 document.querySelector("#admin-signals-prev")?.addEventListener("click", () => { if (state.adminSignals.page > 1) { state.adminSignals.page -= 1; loadAdminSignals(); } });
 document.querySelector("#admin-signals-next")?.addEventListener("click", () => { if (state.adminSignals.page < state.adminSignals.totalPages) { state.adminSignals.page += 1; loadAdminSignals(); } });
+adminTelegramSimulate?.addEventListener("click", async () => {
+  adminTelegramSimulate.disabled = true;
+  adminTelegramSimulation.innerHTML = `<div class="empty-state"><strong>Testing alert logic...</strong></div>`;
+  try {
+    const result = await api.request("/api/admin/signals/telegram/simulate", {
+      method: "POST",
+      body: JSON.stringify({ limit: 40 })
+    });
+    renderTelegramAlertSimulation(result);
+  } catch (error) {
+    adminTelegramSimulation.innerHTML = `<div class="empty-state"><strong>Telegram simulation failed</strong><p class="reasoning">${escapeHtml(error.message)}</p></div>`;
+  } finally {
+    adminTelegramSimulate.disabled = false;
+  }
+});
+adminTelegramTestMessage?.addEventListener("click", async () => {
+  const chatId = window.prompt("Telegram chat ID for this admin test message:");
+  if (!chatId) return;
+  adminTelegramTestMessage.disabled = true;
+  try {
+    const result = await api.request("/api/admin/signals/telegram/test-message", {
+      method: "POST",
+      body: JSON.stringify({ chatId })
+    });
+    showToast(result.message || "Telegram test complete");
+    await loadAdminTelegramHealth();
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    adminTelegramTestMessage.disabled = false;
+  }
+});
+adminStrategyBacktestStart?.addEventListener("click", async () => {
+  adminStrategyBacktestStart.disabled = true;
+  try {
+    const result = await api.request("/api/admin/signals/strategy-lab/backtest/start", {
+      method: "POST",
+      body: JSON.stringify({ scope: { mode: "active_crypto_batch" } })
+    });
+    showToast(`Backtest job started: ${result.job?.id || "queued"}`);
+    await loadAdminStrategyLab();
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    adminStrategyBacktestStart.disabled = false;
+  }
+});
 adminSignalsTable?.addEventListener("click", async (event) => {
   const copy = event.target.closest("[data-admin-signal-copy]");
   if (copy) { await navigator.clipboard.writeText(copy.dataset.adminSignalCopy); showToast("Signal ID copied"); return; }
@@ -3099,6 +3154,7 @@ async function bootDashboard() {
   document.querySelector("#user-name").textContent = getUserDisplayName();
   adminNavLink.classList.toggle("hidden", !state.user.isAdmin);
   adminSignalsNavLink.classList.toggle("hidden", !state.user.isAdmin);
+  adminStrategyLabNavLink?.classList.toggle("hidden", !state.user.isAdmin);
   adminCryptoMarketsNavLink.classList.toggle("hidden", !state.user.isAdmin);
   adminSupportNavLink.classList.toggle("hidden", !state.user.isAdmin);
   affiliateAdminNavLink.classList.toggle("hidden", !state.user.isAdmin);
@@ -3720,6 +3776,25 @@ async function loadAdminSignals() {
   const result = await api.request(`/api/admin/signals?${params}`);
   state.adminSignals = { ...state.adminSignals, ...result, signals: result.signals || [], stats: result.stats || {} };
   renderAdminSignals();
+  loadAdminTelegramHealth().catch((error) => {
+    if (adminTelegramHealthStats) {
+      adminTelegramHealthStats.innerHTML = `<article><span>Telegram health</span><strong>Unavailable</strong><small>${escapeHtml(error.message)}</small></article>`;
+    }
+  });
+}
+
+async function loadAdminTelegramHealth() {
+  if (!state.user?.isAdmin || !adminTelegramHealthStats) return;
+  const result = await api.request("/api/admin/signals/telegram/health");
+  state.adminTelegramHealth = result.telegram || {};
+  renderAdminTelegramHealth();
+}
+
+async function loadAdminStrategyLab() {
+  if (!state.user?.isAdmin) throw new Error("Admin access required.");
+  const lab = await api.request("/api/admin/signals/strategy-lab");
+  state.adminStrategyLab = lab;
+  renderAdminStrategyLab();
 }
 
 async function loadAdminCryptoMarkets() {
@@ -3867,6 +3942,66 @@ function renderAdminSignals() {
   document.querySelector("#admin-signals-next").disabled = Number(data.page || 1) >= Number(data.totalPages || 1);
 }
 
+function renderAdminTelegramHealth() {
+  const telegram = state.adminTelegramHealth || {};
+  if (!adminTelegramHealthStats) return;
+  adminTelegramHealthStats.innerHTML = [
+    ["Telegram enabled", telegram.enabled ? "Yes" : "No"],
+    ["Bot token", telegram.botTokenConfigured ? "Configured" : "Missing"],
+    ["Last alert sent", telegram.lastAlertSentAt ? formatDateTime(telegram.lastAlertSentAt) : "None"],
+    ["Last attempt", telegram.lastAlertAttemptAt ? formatDateTime(telegram.lastAlertAttemptAt) : "None"],
+    ["Queue size", telegram.queueSize],
+    ["Blocked today", telegram.alertsBlockedToday],
+    ["Sent today", telegram.alertsSentToday],
+    ["Min confidence", telegram.minimumConfidenceThreshold],
+    ["Alertable signals", telegram.alertableSignalCount],
+    ["Non-alerted signals", telegram.nonAlertedGeneratedSignalCount],
+    ["Failed sends", telegram.failedSends],
+    ["Retries", telegram.retryCount]
+  ].map(([label, value]) => `<article><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value ?? 0))}</strong></article>`).join("");
+  if (telegram.lastAlertFailure && adminTelegramSimulation && !adminTelegramSimulation.innerHTML.trim()) {
+    adminTelegramSimulation.innerHTML = `<div class="empty-state"><strong>Latest block/failure</strong><p class="reasoning">${escapeHtml(telegram.lastAlertFailure.reason || "No reason recorded.")}</p></div>`;
+  }
+}
+
+function renderTelegramAlertSimulation(result = {}) {
+  const rows = result.results || [];
+  if (!adminTelegramSimulation) return;
+  adminTelegramSimulation.innerHTML = rows.length ? `
+    <div class="admin-generated-row admin-generated-head"><span>Signal</span><span>Confidence</span><span>Decision</span><span>Reason</span></div>
+    ${rows.map((row) => `<div class="admin-generated-row">
+      <span data-label="Signal"><strong>${escapeHtml(row.pair)}</strong><small>${escapeHtml(row.timeframe)} · ${escapeHtml(String(row.direction).toUpperCase())}</small></span>
+      <span data-label="Confidence"><strong>${Number(row.confidence || 0).toFixed(0)}%</strong><small>Threshold ${Number(row.threshold || result.threshold || 75).toFixed(0)}%</small></span>
+      <span data-label="Decision"><em class="status-pill ${row.wouldSend ? "status-hit-tp" : "status-expired"}">${row.wouldSend ? "Would send" : escapeHtml(titleCase(row.status))}</em></span>
+      <span data-label="Reason"><small>${escapeHtml(row.reason)}</small></span>
+    </div>`).join("")}` : `<div class="empty-state"><strong>No recent generated signals to simulate.</strong></div>`;
+}
+
+function renderAdminStrategyLab() {
+  const lab = state.adminStrategyLab || {};
+  const stats = lab.stats || [];
+  const best = lab.bestStrategies || [];
+  const quarantine = lab.quarantinedRecommendations || [];
+  const examples = lab.examples || [];
+  const runs = lab.runs || [];
+  document.querySelector("#admin-strategy-lab-summary").innerHTML = [
+    ["Strategies tested", new Set(stats.map((item) => item.strategy)).size],
+    ["Pair/timeframes", stats.length],
+    ["Validated", stats.filter((item) => item.walkForwardStatus === "validated").length],
+    ["Failed validation", stats.filter((item) => item.walkForwardStatus === "failed_validation").length],
+    ["Best examples", examples.filter((item) => item.exampleType === "best").length],
+    ["Worst examples", examples.filter((item) => item.exampleType === "worst").length]
+  ].map(([label, value]) => `<article><span>${escapeHtml(label)}</span><strong>${Number(value || 0)}</strong></article>`).join("");
+  renderAdminCompactTable("#admin-strategy-performance", ["Strategy", "Pair", "TF", "Regime", "Win", "BE", "Exp"], stats, (item) => [
+    item.strategy, item.pair, item.timeframe, item.marketRegime,
+    `${Number(item.winRate || 0).toFixed(1)}%`, `${Number(item.breakEvenWinRate || 0).toFixed(1)}%`, `${Number(item.expectancy || 0).toFixed(2)}R`
+  ]);
+  renderAdminRows("#admin-strategy-active", best, (item) => `<div class="analytics-list-row"><span><strong>${escapeHtml(item.strategy)}</strong><small>${escapeHtml(item.pair)} · ${escapeHtml(item.timeframe)} · ${escapeHtml(item.sampleSizeLabel)}</small></span><strong>${Number(item.expectancy || 0).toFixed(2)}R</strong></div>`);
+  renderAdminRows("#admin-strategy-quarantine", quarantine, (item) => `<div class="analytics-list-row"><span><strong>${escapeHtml(item.strategy)}</strong><small>${escapeHtml(item.pair)} · ${escapeHtml(item.timeframe)} · ${escapeHtml(titleCase(item.walkForwardStatus))}</small></span><strong>${Number(item.expectancy || 0).toFixed(2)}R</strong></div>`);
+  renderAdminRows("#admin-strategy-examples", examples, (item) => `<div class="analytics-list-row"><span><strong>${escapeHtml(item.strategy)}</strong><small>${escapeHtml(item.pair)} · ${escapeHtml(item.timeframe)} · ${escapeHtml(item.result)}</small></span><strong>${item.entryCandleTime ? formatDateTime(item.entryCandleTime) : "Historical"}</strong></div>`);
+  renderAdminRows("#admin-strategy-runs", runs, (item) => `<div class="analytics-list-row"><span><strong>${escapeHtml(item.status)}</strong><small>${escapeHtml(item.id)}</small></span><strong>${formatDateTime(item.updatedAt)}</strong></div>`);
+}
+
 function renderAdminSignalQualityPanel(quality = {}) {
   const panel = document.querySelector("#admin-signal-quality-panel");
   if (!panel) return;
@@ -3981,7 +4116,7 @@ function renderAdminSignalRow(signal) {
     <span data-label="Levels"><small>Entry ${formatCurrency(signal.entry)}</small><small>SL ${formatCurrency(signal.stopLoss)} &middot; TP ${formatCurrency(signal.takeProfit)}</small><strong>${Number(signal.riskReward).toFixed(2)}R</strong></span>
     <span data-label="Scores"><small>Confidence ${Number(signal.confidence).toFixed(0)}%</small><small>Raw ${Number(signal.rawSetupScore ?? signal.originalConfidence ?? signal.confidence).toFixed(0)} &middot; Calibrated ${Number(signal.calibratedConfidence ?? signal.confidence).toFixed(0)}</small><small>Quality ${Number(signal.setupQualityScore).toFixed(0)} &middot; Readiness ${Number(signal.entryReadinessScore).toFixed(0)}</small></span>
     <span data-label="Status"><em class="status-pill ${adminSignalStatusClass(effectiveStatus)}">${escapeHtml(effectiveStatus)}</em><small>${escapeHtml(signal.resultReason || "Tracking")}</small></span>
-    <span data-label="Source"><strong>${escapeHtml(titleCase(signal.source))}</strong><small>${escapeHtml(engineMarker)} &middot; ${escapeHtml(titleCase(calibrationStatus))}</small><small>${formatDateTime(signal.createdAt)}</small><small>Valid until ${formatDateTime(signal.validUntil)}</small></span>
+    <span data-label="Source"><strong>${escapeHtml(titleCase(signal.source))}</strong><small>${escapeHtml(engineMarker)} &middot; ${escapeHtml(titleCase(calibrationStatus))}</small><small>Telegram ${escapeHtml(titleCase(signal.telegramStatus || "not checked"))}</small><small>${formatDateTime(signal.createdAt)}</small><small>Valid until ${formatDateTime(signal.validUntil)}</small></span>
     <span data-label="Actions" class="admin-signal-row-actions"><button data-admin-signal-view="${escapeHtml(signal.id)}" type="button">Show details</button><button class="secondary-action" data-admin-signal-copy="${escapeHtml(signal.signalId)}" type="button">Copy ID</button>${signal.promotedFromCandidateId ? `<button class="secondary-action" data-admin-signal-view="${escapeHtml(signal.id)}" type="button">Candidate source</button>` : ""}${signal.status !== "Active" ? `<button class="secondary-action" data-admin-signal-view="${escapeHtml(signal.id)}" type="button">Post-mortem</button>` : ""}</span>
   </article>`;
 }
@@ -4005,10 +4140,31 @@ function renderAdminSignalDetail(signal) {
     ...(calibration.penalties || []).map((item) => `Penalty ${item.points}: ${item.reason}`),
     ...(calibration.groups || []).map((group) => `${titleCase(group.groupType)} ${group.groupValue}: ${Number(group.winRate || 0).toFixed(1)}% win vs ${Number(group.breakEvenWinRate || 0).toFixed(1)}% break-even`)
   ];
+  const historicalRows = [
+    signal.historicalStrategyStatus ? `Historical status: ${titleCase(signal.historicalStrategyStatus)}` : null,
+    signal.historicalStrategyReason ? `Historical reason: ${signal.historicalStrategyReason}` : null,
+    analysis.indicators?.historicalStrategyCalibration?.copy,
+    ...(analysis.indicators?.historicalStrategyCalibration?.reasons || []).map((reason) => `Historical calibration: ${reason}`)
+  ];
+  const strategyRows = [
+    signal.strategyValidationStatus ? `Strategy validation: ${titleCase(signal.strategyValidationStatus)}` : null,
+    signal.strategyValidationReason,
+    analysis.indicators?.strategyStrictness?.reason ? `Strictness: ${analysis.indicators.strategyStrictness.reason}` : null
+  ];
+  const telegramRows = [
+    signal.telegramStatus ? `Telegram status: ${titleCase(signal.telegramStatus)}` : "Telegram status: Not checked",
+    signal.telegramBlockReason,
+    signal.telegramLastCheckedAt ? `Last checked: ${formatDateTime(signal.telegramLastCheckedAt)}` : null,
+    signal.telegramBlockDetails?.threshold ? `Threshold: ${signal.telegramBlockDetails.threshold}` : null,
+    signal.telegramBlockDetails?.confidence ? `Confidence checked: ${Number(signal.telegramBlockDetails.confidence).toFixed(0)}%` : null
+  ];
   document.querySelector("#admin-signal-modal-title").textContent = `${signal.displayPair} / ${signal.timeframe} / ${String(signal.direction).toUpperCase()}`;
   adminSignalDetail.innerHTML = `
     <section class="admin-detail-levels"><div><span>Entry</span><strong>${formatCurrency(signal.entry)}</strong></div><div><span>Stop loss</span><strong>${formatCurrency(signal.stopLoss)}</strong></div><div><span>Take profit</span><strong>${formatCurrency(signal.takeProfit)}</strong></div><div><span>Risk/reward</span><strong>${Number(signal.riskReward).toFixed(2)}R</strong></div></section>
     <section class="admin-detail-meta"><span class="status-pill ${adminSignalStatusClass(signal.status)}">${escapeHtml(signal.status)}</span><span>${escapeHtml(signal.strategy)}</span><span>${Number(signal.confidence).toFixed(0)}% confidence</span><span>${Number(signal.setupQualityScore).toFixed(0)} quality</span><span>${Number(signal.entryReadinessScore).toFixed(0)} readiness</span></section>
+    ${renderAdminDetailSection("Telegram alert diagnostics", telegramRows)}
+    ${renderAdminDetailSection("Historical strategy calibration", historicalRows)}
+    ${renderAdminDetailSection("Strategy strictness", strategyRows)}
     ${renderAdminDetailSection("Confidence calibration", calibrationRows)}
     ${renderAdminDetailSection("Signal quality breakdown", Object.values(quality).map((item) => `${item.label}: ${titleCase(item.status)} - ${item.reason}`))}
     ${renderAdminDetailSection("Why it was generated", [analysis.reasoning, ...(analysis.confirmations || []).map((item) => `${item.passed ? "Passed" : "Failed"}: ${item.name} - ${item.detail}`), ...(signal.warningReasons || []).map((item) => `Warning: ${typeof item === "string" ? item : item.reason}`)])}
@@ -4619,7 +4775,7 @@ function handleBrowserRouteChange() {
 
 function isRouteAllowed(route) {
   if (!Object.hasOwn(ROUTE_TO_VIEW, route)) return false;
-  return !["admin", "admin-signals", "admin-crypto-markets", "admin-support", "affiliate-admin", "webhook-events"].includes(route) || Boolean(state.user?.isAdmin);
+  return !["admin", "admin-signals", "admin-strategy-lab", "admin-crypto-markets", "admin-support", "affiliate-admin", "webhook-events"].includes(route) || Boolean(state.user?.isAdmin);
 }
 
 function resolvePaperTradingRouteSymbol(value) {
@@ -4678,7 +4834,7 @@ function removeHashParams(names) {
 function applyViewState(view, options = {}) {
   const allowedViews = ["scanner", "watchlist", "alerts", "notifications", "signals", "paper-portfolio", "journal", "backtesting", "performance", "how-it-works", "affiliate", "leaderboard", "profile", "settings", "support", "billing"];
   if (state.user?.isAdmin) {
-    allowedViews.push("admin", "admin-signals", "admin-crypto-markets", "admin-support", "affiliate-admin", "webhook-events");
+    allowedViews.push("admin", "admin-signals", "admin-strategy-lab", "admin-crypto-markets", "admin-support", "affiliate-admin", "webhook-events");
   }
   const normalizedView = allowedViews.includes(view) ? view : "scanner";
   if (normalizedView !== "admin-signals") closeAdminSignalModal();
@@ -4717,6 +4873,7 @@ function applyViewState(view, options = {}) {
     support: ["Account support", "Support"],
     admin: ["Administration", "Tester access requests"],
     "admin-signals": ["ADMIN SIGNALS", "All generated signals"],
+    "admin-strategy-lab": ["ADMIN", "Strategy Lab"],
     "admin-crypto-markets": ["ADMIN", "Crypto Markets"],
     "admin-support": ["Administration", "Support Tickets"],
     "affiliate-admin": ["Administration", "Affiliate Program"],
@@ -4743,6 +4900,12 @@ function applyViewState(view, options = {}) {
   if (normalizedView === "admin-signals") {
     loadAdminSignals().catch((error) => {
       adminSignalsTable.innerHTML = `<div class="empty-state"><strong>Generated signals unavailable</strong><p class="reasoning">${escapeHtml(error.message)}</p></div>`;
+    });
+  }
+
+  if (normalizedView === "admin-strategy-lab") {
+    loadAdminStrategyLab().catch((error) => {
+      document.querySelector("#admin-strategy-performance").innerHTML = `<div class="empty-state"><strong>Strategy Lab unavailable</strong><p class="reasoning">${escapeHtml(error.message)}</p></div>`;
     });
   }
 

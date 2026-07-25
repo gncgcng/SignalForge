@@ -20,6 +20,7 @@ export const ROUTE_TO_VIEW = Object.freeze({
   "affiliate-admin": "affiliate-admin",
   "webhook-events": "webhook-events",
   "admin-signals": "admin-signals",
+  "admin-strategy-lab": "admin-strategy-lab",
   "admin-crypto-markets": "admin-crypto-markets"
 });
 

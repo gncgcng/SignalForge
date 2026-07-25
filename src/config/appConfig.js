@@ -165,7 +165,10 @@ export const appConfig = {
     queueIntervalMs: Number(process.env.TELEGRAM_QUEUE_INTERVAL_MS || 2000),
     maxAttempts: Number(process.env.TELEGRAM_MAX_ATTEMPTS || 3),
     connectionCodeTtlMinutes: Number(process.env.TELEGRAM_CONNECTION_CODE_TTL_MINUTES || 10),
-    updatePollIntervalMs: Number(process.env.TELEGRAM_UPDATE_POLL_INTERVAL_MS || 3000)
+    updatePollIntervalMs: Number(process.env.TELEGRAM_UPDATE_POLL_INTERVAL_MS || 3000),
+    readyAlertMinConfidence: Number(process.env.TELEGRAM_READY_ALERT_MIN_CONFIDENCE || 75),
+    watchingAlertsEnabled: process.env.TELEGRAM_WATCHING_ALERTS_ENABLED === "true",
+    watchingAlertMinConfidence: Number(process.env.TELEGRAM_WATCHING_ALERT_MIN_CONFIDENCE || 65)
   },
   signalTracking: {
     enabled: true,

@@ -8,6 +8,10 @@ import {
 } from "../../db/repositories.js";
 import { sendTelegramMessage } from "./telegramClient.js";
 import { formatSignalValidityWindow } from "../signals/signalValidityService.js";
+import {
+  evaluateTelegramAlertEligibility,
+  recordTelegramAlertDiagnostic
+} from "./telegramAlertDiagnosticsService.js";
 
 const directions = new Set(["long", "short", "both"]);
 const timeframes = new Set(["5m", "15m", "1h", "4h"]);
@@ -86,6 +90,16 @@ export async function enqueueMatchingTelegramNotifications(user, setups) {
   const settings = await getTelegramSettingsByUser(user.id);
 
   if (!settings?.enabled || !appConfig.telegram.botToken) {
+    for (const setup of setups || []) {
+      const evaluation = evaluateTelegramAlertEligibility({ user, settings, setup });
+      await recordTelegramAlertDiagnostic({
+        signal: setup,
+        userId: user.id,
+        status: evaluation.status,
+        reason: evaluation.reason,
+        details: evaluation.details
+      });
+    }
     return [];
   }
 
@@ -96,7 +110,15 @@ export async function enqueueMatchingTelegramNotifications(user, setups) {
   const queued = [];
 
   for (const setup of setups) {
-    if (!telegramPreferenceMatchesSetup(settings, favoriteSymbols, setup)) {
+    const evaluation = evaluateTelegramAlertEligibility({ user, settings, setup, favoriteSymbols });
+    if (!evaluation.allowed) {
+      await recordTelegramAlertDiagnostic({
+        signal: setup,
+        userId: user.id,
+        status: evaluation.status,
+        reason: evaluation.reason,
+        details: evaluation.details
+      });
       continue;
     }
 
@@ -104,9 +126,23 @@ export async function enqueueMatchingTelegramNotifications(user, setups) {
 
     if (inserted) {
       console.log(`[telegram] queued alert user=${user.id} symbol=${setup.symbol} timeframe=${setup.timeframe} queue_id=${inserted.id}`);
+      await recordTelegramAlertDiagnostic({
+        signal: setup,
+        userId: user.id,
+        status: "queued",
+        reason: "Telegram alert queued for delivery.",
+        details: { queueId: inserted.id, confidence: setup.confidenceScore, threshold: evaluation.details?.threshold }
+      });
       queued.push(inserted.id);
     } else {
       console.log(`[telegram] duplicate alert skipped user=${user.id} symbol=${setup.symbol} timeframe=${setup.timeframe}`);
+      await recordTelegramAlertDiagnostic({
+        signal: setup,
+        userId: user.id,
+        status: "blocked_duplicate",
+        reason: "A Telegram alert for this setup is already queued or sent.",
+        details: { setupKey: setup.setupKey }
+      });
     }
   }
 
@@ -120,7 +156,7 @@ export function telegramPreferenceMatchesSetup(settings, favoriteSymbols, setup)
     settings.timeframes.includes(setup.timeframe) &&
     (settings.direction === "both" || settings.direction === setup.direction) &&
     Number(setup.confidenceScore) >= Number(settings.minimumConfidence) &&
-    Number(setup.confidenceScore) >= 80
+    Number(setup.confidenceScore) >= Number(appConfig.telegram.readyAlertMinConfidence || 75)
   );
 }
 

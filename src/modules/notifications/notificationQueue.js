@@ -8,6 +8,7 @@ import {
   formatTelegramSignalMessage,
   formatTelegramSignalReplyMarkup
 } from "./notificationService.js";
+import { recordTelegramAlertDiagnostic } from "./telegramAlertDiagnosticsService.js";
 import { sendTelegramMessage } from "./telegramClient.js";
 import { isSignalExpired } from "../signals/signalValidityService.js";
 
@@ -37,6 +38,13 @@ export async function processTelegramQueue() {
       try {
         if (isSignalExpired(delivery.payload)) {
           await markTelegramNotificationFailed(delivery.id, "Signal expired before Telegram delivery.", false);
+          await recordTelegramAlertDiagnostic({
+            signal: delivery.payload,
+            userId: delivery.userId,
+            status: "blocked_not_alertable",
+            reason: "Signal expired before Telegram delivery.",
+            details: { queueId: delivery.id }
+          });
           console.info(`[telegram] expired alert skipped queue_id=${delivery.id} user=${delivery.userId}`);
           continue;
         }
@@ -47,10 +55,24 @@ export async function processTelegramQueue() {
           formatTelegramSignalReplyMarkup(delivery.payload)
         );
         await markTelegramNotificationSent(delivery.id);
+        await recordTelegramAlertDiagnostic({
+          signal: delivery.payload,
+          userId: delivery.userId,
+          status: "sent",
+          reason: "Telegram alert sent.",
+          details: { queueId: delivery.id, attempts: delivery.attempts }
+        });
         console.log(`[telegram] sent queue_id=${delivery.id} user=${delivery.userId}`);
       } catch (error) {
         const retry = delivery.attempts < appConfig.telegram.maxAttempts;
         await markTelegramNotificationFailed(delivery.id, error.message, retry);
+        await recordTelegramAlertDiagnostic({
+          signal: delivery.payload,
+          userId: delivery.userId,
+          status: "failed",
+          reason: error.message,
+          details: { queueId: delivery.id, attempts: delivery.attempts, retry }
+        });
         console.warn(`[telegram] failed queue_id=${delivery.id} user=${delivery.userId} retry=${retry} error=${error.message}`);
 
         if (!retry) {

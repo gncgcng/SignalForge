@@ -1,0 +1,125 @@
+import assert from "node:assert/strict";
+import {
+  applyHistoricalStrategyContext,
+  calculateBreakEvenWinRate,
+  calculateHistoricalStrategyMetrics,
+  calculateStrategyExpectancy,
+  calculateWalkForwardValidation,
+  compareSetupToHistoricalExamples,
+  evaluateHistoricalOutcome,
+  getSampleSizeLabel
+} from "../src/modules/signals/historicalStrategyTestingService.js";
+import {
+  validateStrategyStrictness
+} from "../src/modules/signals/strategyStrictnessService.js";
+
+const longSetup = {
+  direction: "long",
+  entryPrice: 100,
+  stopLoss: 95,
+  takeProfit: 110,
+  riskRewardRatio: 2
+};
+
+assert.equal(evaluateHistoricalOutcome(longSetup, [{ high: 106, low: 98 }, { high: 111, low: 101 }]).status, "Hit TP");
+assert.equal(evaluateHistoricalOutcome(longSetup, [{ high: 101, low: 94 }]).status, "Hit SL");
+assert.equal(evaluateHistoricalOutcome({ ...longSetup, direction: "short", stopLoss: 105, takeProfit: 90 }, [{ high: 101, low: 89 }]).status, "Hit TP");
+
+assert.equal(calculateBreakEvenWinRate(2), 33.3);
+assert.equal(calculateStrategyExpectancy({ winRate: 50, averageRiskReward: 2, expiredRate: 0 }), 0.5);
+assert.equal(getSampleSizeLabel(10), "not_enough_data");
+assert.equal(getSampleSizeLabel(25), "experimental");
+assert.equal(getSampleSizeLabel(60), "promising");
+assert.equal(getSampleSizeLabel(120), "stronger_evidence");
+
+const examples = Array.from({ length: 60 }, (_, index) => ({
+  strategy: "Breakout retest",
+  pair: "BTC-USD",
+  timeframe: "15m",
+  marketRegime: "Trend Up",
+  entryCandleTime: new Date(Date.UTC(2026, 0, 1, 0, index * 15)).toISOString(),
+  result: index % 3 === 0 ? "Hit SL" : "Hit TP",
+  riskReward: 2,
+  barsToOutcome: 4
+}));
+const metrics = calculateHistoricalStrategyMetrics(examples);
+assert.equal(metrics.totalTested, 60);
+assert.equal(metrics.validSetupCount, 60);
+assert.equal(metrics.hitTp, 40);
+assert.equal(metrics.hitSl, 20);
+assert(metrics.winRate > metrics.breakEvenWinRate);
+assert(metrics.expectancy > 0);
+
+const walkForward = calculateWalkForwardValidation(examples);
+assert.equal(walkForward.status, "validated");
+assert(walkForward.training.totalTested > 0);
+assert(walkForward.validation.totalTested > 0);
+
+const failedExamples = examples.map((example, index) => ({ ...example, result: index % 4 === 0 ? "Hit TP" : "Hit SL" }));
+const failedWalkForward = calculateWalkForwardValidation(failedExamples);
+assert.equal(failedWalkForward.status, "failed_validation");
+
+const similarity = compareSetupToHistoricalExamples({
+  setupType: "Breakout retest",
+  symbol: "BTC-USD",
+  timeframe: "15m",
+  direction: "long",
+  riskRewardRatio: 2,
+  confidenceScore: 82,
+  readinessScore: 85
+}, failedExamples);
+assert(similarity.adjustment <= 0);
+
+const calibrated = applyHistoricalStrategyContext({
+  confidenceScore: 88,
+  setupType: "Breakout retest",
+  symbol: "BTC-USD",
+  timeframe: "15m",
+  direction: "long",
+  riskRewardRatio: 2,
+  indicators: {}
+}, {
+  stat: { sampleSizeLabel: "promising", walkForwardStatus: "failed_validation", expectancy: -0.2, expiredRate: 10 },
+  similarity
+});
+assert(calibrated.confidenceScore <= 75);
+assert.match(calibrated.historicalStrategyReason, /negative|Walk-forward|failed/i);
+
+const misreadRetest = validateStrategyStrictness({
+  setupType: "Breakout retest",
+  direction: "long",
+  entryPrice: 100,
+  stopLoss: 96,
+  takeProfit: 108,
+  riskRewardRatio: 2,
+  readinessScore: 82,
+  confirmations: [
+    { name: "Trend", passed: true },
+    { name: "Volume", passed: true },
+    { name: "Support", passed: true }
+  ],
+  indicators: { atr14: 2 }
+}, { volumeAvailable: true });
+assert.equal(misreadRetest.passed, false);
+assert.equal(misreadRetest.code, "missing_retest");
+assert.match(misreadRetest.reason, /did not actually retest/i);
+
+const validRetest = validateStrategyStrictness({
+  setupType: "Breakout retest",
+  direction: "long",
+  entryPrice: 100.2,
+  stopLoss: 96,
+  takeProfit: 108.6,
+  riskRewardRatio: 2,
+  readinessScore: 84,
+  marketStructure: { breakoutLevel: 100, score: 70, retestConfirmed: true },
+  confirmations: [
+    { name: "Retest held", passed: true },
+    { name: "Volume expansion", passed: true },
+    { name: "Structure", passed: true }
+  ],
+  indicators: { atr14: 2, volumeConfirmed: true }
+}, { volumeAvailable: true });
+assert.equal(validRetest.passed, true);
+
+console.log("historical strategy testing tests passed");

@@ -147,7 +147,7 @@ export async function runAutoCryptoAlertScan() {
 
             const telegramSetup = setup ? await calibrateTelegramAlertSetup(setup) : null;
 
-            if (!telegramSetup || !telegramPreferenceMatchesSetup(settings, favoriteSymbols, telegramSetup)) {
+            if (!telegramSetup) {
               continue;
             }
 

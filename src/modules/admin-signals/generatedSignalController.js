@@ -1,6 +1,16 @@
 import { readJson, sendError, sendJson } from "../../shared/http.js";
 import { isAdminUser } from "../auth/authService.js";
 import { getAdminGeneratedSignal, getAdminGeneratedSignals, updateAdminSignalGroupStatus } from "./generatedSignalService.js";
+import {
+  getTelegramAlertHealth,
+  sendTelegramAdminTestMessage,
+  simulateTelegramAlertLogic
+} from "../notifications/telegramAlertDiagnosticsService.js";
+import {
+  getStrategyBacktestJob,
+  listStrategyLabSummary,
+  startStrategyBacktestJob
+} from "../signals/historicalStrategyTestingService.js";
 
 export async function handleAdminGeneratedSignalRoutes(req, res, pathname, url) {
   if (!pathname.startsWith("/api/admin/signals")) return false;
@@ -20,6 +30,35 @@ export async function handleAdminGeneratedSignalRoutes(req, res, pathname, url) 
       confidenceCapOverride: numberFromBody(body.confidenceCapOverride)
     }, req.user);
     return sendJson(res, 200, { ok: true, status: updated });
+  }
+
+  if (pathname === "/api/admin/signals/telegram/health" && req.method === "GET") {
+    return sendJson(res, 200, { telegram: await getTelegramAlertHealth() });
+  }
+
+  if (pathname === "/api/admin/signals/telegram/simulate" && req.method === "POST") {
+    const body = await readJson(req);
+    return sendJson(res, 200, await simulateTelegramAlertLogic(Math.min(100, Math.max(1, Number(body.limit || 40)))));
+  }
+
+  if (pathname === "/api/admin/signals/telegram/test-message" && req.method === "POST") {
+    const body = await readJson(req);
+    return sendJson(res, 200, await sendTelegramAdminTestMessage(clean(body.chatId, 80)));
+  }
+
+  if (pathname === "/api/admin/signals/strategy-lab" && req.method === "GET") {
+    return sendJson(res, 200, await listStrategyLabSummary());
+  }
+
+  if (pathname === "/api/admin/signals/strategy-lab/backtest/start" && req.method === "POST") {
+    const body = await readJson(req);
+    return sendJson(res, 202, { job: await startStrategyBacktestJob(body.scope || {}, req.user) });
+  }
+
+  const jobMatch = pathname.match(/^\/api\/admin\/signals\/strategy-lab\/backtest\/([^/]+)$/);
+  if (jobMatch && req.method === "GET") {
+    const job = await getStrategyBacktestJob(decodeURIComponent(jobMatch[1]));
+    return job ? sendJson(res, 200, { job }) : sendError(res, 404, "Backtest job not found.");
   }
 
   if (req.method !== "GET") return sendError(res, 405, "Method not allowed.");

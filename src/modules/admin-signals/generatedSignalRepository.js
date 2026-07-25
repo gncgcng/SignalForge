@@ -55,8 +55,11 @@ export async function upsertGeneratedSignal(signal, context = {}) {
     signal.resultReason || signal.statusReason || signal.indicators?.generatedQualityBlockReason || null,
     signal.generatedAt || new Date()
   ]);
+  if (result.rows[0]) {
+    await updateGeneratedSignalAnnotations(result.rows[0].id, signal);
+  }
   await recordGeneratedSignalConfidenceAdjustment(result.rows[0], signal);
-  return mapGeneratedSignal(result.rows[0]);
+  return getGeneratedSignalById(result.rows[0].id);
 }
 
 export async function listGeneratedSignals(filters = {}) {
@@ -184,6 +187,74 @@ export async function syncGeneratedSignalOutcome(signal) {
   return updateGeneratedSignalStatus(id, signal.status, { resolvedAt: signal.resolvedAt, reason: signal.statusReason });
 }
 
+export async function recordGeneratedSignalTelegramDiagnostic({ signal = {}, userId = null, status, reason = "", details = {} }) {
+  const signalId = signal.id || signal.signalId || null;
+  const setupKey = signal.setupKey || null;
+  await query(`
+    INSERT INTO telegram_alert_diagnostics (
+      id, signal_id, setup_key, user_id, status, reason, details, attempted_at, created_at
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,now(),now())
+  `, [
+    createId("tgdiag"),
+    signalId,
+    setupKey,
+    userId,
+    status,
+    reason || null,
+    JSON.stringify(details || {})
+  ]);
+  await query(`
+    UPDATE generated_signals SET
+      telegram_status = $3,
+      telegram_block_reason = $4,
+      telegram_block_details = $5,
+      telegram_last_checked_at = now(),
+      updated_at = now()
+    WHERE signal_id = $1 OR ($2::text IS NOT NULL AND setup_key = $2)
+  `, [
+    signalId,
+    setupKey,
+    status,
+    reason || null,
+    JSON.stringify(details || {})
+  ]);
+}
+
+export async function getTelegramAlertDiagnosticsSummary() {
+  const [diagnostics, generated, latestFailure] = await Promise.all([
+    query(`
+      SELECT
+        COUNT(*) FILTER (WHERE status IN ('sent','queued'))::integer AS sent_or_queued_today,
+        COUNT(*) FILTER (WHERE status LIKE 'blocked_%' OR status IN ('telegram_disabled','missing_chat_id','missing_bot_token'))::integer AS blocked_today,
+        MAX(attempted_at) AS last_attempt_at,
+        MAX(attempted_at) FILTER (WHERE status IN ('sent','queued')) AS last_sent_at
+      FROM telegram_alert_diagnostics
+      WHERE created_at::date = current_date
+    `),
+    query(`
+      SELECT
+        COUNT(*) FILTER (WHERE status = 'Active')::integer AS alertable_signal_count,
+        COUNT(*) FILTER (WHERE telegram_status IS NULL AND status = 'Active')::integer AS non_alerted_generated_signal_count,
+        COUNT(*) FILTER (WHERE telegram_status = 'failed')::integer AS failed_total,
+        COUNT(*) FILTER (WHERE telegram_status = 'queued')::integer AS queued_total
+      FROM generated_signals
+      WHERE created_at >= now() - interval '7 days'
+    `),
+    query(`
+      SELECT status, reason, details, attempted_at
+      FROM telegram_alert_diagnostics
+      WHERE status IN ('failed','telegram_disabled','missing_chat_id','missing_bot_token') OR status LIKE 'blocked_%'
+      ORDER BY attempted_at DESC
+      LIMIT 1
+    `)
+  ]);
+  return {
+    ...(diagnostics.rows[0] || {}),
+    ...(generated.rows[0] || {}),
+    latestFailure: latestFailure.rows[0] || null
+  };
+}
+
 export function buildGeneratedSignalKey(signal) {
   if (signal.setupKey) return String(signal.setupKey).toLowerCase();
   const created = new Date(signal.generatedAt || Date.now()).getTime();
@@ -195,7 +266,25 @@ function toFullAnalysis(signal) { return { reasoning: signal.reasoning, confirma
 function normalizeSource(source) { return ["manual_scan","auto_crypto_watcher","telegram_alert","candidate_promotion","backtest_shadow","admin_test","legacy_saved_signal","legacy_unlocked_signal"].includes(source) ? source : "manual_scan"; }
 function finiteOrNull(value) { const number = Number(value); return Number.isFinite(number) ? number : null; }
 function displayPair(symbol) { return String(symbol || "").toUpperCase().replace(/[-/]/g, ""); }
-function mapGeneratedSignal(row) { if (!row) return null; return { id: row.id, signalId: row.signal_id, setupKey: row.setup_key, pair: row.pair, displayPair: row.display_pair, provider: row.provider, timeframe: row.timeframe, direction: row.direction, strategy: row.strategy, pattern: row.pattern, patternContext: row.pattern_context || {}, entry: Number(row.entry), stopLoss: Number(row.stop_loss), takeProfit: Number(row.take_profit), riskReward: Number(row.risk_reward), confidence: Number(row.confidence), originalConfidence: row.original_confidence == null ? Number(row.confidence) : Number(row.original_confidence), rawSetupScore: row.original_confidence == null ? Number(row.confidence) : Number(row.original_confidence), calibratedConfidence: row.calibrated_confidence == null ? Number(row.confidence) : Number(row.calibrated_confidence), finalConfidence: row.calibrated_confidence == null ? Number(row.confidence) : Number(row.calibrated_confidence), confidenceVersion: row.confidence_version || row.confidence_calibration?.version || "calibration_v1", calibrationReason: row.calibration_reason || row.confidence_calibration?.calibrationReason || row.confidence_calibration?.message || null, confidenceCalibration: row.confidence_calibration || {}, setupQualityScore: Number(row.setup_quality_score || 0), entryReadinessScore: Number(row.entry_readiness_score || 0), status: row.status, expiringSoon: Boolean(row.expiring_soon), validUntil: row.valid_until, expiredAt: row.expired_at, hitTpAt: row.hit_tp_at, hitSlAt: row.hit_sl_at, source: row.source, sourceHistory: row.source_history || [], generatedBy: row.generated_by, promotedFromCandidateId: row.promoted_from_candidate_id, validationSummary: row.validation_summary || {}, warningReasons: row.warning_reasons || [], qualityBreakdown: row.quality_breakdown || {}, fullAnalysis: row.full_analysis || {}, postMortemTags: row.resolved_post_mortem_tags || row.post_mortem_tags || [], maxFavorableExcursion: row.max_favorable_excursion == null ? null : Number(row.max_favorable_excursion), maxAdverseExcursion: row.max_adverse_excursion == null ? null : Number(row.max_adverse_excursion), resultReason: row.result_reason, candidateOrigin: row.candidate_status ? { status: row.candidate_status, setupQualityScore: Number(row.candidate_score || 0), entryReadinessScore: Number(row.readiness_score || 0), missingConfirmations: row.missing_confirmations || [], firstDetectedAt: row.first_detected_at, lastCheckedAt: row.last_checked_at } : null, createdAt: row.created_at, updatedAt: row.updated_at }; }
+function mapGeneratedSignal(row) { if (!row) return null; return { id: row.id, signalId: row.signal_id, setupKey: row.setup_key, pair: row.pair, displayPair: row.display_pair, provider: row.provider, timeframe: row.timeframe, direction: row.direction, strategy: row.strategy, pattern: row.pattern, patternContext: row.pattern_context || {}, entry: Number(row.entry), stopLoss: Number(row.stop_loss), takeProfit: Number(row.take_profit), riskReward: Number(row.risk_reward), confidence: Number(row.confidence), originalConfidence: row.original_confidence == null ? Number(row.confidence) : Number(row.original_confidence), rawSetupScore: row.original_confidence == null ? Number(row.confidence) : Number(row.original_confidence), calibratedConfidence: row.calibrated_confidence == null ? Number(row.confidence) : Number(row.calibrated_confidence), finalConfidence: row.calibrated_confidence == null ? Number(row.confidence) : Number(row.calibrated_confidence), confidenceVersion: row.confidence_version || row.confidence_calibration?.version || "calibration_v1", calibrationReason: row.calibration_reason || row.confidence_calibration?.calibrationReason || row.confidence_calibration?.message || null, confidenceCalibration: row.confidence_calibration || {}, setupQualityScore: Number(row.setup_quality_score || 0), entryReadinessScore: Number(row.entry_readiness_score || 0), status: row.status, expiringSoon: Boolean(row.expiring_soon), validUntil: row.valid_until, expiredAt: row.expired_at, hitTpAt: row.hit_tp_at, hitSlAt: row.hit_sl_at, source: row.source, sourceHistory: row.source_history || [], generatedBy: row.generated_by, promotedFromCandidateId: row.promoted_from_candidate_id, validationSummary: row.validation_summary || {}, warningReasons: row.warning_reasons || [], qualityBreakdown: row.quality_breakdown || {}, fullAnalysis: row.full_analysis || {}, telegramStatus: row.telegram_status || null, telegramBlockReason: row.telegram_block_reason || null, telegramBlockDetails: row.telegram_block_details || {}, telegramLastCheckedAt: row.telegram_last_checked_at || null, historicalStrategyStatus: row.historical_strategy_status || null, historicalStrategyReason: row.historical_strategy_reason || null, strategyValidationStatus: row.strategy_validation_status || null, strategyValidationReason: row.strategy_validation_reason || null, postMortemTags: row.resolved_post_mortem_tags || row.post_mortem_tags || [], maxFavorableExcursion: row.max_favorable_excursion == null ? null : Number(row.max_favorable_excursion), maxAdverseExcursion: row.max_adverse_excursion == null ? null : Number(row.max_adverse_excursion), resultReason: row.result_reason, candidateOrigin: row.candidate_status ? { status: row.candidate_status, setupQualityScore: Number(row.candidate_score || 0), entryReadinessScore: Number(row.readiness_score || 0), missingConfirmations: row.missing_confirmations || [], firstDetectedAt: row.first_detected_at, lastCheckedAt: row.last_checked_at } : null, createdAt: row.created_at, updatedAt: row.updated_at }; }
+
+async function updateGeneratedSignalAnnotations(id, signal) {
+  await query(`
+    UPDATE generated_signals SET
+      historical_strategy_status = COALESCE($2, historical_strategy_status),
+      historical_strategy_reason = COALESCE($3, historical_strategy_reason),
+      strategy_validation_status = COALESCE($4, strategy_validation_status),
+      strategy_validation_reason = COALESCE($5, strategy_validation_reason),
+      updated_at = now()
+    WHERE id = $1
+  `, [
+    id,
+    signal.historicalStrategyStatus || signal.indicators?.historicalStrategyCalibration?.status || null,
+    signal.historicalStrategyReason || (signal.indicators?.historicalStrategyCalibration?.reasons || []).join(" ") || null,
+    signal.strategyValidationStatus || signal.indicators?.strategyValidationStatus || signal.indicators?.strategyStrictness?.status || null,
+    signal.strategyValidationReason || signal.indicators?.strategyValidationReason || signal.indicators?.strategyStrictness?.reason || null
+  ]);
+}
 
 async function recordGeneratedSignalConfidenceAdjustment(row, signal) {
   const calibration = signal.confidenceCalibration || signal.indicators?.confidenceCalibration || {};

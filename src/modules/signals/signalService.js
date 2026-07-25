@@ -43,11 +43,16 @@ import {
   applyConfidenceCalibration,
   isSignalBlockedByCalibration
 } from "./signalConfidenceCalibrationService.js";
+import { applyHistoricalStrategyCalibration } from "./historicalStrategyTestingService.js";
 import {
   applyGeneratedSignalQualityBlock,
   applyTimeframeConfidencePolicy,
   evaluateGeneratedSignalQualityGate
 } from "./generatedSignalQualityGate.js";
+import {
+  applyStrategyStrictnessRejection,
+  validateStrategyStrictness
+} from "./strategyStrictnessService.js";
 import {
   SCANNER_RESULT_TYPES,
   buildAvoidTradeResult,
@@ -326,19 +331,24 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
       }
     }
     : null;
-  const validation = readySignal
+  const strictness = readySignal ? validateStrategyStrictness(readySignal, marketData) : null;
+  const validation = readySignal && strictness?.passed !== false
     ? await validateSignalForPublication(readySignal, marketData, user, {
       source: "scanner",
       duplicate: true
     })
     : null;
-  const valid = Boolean(readySignal && validation?.passed);
+  const strictnessBlocked = Boolean(readySignal && strictness?.passed === false);
+  const valid = Boolean(readySignal && !strictnessBlocked && validation?.passed);
   const learnedSignal = valid
     ? withSignalValidity(await applyLearningToValidatedSignal(applyValidationToSignal(readySignal, validation), {
       source: generationSource
     }))
     : null;
-  const cappedSignal = learnedSignal ? applyTimeframeConfidencePolicy(learnedSignal) : null;
+  const historicallyCalibratedSignal = learnedSignal
+    ? await applyHistoricalStrategyCalibration(learnedSignal)
+    : null;
+  const cappedSignal = historicallyCalibratedSignal ? applyTimeframeConfidencePolicy(historicallyCalibratedSignal) : null;
   const calibrationBlocked = isSignalBlockedByCalibration(cappedSignal);
   const qualityGate = cappedSignal && !calibrationBlocked
     ? await evaluateGeneratedSignalQualityGate(cappedSignal, { source: generationSource })
@@ -349,6 +359,8 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
     : null;
   const blockedSignal = qualityBlocked
     ? withSignalQuality(applyGeneratedSignalQualityBlock(cappedSignal, qualityGate))
+    : strictnessBlocked
+      ? withSignalQuality(applyStrategyStrictnessRejection(readySignal, strictness))
     : null;
   if (signal && candidate) {
     candidate = await markCandidatePromoted(candidate, signal) || { ...candidate, status: "promoted_to_signal" };
@@ -384,8 +396,10 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
       candidateId: candidate?.id || null
     });
   }
-  if (readySignal && validation && (!validation.passed || calibrationBlocked || qualityBlocked) && candidate) {
-    const rejectionReason = calibrationBlocked
+  if (readySignal && (strictnessBlocked || validation || calibrationBlocked || qualityBlocked) && (!validation?.passed || calibrationBlocked || qualityBlocked || strictnessBlocked) && candidate) {
+    const rejectionReason = strictnessBlocked
+      ? strictness.reason
+      : calibrationBlocked
       ? "Performance calibration quarantined or disabled this group."
       : qualityBlocked
         ? qualityGate.reason
@@ -405,8 +419,10 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
       rejectionReasonCodes: readiness.reasons.map((reason) => reason.includes("entry") ? "entry_not_ready" : "readiness_pending"),
       candidate: candidate ? toCandidatePreview(candidate) : null
     }
-    : result.valid && validation && (!validation.passed || qualityBlocked || calibrationBlocked)
-      ? validationNoSetupAnalysis(readySignal, qualityBlocked
+    : result.valid && (strictnessBlocked || validation) && (strictnessBlocked || !validation?.passed || qualityBlocked || calibrationBlocked)
+      ? validationNoSetupAnalysis(readySignal, strictnessBlocked
+        ? qualityGateToValidation(readySignal, { stage: "strategy_strictness", reason: strictness.reason })
+        : qualityBlocked
         ? qualityGateToValidation(readySignal, qualityGate)
         : calibrationBlocked
           ? qualityGateToValidation(readySignal, { stage: "generated_quality_calibration", reason: "Performance calibration quarantined or disabled this group." })
