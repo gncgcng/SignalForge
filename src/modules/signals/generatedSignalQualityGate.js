@@ -1,11 +1,21 @@
 import { query } from "../../db/client.js";
+import { recordSignalQualityGateResult } from "./signalQualityGateRepository.js";
+import { evaluateSignalQualityGateV2 } from "./signalQualityGateV2Service.js";
 
 export const blockedGeneratedSignalStatuses = Object.freeze({
   duplicate: "Duplicate blocked",
   cooldown: "Cooldown blocked",
   correlated: "Correlated duplicate",
   timeframe: "Quarantined timeframe",
-  readiness: "Readiness failed"
+  readiness: "Readiness failed",
+  weak_strategy_match: "Weak strategy match",
+  poor_entry_quality: "Poor entry quality",
+  invalid_stop_loss: "Invalid stop loss",
+  unrealistic_take_profit: "Unrealistic take profit",
+  weak_risk_reward: "Weak risk/reward",
+  bad_market_regime: "Bad market regime",
+  historical_underperformer: "Historical underperformer",
+  similar_to_past_losers: "Similar to past losers"
 });
 
 const currentEngineSourceSql = "source NOT IN ('legacy_saved_signal','legacy_unlocked_signal')";
@@ -22,34 +32,40 @@ export async function evaluateGeneratedSignalQualityGate(signal, context = {}) {
   const source = context.source || signal.generationSource || signal.source || signal.indicators?.generationSource || "manual_scan";
   const readiness = Number(signal.readinessScore ?? signal.entryReadinessScore ?? signal.indicators?.readinessScore ?? signal.indicators?.entryReadinessScore ?? 0);
   if (!Number.isFinite(readiness) || readiness <= 0) {
-    return blockGate("readiness", "Readiness score is 0, so this setup cannot be promoted as a ready signal.", { readinessScore: readiness });
+    return recordAndReturn(signal, blockGate("readiness", "Readiness score is 0, so this setup cannot be promoted as a ready signal.", { readinessScore: readiness }), context);
   }
 
   const timeframePolicy = getTimeframeQualityPolicy(signal.timeframe);
   if (timeframePolicy.status === "quarantined") {
-    return blockGate("timeframe", timeframePolicy.reason, { timeframe: signal.timeframe, confidenceCap: timeframePolicy.confidenceCap });
+    return recordAndReturn(signal, blockGate("timeframe", timeframePolicy.reason, { timeframe: signal.timeframe, confidenceCap: timeframePolicy.confidenceCap }), context);
   }
   if (timeframePolicy.status === "watchlist" && !(await hasProvenSourceStrategyTimeframe(signal, source))) {
-    return blockGate("timeframe", timeframePolicy.reason, { timeframe: signal.timeframe, confidenceCap: timeframePolicy.confidenceCap });
+    return recordAndReturn(signal, blockGate("timeframe", timeframePolicy.reason, { timeframe: signal.timeframe, confidenceCap: timeframePolicy.confidenceCap }), context);
   }
 
   const cooldown = await findRecentGeneratedSignalFailure(signal);
   if (cooldown) {
-    return blockGate("cooldown", `Blocked by cooldown because the last similar signal ${cooldown.status === "Hit SL" ? "hit SL" : "expired"}.`, cooldown);
+    return recordAndReturn(signal, blockGate("cooldown", `Blocked by cooldown because the last similar signal ${cooldown.status === "Hit SL" ? "hit SL" : "expired"}.`, cooldown), context);
   }
 
   const duplicate = await findRecentGeneratedSignalDuplicate(signal);
   if (duplicate) {
-    return blockGate(
+    return recordAndReturn(signal, blockGate(
       duplicate.timeframe === signal.timeframe ? "duplicate" : "correlated",
       duplicate.timeframe === signal.timeframe
         ? "A recent similar ready signal already exists for this pair, direction, timeframe, and strategy."
         : "A recent correlated signal already exists for this pair and direction on a nearby timeframe.",
       duplicate
-    );
+    ), context);
   }
 
-  return passGate();
+  const v2 = evaluateSignalQualityGateV2(signal, context);
+  if (!v2.passed) {
+    return recordAndReturn(signal, blockGate(v2.status, v2.explanation, { qualityGateV2: v2 }, v2), context);
+  }
+
+  await recordGateSafely(signal, v2, context);
+  return passGate({ qualityGateV2: v2 });
 }
 
 export function applyGeneratedSignalQualityBlock(signal, gate) {
@@ -70,7 +86,9 @@ export function applyGeneratedSignalQualityBlock(signal, gate) {
       ...(signal.indicators || {}),
       generatedQualityGate: gate,
       generatedQualityBlocked: true,
-      generatedQualityBlockReason: reason
+      generatedQualityBlockReason: reason,
+      qualityGatePassed: false,
+      qualityGateV2: gate.details?.qualityGateV2 || gate.qualityGateV2 || null
     }
   };
 }
@@ -191,18 +209,36 @@ async function hasProvenSourceStrategyTimeframe(signal, source) {
   return expectancy > 0;
 }
 
-function passGate() {
-  return { passed: true, status: "passed", reasons: [] };
+async function recordAndReturn(signal, gate, context) {
+  await recordGateSafely(signal, gate, context);
+  return gate;
 }
 
-function blockGate(type, reason, details = {}) {
+async function recordGateSafely(signal, gate, context) {
+  try {
+    await recordSignalQualityGateResult(signal, gate, context);
+  } catch (error) {
+    console.warn(`[signal-quality-gate] diagnostic_write_failed reason=${error.message}`);
+  }
+}
+
+function passGate(details = {}) {
+  return { passed: true, status: "passed", reasons: [], ...details };
+}
+
+function blockGate(type, reason, details = {}, qualityGateV2 = null) {
   return {
+    version: qualityGateV2?.version || "quality_gate_v2",
     passed: false,
     type,
     stage: `generated_quality_${type}`,
     status: blockedGeneratedSignalStatuses[type] || blockedGeneratedSignalStatuses.duplicate,
     reason,
     details,
+    reasonCode: qualityGateV2?.reasonCode || type,
+    explanation: qualityGateV2?.explanation || reason,
+    userExplanation: qualityGateV2?.userExplanation || reason,
+    qualityGateV2,
     checkedAt: new Date().toISOString()
   };
 }

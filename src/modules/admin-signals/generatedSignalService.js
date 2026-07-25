@@ -3,6 +3,7 @@ import {
   getAdminSignalQualityBreakdown,
   updateSignalGroupStatus
 } from "../signals/signalConfidenceCalibrationService.js";
+import { getSignalQualityGateDashboard } from "../signals/signalQualityGateRepository.js";
 import {
   getGeneratedSignalById,
   getGeneratedSignalStats,
@@ -25,12 +26,13 @@ export async function saveGeneratedSignal(signal, context = {}) {
 }
 
 export async function getAdminGeneratedSignals(filters) {
-  const [listing, stats, qualityBreakdown] = await Promise.all([
+  const [listing, stats, qualityBreakdown, qualityGate] = await Promise.all([
     listGeneratedSignals(filters),
     getGeneratedSignalStats(),
-    getAdminSignalQualityBreakdown(filters?.performanceScope || "current")
+    getAdminSignalQualityBreakdown(filters?.performanceScope || "current"),
+    getSignalQualityGateDashboard()
   ]);
-  return { ...listing, stats, qualityBreakdown };
+  return { ...listing, stats, qualityBreakdown, qualityGate };
 }
 
 export async function getAdminGeneratedSignal(id) {

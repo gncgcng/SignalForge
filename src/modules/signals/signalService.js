@@ -351,11 +351,19 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
   const cappedSignal = historicallyCalibratedSignal ? applyTimeframeConfidencePolicy(historicallyCalibratedSignal) : null;
   const calibrationBlocked = isSignalBlockedByCalibration(cappedSignal);
   const qualityGate = cappedSignal && !calibrationBlocked
-    ? await evaluateGeneratedSignalQualityGate(cappedSignal, { source: generationSource })
+    ? await evaluateGeneratedSignalQualityGate(cappedSignal, { source: generationSource, marketData, candidateId: candidate?.id || null })
     : { passed: !cappedSignal || calibrationBlocked };
   const qualityBlocked = Boolean(cappedSignal && !qualityGate.passed);
   const signal = cappedSignal && !calibrationBlocked && !qualityBlocked
-    ? withSignalQuality({ ...cappedSignal, confidenceScore: Math.min(cappedSignal.confidenceScore, candidate?.confidenceEstimate || 99) })
+    ? withSignalQuality({
+      ...cappedSignal,
+      confidenceScore: Math.min(cappedSignal.confidenceScore, candidate?.confidenceEstimate || 99),
+      indicators: {
+        ...(cappedSignal.indicators || {}),
+        qualityGatePassed: true,
+        qualityGateV2: qualityGate.qualityGateV2 || qualityGate.details?.qualityGateV2 || null
+      }
+    })
     : null;
   const blockedSignal = qualityBlocked
     ? withSignalQuality(applyGeneratedSignalQualityBlock(cappedSignal, qualityGate))

@@ -11,6 +11,7 @@ import {
   listStrategyLabSummary,
   startStrategyBacktestJob
 } from "../signals/historicalStrategyTestingService.js";
+import { getSignalQualityGateDashboard } from "../signals/signalQualityGateRepository.js";
 
 export async function handleAdminGeneratedSignalRoutes(req, res, pathname, url) {
   if (!pathname.startsWith("/api/admin/signals")) return false;
@@ -34,6 +35,10 @@ export async function handleAdminGeneratedSignalRoutes(req, res, pathname, url) 
 
   if (pathname === "/api/admin/signals/telegram/health" && req.method === "GET") {
     return sendJson(res, 200, { telegram: await getTelegramAlertHealth() });
+  }
+
+  if (pathname === "/api/admin/signals/quality-gate" && req.method === "GET") {
+    return sendJson(res, 200, { qualityGate: await getSignalQualityGateDashboard() });
   }
 
   if (pathname === "/api/admin/signals/telegram/simulate" && req.method === "POST") {

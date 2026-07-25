@@ -671,6 +671,7 @@
                 <a href="#support" data-view-link="support">Support</a>
                 <a class="hidden" href="#admin" data-view-link="admin" id="admin-nav-link">Admin</a>
                 <a class="hidden" href="#admin-signals" data-view-link="admin-signals" id="admin-signals-nav-link">Admin Signals</a>
+                <a class="hidden" href="#admin-signal-quality-gate" data-view-link="admin-signal-quality-gate" id="admin-signal-quality-gate-nav-link">Signal Quality Gate</a>
                 <a class="hidden" href="#admin-strategy-lab" data-view-link="admin-strategy-lab" id="admin-strategy-lab-nav-link">Strategy Lab</a>
                 <a class="hidden" href="#admin-crypto-markets" data-view-link="admin-crypto-markets" id="admin-crypto-markets-nav-link">Crypto Markets</a>
                 <a class="hidden" href="#admin-support" data-view-link="admin-support" id="admin-support-nav-link">Support Tickets</a>
@@ -2054,7 +2055,7 @@
             </article>
             <form class="admin-signal-filters" id="admin-signal-filters">
               <input class="sf-input" name="search" type="search" placeholder="Search pair, strategy, pattern, notes, or signal ID">
-              <select class="sf-select" name="status"><option value="all">All statuses</option><option>Active</option><option value="expiring-soon">Expiring Soon</option><option>Hit TP</option><option>Hit SL</option><option>Expired</option><option value="closed">Closed</option><option>Duplicate blocked</option><option>Cooldown blocked</option><option>Correlated duplicate</option><option>Quarantined timeframe</option><option>Readiness failed</option><option>Invalid legacy ready signal</option></select>
+              <select class="sf-select" name="status"><option value="all">All statuses</option><option>Active</option><option value="expiring-soon">Expiring Soon</option><option>Hit TP</option><option>Hit SL</option><option>Expired</option><option value="closed">Closed</option><option>Duplicate blocked</option><option>Cooldown blocked</option><option>Correlated duplicate</option><option>Quarantined timeframe</option><option>Readiness failed</option><option>Weak strategy match</option><option>Poor entry quality</option><option>Invalid stop loss</option><option>Unrealistic take profit</option><option>Weak risk/reward</option><option>Bad market regime</option><option>Historical underperformer</option><option>Similar to past losers</option><option>Invalid legacy ready signal</option></select>
               <select class="sf-select" name="performanceScope"><option value="current">Current engine only</option><option value="legacy">Legacy only</option><option value="all">All signals</option></select>
               <input class="sf-input" name="pair" placeholder="Pair">
               <select class="sf-select" name="timeframe"><option value="">All timeframes</option><option>1m</option><option>5m</option><option>15m</option><option>1h</option><option>4h</option></select>
@@ -2077,6 +2078,17 @@
               <button class="admin-signal-modal-backdrop" data-admin-signal-close type="button" aria-label="Close signal details"></button>
               <article class="admin-signal-detail-card"><header><div><span class="eyebrow">Full internal record</span><h3 id="admin-signal-modal-title">Generated signal</h3></div><button class="secondary-action" data-admin-signal-close type="button">Close</button></header><div id="admin-signal-detail"></div></article>
             </div>
+          </section>
+
+          <section class="page-view hidden admin-signals-page" id="admin-signal-quality-gate-view" data-view="admin-signal-quality-gate">
+            <div class="section-title admin-signals-heading">
+              <div><span class="eyebrow">ADMIN</span><h3>Signal Quality Gate</h3><p>Final promotion filter diagnostics for weak strategy matches, poor entries, invalid stops, unrealistic targets, and historical underperformance.</p></div>
+            </div>
+            <div class="signal-disclaimer">
+              <strong>Internal diagnostics.</strong>
+              <span>Blocked setups are saved for tuning only and are not shown as user-ready signals or Telegram alerts.</span>
+            </div>
+            <div class="admin-signal-quality-panel" id="admin-signal-quality-gate-panel"><div class="empty-state"><strong>Loading quality gate diagnostics...</strong></div></div>
           </section>
 
           <section class="page-view hidden admin-signals-page" id="admin-strategy-lab-view" data-view="admin-strategy-lab">

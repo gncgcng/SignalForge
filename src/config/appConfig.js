@@ -192,6 +192,10 @@ export const appConfig = {
     maxRows: Math.max(1000, Number(process.env.AVOID_TRADE_EVENT_MAX_ROWS || 25000)),
     dedupMinutes: Math.max(1, Number(process.env.AVOID_TRADE_EVENT_DEDUP_MINUTES || 60))
   },
+  signalQualityGate: {
+    detailRetentionDays: Math.max(1, Number(process.env.SIGNAL_QUALITY_GATE_DETAIL_RETENTION_DAYS || 30)),
+    maxDetailRows: Math.max(1000, Number(process.env.SIGNAL_QUALITY_GATE_DETAIL_MAX_ROWS || 25000))
+  },
   stripe: {
     publishableKey: process.env.STRIPE_PUBLISHABLE_KEY || "",
     secretKey: process.env.STRIPE_SECRET_KEY || "",

@@ -1,3 +1,5 @@
+import { classifySignalMistakeLabels } from "./signalQualityGateV2Service.js";
+
 const terminalOutcomeTags = {
   "Hit TP": ["winner_confirmations"],
   "Hit SL": ["trend_reversal_after_entry", "weak_confirmation"],
@@ -127,6 +129,7 @@ export function buildPostMortemTags(signal) {
     if (indicators.vwapAvailable && !indicators.vwapAligned) tags.add("vwap_conflict");
     if (String(indicators.sessionLiquidity || "").toLowerCase() === "low") tags.add("low_liquidity_session");
     if (Number(signal.riskRewardRatio || 0) > 2.4) tags.add("target_too_aggressive");
+    classifySignalMistakeLabels(signal).forEach((tag) => tags.add(tag));
   }
   if (signal.status === "Expired") {
     tags.add("entry_never_developed");
@@ -136,6 +139,7 @@ export function buildPostMortemTags(signal) {
     if (String(indicators.volatilityLevel || "").toLowerCase().includes("low")) tags.add("low_volatility");
     if (Number(indicators.atrRatio || 0) < 0.001) tags.add("atr_too_low");
     if (String(indicators.sessionLiquidity || "").toLowerCase() === "low") tags.add("session_liquidity_issue");
+    classifySignalMistakeLabels(signal).forEach((tag) => tags.add(tag));
   }
 
   return [...tags];

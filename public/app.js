@@ -356,6 +356,7 @@ const onboardingPublicProfile = document.querySelector("#onboarding-public-profi
 const usernameOnboardingMessage = document.querySelector("#username-onboarding-message");
 const adminNavLink = document.querySelector("#admin-nav-link");
 const adminSignalsNavLink = document.querySelector("#admin-signals-nav-link");
+const adminSignalQualityGateNavLink = document.querySelector("#admin-signal-quality-gate-nav-link");
 const adminStrategyLabNavLink = document.querySelector("#admin-strategy-lab-nav-link");
 const adminCryptoMarketsNavLink = document.querySelector("#admin-crypto-markets-nav-link");
 const affiliateAdminNavLink = document.querySelector("#affiliate-admin-nav-link");
@@ -391,6 +392,7 @@ const adminTelegramHealthStats = document.querySelector("#admin-telegram-health-
 const adminTelegramSimulation = document.querySelector("#admin-telegram-simulation");
 const adminTelegramSimulate = document.querySelector("#admin-telegram-simulate");
 const adminTelegramTestMessage = document.querySelector("#admin-telegram-test-message");
+const adminSignalQualityGatePanel = document.querySelector("#admin-signal-quality-gate-panel");
 const adminStrategyBacktestStart = document.querySelector("#admin-strategy-backtest-start");
 const adminCryptoFilters = document.querySelector("#admin-crypto-filters");
 const adminCryptoMarketList = document.querySelector("#admin-crypto-market-list");
@@ -3154,6 +3156,7 @@ async function bootDashboard() {
   document.querySelector("#user-name").textContent = getUserDisplayName();
   adminNavLink.classList.toggle("hidden", !state.user.isAdmin);
   adminSignalsNavLink.classList.toggle("hidden", !state.user.isAdmin);
+  adminSignalQualityGateNavLink?.classList.toggle("hidden", !state.user.isAdmin);
   adminStrategyLabNavLink?.classList.toggle("hidden", !state.user.isAdmin);
   adminCryptoMarketsNavLink.classList.toggle("hidden", !state.user.isAdmin);
   adminSupportNavLink.classList.toggle("hidden", !state.user.isAdmin);
@@ -3790,6 +3793,13 @@ async function loadAdminTelegramHealth() {
   renderAdminTelegramHealth();
 }
 
+async function loadAdminSignalQualityGate() {
+  if (!state.user?.isAdmin) throw new Error("Admin access required.");
+  if (adminSignalQualityGatePanel) adminSignalQualityGatePanel.innerHTML = `<div class="empty-state"><strong>Loading quality gate diagnostics...</strong></div>`;
+  const result = await api.request("/api/admin/signals/quality-gate");
+  if (adminSignalQualityGatePanel) adminSignalQualityGatePanel.innerHTML = renderSignalQualityGateDiagnostics(result.qualityGate || {});
+}
+
 async function loadAdminStrategyLab() {
   if (!state.user?.isAdmin) throw new Error("Admin access required.");
   const lab = await api.request("/api/admin/signals/strategy-lab");
@@ -3928,10 +3938,14 @@ function renderAdminSignals() {
     ["Duplicate blocked", stats.duplicateBlocked], ["Cooldown blocked", stats.cooldownBlocked],
     ["Correlated blocked", stats.correlatedDuplicate], ["Timeframe blocked", stats.quarantinedTimeframe],
     ["Readiness failed", stats.readinessFailed], ["Invalid legacy", stats.invalidLegacyReady],
+    ["Weak strategy", stats.weakStrategyMatch], ["Poor entry", stats.poorEntryQuality],
+    ["Invalid stop", stats.invalidStopLoss], ["Unrealistic TP", stats.unrealisticTakeProfit],
+    ["Weak R/R", stats.weakRiskReward], ["Bad regime", stats.badMarketRegime],
+    ["Historical block", stats.historicalUnderperformer], ["Past-loser match", stats.similarToPastLosers],
     ["Win rate", `${Number(stats.winRate || 0).toFixed(1)}%`], ["Average R/R", `${Number(stats.averageRiskReward || 0).toFixed(2)}R`],
     ["Average confidence", `${Number(stats.averageConfidence || 0).toFixed(1)}%`], ["Today", stats.today], ["This week", stats.week]
   ].map(([label, value]) => `<article><span>${label}</span><strong>${value ?? 0}</strong></article>`).join("");
-  renderAdminSignalQualityPanel(data.qualityBreakdown || {});
+  renderAdminSignalQualityPanel(data.qualityBreakdown || {}, data.qualityGate || {});
   adminSignalsTable.innerHTML = data.signals.length ? `
     <div class="admin-generated-table">
       <div class="admin-generated-row admin-generated-head"><span>Pair</span><span>Setup</span><span>Levels</span><span>Scores</span><span>Status</span><span>Source / created</span><span>Actions</span></div>
@@ -4002,7 +4016,7 @@ function renderAdminStrategyLab() {
   renderAdminRows("#admin-strategy-runs", runs, (item) => `<div class="analytics-list-row"><span><strong>${escapeHtml(item.status)}</strong><small>${escapeHtml(item.id)}</small></span><strong>${formatDateTime(item.updatedAt)}</strong></div>`);
 }
 
-function renderAdminSignalQualityPanel(quality = {}) {
+function renderAdminSignalQualityPanel(quality = {}, qualityGate = {}) {
   const panel = document.querySelector("#admin-signal-quality-panel");
   if (!panel) return;
   const warning = quality.warning || {};
@@ -4040,7 +4054,37 @@ function renderAdminSignalQualityPanel(quality = {}) {
     <div class="signal-quality-groups">
       ${groups.map(([title, items, mode]) => renderSignalQualityGroupList(title, items, mode)).join("")}
     </div>
+    ${renderSignalQualityGateDiagnostics(qualityGate)}
     <article class="signal-quality-buckets"><h4>Confidence buckets</h4>${renderSignalQualityBucketRows(quality.confidenceBuckets || [])}</article>`;
+}
+
+function renderSignalQualityGateDiagnostics(gate = {}) {
+  const failed = gate.failedByReason || {};
+  const reasonRows = gate.topReasons?.length
+    ? gate.topReasons.map((item) => `<div class="signal-quality-row compact">
+      <span><strong>${escapeHtml(titleCase(item.reason))}</strong><small>${escapeHtml(item.pair || "All pairs")} · ${escapeHtml(item.timeframe || "All TF")} · ${escapeHtml(item.strategy || "All strategies")}</small></span>
+      <span><strong>${Number(item.count || 0)}</strong><small>Last seen ${item.lastSeenAt ? formatDateTime(item.lastSeenAt) : "n/a"}</small></span>
+    </div>`).join("")
+    : `<p class="reasoning">No quality-gate rejects recorded yet.</p>`;
+  const recentRows = gate.recentRejected?.length
+    ? gate.recentRejected.map((item) => `<div class="signal-quality-row compact">
+      <span><strong>${escapeHtml(item.pair || "Unknown")} ${escapeHtml(item.timeframe || "")}</strong><small>${escapeHtml(String(item.direction || "").toUpperCase())} · ${escapeHtml(item.attemptedStrategy || "Unknown strategy")}</small></span>
+      <span><strong>${escapeHtml(titleCase(item.gateStatus || "rejected"))}</strong><small>${escapeHtml(item.explanation || item.userExplanation || "No explanation recorded.")}</small></span>
+    </div>`).join("")
+    : `<p class="reasoning">Recent rejected examples will appear here as the gate reviews setups.</p>`;
+  return `<article class="signal-quality-card">
+    <h4>Signal Quality Gate v2</h4>
+    <div class="signal-quality-summary">
+      <div><span>Setups checked</span><strong>${Number(gate.totalSetupsChecked || 0)}</strong><small>Last 30 days</small></div>
+      <div><span>Passed gate</span><strong>${Number(gate.passedQualityGate || 0)}</strong><small>${Number(gate.passRate || 0).toFixed(1)}% pass rate</small></div>
+      <div><span>Failed gate</span><strong>${Number(gate.failedQualityGate || 0)}</strong><small>Blocked before users see them</small></div>
+      <div><span>Main blocks</span><strong>${Number(failed.weakStrategyMatch || 0) + Number(failed.poorEntryQuality || 0) + Number(failed.badMarketRegime || 0)}</strong><small>Strategy, entry, regime</small></div>
+    </div>
+    <div class="signal-quality-groups">
+      <section><h4>Top rejection reasons</h4>${reasonRows}</section>
+      <section><h4>Recent rejected setups</h4>${recentRows}</section>
+    </div>
+  </article>`;
 }
 
 function renderConfidenceCalibrationSummary(summary = {}) {
@@ -4166,6 +4210,12 @@ function renderAdminSignalDetail(signal) {
     ${renderAdminDetailSection("Historical strategy calibration", historicalRows)}
     ${renderAdminDetailSection("Strategy strictness", strategyRows)}
     ${renderAdminDetailSection("Confidence calibration", calibrationRows)}
+    ${renderAdminDetailSection("Signal Quality Gate", [
+      signal.qualityGateStatus ? `Gate status: ${titleCase(signal.qualityGateStatus)}` : null,
+      signal.qualityGateReason ? `Reason: ${titleCase(signal.qualityGateReason)}` : null,
+      signal.qualityGateDetails?.explanation,
+      ...(signal.qualityGateDetails?.checks || []).filter((item) => item.passed === false).map((item) => `${titleCase(item.stage)}: ${item.explanation}`)
+    ])}
     ${renderAdminDetailSection("Signal quality breakdown", Object.values(quality).map((item) => `${item.label}: ${titleCase(item.status)} - ${item.reason}`))}
     ${renderAdminDetailSection("Why it was generated", [analysis.reasoning, ...(analysis.confirmations || []).map((item) => `${item.passed ? "Passed" : "Failed"}: ${item.name} - ${item.detail}`), ...(signal.warningReasons || []).map((item) => `Warning: ${typeof item === "string" ? item : item.reason}`)])}
     ${signal.pattern ? renderAdminDetailSection("Pattern context", [`${pattern.label || titleCase(signal.pattern)} - ${titleCase(pattern.bias)} ${pattern.category || "pattern"}`, `Pattern confidence: ${Math.round(Number(pattern.confidence || 0) * 100)}%`, ...(pattern.reasons || []), ...(pattern.warnings || []).map((item) => `Warning: ${item}`)]) : ""}
@@ -4775,7 +4825,7 @@ function handleBrowserRouteChange() {
 
 function isRouteAllowed(route) {
   if (!Object.hasOwn(ROUTE_TO_VIEW, route)) return false;
-  return !["admin", "admin-signals", "admin-strategy-lab", "admin-crypto-markets", "admin-support", "affiliate-admin", "webhook-events"].includes(route) || Boolean(state.user?.isAdmin);
+  return !["admin", "admin-signals", "admin-signal-quality-gate", "admin-strategy-lab", "admin-crypto-markets", "admin-support", "affiliate-admin", "webhook-events"].includes(route) || Boolean(state.user?.isAdmin);
 }
 
 function resolvePaperTradingRouteSymbol(value) {
@@ -4834,7 +4884,7 @@ function removeHashParams(names) {
 function applyViewState(view, options = {}) {
   const allowedViews = ["scanner", "watchlist", "alerts", "notifications", "signals", "paper-portfolio", "journal", "backtesting", "performance", "how-it-works", "affiliate", "leaderboard", "profile", "settings", "support", "billing"];
   if (state.user?.isAdmin) {
-    allowedViews.push("admin", "admin-signals", "admin-strategy-lab", "admin-crypto-markets", "admin-support", "affiliate-admin", "webhook-events");
+    allowedViews.push("admin", "admin-signals", "admin-signal-quality-gate", "admin-strategy-lab", "admin-crypto-markets", "admin-support", "affiliate-admin", "webhook-events");
   }
   const normalizedView = allowedViews.includes(view) ? view : "scanner";
   if (normalizedView !== "admin-signals") closeAdminSignalModal();
@@ -4873,6 +4923,7 @@ function applyViewState(view, options = {}) {
     support: ["Account support", "Support"],
     admin: ["Administration", "Tester access requests"],
     "admin-signals": ["ADMIN SIGNALS", "All generated signals"],
+    "admin-signal-quality-gate": ["ADMIN", "Signal Quality Gate"],
     "admin-strategy-lab": ["ADMIN", "Strategy Lab"],
     "admin-crypto-markets": ["ADMIN", "Crypto Markets"],
     "admin-support": ["Administration", "Support Tickets"],
@@ -4900,6 +4951,12 @@ function applyViewState(view, options = {}) {
   if (normalizedView === "admin-signals") {
     loadAdminSignals().catch((error) => {
       adminSignalsTable.innerHTML = `<div class="empty-state"><strong>Generated signals unavailable</strong><p class="reasoning">${escapeHtml(error.message)}</p></div>`;
+    });
+  }
+
+  if (normalizedView === "admin-signal-quality-gate") {
+    loadAdminSignalQualityGate().catch((error) => {
+      if (adminSignalQualityGatePanel) adminSignalQualityGatePanel.innerHTML = `<div class="empty-state"><strong>Signal Quality Gate unavailable</strong><p class="reasoning">${escapeHtml(error.message)}</p></div>`;
     });
   }
 

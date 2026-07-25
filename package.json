@@ -72,6 +72,7 @@
     "test:signal-learning": "node scripts/signal-learning-engine-test.js",
     "test:signal-confidence-calibration": "node scripts/signal-confidence-calibration-test.js",
     "test:generated-signal-quality": "node scripts/generated-signal-quality-controls-test.js",
+    "test:signal-quality-gate-v2": "node scripts/signal-quality-gate-v2-test.js",
     "test:historical-strategy-testing": "node scripts/historical-strategy-testing-test.js",
     "test:telegram-alert-diagnostics": "node scripts/telegram-alert-diagnostics-test.js",
     "test:signal-transparency": "node scripts/signal-transparency-test.js",

@@ -27,7 +27,10 @@ const readySignal = {
   readinessScore: 84,
   setupType: "Breakout retest",
   source: "manual_scan",
-  indicators: {}
+  indicators: {
+    qualityGatePassed: true,
+    qualityGateV2: { status: "passed" }
+  }
 };
 
 assert.equal(evaluateTelegramAlertEligibility({ settings, setup: readySignal }).allowed, true);
@@ -38,6 +41,9 @@ assert.equal(evaluateTelegramAlertEligibility({ settings, setup: { ...readySigna
 assert.equal(evaluateTelegramAlertEligibility({ settings, setup: { ...readySignal, status: "Duplicate blocked" } }).status, "blocked_duplicate");
 assert.equal(evaluateTelegramAlertEligibility({ settings, setup: { ...readySignal, readinessScore: 0 } }).status, "blocked_not_ready");
 assert.equal(evaluateTelegramAlertEligibility({ settings, setup: { ...readySignal, source: "legacy_unlocked_signal" } }).status, "blocked_legacy");
+assert.equal(evaluateTelegramAlertEligibility({ settings, setup: { ...readySignal, indicators: { qualityGatePassed: false, qualityGateV2: { status: "poor_entry_quality" } } } }).status, "blocked_not_alertable");
+assert.match(evaluateTelegramAlertEligibility({ settings, setup: { ...readySignal, indicators: { qualityGatePassed: false, qualityGateV2: { status: "poor_entry_quality" } } } }).reason, /Signal Quality Gate blocked/);
+assert.equal(evaluateTelegramAlertEligibility({ settings, setup: { ...readySignal, indicators: {} } }).status, "blocked_not_alertable");
 assert.equal(evaluateTelegramAlertEligibility({ settings: { ...settings, enabled: false }, setup: readySignal }).status, "telegram_disabled");
 appConfig.telegram.botToken = "";
 assert.equal(evaluateTelegramAlertEligibility({ settings, setup: readySignal }).status, "missing_bot_token");

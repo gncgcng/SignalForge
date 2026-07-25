@@ -136,6 +136,14 @@ export async function getGeneratedSignalStats() {
       COUNT(*) FILTER (WHERE status = 'Correlated duplicate')::integer AS correlated_duplicate,
       COUNT(*) FILTER (WHERE status = 'Quarantined timeframe')::integer AS quarantined_timeframe,
       COUNT(*) FILTER (WHERE status = 'Readiness failed')::integer AS readiness_failed,
+      COUNT(*) FILTER (WHERE status = 'Weak strategy match')::integer AS weak_strategy_match,
+      COUNT(*) FILTER (WHERE status = 'Poor entry quality')::integer AS poor_entry_quality,
+      COUNT(*) FILTER (WHERE status = 'Invalid stop loss')::integer AS invalid_stop_loss,
+      COUNT(*) FILTER (WHERE status = 'Unrealistic take profit')::integer AS unrealistic_take_profit,
+      COUNT(*) FILTER (WHERE status = 'Weak risk/reward')::integer AS weak_risk_reward,
+      COUNT(*) FILTER (WHERE status = 'Bad market regime')::integer AS bad_market_regime,
+      COUNT(*) FILTER (WHERE status = 'Historical underperformer')::integer AS historical_underperformer,
+      COUNT(*) FILTER (WHERE status = 'Similar to past losers')::integer AS similar_to_past_losers,
       COUNT(*) FILTER (WHERE status = 'Invalid legacy ready signal')::integer AS invalid_legacy_ready,
       COUNT(*) FILTER (WHERE created_at::date = current_date)::integer AS today,
       COUNT(*) FILTER (WHERE created_at >= now() - interval '7 days')::integer AS week,
@@ -145,7 +153,7 @@ export async function getGeneratedSignalStats() {
   `);
   const row = result.rows[0] || {};
   const closed = Number(row.hit_tp || 0) + Number(row.hit_sl || 0);
-  return { total: Number(row.total || 0), active: Number(row.active || 0), expiringSoon: Number(row.expiring_soon || 0), hitTp: Number(row.hit_tp || 0), hitSl: Number(row.hit_sl || 0), expired: Number(row.expired || 0), duplicateBlocked: Number(row.duplicate_blocked || 0), cooldownBlocked: Number(row.cooldown_blocked || 0), correlatedDuplicate: Number(row.correlated_duplicate || 0), quarantinedTimeframe: Number(row.quarantined_timeframe || 0), readinessFailed: Number(row.readiness_failed || 0), invalidLegacyReady: Number(row.invalid_legacy_ready || 0), today: Number(row.today || 0), week: Number(row.week || 0), winRate: closed ? Number(((Number(row.hit_tp) / closed) * 100).toFixed(1)) : 0, averageRiskReward: Number(Number(row.average_rr || 0).toFixed(2)), averageConfidence: Number(Number(row.average_confidence || 0).toFixed(1)) };
+  return { total: Number(row.total || 0), active: Number(row.active || 0), expiringSoon: Number(row.expiring_soon || 0), hitTp: Number(row.hit_tp || 0), hitSl: Number(row.hit_sl || 0), expired: Number(row.expired || 0), duplicateBlocked: Number(row.duplicate_blocked || 0), cooldownBlocked: Number(row.cooldown_blocked || 0), correlatedDuplicate: Number(row.correlated_duplicate || 0), quarantinedTimeframe: Number(row.quarantined_timeframe || 0), readinessFailed: Number(row.readiness_failed || 0), weakStrategyMatch: Number(row.weak_strategy_match || 0), poorEntryQuality: Number(row.poor_entry_quality || 0), invalidStopLoss: Number(row.invalid_stop_loss || 0), unrealisticTakeProfit: Number(row.unrealistic_take_profit || 0), weakRiskReward: Number(row.weak_risk_reward || 0), badMarketRegime: Number(row.bad_market_regime || 0), historicalUnderperformer: Number(row.historical_underperformer || 0), similarToPastLosers: Number(row.similar_to_past_losers || 0), invalidLegacyReady: Number(row.invalid_legacy_ready || 0), today: Number(row.today || 0), week: Number(row.week || 0), winRate: closed ? Number(((Number(row.hit_tp) / closed) * 100).toFixed(1)) : 0, averageRiskReward: Number(Number(row.average_rr || 0).toFixed(2)), averageConfidence: Number(Number(row.average_confidence || 0).toFixed(1)) };
 }
 
 export async function listActiveGeneratedSignals(limit = 500) {
@@ -266,7 +274,16 @@ function toFullAnalysis(signal) { return { reasoning: signal.reasoning, confirma
 function normalizeSource(source) { return ["manual_scan","auto_crypto_watcher","telegram_alert","candidate_promotion","backtest_shadow","admin_test","legacy_saved_signal","legacy_unlocked_signal"].includes(source) ? source : "manual_scan"; }
 function finiteOrNull(value) { const number = Number(value); return Number.isFinite(number) ? number : null; }
 function displayPair(symbol) { return String(symbol || "").toUpperCase().replace(/[-/]/g, ""); }
-function mapGeneratedSignal(row) { if (!row) return null; return { id: row.id, signalId: row.signal_id, setupKey: row.setup_key, pair: row.pair, displayPair: row.display_pair, provider: row.provider, timeframe: row.timeframe, direction: row.direction, strategy: row.strategy, pattern: row.pattern, patternContext: row.pattern_context || {}, entry: Number(row.entry), stopLoss: Number(row.stop_loss), takeProfit: Number(row.take_profit), riskReward: Number(row.risk_reward), confidence: Number(row.confidence), originalConfidence: row.original_confidence == null ? Number(row.confidence) : Number(row.original_confidence), rawSetupScore: row.original_confidence == null ? Number(row.confidence) : Number(row.original_confidence), calibratedConfidence: row.calibrated_confidence == null ? Number(row.confidence) : Number(row.calibrated_confidence), finalConfidence: row.calibrated_confidence == null ? Number(row.confidence) : Number(row.calibrated_confidence), confidenceVersion: row.confidence_version || row.confidence_calibration?.version || "calibration_v1", calibrationReason: row.calibration_reason || row.confidence_calibration?.calibrationReason || row.confidence_calibration?.message || null, confidenceCalibration: row.confidence_calibration || {}, setupQualityScore: Number(row.setup_quality_score || 0), entryReadinessScore: Number(row.entry_readiness_score || 0), status: row.status, expiringSoon: Boolean(row.expiring_soon), validUntil: row.valid_until, expiredAt: row.expired_at, hitTpAt: row.hit_tp_at, hitSlAt: row.hit_sl_at, source: row.source, sourceHistory: row.source_history || [], generatedBy: row.generated_by, promotedFromCandidateId: row.promoted_from_candidate_id, validationSummary: row.validation_summary || {}, warningReasons: row.warning_reasons || [], qualityBreakdown: row.quality_breakdown || {}, fullAnalysis: row.full_analysis || {}, telegramStatus: row.telegram_status || null, telegramBlockReason: row.telegram_block_reason || null, telegramBlockDetails: row.telegram_block_details || {}, telegramLastCheckedAt: row.telegram_last_checked_at || null, historicalStrategyStatus: row.historical_strategy_status || null, historicalStrategyReason: row.historical_strategy_reason || null, strategyValidationStatus: row.strategy_validation_status || null, strategyValidationReason: row.strategy_validation_reason || null, postMortemTags: row.resolved_post_mortem_tags || row.post_mortem_tags || [], maxFavorableExcursion: row.max_favorable_excursion == null ? null : Number(row.max_favorable_excursion), maxAdverseExcursion: row.max_adverse_excursion == null ? null : Number(row.max_adverse_excursion), resultReason: row.result_reason, candidateOrigin: row.candidate_status ? { status: row.candidate_status, setupQualityScore: Number(row.candidate_score || 0), entryReadinessScore: Number(row.readiness_score || 0), missingConfirmations: row.missing_confirmations || [], firstDetectedAt: row.first_detected_at, lastCheckedAt: row.last_checked_at } : null, createdAt: row.created_at, updatedAt: row.updated_at }; }
+function mapGeneratedSignal(row) { if (!row) return null; return withQualityGateFields({ id: row.id, signalId: row.signal_id, setupKey: row.setup_key, pair: row.pair, displayPair: row.display_pair, provider: row.provider, timeframe: row.timeframe, direction: row.direction, strategy: row.strategy, pattern: row.pattern, patternContext: row.pattern_context || {}, entry: Number(row.entry), stopLoss: Number(row.stop_loss), takeProfit: Number(row.take_profit), riskReward: Number(row.risk_reward), confidence: Number(row.confidence), originalConfidence: row.original_confidence == null ? Number(row.confidence) : Number(row.original_confidence), rawSetupScore: row.original_confidence == null ? Number(row.confidence) : Number(row.original_confidence), calibratedConfidence: row.calibrated_confidence == null ? Number(row.confidence) : Number(row.calibrated_confidence), finalConfidence: row.calibrated_confidence == null ? Number(row.confidence) : Number(row.calibrated_confidence), confidenceVersion: row.confidence_version || row.confidence_calibration?.version || "calibration_v1", calibrationReason: row.calibration_reason || row.confidence_calibration?.calibrationReason || row.confidence_calibration?.message || null, confidenceCalibration: row.confidence_calibration || {}, setupQualityScore: Number(row.setup_quality_score || 0), entryReadinessScore: Number(row.entry_readiness_score || 0), status: row.status, expiringSoon: Boolean(row.expiring_soon), validUntil: row.valid_until, expiredAt: row.expired_at, hitTpAt: row.hit_tp_at, hitSlAt: row.hit_sl_at, source: row.source, sourceHistory: row.source_history || [], generatedBy: row.generated_by, promotedFromCandidateId: row.promoted_from_candidate_id, validationSummary: row.validation_summary || {}, warningReasons: row.warning_reasons || [], qualityBreakdown: row.quality_breakdown || {}, fullAnalysis: row.full_analysis || {}, telegramStatus: row.telegram_status || null, telegramBlockReason: row.telegram_block_reason || null, telegramBlockDetails: row.telegram_block_details || {}, telegramLastCheckedAt: row.telegram_last_checked_at || null, historicalStrategyStatus: row.historical_strategy_status || null, historicalStrategyReason: row.historical_strategy_reason || null, strategyValidationStatus: row.strategy_validation_status || null, strategyValidationReason: row.strategy_validation_reason || null, postMortemTags: row.resolved_post_mortem_tags || row.post_mortem_tags || [], maxFavorableExcursion: row.max_favorable_excursion == null ? null : Number(row.max_favorable_excursion), maxAdverseExcursion: row.max_adverse_excursion == null ? null : Number(row.max_adverse_excursion), resultReason: row.result_reason, candidateOrigin: row.candidate_status ? { status: row.candidate_status, setupQualityScore: Number(row.candidate_score || 0), entryReadinessScore: Number(row.readiness_score || 0), missingConfirmations: row.missing_confirmations || [], firstDetectedAt: row.first_detected_at, lastCheckedAt: row.last_checked_at } : null, createdAt: row.created_at, updatedAt: row.updated_at }, row); }
+
+function withQualityGateFields(signal, row) {
+  return {
+    ...signal,
+    qualityGateStatus: row.quality_gate_status || null,
+    qualityGateReason: row.quality_gate_reason || null,
+    qualityGateDetails: row.quality_gate_details || {}
+  };
+}
 
 async function updateGeneratedSignalAnnotations(id, signal) {
   await query(`
@@ -275,6 +292,9 @@ async function updateGeneratedSignalAnnotations(id, signal) {
       historical_strategy_reason = COALESCE($3, historical_strategy_reason),
       strategy_validation_status = COALESCE($4, strategy_validation_status),
       strategy_validation_reason = COALESCE($5, strategy_validation_reason),
+      quality_gate_status = COALESCE($6, quality_gate_status),
+      quality_gate_reason = COALESCE($7, quality_gate_reason),
+      quality_gate_details = CASE WHEN $8::jsonb = '{}'::jsonb THEN quality_gate_details ELSE $8::jsonb END,
       updated_at = now()
     WHERE id = $1
   `, [
@@ -282,7 +302,10 @@ async function updateGeneratedSignalAnnotations(id, signal) {
     signal.historicalStrategyStatus || signal.indicators?.historicalStrategyCalibration?.status || null,
     signal.historicalStrategyReason || (signal.indicators?.historicalStrategyCalibration?.reasons || []).join(" ") || null,
     signal.strategyValidationStatus || signal.indicators?.strategyValidationStatus || signal.indicators?.strategyStrictness?.status || null,
-    signal.strategyValidationReason || signal.indicators?.strategyValidationReason || signal.indicators?.strategyStrictness?.reason || null
+    signal.strategyValidationReason || signal.indicators?.strategyValidationReason || signal.indicators?.strategyStrictness?.reason || null,
+    signal.indicators?.qualityGateV2?.status || signal.generatedQualityGate?.qualityGateV2?.status || signal.generatedQualityGate?.status || null,
+    signal.indicators?.qualityGateV2?.reasonCode || signal.generatedQualityGate?.reasonCode || signal.indicators?.generatedQualityBlockReason || null,
+    JSON.stringify(signal.indicators?.qualityGateV2 || signal.generatedQualityGate?.qualityGateV2 || signal.generatedQualityGate || {})
   ]);
 }
 

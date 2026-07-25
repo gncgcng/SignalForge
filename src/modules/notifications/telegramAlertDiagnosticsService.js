@@ -17,7 +17,15 @@ const blockedStatuses = new Map([
   ["Readiness failed", "blocked_not_ready"],
   ["Invalid legacy ready signal", "blocked_legacy"],
   ["Strategy Misread Rejected", "blocked_not_alertable"],
-  ["Weak Pattern Match", "blocked_not_alertable"]
+  ["Weak Pattern Match", "blocked_not_alertable"],
+  ["Weak strategy match", "blocked_not_alertable"],
+  ["Poor entry quality", "blocked_not_alertable"],
+  ["Invalid stop loss", "blocked_not_alertable"],
+  ["Unrealistic take profit", "blocked_not_alertable"],
+  ["Weak risk/reward", "blocked_not_alertable"],
+  ["Bad market regime", "blocked_not_alertable"],
+  ["Historical underperformer", "blocked_not_alertable"],
+  ["Similar to past losers", "blocked_not_alertable"]
 ]);
 
 export function evaluateTelegramAlertEligibility({ user = null, settings = null, setup = null, favoriteSymbols = new Set() } = {}) {
@@ -48,6 +56,14 @@ export function evaluateTelegramAlertEligibility({ user = null, settings = null,
   }
   if (getTimeframeQualityPolicy(setup.timeframe).status === "quarantined") {
     return block("blocked_quarantined_timeframe", `${setup.timeframe} is quarantined for ready alerts.`);
+  }
+  const qualityGatePassed = setup.indicators?.qualityGatePassed ?? setup.fullAnalysis?.indicators?.qualityGatePassed ?? setup.qualityGatePassed;
+  const qualityGateStatus = setup.indicators?.qualityGateV2?.status || setup.fullAnalysis?.indicators?.qualityGateV2?.status || setup.qualityGateStatus;
+  if (qualityGatePassed !== true || (qualityGateStatus && qualityGateStatus !== "passed")) {
+    return block("blocked_not_alertable", `Signal Quality Gate blocked Telegram alert: ${qualityGateStatus || "failed"}.`, {
+      qualityGateStatus,
+      qualityGateReason: setup.indicators?.qualityGateV2?.reasonCode || setup.qualityGateReason || null
+    });
   }
   const readiness = Number(setup.readinessScore ?? setup.entryReadinessScore ?? setup.indicators?.readinessScore ?? 0);
   if (!Number.isFinite(readiness) || readiness <= 0) {
