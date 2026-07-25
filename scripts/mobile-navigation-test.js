@@ -39,6 +39,10 @@ const result = {
     app.includes("setMobileNavigationOpen(!dashboard.classList.contains(\"mobile-nav-open\"))") &&
     app.includes("navigateTo(link.dataset.viewLink);") &&
     app.includes("setMobileNavigationOpen(false);"),
+  adminCryptoMarketsNotClipped:
+    html.includes('href="#admin-crypto-markets" data-view-link="admin-crypto-markets" id="admin-crypto-markets-nav-link"') &&
+    app.includes("adminCryptoMarketsNavLink.classList.toggle(\"hidden\", !state.user.isAdmin)") &&
+    Number(css.match(/\.nav-section-links\s*\{[^}]*max-height:\s*(\d+)px/s)?.[1] || 0) >= 520,
   menuClosesOnBackdropAndEscape:
     app.includes("dashboard.addEventListener(\"click\"") &&
     app.includes("!sidebar.contains(event.target)") &&

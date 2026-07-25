@@ -1888,7 +1888,7 @@ button {
   display: grid;
   gap: 6px;
   overflow: hidden;
-  max-height: 320px;
+  max-height: 640px;
   transition: max-height 180ms ease, opacity 160ms ease;
 }
 

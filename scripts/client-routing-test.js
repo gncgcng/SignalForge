@@ -31,6 +31,7 @@ assert.equal(buildRouteHash("paper-portfolio"), "#paper-trading");
 assert.equal(buildRouteHash("signals", { signalId: "abc123" }), "#signals?signalId=abc123");
 assert.equal(normalizeAppRoute("paper-portfolio"), "paper-trading");
 assert.equal(ROUTE_TO_VIEW["paper-trading"], "paper-portfolio");
+assert.equal(ROUTE_TO_VIEW["admin-crypto-markets"], "admin-crypto-markets");
 
 const app = readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
 const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
@@ -72,7 +73,7 @@ const checks = {
   sidebarRoutesComplete: [
     "scanner", "signals", "paper-trading", "backtesting", "performance",
     "watchlist", "alerts", "notifications", "journal", "affiliate",
-    "billing", "settings", "profile"
+    "billing", "settings", "profile", "admin-crypto-markets"
   ].every((route) => html.includes(`href="#${route}"`)),
   pwaCachesRouter: serviceWorker.includes('"/router.js"')
 };
