@@ -402,6 +402,8 @@ const adminCryptoVerifyPending = document.querySelector("#admin-crypto-verify-pe
 const adminCryptoDiagnostics = document.querySelector("#admin-crypto-diagnostics");
 const adminCryptoOperationStatus = document.querySelector("#admin-crypto-operation-status");
 const adminCryptoProgress = document.querySelector("#admin-crypto-progress");
+const routeNotFoundName = document.querySelector("#route-not-found-name");
+const routeAccessDeniedName = document.querySelector("#route-access-denied-name");
 const backtestForm = document.querySelector("#backtest-form");
 const backtestSymbol = document.querySelector("#backtest-symbol");
 const backtestTimeframe = document.querySelector("#backtest-timeframe");
@@ -1334,6 +1336,13 @@ document.querySelectorAll("[data-view-link]").forEach((link) => {
     navigateTo(link.dataset.viewLink);
     setMobileNavigationOpen(false);
   });
+});
+
+document.addEventListener("click", (event) => {
+  const route = event.target.closest("[data-route-fallback]")?.dataset.routeFallback;
+  if (!route) return;
+  event.preventDefault();
+  navigateTo(route);
 });
 
 window.addEventListener("hashchange", handleBrowserRouteChange);
@@ -4747,9 +4756,8 @@ function refreshSignalValidityTimers() {
 }
 
 function navigateTo(routeOrView, params = {}, options = {}) {
-  const route = normalizeAppRoute(routeOrView);
-  const allowedRoute = isRouteAllowed(route) ? route : "scanner";
-  const hash = buildRouteHash(allowedRoute, params);
+  const route = normalizeAppRoute(routeOrView) || "scanner";
+  const hash = buildRouteHash(route, params);
   const destination = `${location.pathname}${location.search}${hash}`;
 
   if (location.hash !== hash) {
@@ -4765,12 +4773,20 @@ function syncRouteFromLocation({ force = false, replaceInvalid = false, viewOpti
   let route = parsed.route;
   let params = parsed.params;
 
-  if (!parsed.valid || !isRouteAllowed(route)) {
+  logRouteForDebug(route);
+
+  if (!parsed.valid && !route) {
     route = "scanner";
     params = new URLSearchParams();
     if (replaceInvalid || location.hash) {
       history.replaceState({}, "", `${location.pathname}${location.search}#scanner`);
     }
+  } else if (!parsed.valid) {
+    showRouteNotFound(route, params);
+    return;
+  } else if (!isRouteAllowed(route)) {
+    showAdminAccessDenied(route, params);
+    return;
   } else if (!parsed.canonical) {
     const canonicalHash = buildRouteHash(route, params);
     history.replaceState({}, "", `${location.pathname}${location.search}${canonicalHash}`);
@@ -4825,7 +4841,49 @@ function handleBrowserRouteChange() {
 
 function isRouteAllowed(route) {
   if (!Object.hasOwn(ROUTE_TO_VIEW, route)) return false;
-  return !["admin", "admin-signals", "admin-signal-quality-gate", "admin-strategy-lab", "admin-crypto-markets", "admin-support", "affiliate-admin", "webhook-events"].includes(route) || Boolean(state.user?.isAdmin);
+  return !isAdminRoute(route) || Boolean(state.user?.isAdmin);
+}
+
+function isAdminRoute(route) {
+  return [
+    "admin",
+    "admin-signals",
+    "admin-signal-quality-gate",
+    "admin-strategy-lab",
+    "admin-crypto-markets",
+    "admin-support",
+    "affiliate-admin",
+    "webhook-events"
+  ].includes(route);
+}
+
+function showRouteNotFound(route, params = new URLSearchParams()) {
+  const label = route ? `#${String(route).replace(/^#/, "")}` : String(location.hash || "(empty route)");
+  logUnknownRoute(label);
+  const currentHash = buildRouteHash(route || "unknown", params);
+  state.lastAppliedRouteHash = currentHash;
+  state.activeRoute = route || "unknown";
+  applyViewState("route-not-found", { routeName: label });
+}
+
+function showAdminAccessDenied(route, params = new URLSearchParams()) {
+  const label = route ? `#${String(route).replace(/^#/, "")}` : String(location.hash || "(admin route)");
+  const currentHash = buildRouteHash(route || "admin", params);
+  state.lastAppliedRouteHash = currentHash;
+  state.activeRoute = route || "admin";
+  applyViewState("admin-access-denied", { routeName: label });
+}
+
+function isDevelopmentRouteLoggingEnabled() {
+  return ["", "localhost", "127.0.0.1"].includes(location.hostname);
+}
+
+function logRouteForDebug(route) {
+  if (isDevelopmentRouteLoggingEnabled()) console.log("[router] route:", route || "(empty)");
+}
+
+function logUnknownRoute(route) {
+  if (isDevelopmentRouteLoggingEnabled()) console.warn(`[router] unknown route: ${route || "(empty)"}`);
 }
 
 function resolvePaperTradingRouteSymbol(value) {
@@ -4882,11 +4940,11 @@ function removeHashParams(names) {
 }
 
 function applyViewState(view, options = {}) {
-  const allowedViews = ["scanner", "watchlist", "alerts", "notifications", "signals", "paper-portfolio", "journal", "backtesting", "performance", "how-it-works", "affiliate", "leaderboard", "profile", "settings", "support", "billing"];
+  const allowedViews = ["scanner", "watchlist", "alerts", "notifications", "signals", "paper-portfolio", "journal", "backtesting", "performance", "how-it-works", "affiliate", "leaderboard", "profile", "settings", "support", "billing", "route-not-found", "admin-access-denied"];
   if (state.user?.isAdmin) {
     allowedViews.push("admin", "admin-signals", "admin-signal-quality-gate", "admin-strategy-lab", "admin-crypto-markets", "admin-support", "affiliate-admin", "webhook-events");
   }
-  const normalizedView = allowedViews.includes(view) ? view : "scanner";
+  const normalizedView = allowedViews.includes(view) ? view : "route-not-found";
   if (normalizedView !== "admin-signals") closeAdminSignalModal();
   state.activeView = normalizedView;
 
@@ -4929,11 +4987,21 @@ function applyViewState(view, options = {}) {
     "admin-support": ["Administration", "Support Tickets"],
     "affiliate-admin": ["Administration", "Affiliate Program"],
     "webhook-events": ["Stripe operations", "Webhook Events"],
+    "admin-access-denied": ["Protected route", "Admin access required"],
+    "route-not-found": ["Routing", "Page not found"],
     billing: ["Subscription", "Billing"]
   };
   const [eyebrow, title] = titles[normalizedView];
   document.querySelector(".topbar .eyebrow").textContent = eyebrow;
   document.querySelector(".topbar h2").textContent = title;
+
+  if (normalizedView === "route-not-found" && routeNotFoundName) {
+    routeNotFoundName.textContent = options.routeName || state.activeRoute || "(unknown)";
+  }
+
+  if (normalizedView === "admin-access-denied" && routeAccessDeniedName) {
+    routeAccessDeniedName.textContent = options.routeName || state.activeRoute || "(admin route)";
+  }
 
   if (normalizedView === "signals") {
     renderSignalsHistory();

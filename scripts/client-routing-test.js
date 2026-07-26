@@ -22,6 +22,12 @@ assert.equal(parseAppHash("#signals").route, "signals");
 assert.equal(parseAppHash("#backtesting").route, "backtesting");
 assert.equal(parseAppHash("#paper-portfolio").route, "paper-trading");
 assert.equal(parseAppHash("#paper-portfolio").canonical, false);
+assert.equal(parseAppHash("#admin-signal-quality-gate").route, "admin-signal-quality-gate");
+assert.equal(parseAppHash("#admin-signal-quality-gate").valid, true);
+assert.equal(parseAppHash("#signal-quality-gate").route, "admin-signal-quality-gate");
+assert.equal(parseAppHash("#signal-quality-gate").valid, true);
+assert.equal(parseAppHash("#strategy-lab").route, "admin-strategy-lab");
+assert.equal(parseAppHash("#crypto-markets").route, "admin-crypto-markets");
 assert.equal(parseAppHash("#not-a-route").valid, false);
 assert.equal(parseAppHash("").valid, false);
 assert.equal(parseAppHash("#signals?signalId=abc123").params.get("signalId"), "abc123");
@@ -32,6 +38,7 @@ assert.equal(buildRouteHash("signals", { signalId: "abc123" }), "#signals?signal
 assert.equal(normalizeAppRoute("paper-portfolio"), "paper-trading");
 assert.equal(ROUTE_TO_VIEW["paper-trading"], "paper-portfolio");
 assert.equal(ROUTE_TO_VIEW["admin-crypto-markets"], "admin-crypto-markets");
+assert.equal(ROUTE_TO_VIEW["admin-signal-quality-gate"], "admin-signal-quality-gate");
 
 const app = readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
 const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
@@ -60,6 +67,18 @@ const checks = {
     app.includes("state.activeRoute = route") &&
     app.includes("applyViewState(ROUTE_TO_VIEW[route], viewOptions)") &&
     app.includes('link.classList.toggle("active", link.dataset.viewLink === normalizedView)'),
+  noSilentScannerFallback:
+    !app.includes('allowedRoute = isRouteAllowed(route) ? route : "scanner"') &&
+    !app.includes('allowedViews.includes(view) ? view : "scanner"'),
+  unknownRouteState:
+    app.includes("showRouteNotFound(route, params)") &&
+    app.includes("[router] unknown route:") &&
+    html.includes('data-view="route-not-found"') &&
+    html.includes("Page not found"),
+  adminAccessDeniedState:
+    app.includes("showAdminAccessDenied(route, params)") &&
+    html.includes('data-view="admin-access-denied"') &&
+    html.includes("Admin access required"),
   deepLinksPreserved:
     app.includes('params.get("signalId")') &&
     app.includes('hashParams.get("unlock")') &&
@@ -73,8 +92,12 @@ const checks = {
   sidebarRoutesComplete: [
     "scanner", "signals", "paper-trading", "backtesting", "performance",
     "watchlist", "alerts", "notifications", "journal", "affiliate",
-    "billing", "settings", "profile", "admin-crypto-markets"
+    "billing", "settings", "profile", "admin", "admin-signals",
+    "admin-signal-quality-gate", "admin-strategy-lab", "admin-crypto-markets"
   ].every((route) => html.includes(`href="#${route}"`)),
+  sidebarLinksHaveViews: [...html.matchAll(/data-view-link="([^"]+)"/g)]
+    .map((match) => match[1])
+    .every((view) => html.includes(`data-view="${view}"`)),
   pwaCachesRouter: serviceWorker.includes('"/router.js"')
 };
 

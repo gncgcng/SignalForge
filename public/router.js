@@ -21,6 +21,7 @@ export const ROUTE_TO_VIEW = Object.freeze({
   "webhook-events": "webhook-events",
   "admin-signals": "admin-signals",
   "admin-strategy-lab": "admin-strategy-lab",
+  "admin-signal-quality-gate": "admin-signal-quality-gate",
   "admin-crypto-markets": "admin-crypto-markets"
 });
 
@@ -50,9 +51,18 @@ const VIEW_TO_ROUTE = Object.freeze(Object.fromEntries(
   Object.entries(ROUTE_TO_VIEW).map(([route, view]) => [view, route])
 ));
 
+const ROUTE_ALIASES = Object.freeze({
+  "paper-portfolio": "paper-trading",
+  "strategy-lab": "admin-strategy-lab",
+  "signal-quality": "admin-signal-quality-gate",
+  "signal-quality-gate": "admin-signal-quality-gate",
+  "crypto-markets": "admin-crypto-markets",
+  "admin-markets": "admin-crypto-markets"
+});
+
 export function normalizeAppRoute(routeOrView) {
   const value = String(routeOrView || "").replace(/^#/, "").split("?")[0].trim().toLowerCase();
-  if (value === "paper-portfolio") return "paper-trading";
+  if (ROUTE_ALIASES[value]) return ROUTE_ALIASES[value];
   if (Object.hasOwn(ROUTE_TO_VIEW, value)) return value;
   return VIEW_TO_ROUTE[value] || value;
 }

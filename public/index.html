@@ -2169,6 +2169,22 @@
             </article>
           </section>
 
+          <section class="page-view hidden" id="admin-access-denied-view" data-view="admin-access-denied">
+            <div class="empty-state">
+              <strong>Admin access required</strong>
+              <p class="reasoning">The route <code id="route-access-denied-name">#admin</code> is only available to admin users.</p>
+              <button type="button" data-route-fallback="scanner">Back to Scanner</button>
+            </div>
+          </section>
+
+          <section class="page-view hidden" id="route-not-found-view" data-view="route-not-found">
+            <div class="empty-state">
+              <strong>Page not found</strong>
+              <p class="reasoning">SignalForge could not find the route <code id="route-not-found-name">#unknown</code>.</p>
+              <button type="button" data-route-fallback="scanner">Back to Scanner</button>
+            </div>
+          </section>
+
           <section class="page-view hidden" id="billing-view" data-view="billing">
             <div class="section-title">
               <div>
