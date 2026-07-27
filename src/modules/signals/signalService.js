@@ -65,6 +65,7 @@ import {
   getLatestDailyMarketBrief,
   refreshDailyMarketBrief
 } from "./dailyMarketBriefService.js";
+import { buildWhyNoSignalReport } from "./missedSetupAnalyzer.js";
 
 const scanTimeframes = ["1h", "4h", "15m", "5m"];
 const scanAllJobs = new Map();
@@ -444,6 +445,24 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
     ? buildAvoidTradeResult({ symbol, timeframe, analysis, candidate })
     : null;
   if (avoidTrade) await recordAvoidTradeSafely(avoidTrade);
+  const whyNoSignal = !publishable
+    ? buildWhyNoSignalReport({
+      symbol,
+      timeframe,
+      marketData,
+      generatorResult: result,
+      analysis,
+      readiness,
+      candidate: candidate ? toCandidatePreview(candidate) : null,
+      strictness,
+      validation,
+      qualityGate,
+      calibrationBlocked,
+      qualityBlocked,
+      publishable,
+      admin: Boolean(user?.isAdmin)
+    })
+    : null;
   const briefObservation = buildMarketBriefObservation({
     symbol,
     timeframe,
@@ -462,7 +481,10 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
       valid: publishable,
       resultType,
       setup: publishable ? toScanPreview(signal) : null,
-      analysis,
+      analysis: whyNoSignal
+        ? { ...analysis, whyNoSignal }
+        : analysis,
+      whyNoSignal,
       candidate: candidate ? toCandidatePreview(candidate) : null,
       avoidTrade
     },

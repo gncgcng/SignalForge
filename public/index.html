@@ -801,6 +801,33 @@
                   </details>
                   <button class="secondary-action" id="view-opportunities-button" type="button">View Opportunities</button>
                 </article>
+                <article class="why-no-signal-panel hidden" id="why-no-signal-panel" aria-live="polite">
+                  <div class="panel-header">
+                    <div>
+                      <span class="eyebrow">Decision transparency</span>
+                      <h3>Why no signal?</h3>
+                    </div>
+                    <span class="status-pill" id="why-no-signal-status">No ready signal</span>
+                  </div>
+                  <p class="reasoning" id="why-no-signal-summary">Run the scanner to see why SignalForge is waiting or avoiding a setup.</p>
+                  <div class="diagnostic-reasons" id="why-no-signal-reasons"></div>
+                  <div class="missed-setup-list" id="missed-setup-list"></div>
+                  <details class="scan-diagnostics hidden" id="why-no-signal-admin-details">
+                    <summary>Admin missed setup diagnostics</summary>
+                    <div id="why-no-signal-admin-content"></div>
+                  </details>
+                  <div class="missed-setup-actions hidden" id="missed-setup-admin-actions">
+                    <button class="secondary-action" id="analyze-missed-setup-button" type="button">Analyze missed setup</button>
+                    <select class="sf-select" id="missed-setup-classification" aria-label="Missed setup classification">
+                      <option value="unsure">Unsure</option>
+                      <option value="good">Good missed setup</option>
+                      <option value="bad">Bad setup</option>
+                    </select>
+                    <input class="sf-input" id="missed-setup-note" placeholder="Admin note (optional)" />
+                    <button class="secondary-action" id="save-missed-setup-button" type="button">Save example</button>
+                  </div>
+                  <p class="scan-trust-copy">Confidence reflects rule alignment, not win probability. Educational analysis only.</p>
+                </article>
                 <p class="status-line" id="status-line">Select a market and timeframe to generate a setup.</p>
               </div>
 

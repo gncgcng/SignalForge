@@ -13,6 +13,7 @@ import {
 } from "./signalService.js";
 import { getCandidateQualitySummary, listSetupCandidates } from "./setupCandidateService.js";
 import { getLatestDailyMarketBrief } from "./dailyMarketBriefService.js";
+import { analyzeMissedSetup, saveMissedSetupExample } from "./missedSetupService.js";
 
 // scanMarketSetupDetailed stays service-private so Telegram receives full setups
 // without exposing locked price levels in scan responses.
@@ -45,6 +46,22 @@ export async function handleSignalRoutes(req, res, pathname) {
       getLatestDailyMarketBrief()
     ]);
     return sendJson(res, 200, { quality, marketBrief });
+  }
+
+  if (pathname === "/api/signals/missed-setup/analyze" && req.method === "POST") {
+    try {
+      return sendJson(res, 200, await analyzeMissedSetup(req.user, await readJson(req)));
+    } catch (error) {
+      return sendError(res, error.statusCode || 400, error.message);
+    }
+  }
+
+  if (pathname === "/api/signals/missed-setup/examples" && req.method === "POST") {
+    try {
+      return sendJson(res, 201, await saveMissedSetupExample(req.user, await readJson(req)));
+    } catch (error) {
+      return sendError(res, error.statusCode || 400, error.message);
+    }
   }
 
   if (pathname === "/api/signals/scan" && req.method === "POST") {

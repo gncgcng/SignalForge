@@ -103,6 +103,8 @@ const state = {
   marketBriefCollapsed: getStoredMarketBriefCollapsed(),
   avoidTrades: [],
   showAllAvoidTrades: false,
+  whyNoSignal: null,
+  missedSetupAnalysis: null,
   scanResults: [],
   watchlist: [],
   alerts: [],
@@ -252,6 +254,18 @@ const scanProgressCount = document.querySelector("#scan-progress-count");
 const scanProgressBar = document.querySelector("#scan-progress-bar");
 const scanSummaryPanel = document.querySelector("#scan-summary-panel");
 const viewOpportunitiesButton = document.querySelector("#view-opportunities-button");
+const whyNoSignalPanel = document.querySelector("#why-no-signal-panel");
+const whyNoSignalStatus = document.querySelector("#why-no-signal-status");
+const whyNoSignalSummary = document.querySelector("#why-no-signal-summary");
+const whyNoSignalReasons = document.querySelector("#why-no-signal-reasons");
+const missedSetupList = document.querySelector("#missed-setup-list");
+const whyNoSignalAdminDetails = document.querySelector("#why-no-signal-admin-details");
+const whyNoSignalAdminContent = document.querySelector("#why-no-signal-admin-content");
+const missedSetupAdminActions = document.querySelector("#missed-setup-admin-actions");
+const analyzeMissedSetupButton = document.querySelector("#analyze-missed-setup-button");
+const saveMissedSetupButton = document.querySelector("#save-missed-setup-button");
+const missedSetupClassification = document.querySelector("#missed-setup-classification");
+const missedSetupNote = document.querySelector("#missed-setup-note");
 const onboardingPanel = document.querySelector("#onboarding-panel");
 const onboardingChecklist = document.querySelector("#onboarding-checklist");
 const onboardingProgressText = document.querySelector("#onboarding-progress-text");
@@ -1438,6 +1452,9 @@ scanAllButton.addEventListener("click", async () => {
   scanProgress.classList.remove("hidden");
   scanSummaryPanel.classList.add("hidden");
   state.scanResults = [];
+  state.whyNoSignal = null;
+  state.missedSetupAnalysis = null;
+  renderWhyNoSignalPanel(null);
   state.activeScanJob = null;
   signalsGrid.innerHTML = "";
   updateScanProgress(
@@ -1583,6 +1600,9 @@ generateButton.addEventListener("click", async () => {
     }
 
     state.scanResults = [];
+    state.whyNoSignal = null;
+    state.missedSetupAnalysis = null;
+    renderWhyNoSignalPanel(null);
     state.signals = [signal, ...state.signals];
     markFirstScanCompleted();
     await loadSignals();
@@ -1782,6 +1802,63 @@ telegramEnabled.addEventListener("change", async () => {
 avoidTradeMore?.addEventListener("click", () => {
   state.showAllAvoidTrades = !state.showAllAvoidTrades;
   renderAvoidTrades();
+});
+
+analyzeMissedSetupButton?.addEventListener("click", async () => {
+  if (!state.user?.isAdmin || !state.selectedPair) return;
+  analyzeMissedSetupButton.disabled = true;
+  statusLine.textContent = "Analyzing missed setup...";
+  try {
+    const result = await api.request("/api/signals/missed-setup/analyze", {
+      method: "POST",
+      body: JSON.stringify({
+        symbol: state.selectedPair.symbol,
+        timeframe: state.timeframe
+      })
+    });
+    state.missedSetupAnalysis = result;
+    state.whyNoSignal = result.whyNoSignal || null;
+    renderWhyNoSignalPanel(state.whyNoSignal, {
+      fallbackSummary: result.analysis?.rejectionSummary || result.analysis?.message,
+      fallbackReasons: result.analysis?.rejectionReasons || []
+    });
+    statusLine.textContent = result.hasReadySignal
+      ? "Analyzer found a ready setup. Check the generated signal output."
+      : "Missed setup analysis complete.";
+  } catch (error) {
+    statusLine.textContent = error.message;
+  } finally {
+    analyzeMissedSetupButton.disabled = false;
+  }
+});
+
+saveMissedSetupButton?.addEventListener("click", async () => {
+  if (!state.user?.isAdmin || !state.selectedPair) return;
+  const snapshot = state.missedSetupAnalysis || { whyNoSignal: state.whyNoSignal };
+  const firstSetup = snapshot?.whyNoSignal?.possibleSetups?.[0] || {};
+  saveMissedSetupButton.disabled = true;
+  statusLine.textContent = "Saving missed setup example...";
+  try {
+    await api.request("/api/signals/missed-setup/examples", {
+      method: "POST",
+      body: JSON.stringify({
+        symbol: state.selectedPair.symbol,
+        timeframe: state.timeframe,
+        direction: firstSetup.direction || "",
+        attemptedStrategy: firstSetup.attemptedStrategy || "",
+        classification: missedSetupClassification?.value || "unsure",
+        reason: firstSetup.reason || snapshot?.whyNoSignal?.summary || "",
+        adminNote: missedSetupNote?.value || "",
+        analyzerSnapshot: snapshot
+      })
+    });
+    if (missedSetupNote) missedSetupNote.value = "";
+    statusLine.textContent = "Missed setup example saved for admin review.";
+  } catch (error) {
+    statusLine.textContent = error.message;
+  } finally {
+    saveMissedSetupButton.disabled = false;
+  }
 });
 
 dailyMarketBrief?.addEventListener("click", (event) => {
@@ -6862,7 +6939,13 @@ function renderSignalValidity(signal, { compact = false } = {}) {
 function renderNoSetup(analysis) {
   state.avoidTrades = analysis?.avoidTrade ? [analysis.avoidTrade] : [];
   state.showAllAvoidTrades = false;
+  state.whyNoSignal = analysis?.whyNoSignal || null;
+  state.missedSetupAnalysis = state.whyNoSignal ? { whyNoSignal: state.whyNoSignal } : null;
   renderAvoidTrades();
+  renderWhyNoSignalPanel(state.whyNoSignal, {
+    fallbackSummary: analysis?.rejectionSummary || analysis?.message,
+    fallbackReasons: analysis?.rejectionReasons || []
+  });
   const rejectionSummary = analysis?.rejectionSummary ||
     (analysis?.rejectionReasons?.length
       ? `No setup found because: ${analysis.rejectionReasons.slice(0, 3).join(", ")}.`
@@ -6894,6 +6977,85 @@ function renderNoSetup(analysis) {
     </article>
     ${state.signals.map((signal) => renderSignalCard(signal)).join("")}
   `;
+}
+
+function renderWhyNoSignalPanel(report = null, fallback = {}) {
+  if (!whyNoSignalPanel) return;
+  const hasReport = Boolean(report?.available || fallback.fallbackSummary || fallback.fallbackReasons?.length);
+  whyNoSignalPanel.classList.toggle("hidden", !hasReport);
+  missedSetupAdminActions?.classList.toggle("hidden", !state.user?.isAdmin);
+  whyNoSignalAdminDetails?.classList.toggle("hidden", !state.user?.isAdmin || !report?.admin);
+  if (!hasReport) return;
+
+  const possibleSetups = report?.possibleSetups || [];
+  whyNoSignalStatus.textContent = possibleSetups[0]?.status
+    ? titleCase(possibleSetups[0].status)
+    : "No ready signal";
+  whyNoSignalSummary.textContent = report?.summary ||
+    fallback.fallbackSummary ||
+    "SignalForge did not find a clean rule-based setup right now.";
+  const reasons = report?.reasons?.length
+    ? report.reasons.map((item) => item.label || item.reason || item.code)
+    : fallback.fallbackReasons || [];
+  whyNoSignalReasons.innerHTML = renderRejectionReasons(reasons);
+  missedSetupList.innerHTML = possibleSetups.length
+    ? possibleSetups.map(renderMissedSetupRow).join("")
+    : `<div class="empty-state"><strong>No near setup detected</strong><p class="reasoning">SignalForge did not find a close strategy match for this market and timeframe.</p></div>`;
+  if (state.user?.isAdmin && report?.admin) {
+    whyNoSignalAdminContent.innerHTML = renderMissedSetupAdminDebug(report.admin);
+  }
+}
+
+function renderMissedSetupRow(setup) {
+  const improvements = (setup.whatToImprove || []).filter(Boolean).slice(0, 3);
+  const failed = (setup.failedRules || []).filter(Boolean).slice(0, 4);
+  return `
+    <article class="missed-setup-row" data-missed-status="${escapeHtml(setup.status || "no_setup")}">
+      <header>
+        <div>
+          <strong>${escapeHtml(setup.attemptedStrategy || "Possible setup")}</strong>
+          <span>${escapeHtml(String(setup.direction || "Either").toUpperCase())} · ${escapeHtml(titleCase(setup.resultType || "no_setup"))}</span>
+        </div>
+        <span class="status-pill">${escapeHtml(titleCase(setup.status || "not ready"))}</span>
+      </header>
+      <p>${escapeHtml(setup.reason || "SignalForge is waiting for clearer confirmation.")}</p>
+      <div class="missed-setup-metrics">
+        <div><span>Raw score</span><strong>${formatMaybePercent(setup.rawScore)}</strong></div>
+        <div><span>Calibrated</span><strong>${formatMaybePercent(setup.calibratedConfidence)}</strong></div>
+        <div><span>Estimate</span><strong>${formatMaybePercent(setup.confidenceEstimate)}</strong></div>
+      </div>
+      ${improvements.length ? `<section><strong>What would improve it</strong><ul>${improvements.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></section>` : ""}
+      ${state.scannerMode === "advanced" && failed.length ? `<section><strong>Failed checks</strong><ul>${failed.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></section>` : ""}
+    </article>
+  `;
+}
+
+function renderMissedSetupAdminDebug(debug = {}) {
+  const rows = [
+    ["Candidate source", debug.candidateSource],
+    ["Candidate ID", debug.candidateId],
+    ["Attempted strategies", (debug.attemptedStrategies || []).join(", ")],
+    ["Raw score", debug.rawScore],
+    ["Calibrated confidence", debug.calibratedConfidence],
+    ["Setup quality", debug.setupQualityScore],
+    ["Entry readiness", debug.entryReadinessScore],
+    ["Final decision", debug.finalDecision],
+    ["Telegram decision", debug.telegramDecision],
+    ["Timeframe policy", debug.timeframePolicy?.reason],
+    ["Quality gate", debug.qualityGate?.reason || (debug.qualityGate?.passed ? "Passed" : null)],
+    ["Strictness", debug.strictness?.reason],
+    ["Validation", (debug.validation?.rejectedReasons || []).map((item) => item.reason).join(", ")]
+  ].filter(([, value]) => value !== null && value !== undefined && value !== "");
+  return `
+    <div class="missed-admin-grid">
+      ${rows.map(([label, value]) => `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value))}</strong></div>`).join("")}
+    </div>
+  `;
+}
+
+function formatMaybePercent(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? `${Math.round(numeric)}%` : "--";
 }
 
 function updateScanProgress(done, total, message) {
@@ -6971,6 +7133,51 @@ function formatMarketTypeLabel(marketType = "all") {
   }[String(marketType || "all").toLowerCase()] || "All active";
 }
 
+function buildScanWhyNoSignalReport(diagnostics = null, summary = null, scanUniverse = null) {
+  const topReasons = (diagnostics?.topReasons || []).slice(0, 6).map((item) => ({
+    code: normalizeFrontendText(item.reason),
+    label: `${item.reason} (${item.count})`,
+    source: "scan_summary"
+  }));
+  const samples = (diagnostics?.samples || []).slice(0, 4).map((sample) => ({
+    resultType: "no_setup",
+    direction: null,
+    attemptedStrategy: "Scanner diagnostics",
+    status: "not_ready",
+    rawScore: null,
+    calibratedConfidence: null,
+    confidenceEstimate: null,
+    reason: `${getDisplaySymbol(sample.symbol)} ${sample.timeframe}: ${sample.message}`,
+    whatToImprove: sample.reasons || [],
+    failedRules: sample.reasons || []
+  }));
+  return {
+    available: true,
+    symbol: state.selectedPair?.symbol || null,
+    timeframe: state.timeframe,
+    summary: diagnostics?.summary ||
+      `No ready signals across ${formatInteger(scanUniverse?.scannedMarkets || scanUniverse?.selectedMarkets || 0)} scanned markets.`,
+    reasons: topReasons.length
+      ? topReasons
+      : [{ code: "strategy_not_matched", label: "No approved strategy matched cleanly.", source: "scan_summary" }],
+    possibleSetups: samples,
+    whatToImprove: [
+      summary?.watching ? `${summary.watching} setup${summary.watching === 1 ? " is" : "s are"} still watching for confirmation.` : null,
+      summary?.avoidTrade ? `${summary.avoidTrade} market${summary.avoidTrade === 1 ? " is" : "s are"} currently in avoid-trade conditions.` : null,
+      "Run a fresh scan later after candles, volume, and structure change."
+    ].filter(Boolean),
+    educationalCopy: "No signal can be a useful result. SignalForge filters out weak setups instead of forcing trades.",
+    admin: state.user?.isAdmin ? {
+      candidateSource: "scan_summary",
+      attemptedStrategies: ["manual_scan"],
+      finalDecision: "no_ready_signal",
+      telegramDecision: "blocked_not_alertable",
+      qualityGate: null,
+      timeframePolicy: null
+    } : null
+  };
+}
+
 function renderScanSummary(opportunitiesFound, marketsScanned, timeframesScanned, errors = [], diagnostics = null, summary = null, scanUniverse = null, skippedMarkets = []) {
   const counts = summary || { ready: opportunitiesFound, watching: 0, avoidTrade: 0, rejected: 0, expired: 0 };
   const skippedCount = counts.skipped ?? skippedMarkets.length ?? 0;
@@ -7040,6 +7247,18 @@ function renderScanResults(setups, errors, diagnostics = null, scanSummary = nul
   state.avoidTrades = avoidTrades || [];
   state.showAllAvoidTrades = false;
   renderAvoidTrades();
+  if (setups.length === 0) {
+    const scanWhyNoSignal = buildScanWhyNoSignalReport(diagnostics, scanSummary, scanUniverse);
+    state.whyNoSignal = scanWhyNoSignal;
+    renderWhyNoSignalPanel(scanWhyNoSignal, {
+      fallbackSummary: diagnostics?.summary,
+      fallbackReasons: (diagnostics?.topReasons || []).map((item) => item.reason)
+    });
+  } else {
+    state.whyNoSignal = null;
+    state.missedSetupAnalysis = null;
+    renderWhyNoSignalPanel(null);
+  }
   document.querySelector("#signal-count").textContent = `${setups.length} scan results`;
   const activePairs = state.pairs
     .concat(state.marketCatalog)
