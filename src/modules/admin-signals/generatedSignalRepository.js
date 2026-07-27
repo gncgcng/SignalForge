@@ -196,7 +196,7 @@ export async function syncGeneratedSignalOutcome(signal) {
 }
 
 export async function recordGeneratedSignalTelegramDiagnostic({ signal = {}, userId = null, status, reason = "", details = {} }) {
-  const signalId = signal.id || signal.signalId || null;
+  const signalId = signal.signalId || signal.id || null;
   const setupKey = signal.setupKey || null;
   await query(`
     INSERT INTO telegram_alert_diagnostics (
@@ -281,8 +281,56 @@ function withQualityGateFields(signal, row) {
     ...signal,
     qualityGateStatus: row.quality_gate_status || null,
     qualityGateReason: row.quality_gate_reason || null,
-    qualityGateDetails: row.quality_gate_details || {}
+    qualityGateDetails: row.quality_gate_details || {},
+    qualityGateDisplayStatus: getQualityGateDisplayStatus(row),
+    userVisibility: getUserVisibility(row),
+    telegramDecisionStatus: row.telegram_status || null,
+    telegramDecisionLabel: getTelegramDecisionLabel(row.telegram_status, row.telegram_block_reason)
   };
+}
+
+function getQualityGateDisplayStatus(row) {
+  if (row.quality_gate_status === "passed") return "Passed";
+  if (row.quality_gate_status) return "Blocked before users";
+  if (isBlockedGeneratedStatus(row.status)) return "Blocked before users";
+  return "Not evaluated";
+}
+
+function getUserVisibility(row) {
+  if (row.status === "Active") return "User-ready";
+  if (row.status === "Expiring Soon") return "User-ready";
+  if (row.status === "Watching") return "Watching only";
+  if (row.status === "Quarantined timeframe") return "Quarantined";
+  if (isBlockedGeneratedStatus(row.status)) return "Blocked";
+  if (["Hit TP", "Hit SL", "Expired", "Manually closed"].includes(row.status)) return "Admin-only";
+  return "Admin-only";
+}
+
+function isBlockedGeneratedStatus(status) {
+  return [
+    "Duplicate blocked",
+    "Cooldown blocked",
+    "Correlated duplicate",
+    "Quarantined timeframe",
+    "Readiness failed",
+    "Weak strategy match",
+    "Poor entry quality",
+    "Invalid stop loss",
+    "Unrealistic take profit",
+    "Weak risk/reward",
+    "Bad market regime",
+    "Historical underperformer",
+    "Similar to past losers",
+    "Invalid legacy ready signal",
+    "Strategy Misread Rejected",
+    "Weak Pattern Match"
+  ].includes(status);
+}
+
+function getTelegramDecisionLabel(status, reason) {
+  if (!status) return "Not evaluated";
+  const label = String(status).replace(/^telegram_/, "").replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+  return reason ? `${label}: ${reason}` : label;
 }
 
 async function updateGeneratedSignalAnnotations(id, signal) {

@@ -92,6 +92,74 @@ export function evaluateTelegramAlertEligibility({ user = null, settings = null,
   };
 }
 
+export function evaluateGeneratedSignalTelegramDecision(setup = {}) {
+  const threshold = Number(appConfig.telegram.readyAlertMinConfidence || 75);
+  if (!setup) return telegramBlock("telegram_blocked_not_alertable", "No generated setup was available for Telegram.");
+
+  const blockedStatus = blockedStatuses.get(setup.status);
+  if (blockedStatus) {
+    return telegramBlock(prefixTelegramStatus(blockedStatus), `Generated signal status is ${setup.status}.`, {
+      status: setup.status,
+      qualityGateStatus: setup.indicators?.qualityGateV2?.status || setup.generatedQualityGate?.status || setup.qualityGateStatus || null,
+      qualityGateReason: setup.indicators?.qualityGateV2?.reasonCode || setup.generatedQualityGate?.reasonCode || setup.qualityGateReason || null
+    });
+  }
+
+  if (!alertableStatuses.has(setup.status || "Active")) {
+    return telegramBlock("telegram_blocked_not_alertable", `Generated signal status is ${setup.status || "unknown"}.`, {
+      status: setup.status || null
+    });
+  }
+
+  if (["legacy_saved_signal", "legacy_unlocked_signal"].includes(setup.source || setup.generationSource)) {
+    return telegramBlock("telegram_blocked_legacy", "Legacy signals are excluded from Telegram ready alerts.");
+  }
+
+  if (getTimeframeQualityPolicy(setup.timeframe).status === "quarantined") {
+    return telegramBlock("telegram_blocked_quarantined_timeframe", `${setup.timeframe} is quarantined for ready alerts.`, {
+      timeframe: setup.timeframe
+    });
+  }
+
+  const qualityGatePassed = setup.indicators?.qualityGatePassed ?? setup.fullAnalysis?.indicators?.qualityGatePassed ?? setup.qualityGatePassed;
+  const qualityGateStatus = setup.indicators?.qualityGateV2?.status || setup.fullAnalysis?.indicators?.qualityGateV2?.status || setup.qualityGateStatus;
+  if (qualityGatePassed !== true || (qualityGateStatus && qualityGateStatus !== "passed")) {
+    return telegramBlock("telegram_blocked_failed_quality_gate", `Signal Quality Gate blocked Telegram alert: ${qualityGateStatus || "failed"}.`, {
+      qualityGateStatus,
+      qualityGateReason: setup.indicators?.qualityGateV2?.reasonCode || setup.qualityGateReason || null
+    });
+  }
+
+  const readiness = Number(setup.readinessScore ?? setup.entryReadinessScore ?? setup.indicators?.readinessScore ?? 0);
+  if (!Number.isFinite(readiness) || readiness <= 0) {
+    return telegramBlock("telegram_blocked_not_ready", "Readiness score is 0.", { readiness });
+  }
+
+  const confidence = Number(setup.confidenceScore ?? setup.confidence ?? 0);
+  if (!Number.isFinite(confidence) || confidence < threshold) {
+    return telegramBlock("telegram_blocked_low_confidence", `Calibrated confidence ${Number.isFinite(confidence) ? Math.round(confidence) : 0} was below threshold ${threshold}.`, {
+      confidence,
+      threshold
+    });
+  }
+
+  if (!appConfig.telegram.botToken) {
+    return telegramBlock("telegram_missing_bot_token", "Telegram bot token is not configured.");
+  }
+
+  return {
+    allowed: true,
+    status: "telegram_queued",
+    reason: "Generated signal passed Telegram decision checks and is eligible to queue for matching users.",
+    details: {
+      threshold,
+      confidence,
+      timeframe: setup.timeframe,
+      direction: setup.direction
+    }
+  };
+}
+
 export async function recordTelegramAlertDiagnostic(input) {
   try {
     await recordGeneratedSignalTelegramDiagnostic(input);
@@ -187,4 +255,27 @@ export async function sendTelegramAdminTestMessage(chatId) {
 
 function block(status, reason, details = {}) {
   return { allowed: false, status, reason, details };
+}
+
+function telegramBlock(status, reason, details = {}) {
+  return { allowed: false, status, reason, details };
+}
+
+function prefixTelegramStatus(status) {
+  const mapping = {
+    blocked_low_confidence: "telegram_blocked_low_confidence",
+    blocked_quarantined_timeframe: "telegram_blocked_quarantined_timeframe",
+    blocked_not_alertable: "telegram_blocked_not_alertable",
+    blocked_duplicate: "telegram_blocked_duplicate",
+    blocked_cooldown: "telegram_blocked_cooldown",
+    blocked_legacy: "telegram_blocked_legacy",
+    blocked_not_ready: "telegram_blocked_not_ready",
+    queued: "telegram_queued",
+    sent: "telegram_sent",
+    failed: "telegram_failed",
+    telegram_disabled: "telegram_disabled",
+    missing_chat_id: "telegram_missing_chat_id",
+    missing_bot_token: "telegram_missing_bot_token"
+  };
+  return mapping[status] || (String(status || "").startsWith("telegram_") ? status : `telegram_${status || "blocked_not_alertable"}`);
 }

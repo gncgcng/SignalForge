@@ -350,9 +350,11 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
     : null;
   const cappedSignal = historicallyCalibratedSignal ? applyTimeframeConfidencePolicy(historicallyCalibratedSignal) : null;
   const calibrationBlocked = isSignalBlockedByCalibration(cappedSignal);
-  const qualityGate = cappedSignal && !calibrationBlocked
-    ? await evaluateGeneratedSignalQualityGate(cappedSignal, { source: generationSource, marketData, candidateId: candidate?.id || null })
-    : { passed: !cappedSignal || calibrationBlocked };
+  const qualityGate = cappedSignal
+    ? calibrationBlocked
+      ? buildCalibrationBlockedQualityGate(cappedSignal)
+      : await evaluateGeneratedSignalQualityGate(cappedSignal, { source: generationSource, marketData, candidateId: candidate?.id || null })
+    : { passed: true };
   const qualityBlocked = Boolean(cappedSignal && !qualityGate.passed);
   const signal = cappedSignal && !calibrationBlocked && !qualityBlocked
     ? withSignalQuality({
@@ -466,7 +468,8 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
     },
     fullSetup: publishable ? signal : null,
     analysis,
-    briefObservation
+    briefObservation,
+    qualityGateDecision: cappedSignal ? qualityGate : null
   };
 }
 
@@ -730,6 +733,7 @@ async function createManualScanContext(user, options = {}) {
     rejectionReasons: {},
     samples: []
   };
+  const qualityGateDiagnostics = createQualityGateRunDiagnostics();
   const universe = options.universe || getManualScannerUniverse(options);
   const scanMarkets = universe.markets;
   const marketsToScan = scanMarkets.slice(0, appConfig.manualScan.maxMarkets);
@@ -782,7 +786,8 @@ async function createManualScanContext(user, options = {}) {
     avoidTrades,
     briefObservations,
     errors,
-    diagnostics
+    diagnostics,
+    qualityGateDiagnostics
   };
 }
 
@@ -806,6 +811,7 @@ async function scanManualMarket(context, market, onProgress = null, shouldCancel
         { symbol, timeframe },
         context.analystProfile
       );
+      trackQualityGateRunDecision(context.qualityGateDiagnostics, detailed.qualityGateDecision);
       const result = detailed.publicResult;
       const analysis = result.analysis || {};
       if (detailed.briefObservation) context.briefObservations.push(detailed.briefObservation);
@@ -889,6 +895,7 @@ async function finalizeManualScanContext(context) {
     `avoid=${scanSummary.avoidTrade} rejected=${scanSummary.rejected} expired=${scanSummary.expired}`
   );
   console.info(`[scanner] top_rejection_reason=${scanSummary.topRejectionCode}`);
+  logQualityGateRunSummary("manual_scan", context.qualityGateDiagnostics);
 
   return {
     publicResult: {
@@ -1134,6 +1141,44 @@ function recordScanDiagnostics(diagnostics, symbol, timeframe, analysis = {}) {
   }
 }
 
+export function createQualityGateRunDiagnostics() {
+  return {
+    checked: 0,
+    passed: 0,
+    failed: 0,
+    blocked: 0,
+    reasons: {}
+  };
+}
+
+export function trackQualityGateRunDecision(diagnostics, decision = null) {
+  if (!diagnostics || !decision?.version) return diagnostics;
+  diagnostics.checked += 1;
+  if (decision.passed) {
+    diagnostics.passed += 1;
+    return diagnostics;
+  }
+  diagnostics.failed += 1;
+  diagnostics.blocked += 1;
+  const reason = normalizeDiagnosticReason(decision.reasonCode || decision.type || decision.status || "failed_quality_gate");
+  diagnostics.reasons[reason] = Number(diagnostics.reasons[reason] || 0) + 1;
+  return diagnostics;
+}
+
+export function logQualityGateRunSummary(source, diagnostics = createQualityGateRunDiagnostics()) {
+  const topReason = Object.entries(diagnostics.reasons || {})
+    .sort((left, right) => right[1] - left[1])[0]?.[0] || "none";
+  console.info(
+    `[quality-gate] source=${source} checked=${Number(diagnostics.checked || 0)} ` +
+    `passed=${Number(diagnostics.passed || 0)} failed=${Number(diagnostics.failed || 0)} ` +
+    `blocked=${Number(diagnostics.blocked || 0)} topReason=${topReason}`
+  );
+}
+
+function normalizeDiagnosticReason(reason) {
+  return String(reason || "unknown").trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^timeframe$/, "quarantined_timeframe");
+}
+
 function finalizeScanDiagnostics(diagnostics) {
   const topReasons = Object.entries(diagnostics.rejectionReasons)
     .sort((a, b) => b[1] - a[1])
@@ -1198,6 +1243,27 @@ function qualityGateToValidation(signal, gate = {}) {
       market: signal?.symbol,
       strategy: signal?.setupType
     }]
+  };
+}
+
+function buildCalibrationBlockedQualityGate(signal) {
+  const reason = signal?.confidenceCalibration?.message ||
+    signal?.indicators?.confidenceCalibration?.message ||
+    "Performance calibration quarantined or disabled this group.";
+  return {
+    version: "quality_gate_v2",
+    passed: false,
+    type: "historical_underperformer",
+    stage: "generated_quality_historical_underperformer",
+    status: "Historical underperformer",
+    reason,
+    reasonCode: "historical_underperformer",
+    explanation: reason,
+    userExplanation: "No clean signal yet. Historical calibration blocked this setup group.",
+    details: {
+      confidenceCalibration: signal?.confidenceCalibration || signal?.indicators?.confidenceCalibration || {}
+    },
+    checkedAt: new Date().toISOString()
   };
 }
 

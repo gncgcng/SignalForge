@@ -4071,14 +4071,14 @@ function renderSignalQualityGateDiagnostics(gate = {}) {
   const failed = gate.failedByReason || {};
   const reasonRows = gate.topReasons?.length
     ? gate.topReasons.map((item) => `<div class="signal-quality-row compact">
-      <span><strong>${escapeHtml(titleCase(item.reason))}</strong><small>${escapeHtml(item.pair || "All pairs")} · ${escapeHtml(item.timeframe || "All TF")} · ${escapeHtml(item.strategy || "All strategies")}</small></span>
+      <span><strong>${escapeHtml(item.label || titleCase(item.reason))}</strong><small>${escapeHtml(item.pair || "All pairs")} · ${escapeHtml(item.timeframe || "All TF")} · ${escapeHtml(item.strategy || "All strategies")}</small></span>
       <span><strong>${Number(item.count || 0)}</strong><small>Last seen ${item.lastSeenAt ? formatDateTime(item.lastSeenAt) : "n/a"}</small></span>
     </div>`).join("")
     : `<p class="reasoning">No quality-gate rejects recorded yet.</p>`;
   const recentRows = gate.recentRejected?.length
     ? gate.recentRejected.map((item) => `<div class="signal-quality-row compact">
       <span><strong>${escapeHtml(item.pair || "Unknown")} ${escapeHtml(item.timeframe || "")}</strong><small>${escapeHtml(String(item.direction || "").toUpperCase())} · ${escapeHtml(item.attemptedStrategy || "Unknown strategy")}</small></span>
-      <span><strong>${escapeHtml(titleCase(item.gateStatus || "rejected"))}</strong><small>${escapeHtml(item.explanation || item.userExplanation || "No explanation recorded.")}</small></span>
+      <span><strong>${escapeHtml(item.gateLabel || item.rejectionLabel || titleCase(item.gateStatus || "rejected"))}</strong><small>${escapeHtml(item.explanation || item.userExplanation || "No explanation recorded.")}</small><small>Seen ${Number(item.count || 1)} times · Last seen ${item.lastSeenAt ? formatDateTime(item.lastSeenAt) : "n/a"}</small></span>
     </div>`).join("")
     : `<p class="reasoning">Recent rejected examples will appear here as the gate reviews setups.</p>`;
   return `<article class="signal-quality-card">
@@ -4086,8 +4086,8 @@ function renderSignalQualityGateDiagnostics(gate = {}) {
     <div class="signal-quality-summary">
       <div><span>Setups checked</span><strong>${Number(gate.totalSetupsChecked || 0)}</strong><small>Last 30 days</small></div>
       <div><span>Passed gate</span><strong>${Number(gate.passedQualityGate || 0)}</strong><small>${Number(gate.passRate || 0).toFixed(1)}% pass rate</small></div>
-      <div><span>Failed gate</span><strong>${Number(gate.failedQualityGate || 0)}</strong><small>Blocked before users see them</small></div>
-      <div><span>Main blocks</span><strong>${Number(failed.weakStrategyMatch || 0) + Number(failed.poorEntryQuality || 0) + Number(failed.badMarketRegime || 0)}</strong><small>Strategy, entry, regime</small></div>
+      <div><span>Failed gate</span><strong>${Number(gate.failedQualityGate || 0)}</strong><small>Did not pass final gate</small></div>
+      <div><span>Blocked before users see them</span><strong>${Number(gate.blockedBeforeUsers || gate.failedQualityGate || 0)}</strong><small>Includes quarantine, duplicate, cooldown, low confidence</small></div>
     </div>
     <div class="signal-quality-groups">
       <section><h4>Top rejection reasons</h4>${reasonRows}</section>
@@ -4168,8 +4168,8 @@ function renderAdminSignalRow(signal) {
     <span data-label="Setup"><strong class="direction ${escapeHtml(signal.direction)}">${escapeHtml(String(signal.direction).toUpperCase())} &middot; ${escapeHtml(signal.timeframe)}</strong><small>${escapeHtml(signal.strategy)}${signal.pattern ? ` &middot; ${escapeHtml(titleCase(signal.pattern))}` : ""}</small></span>
     <span data-label="Levels"><small>Entry ${formatCurrency(signal.entry)}</small><small>SL ${formatCurrency(signal.stopLoss)} &middot; TP ${formatCurrency(signal.takeProfit)}</small><strong>${Number(signal.riskReward).toFixed(2)}R</strong></span>
     <span data-label="Scores"><small>Confidence ${Number(signal.confidence).toFixed(0)}%</small><small>Raw ${Number(signal.rawSetupScore ?? signal.originalConfidence ?? signal.confidence).toFixed(0)} &middot; Calibrated ${Number(signal.calibratedConfidence ?? signal.confidence).toFixed(0)}</small><small>Quality ${Number(signal.setupQualityScore).toFixed(0)} &middot; Readiness ${Number(signal.entryReadinessScore).toFixed(0)}</small></span>
-    <span data-label="Status"><em class="status-pill ${adminSignalStatusClass(effectiveStatus)}">${escapeHtml(effectiveStatus)}</em><small>${escapeHtml(signal.resultReason || "Tracking")}</small></span>
-    <span data-label="Source"><strong>${escapeHtml(titleCase(signal.source))}</strong><small>${escapeHtml(engineMarker)} &middot; ${escapeHtml(titleCase(calibrationStatus))}</small><small>Telegram ${escapeHtml(titleCase(signal.telegramStatus || "not checked"))}</small><small>${formatDateTime(signal.createdAt)}</small><small>Valid until ${formatDateTime(signal.validUntil)}</small></span>
+    <span data-label="Status"><em class="status-pill ${adminSignalStatusClass(effectiveStatus)}">${escapeHtml(effectiveStatus)}</em><small>${escapeHtml(signal.userVisibility || "Admin-only")}</small><small>${escapeHtml(signal.resultReason || "Tracking")}</small></span>
+    <span data-label="Source"><strong>${escapeHtml(titleCase(signal.source))}</strong><small>${escapeHtml(engineMarker)} &middot; ${escapeHtml(titleCase(calibrationStatus))}</small><small>Quality Gate ${escapeHtml(signal.qualityGateDisplayStatus || titleCase(signal.qualityGateStatus || "not evaluated"))}</small><small>Telegram ${escapeHtml(signal.telegramDecisionLabel || titleCase(signal.telegramStatus || "not evaluated"))}</small><small>${formatDateTime(signal.createdAt)}</small><small>Valid until ${formatDateTime(signal.validUntil)}</small></span>
     <span data-label="Actions" class="admin-signal-row-actions"><button data-admin-signal-view="${escapeHtml(signal.id)}" type="button">Show details</button><button class="secondary-action" data-admin-signal-copy="${escapeHtml(signal.signalId)}" type="button">Copy ID</button>${signal.promotedFromCandidateId ? `<button class="secondary-action" data-admin-signal-view="${escapeHtml(signal.id)}" type="button">Candidate source</button>` : ""}${signal.status !== "Active" ? `<button class="secondary-action" data-admin-signal-view="${escapeHtml(signal.id)}" type="button">Post-mortem</button>` : ""}</span>
   </article>`;
 }
@@ -4205,7 +4205,7 @@ function renderAdminSignalDetail(signal) {
     analysis.indicators?.strategyStrictness?.reason ? `Strictness: ${analysis.indicators.strategyStrictness.reason}` : null
   ];
   const telegramRows = [
-    signal.telegramStatus ? `Telegram status: ${titleCase(signal.telegramStatus)}` : "Telegram status: Not checked",
+    signal.telegramStatus ? `Telegram status: ${titleCase(signal.telegramStatus)}` : "Telegram status: Not evaluated",
     signal.telegramBlockReason,
     signal.telegramLastCheckedAt ? `Last checked: ${formatDateTime(signal.telegramLastCheckedAt)}` : null,
     signal.telegramBlockDetails?.threshold ? `Threshold: ${signal.telegramBlockDetails.threshold}` : null,
@@ -4220,6 +4220,8 @@ function renderAdminSignalDetail(signal) {
     ${renderAdminDetailSection("Strategy strictness", strategyRows)}
     ${renderAdminDetailSection("Confidence calibration", calibrationRows)}
     ${renderAdminDetailSection("Signal Quality Gate", [
+      signal.qualityGateDisplayStatus ? `Gate decision: ${signal.qualityGateDisplayStatus}` : null,
+      signal.userVisibility ? `User visibility: ${signal.userVisibility}` : null,
       signal.qualityGateStatus ? `Gate status: ${titleCase(signal.qualityGateStatus)}` : null,
       signal.qualityGateReason ? `Reason: ${titleCase(signal.qualityGateReason)}` : null,
       signal.qualityGateDetails?.explanation,

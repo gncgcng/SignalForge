@@ -18,6 +18,22 @@ export const blockedGeneratedSignalStatuses = Object.freeze({
   similar_to_past_losers: "Similar to past losers"
 });
 
+const blockedGeneratedSignalReasonCodes = Object.freeze({
+  duplicate: "duplicate_blocked",
+  cooldown: "cooldown_blocked",
+  correlated: "correlated_duplicate",
+  timeframe: "quarantined_timeframe",
+  readiness: "readiness_failed",
+  weak_strategy_match: "weak_strategy_match",
+  poor_entry_quality: "poor_entry_quality",
+  invalid_stop_loss: "invalid_stop_loss",
+  unrealistic_take_profit: "unrealistic_take_profit",
+  weak_risk_reward: "weak_risk_reward",
+  bad_market_regime: "bad_market_regime",
+  historical_underperformer: "historical_underperformer",
+  similar_to_past_losers: "similar_to_past_losers"
+});
+
 const currentEngineSourceSql = "source NOT IN ('legacy_saved_signal','legacy_unlocked_signal')";
 const timeframeOrder = ["5m", "15m", "1h", "4h"];
 const timeframePolicies = Object.freeze({
@@ -91,6 +107,17 @@ export function applyGeneratedSignalQualityBlock(signal, gate) {
       qualityGateV2: gate.details?.qualityGateV2 || gate.qualityGateV2 || null
     }
   };
+}
+
+export function hasGeneratedSignalQualityGate(signal = {}) {
+  return Boolean(
+    signal.generatedQualityGate?.version ||
+    signal.indicators?.generatedQualityGate?.version ||
+    signal.indicators?.qualityGateV2?.version ||
+    signal.qualityGateStatus ||
+    signal.qualityGatePassed === true ||
+    signal.indicators?.qualityGatePassed === true
+  );
 }
 
 export function applyTimeframeConfidencePolicy(signal) {
@@ -227,15 +254,16 @@ function passGate(details = {}) {
 }
 
 function blockGate(type, reason, details = {}, qualityGateV2 = null) {
+  const status = blockedGeneratedSignalStatuses[type] || blockedGeneratedSignalStatuses.duplicate;
   return {
     version: qualityGateV2?.version || "quality_gate_v2",
     passed: false,
     type,
     stage: `generated_quality_${type}`,
-    status: blockedGeneratedSignalStatuses[type] || blockedGeneratedSignalStatuses.duplicate,
+    status,
     reason,
     details,
-    reasonCode: qualityGateV2?.reasonCode || type,
+    reasonCode: qualityGateV2?.reasonCode || blockedGeneratedSignalReasonCodes[type] || normalizeText(status),
     explanation: qualityGateV2?.explanation || reason,
     userExplanation: qualityGateV2?.userExplanation || reason,
     qualityGateV2,

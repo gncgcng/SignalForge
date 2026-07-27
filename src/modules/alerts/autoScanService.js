@@ -16,7 +16,12 @@ import {
   enqueueMatchingTelegramNotifications,
   telegramPreferenceMatchesSetup
 } from "../notifications/notificationService.js";
-import { scanMarketSetupDetailed } from "../signals/signalService.js";
+import {
+  createQualityGateRunDiagnostics,
+  logQualityGateRunSummary,
+  scanMarketSetupDetailed,
+  trackQualityGateRunDecision
+} from "../signals/signalService.js";
 import { saveGeneratedSignal } from "../admin-signals/generatedSignalService.js";
 import { expireStaleCandidates, getCandidateQualitySummary, refreshCandidateLearningOutcomes, runCandidateMarketWatch } from "../signals/setupCandidateService.js";
 import { preferenceMatchesSetup } from "./alertService.js";
@@ -60,6 +65,7 @@ export async function runAutoCryptoAlertScan() {
   let alertsCreated = 0;
   let telegramAlertsQueued = 0;
   let skippedDuplicates = 0;
+  const qualityGateDiagnostics = createQualityGateRunDiagnostics();
   const users = new Map();
 
   try {
@@ -82,6 +88,7 @@ export async function runAutoCryptoAlertScan() {
           symbol: preference.symbol,
           timeframe: preference.timeframe
         }, null, { source: "auto_crypto_watcher", generatedBy: "auto_crypto_watcher" });
+        trackQualityGateRunDecision(qualityGateDiagnostics, detailed.qualityGateDecision);
         const setup = detailed.fullSetup;
 
         const telegramSetup = setup ? await calibrateTelegramAlertSetup(setup) : null;
@@ -143,6 +150,7 @@ export async function runAutoCryptoAlertScan() {
 
           try {
             const detailed = await scanMarketSetupDetailed(user, { symbol, timeframe }, null, { source: "auto_crypto_watcher", generatedBy: "auto_crypto_watcher" });
+            trackQualityGateRunDecision(qualityGateDiagnostics, detailed.qualityGateDecision);
             const setup = detailed.fullSetup;
 
             const telegramSetup = setup ? await calibrateTelegramAlertSetup(setup) : null;
@@ -172,6 +180,11 @@ export async function runAutoCryptoAlertScan() {
     console.log(`[auto-scan] alerts created ${alertsCreated}`);
     console.log(`[auto-scan] telegram alerts queued ${telegramAlertsQueued}`);
     console.log(`[auto-scan] skipped duplicates ${skippedDuplicates}`);
+    logQualityGateRunSummary("auto_crypto_watcher", qualityGateDiagnostics);
+    console.log(
+      `[telegram-alerts] checked=${qualityGateDiagnostics.checked} sent=${telegramAlertsQueued} ` +
+      `blocked=${Math.max(0, qualityGateDiagnostics.checked - telegramAlertsQueued)} topReason=${getTopRunReason(qualityGateDiagnostics)}`
+    );
     const after = await getCandidateQualitySummary();
     await refreshCandidateLearningOutcomes();
     console.log(
@@ -185,6 +198,11 @@ export async function runAutoCryptoAlertScan() {
   } finally {
     autoScanRunning = false;
   }
+}
+
+function getTopRunReason(diagnostics) {
+  return Object.entries(diagnostics?.reasons || {})
+    .sort((left, right) => right[1] - left[1])[0]?.[0] || "none";
 }
 
 async function calibrateTelegramAlertSetup(setup) {
