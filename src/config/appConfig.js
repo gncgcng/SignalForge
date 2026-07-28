@@ -168,7 +168,8 @@ export const appConfig = {
     updatePollIntervalMs: Number(process.env.TELEGRAM_UPDATE_POLL_INTERVAL_MS || 3000),
     readyAlertMinConfidence: Number(process.env.TELEGRAM_READY_ALERT_MIN_CONFIDENCE || 75),
     watchingAlertsEnabled: process.env.TELEGRAM_WATCHING_ALERTS_ENABLED === "true",
-    watchingAlertMinConfidence: Number(process.env.TELEGRAM_WATCHING_ALERT_MIN_CONFIDENCE || 65)
+    watchingAlertMinConfidence: Number(process.env.TELEGRAM_WATCHING_ALERT_MIN_CONFIDENCE || 65),
+    dailyBriefEnabled: process.env.TELEGRAM_DAILY_BRIEF_ENABLED !== "false"
   },
   signalTracking: {
     enabled: true,

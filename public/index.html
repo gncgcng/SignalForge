@@ -640,6 +640,7 @@
               <div class="nav-section-links">
                 <a href="#backtesting" data-view-link="backtesting">Backtesting</a>
                 <a href="#performance" data-view-link="performance">Performance</a>
+                <a href="#signal-activity" data-view-link="signal-activity">Signal Activity</a>
                 <a href="#how-it-works" data-view-link="how-it-works">How SignalForge Works</a>
               </div>
             </section>
@@ -1098,6 +1099,46 @@
 
           <section class="page-view hidden how-it-works-view" id="how-it-works-view" data-view="how-it-works">
             <div data-how-it-works-content></div>
+          </section>
+
+          <section class="page-view hidden signal-activity-page" id="signal-activity-view" data-view="signal-activity">
+            <div class="section-title">
+              <div>
+                <span class="eyebrow">Scanner activity</span>
+                <h3>Signal Activity</h3>
+                <p>See ready signals, forming setups, no-trade warnings, and market brief context without loosening the Quality Gate.</p>
+              </div>
+              <button class="secondary-action" type="button" data-activity-nav="scanner">Open Scanner</button>
+            </div>
+            <div class="signal-disclaimer">
+              <strong>SignalForge is selective. Not every setup becomes a trade signal.</strong>
+              <span>Watching setups, avoid-trade warnings, and market briefs are free to view and do not use unlock credits.</span>
+            </div>
+            <div class="activity-summary-grid" id="signal-activity-summary"></div>
+            <div class="activity-feed-layout">
+              <article class="analytics-panel activity-feed-card">
+                <div class="panel-header"><div><span class="eyebrow">Strict tier</span><h3>Ready Signals</h3></div></div>
+                <div id="activity-ready-list"></div>
+              </article>
+              <article class="analytics-panel activity-feed-card">
+                <div class="panel-header"><div><span class="eyebrow">Free context</span><h3>Watching Setups</h3></div></div>
+                <p class="activity-copy">Watching setups are not trade signals. SignalForge is waiting for better confirmation.</p>
+                <div id="activity-watching-list"></div>
+              </article>
+              <article class="analytics-panel activity-feed-card">
+                <div class="panel-header"><div><span class="eyebrow">No-trade filter</span><h3>Avoid Trade</h3></div></div>
+                <p class="activity-copy">Avoid Trade means SignalForge sees risk and is choosing not to force a trade.</p>
+                <div id="activity-avoid-list"></div>
+              </article>
+              <article class="analytics-panel activity-feed-card">
+                <div class="panel-header"><div><span class="eyebrow">Daily context</span><h3>Market Brief</h3></div></div>
+                <div id="activity-market-brief"></div>
+              </article>
+              <article class="analytics-panel activity-feed-card activity-wide">
+                <div class="panel-header"><div><span class="eyebrow">Scanner reasoning</span><h3>Why no signal?</h3></div></div>
+                <div id="activity-why-no-signal"></div>
+              </article>
+            </div>
           </section>
 
           <section class="page-view hidden" id="signals-view" data-view="signals">
@@ -2115,6 +2156,12 @@
               <strong>Internal diagnostics.</strong>
               <span>Blocked setups are saved for tuning only and are not shown as user-ready signals or Telegram alerts.</span>
             </div>
+            <article class="analytics-panel admin-signal-supply-card">
+              <div class="panel-header">
+                <div><span class="eyebrow">Supply health</span><h3>Admin Signal Supply</h3></div>
+              </div>
+              <div id="admin-signal-supply-panel"><div class="empty-state"><strong>Loading signal supply...</strong></div></div>
+            </article>
             <div class="admin-signal-quality-panel" id="admin-signal-quality-gate-panel"><div class="empty-state"><strong>Loading quality gate diagnostics...</strong></div></div>
           </section>
 

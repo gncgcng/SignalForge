@@ -9091,6 +9091,213 @@ polyline {
   .avoid-trade-columns { grid-template-columns: 1fr; }
   #avoid-trade-more { width: 100%; min-height: 44px; }
 }
+
+.signal-activity-page {
+  min-width: 0;
+}
+
+.activity-summary-grid,
+.activity-feed-layout,
+.admin-signal-supply-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.activity-summary-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 18px 0;
+}
+
+.activity-summary-grid article {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid rgba(75, 214, 255, 0.18);
+  border-radius: 8px;
+  background: rgba(5, 13, 22, 0.82);
+}
+
+.activity-summary-grid span,
+.activity-copy,
+.activity-tier-card small,
+.activity-brief span,
+.activity-why p,
+.activity-why li {
+  color: var(--muted);
+}
+
+.activity-summary-grid strong {
+  display: block;
+  margin-top: 5px;
+  color: var(--text);
+  font-size: 1.45rem;
+}
+
+.activity-feed-layout {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.activity-feed-card,
+.activity-tier-card,
+.activity-brief,
+.activity-why,
+.admin-signal-supply-card {
+  min-width: 0;
+}
+
+.activity-wide {
+  grid-column: 1 / -1;
+}
+
+.activity-card-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.activity-tier-card {
+  padding: 14px;
+  border: 1px solid rgba(75, 214, 255, 0.16);
+  border-left: 3px solid rgba(75, 214, 255, 0.64);
+  border-radius: 8px;
+  background: rgba(4, 12, 21, 0.72);
+}
+
+.activity-tier-card.ready {
+  border-left-color: rgba(50, 220, 164, 0.8);
+}
+
+.activity-tier-card.watching {
+  border-left-color: rgba(75, 214, 255, 0.78);
+}
+
+.activity-tier-card.avoid {
+  border-left-color: rgba(245, 190, 77, 0.82);
+}
+
+.activity-tier-card header,
+.activity-metrics,
+.activity-brief div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.activity-tier-card header {
+  align-items: flex-start;
+}
+
+.activity-tier-card header div {
+  display: grid;
+  gap: 3px;
+}
+
+.activity-tier-card p,
+.activity-tier-card small,
+.activity-why p,
+.activity-why li {
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.activity-metrics {
+  flex-wrap: wrap;
+  margin: 12px 0;
+}
+
+.activity-metrics span {
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid rgba(75, 214, 255, 0.12);
+  border-radius: 7px;
+  color: var(--muted);
+  background: rgba(2, 8, 15, 0.52);
+}
+
+.activity-metrics strong,
+.activity-brief strong {
+  color: var(--text);
+}
+
+.activity-brief {
+  display: grid;
+  gap: 9px;
+  margin-top: 12px;
+}
+
+.activity-brief div {
+  padding: 10px;
+  border: 1px solid rgba(75, 214, 255, 0.12);
+  border-radius: 7px;
+  background: rgba(2, 8, 15, 0.52);
+}
+
+.activity-why ul {
+  margin: 10px 0 0;
+  padding-left: 18px;
+}
+
+.signal-supply-warning {
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid rgba(245, 190, 77, 0.32);
+  border-radius: 8px;
+  color: #f5ca74;
+  background: rgba(245, 190, 77, 0.08);
+  font-weight: 800;
+}
+
+.admin-signal-supply-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+  margin-top: 14px;
+}
+
+.admin-signal-supply-grid section {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid rgba(75, 214, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(2, 8, 15, 0.44);
+}
+
+@media (max-width: 900px) {
+  .activity-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .activity-feed-layout,
+  .admin-signal-supply-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 767px) {
+  .activity-summary-grid,
+  .activity-feed-layout,
+  .admin-signal-supply-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .activity-tier-card,
+  .activity-feed-card,
+  .admin-signal-supply-card {
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  .activity-tier-card header,
+  .activity-metrics {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .activity-tier-card button,
+  .signal-activity-page .section-title button {
+    width: 100%;
+    min-height: 44px;
+  }
+}
 .public-recovery-page {
   min-height: 100vh;
   display: grid;

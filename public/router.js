@@ -4,6 +4,7 @@ export const ROUTE_TO_VIEW = Object.freeze({
   "paper-trading": "paper-portfolio",
   backtesting: "backtesting",
   performance: "performance",
+  "signal-activity": "signal-activity",
   "how-it-works": "how-it-works",
   watchlist: "watchlist",
   alerts: "alerts",

@@ -13,6 +13,7 @@ import {
 } from "./signalService.js";
 import { getCandidateQualitySummary, listSetupCandidates } from "./setupCandidateService.js";
 import { getLatestDailyMarketBrief } from "./dailyMarketBriefService.js";
+import { getSignalActivityFeed } from "./signalActivityService.js";
 import { analyzeMissedSetup, saveMissedSetupExample } from "./missedSetupService.js";
 
 // scanMarketSetupDetailed stays service-private so Telegram receives full setups
@@ -37,6 +38,10 @@ export async function handleSignalRoutes(req, res, pathname) {
 
   if (pathname === "/api/signals/market-brief" && req.method === "GET") {
     return sendJson(res, 200, { marketBrief: await getLatestDailyMarketBrief() });
+  }
+
+  if (pathname === "/api/signals/activity" && req.method === "GET") {
+    return sendJson(res, 200, await getSignalActivityFeed(req.user));
   }
 
   if (pathname === "/api/signals/candidates/quality" && req.method === "GET") {

@@ -101,6 +101,7 @@ const state = {
   candidates: [],
   marketBrief: null,
   marketBriefCollapsed: getStoredMarketBriefCollapsed(),
+  signalActivity: null,
   avoidTrades: [],
   showAllAvoidTrades: false,
   whyNoSignal: null,
@@ -138,6 +139,7 @@ const state = {
   validationDashboard: null,
   candidateQuality: null,
   adminSignals: { signals: [], stats: {}, page: 1, totalPages: 1, total: 0, filters: {} },
+  adminSignalSupply: null,
   adminTelegramHealth: null,
   adminStrategyLab: null,
   adminCryptoMarkets: { markets: [], summary: {}, filters: {} },
@@ -196,6 +198,12 @@ const avoidTradeSection = document.querySelector("#avoid-trade-section");
 const avoidTradeGrid = document.querySelector("#avoid-trade-grid");
 const avoidTradeCount = document.querySelector("#avoid-trade-count");
 const avoidTradeMore = document.querySelector("#avoid-trade-more");
+const signalActivitySummary = document.querySelector("#signal-activity-summary");
+const activityReadyList = document.querySelector("#activity-ready-list");
+const activityWatchingList = document.querySelector("#activity-watching-list");
+const activityAvoidList = document.querySelector("#activity-avoid-list");
+const activityMarketBrief = document.querySelector("#activity-market-brief");
+const activityWhyNoSignal = document.querySelector("#activity-why-no-signal");
 const landingPage = document.querySelector("#landing-page");
 const publicHowItWorksPage = document.querySelector("#public-how-it-works-page");
 const publicProfilePage = document.querySelector("#public-profile-page");
@@ -406,6 +414,7 @@ const adminTelegramHealthStats = document.querySelector("#admin-telegram-health-
 const adminTelegramSimulation = document.querySelector("#admin-telegram-simulation");
 const adminTelegramSimulate = document.querySelector("#admin-telegram-simulate");
 const adminTelegramTestMessage = document.querySelector("#admin-telegram-test-message");
+const adminSignalSupplyPanel = document.querySelector("#admin-signal-supply-panel");
 const adminSignalQualityGatePanel = document.querySelector("#admin-signal-quality-gate-panel");
 const adminStrategyBacktestStart = document.querySelector("#admin-strategy-backtest-start");
 const adminCryptoFilters = document.querySelector("#admin-crypto-filters");
@@ -4416,6 +4425,172 @@ function renderAvoidTrades() {
   avoidTradeMore.textContent = state.showAllAvoidTrades ? "Show top 3" : `View ${avoidTrades.length - 3} more`;
 }
 
+async function loadSignalActivity() {
+  if (!signalActivitySummary) return;
+  signalActivitySummary.innerHTML = `<article><span>Loading</span><strong>Signal activity...</strong></article>`;
+  const result = await api.request("/api/signals/activity");
+  state.signalActivity = result.activity || null;
+  renderSignalActivity();
+}
+
+function renderSignalActivity() {
+  const activity = state.signalActivity || {};
+  const summary = activity.summary || {};
+  if (signalActivitySummary) {
+    signalActivitySummary.innerHTML = [
+      ["Ready signals", summary.readySignals || 0],
+      ["Watching setups", summary.watchingSetups || 0],
+      ["Avoid trade", summary.avoidTrades || 0],
+      ["Market insights", summary.marketInsights || 0]
+    ].map(([label, value]) => `<article><span>${label}</span><strong>${value}</strong></article>`).join("");
+  }
+  if (activityReadyList) activityReadyList.innerHTML = renderActivityReadySignals(activity.readySignals || []);
+  if (activityWatchingList) activityWatchingList.innerHTML = renderActivityWatchingSetups(activity.watchingSetups || []);
+  if (activityAvoidList) activityAvoidList.innerHTML = renderActivityAvoidTrades(activity.avoidTrades || []);
+  if (activityMarketBrief) activityMarketBrief.innerHTML = renderActivityMarketBrief(activity);
+  if (activityWhyNoSignal) activityWhyNoSignal.innerHTML = renderActivityWhyNoSignal(activity.whyNoSignal || {}, activity.copy || {});
+}
+
+function renderActivityReadySignals(signals = []) {
+  if (!signals.length) {
+    return `
+      <div class="empty-state">
+        <strong>No ready signals right now.</strong>
+        <p class="reasoning">SignalForge is tracking forming setups and will only promote signals that pass the final quality gate.</p>
+        <button type="button" data-activity-nav="scanner">Run scanner</button>
+      </div>
+    `;
+  }
+  return `<div class="activity-card-list">${signals.map((signal) => `
+    <article class="activity-tier-card ready">
+      <header>
+        <div><strong>${escapeHtml(signal.displaySymbol || signal.pair)}</strong><span>${escapeHtml(signal.timeframe)} · ${escapeHtml(titleCase(signal.direction))}</span></div>
+        <span class="status-pill status-active">${escapeHtml(signal.confidenceBand || "Ready")}</span>
+      </header>
+      <p>${escapeHtml(signal.strategy || "Qualified setup")} passed strict validation. Entry, stop, and target remain locked until unlock.</p>
+      <div class="activity-metrics">
+        <span>Confidence <strong>${Number(signal.confidence || 0)}%</strong></span>
+        <span>R/R <strong>${Number(signal.riskReward || 0).toFixed(2)}R</strong></span>
+      </div>
+      <button type="button" data-activity-nav="scanner">Open Scanner</button>
+    </article>
+  `).join("")}</div>`;
+}
+
+function renderActivityWatchingSetups(setups = []) {
+  if (!setups.length) {
+    return `<div class="empty-state"><strong>No watching setups yet.</strong><p class="reasoning">Run a scan to let SignalForge show forming setups before they become ready signals.</p></div>`;
+  }
+  return `<div class="activity-card-list">${setups.map((setup) => `
+    <article class="activity-tier-card watching">
+      <header>
+        <div><strong>${escapeHtml(setup.displaySymbol || setup.pair)}</strong><span>${escapeHtml(setup.timeframe)} · ${escapeHtml(titleCase(setup.direction))}</span></div>
+        <span class="status-pill">Watching</span>
+      </header>
+      <p>${escapeHtml(setup.reason || "Setup is forming, but it has not passed the ready-signal checks.")}</p>
+      <div class="activity-metrics">
+        <span>Setup score <strong>${Number(setup.setupScore || 0).toFixed(0)}</strong></span>
+        <span>Readiness <strong>${Number(setup.readinessScore || 0).toFixed(0)}</strong></span>
+      </div>
+      <small>Needs: ${escapeHtml(setup.nextCondition || (setup.missingConfirmations || [])[0] || "More confirmation")}</small>
+    </article>
+  `).join("")}</div>`;
+}
+
+function renderActivityAvoidTrades(avoidTrades = []) {
+  if (!avoidTrades.length) {
+    return `<div class="empty-state"><strong>No avoid-trade zones in the latest brief.</strong><p class="reasoning">Avoid-trade cards appear when SignalForge detects choppy, risky, or weak conditions.</p></div>`;
+  }
+  return `<div class="activity-card-list">${avoidTrades.map((item) => `
+    <article class="activity-tier-card avoid">
+      <header>
+        <div><strong>${escapeHtml(item.displaySymbol || item.pair)}</strong><span>${escapeHtml(item.timeframe || "mixed")} · No Trade</span></div>
+        <span class="avoid-trade-badge">Avoid</span>
+      </header>
+      <p>${escapeHtml(item.reason)}</p>
+      <small>${escapeHtml((item.avoidBecause || []).slice(0, 2).join(" · ") || "Market conditions are not clean enough yet.")}</small>
+    </article>
+  `).join("")}</div>`;
+}
+
+function renderActivityMarketBrief(activity = {}) {
+  const brief = activity.marketBrief;
+  if (!brief) {
+    return `<div class="empty-state"><strong>Market brief is building.</strong><p class="reasoning">Run a scan to refresh strongest pairs, weak pairs, and scanner activity.</p></div>`;
+  }
+  const strongest = (brief.strongestPairs || []).slice(0, 3).map((item) => escapeHtml(item.symbol || item.displaySymbol)).join(", ") || "None";
+  const weakest = (brief.weakestPairs || []).slice(0, 3).map((item) => escapeHtml(item.symbol || item.displaySymbol)).join(", ") || "None";
+  return `
+    <div class="activity-brief">
+      <div><span>Ready</span><strong>${brief.readySignalCount || activity.summary?.readySignals || 0}</strong></div>
+      <div><span>Watching</span><strong>${brief.watchingCount || activity.summary?.watchingSetups || 0}</strong></div>
+      <div><span>Avoid</span><strong>${brief.avoidCount || activity.summary?.avoidTrades || 0}</strong></div>
+      <p><strong>Strongest:</strong> ${strongest}</p>
+      <p><strong>Weak/choppy:</strong> ${weakest}</p>
+    </div>
+  `;
+}
+
+function renderActivityWhyNoSignal(why = {}, copy = {}) {
+  const reasons = (why.reasons || []).slice(0, 5);
+  return `
+    <div class="activity-why">
+      <strong>${escapeHtml(why.title || "No ready signal right now.")}</strong>
+      <p>${escapeHtml(why.summary || copy.selective || "SignalForge is selective. Not every setup becomes a trade signal.")}</p>
+      ${reasons.length ? `<ul>${reasons.map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}
+      <p class="activity-copy">${escapeHtml(copy.confidence || "Confidence reflects rule alignment and setup quality. It is not a win probability.")}</p>
+    </div>
+  `;
+}
+
+async function loadAdminSignalSupply() {
+  if (!state.user?.isAdmin || !adminSignalSupplyPanel) return;
+  adminSignalSupplyPanel.innerHTML = `<div class="empty-state"><strong>Loading signal supply...</strong></div>`;
+  const result = await api.request("/api/admin/signals/supply");
+  state.adminSignalSupply = result.supply || null;
+  renderAdminSignalSupply();
+}
+
+function renderAdminSignalSupply() {
+  if (!adminSignalSupplyPanel) return;
+  const supply = state.adminSignalSupply || {};
+  const counts = supply.counts || {};
+  const telegram = supply.telegram || {};
+  const reasonRows = (supply.topBlockReasons || []).map((item) => `
+    <div class="analytics-list-row"><span>${escapeHtml(item.reason)}</span><strong>${Number(item.count || 0)}</strong></div>
+  `).join("");
+  adminSignalSupplyPanel.innerHTML = `
+    ${supply.warning ? `<div class="signal-supply-warning">${escapeHtml(supply.warning)}</div>` : ""}
+    <div class="admin-signal-stats">
+      ${[
+        ["Candidates", counts.candidates || 0],
+        ["Ready", counts.ready || 0],
+        ["Watching", counts.watching || 0],
+        ["Avoid trade", counts.avoidTrade || 0],
+        ["Admin-only", counts.adminOnly || 0],
+        ["Rejected", counts.rejected || 0],
+        ["Blocked", counts.blocked || 0],
+        ["Ready in 48h", counts.ready48h || 0]
+      ].map(([label, value]) => `<article><span>${label}</span><strong>${value}</strong></article>`).join("")}
+    </div>
+    <div class="admin-signal-supply-grid">
+      <section>
+        <h4>Telegram alert tiers</h4>
+        <div class="analytics-list-row"><span>Ready alerts sent</span><strong>${telegram.readyAlerts || 0}</strong></div>
+        <div class="analytics-list-row"><span>Watching eligible</span><strong>${telegram.watchingAlerts || 0}</strong></div>
+        <div class="analytics-list-row"><span>Blocked</span><strong>${telegram.blocked || 0}</strong></div>
+        <div class="analytics-list-row"><span>Ready threshold</span><strong>${telegram.readyThreshold || 75}%</strong></div>
+        <div class="analytics-list-row"><span>Watching alerts</span><strong>${telegram.watchingEnabled ? "On" : "Off"}</strong></div>
+        <div class="analytics-list-row"><span>Daily brief</span><strong>${telegram.dailyBriefEnabled ? "On" : "Off"}</strong></div>
+      </section>
+      <section>
+        <h4>Top block reasons</h4>
+        ${reasonRows || `<p class="reasoning">No Telegram block diagnostics in the last 24 hours.</p>`}
+      </section>
+    </div>
+  `;
+}
+
 function renderMarketBrief() {
   if (!dailyBriefContent || !dailyBriefUpdated) return;
   const brief = state.marketBrief;
@@ -5031,7 +5206,7 @@ function removeHashParams(names) {
 }
 
 function applyViewState(view, options = {}) {
-  const allowedViews = ["scanner", "watchlist", "alerts", "notifications", "signals", "paper-portfolio", "journal", "backtesting", "performance", "how-it-works", "affiliate", "leaderboard", "profile", "settings", "support", "billing", "route-not-found", "admin-access-denied"];
+  const allowedViews = ["scanner", "watchlist", "alerts", "notifications", "signals", "paper-portfolio", "journal", "backtesting", "performance", "signal-activity", "how-it-works", "affiliate", "leaderboard", "profile", "settings", "support", "billing", "route-not-found", "admin-access-denied"];
   if (state.user?.isAdmin) {
     allowedViews.push("admin", "admin-signals", "admin-signal-quality-gate", "admin-strategy-lab", "admin-crypto-markets", "admin-support", "affiliate-admin", "webhook-events");
   }
@@ -5064,6 +5239,7 @@ function applyViewState(view, options = {}) {
     journal: ["Review and discipline", "Trade Journal"],
     backtesting: ["Historical strategy research", "Backtesting Lab"],
     performance: ["Outcome analytics", "Performance"],
+    "signal-activity": ["Scanner activity", "Signal Activity"],
     "how-it-works": ["Product guide", "How SignalForge Works"],
     affiliate: ["Recurring commissions", "Affiliate Program"],
     leaderboard: ["Community rankings", "Leaderboard"],
@@ -5114,6 +5290,11 @@ function applyViewState(view, options = {}) {
   }
 
   if (normalizedView === "admin-signal-quality-gate") {
+    loadAdminSignalSupply().catch((error) => {
+      if (adminSignalSupplyPanel) {
+        adminSignalSupplyPanel.innerHTML = `<div class="empty-state"><strong>Signal Supply unavailable</strong><p class="reasoning">${escapeHtml(error.message)}</p></div>`;
+      }
+    });
     loadAdminSignalQualityGate().catch((error) => {
       if (adminSignalQualityGatePanel) adminSignalQualityGatePanel.innerHTML = `<div class="empty-state"><strong>Signal Quality Gate unavailable</strong><p class="reasoning">${escapeHtml(error.message)}</p></div>`;
     });
@@ -5185,6 +5366,14 @@ function applyViewState(view, options = {}) {
     });
   }
 
+  if (normalizedView === "signal-activity") {
+    loadSignalActivity().catch((error) => {
+      if (activityWhyNoSignal) {
+        activityWhyNoSignal.innerHTML = `<div class="empty-state"><strong>Signal Activity unavailable</strong><p class="reasoning">${escapeHtml(error.message)}</p></div>`;
+      }
+    });
+  }
+
   if (normalizedView === "paper-portfolio" && !options.skipPaperLoad) {
     loadPaperTradingTerminal().catch((error) => {
       paperPortfolioGrid.innerHTML = `
@@ -5207,6 +5396,13 @@ function applyViewState(view, options = {}) {
     });
   }
 }
+
+document.addEventListener("click", (event) => {
+  const button = event.target?.closest?.("[data-activity-nav]");
+  if (!button) return;
+  event.preventDefault();
+  navigateTo(button.dataset.activityNav || "scanner");
+});
 
 function setMobileNavigationOpen(open) {
   if (!dashboard || !mobileMenuToggle) return;
