@@ -91,13 +91,13 @@ const result = {
     ...setup,
     confidenceScore: 79
   }),
-  messageIsPreviewOnly: ["Market: BTCUSD", "Provider: Coinbase · BTC-USD", "Timeframe: 1h",
+  messageIsReadyTradeSignal: ["Market: BTCUSD", "Provider: Coinbase · BTC-USD", "Timeframe: 1h",
     "Direction: LONG", "Confidence: 86% (Strong)", "Setup: Pullback bounce",
-    "Preview only. Unlock to view full levels."]
+    "Trade levels:", "Entry: 68,000", "Stop loss: 67,000", "Take profit: 70,000", "Risk/reward: 2.00R"]
     .every((value) => message.includes(value)),
-  messageDoesNotLeakPaidLevels: !["Entry:", "Stop Loss:", "Take Profit:", "Risk/Reward:"]
+  messageDoesNotSendWatchingOrDigestCopy: !["Watching setup", "Market digest", "Daily brief", "Why no signal"]
     .some((value) => message.includes(value)),
-  messageContainsReasonAndDisclaimer: message.includes("Preview reason:") &&
+  messageContainsReasonAndDisclaimer: message.includes("Short reason:") &&
     message.includes("Trend") &&
     message.includes("Educational tool only. Not financial advice."),
   telegramReplyMarkupUnlocksExactSetup: replyMarkup.reply_markup.inline_keyboard[0][0].text === "Unlock Signal" &&

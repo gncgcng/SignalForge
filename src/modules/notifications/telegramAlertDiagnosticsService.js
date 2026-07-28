@@ -110,23 +110,6 @@ export function evaluateGeneratedSignalTelegramDecision(setup = {}) {
   }
 
   if (!alertableStatuses.has(setup.status || "Active")) {
-    if (finalDecision === "watching_setup" && appConfig.telegram.watchingAlertsEnabled) {
-      const watchingConfidence = Number(setup.confidenceScore ?? setup.confidence ?? 0);
-      const watchingThreshold = Number(appConfig.telegram.watchingAlertMinConfidence || 65);
-      if (Number.isFinite(watchingConfidence) && watchingConfidence >= watchingThreshold) {
-        return {
-          allowed: true,
-          status: "telegram_watching_eligible",
-          reason: "Watching setup, not a trade signal. Eligible only because TELEGRAM_WATCHING_ALERTS_ENABLED=true.",
-          details: { finalDecision, threshold: watchingThreshold, confidence: watchingConfidence }
-        };
-      }
-      return telegramBlock("telegram_blocked_low_confidence", `Telegram blocked: watching confidence ${Number.isFinite(watchingConfidence) ? Math.round(watchingConfidence) : 0} was below watching threshold ${watchingThreshold}.`, {
-        finalDecision,
-        confidence: watchingConfidence,
-        threshold: watchingThreshold
-      });
-    }
     return telegramBlock(finalDecision === "admin_only" ? "telegram_blocked_final_decision_admin_only" : "telegram_blocked_not_alertable", `Telegram blocked: final decision is ${finalDecisionLabel(finalDecision)}.`, {
       status: setup.status || null,
       finalDecision

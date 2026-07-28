@@ -169,11 +169,14 @@ export const appConfig = {
     readyAlertMinConfidence: Number(process.env.TELEGRAM_READY_ALERT_MIN_CONFIDENCE || 75),
     watchingAlertsEnabled: process.env.TELEGRAM_WATCHING_ALERTS_ENABLED === "true",
     watchingAlertMinConfidence: Number(process.env.TELEGRAM_WATCHING_ALERT_MIN_CONFIDENCE || 65),
-    dailyBriefEnabled: process.env.TELEGRAM_DAILY_BRIEF_ENABLED !== "false"
+    dailyBriefEnabled: process.env.TELEGRAM_DAILY_BRIEF_ENABLED === "true"
   },
   signalTracking: {
     enabled: true,
     intervalMs: Number(process.env.SIGNAL_TRACKING_INTERVAL_MS || 60000)
+  },
+  signals: {
+    readySignalMinConfidence: Number(process.env.READY_SIGNAL_MIN_CONFIDENCE || 65)
   },
   autoScan: {
     enabled: process.env.CRYPTO_WATCHER_ENABLED !== "false" && process.env.AUTO_SCAN_ENABLED !== "false",

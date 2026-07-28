@@ -180,10 +180,16 @@ export function formatTelegramSignalMessage(setup) {
     `Setup: ${setup.setupType || "Qualified setup"}`,
     `Valid for: ${formatSignalValidityWindow(setup.timeframe)}`,
     "",
-    "Preview reason:",
+    "Trade levels:",
+    `Entry: ${formatLevel(setup.entryPrice)}`,
+    `Stop loss: ${formatLevel(setup.stopLoss)}`,
+    `Take profit: ${formatLevel(setup.takeProfit)}`,
+    `Risk/reward: ${Number(setup.riskRewardRatio || 0).toFixed(2)}R`,
+    "",
+    "Short reason:",
     reason,
     "",
-    "Preview only. Unlock to view full levels.",
+    "Open SignalForge to save, paper trade, and review the full analysis.",
     "Market conditions may change before the validity window ends.",
     "Educational tool only. Not financial advice."
   ].join("\n");
@@ -269,6 +275,12 @@ function getConfidenceTier(confidence) {
   if (confidence >= 80) return "Strong";
   if (confidence >= 70) return "Decent";
   return "No alert";
+}
+
+function formatLevel(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "n/a";
+  return Number(number.toFixed(number > 1000 ? 2 : 5)).toLocaleString("en-US");
 }
 
 function getDisplaySymbol(symbol = "") {

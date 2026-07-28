@@ -18,6 +18,7 @@ import {
   currentStrategyVersion
 } from "../analyst/signalAnalystService.js";
 import { detectChartPatterns } from "../patterns/patternDetector.js";
+import { buildLearnedPatternCandidates } from "./historicalPatternLibraryService.js";
 
 const minimumCandles = 60;
 const minimumQualityScore = 70;
@@ -62,38 +63,35 @@ export function generateMarketDataSetup(marketData, timeframe, options = {}) {
   const rawShortCase = isCommodity
     ? evaluateCommodityShort(latest, indicators, levels)
     : evaluateCryptoShort(latest, indicators, levels, marketData.volumeAvailable !== false);
-  const longCase = withPatternContext(validateCandidate(
-    adjustCandidateForVolatility(rawLongCase, regime),
+  const learnedPatternCandidates = isCommodity ? [] : buildLearnedPatternCandidates({
+    marketData,
+    timeframe,
     candles,
     indicators,
     levels,
     regime,
-    marketData.confluence,
-    marketData.intelligence,
-    smc,
-    marketData.advancedStructure,
-    marketData.correlation,
-    options.analystProfile
-  ), detectedPatterns, "long");
-  const shortCase = withPatternContext(validateCandidate(
-    adjustCandidateForVolatility(rawShortCase, regime),
-    candles,
-    indicators,
-    levels,
-    regime,
-    marketData.confluence,
-    marketData.intelligence,
-    smc,
-    marketData.advancedStructure,
-    marketData.correlation,
-    options.analystProfile
-  ), detectedPatterns, "short");
-  const bestCase = [longCase, shortCase]
+    detectedPatterns
+  });
+  const evaluated = [rawLongCase, rawShortCase, ...learnedPatternCandidates]
+    .filter(Boolean)
+    .map((candidate) => withPatternContext(validateCandidate(
+      adjustCandidateForVolatility(candidate, regime),
+      candles,
+      indicators,
+      levels,
+      regime,
+      marketData.confluence,
+      marketData.intelligence,
+      smc,
+      marketData.advancedStructure,
+      marketData.correlation,
+      options.analystProfile
+    ), detectedPatterns, candidate.direction));
+  const bestCase = evaluated
     .filter((candidate) => candidate.valid)
     .sort((a, b) => b.qualityScore - a.qualityScore || b.confidenceScore - a.confidenceScore)[0];
 
   if (!bestCase) {
-    const evaluated = [longCase, shortCase];
     return noSetup(
       isCommodity
         ? "No valid commodity setup found. EMA trend, RSI, ATR, support, and resistance are not sufficiently aligned."
@@ -126,6 +124,9 @@ export function generateMarketDataSetup(marketData, timeframe, options = {}) {
       newsRisk: bestCase.newsRisk,
       qualityScore: bestCase.qualityScore,
       setupType: bestCase.setupType,
+      strategySource: bestCase.strategySource || "rule_engine",
+      learnedPattern: bestCase.learnedPattern || null,
+      patternSimilarity: bestCase.patternSimilarity || null,
       confluence: bestCase.confluence,
       smc: bestCase.smc,
       riskPlan: bestCase.riskPlan,
@@ -147,7 +148,8 @@ export function generateMarketDataSetup(marketData, timeframe, options = {}) {
         bestCase.marketStructure,
         bestCase.correlation,
         analyst,
-        bestCase.patternContext
+        bestCase.patternContext,
+        bestCase.learnedPattern
       ),
       generatedAt: new Date().toISOString(),
       marketSource: marketData.source
@@ -156,6 +158,10 @@ export function generateMarketDataSetup(marketData, timeframe, options = {}) {
       message: "Valid setup found.",
       qualityScore: bestCase.qualityScore,
       setupType: bestCase.setupType,
+      strategySource: bestCase.strategySource || "rule_engine",
+      learnedPattern: bestCase.learnedPattern || null,
+      patternSimilarity: bestCase.patternSimilarity || null,
+      evaluatedCandidateCount: evaluated.length,
       patternContext: bestCase.patternContext,
       detectedPatterns,
       confirmations: bestCase.confirmations,
@@ -171,7 +177,8 @@ export function generateMarketDataSetup(marketData, timeframe, options = {}) {
         bestCase.marketStructure,
         bestCase.correlation,
         analyst,
-        bestCase.patternContext
+        bestCase.patternContext,
+        bestCase.learnedPattern
       )
     }
   };
@@ -323,7 +330,7 @@ function validateCandidate(
   correlationContext,
   analystProfile
 ) {
-  const setupType = classifySetupType(
+  const setupType = candidate.setupType || classifySetupType(
     candidate.direction,
     candles,
     indicators,
@@ -467,9 +474,12 @@ function validateCandidate(
     newsRisk,
     opposingRoom
   }, analystProfile);
+  const learnedPatternQualityAdjustment = candidate.learnedPattern
+    ? Math.max(-4, Math.min(4, (Number(candidate.learnedPattern.patternMatchScore || 0) - 65) * 0.18))
+    : 0;
   const qualityScore = Math.max(
     0,
-    Math.min(100, baseQualityScore + adaptiveQuality.adjustment)
+    Math.min(100, baseQualityScore + adaptiveQuality.adjustment + learnedPatternQualityAdjustment)
   );
   const protectiveLevel = candidate.direction === "long"
     ? levels.nearestSupport
@@ -529,6 +539,7 @@ function validateCandidate(
     marketStructure,
     correlation,
     adaptiveQuality,
+    learnedPatternQualityAdjustment: Number(learnedPatternQualityAdjustment.toFixed(2)),
     riskPlan,
     session,
     newsRisk,
@@ -1132,6 +1143,9 @@ function noSetup(message, marketData, timeframe, candidates, fallbackCodes = [],
         setupType: candidate.setupType,
         qualityScore: candidate.qualityScore,
         regime: candidate.regime,
+        strategySource: candidate.strategySource || "rule_engine",
+        learnedPattern: candidate.learnedPattern || null,
+        patternSimilarity: candidate.patternSimilarity || null,
         confluence: candidate.confluence,
         smc: candidate.smc,
         marketStructure: candidate.marketStructure,
@@ -1206,7 +1220,8 @@ function serializeIndicators(
   correlation = null
   ,
   analyst = null,
-  patternContext = null
+  patternContext = null,
+  learnedPattern = null
 ) {
   return {
     ema20: roundPrice(indicators.ema20),
@@ -1269,7 +1284,10 @@ function serializeIndicators(
     analystSections: analyst?.sections || {},
     analystAdaptiveAdjustment: analyst?.adaptive?.adjustment || 0,
     analystAdaptiveFactors: analyst?.adaptive?.factors || [],
-    patternContext
+    patternContext,
+    strategySource: learnedPattern?.strategySource || "rule_engine",
+    learnedPattern,
+    historicalPatternSignal: Boolean(learnedPattern)
   };
 }
 
