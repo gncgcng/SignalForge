@@ -171,8 +171,11 @@ export async function applyConfidenceCalibration(signal) {
 }
 
 export function isSignalBlockedByCalibration(signal) {
-  const status = signal?.indicators?.confidenceCalibration?.status;
-  return ["quarantined", "disabled_by_admin"].includes(status);
+  const calibration = signal?.indicators?.confidenceCalibration || signal?.confidenceCalibration || {};
+  const status = calibration.status;
+  if (status === "disabled_by_admin") return true;
+  if (status === "quarantined" && calibration.blockingEvidence?.hardBlockEligible) return true;
+  return false;
 }
 
 export function applyCalibrationContext(signal, context = {}) {
@@ -215,7 +218,13 @@ export function applyCalibrationContext(signal, context = {}) {
   );
   const severeStrategy = poorGroups.find((group) => group.groupType === "strategy" && group.closedSignals >= 20 && group.estimatedExpectancy < 0);
   const severePairTimeframe = poorGroups.find((group) => group.groupType === "pair_timeframe" && group.closedSignals >= 20 && group.estimatedExpectancy < 0);
+  const hardBlockGroup = findHardBlockCalibrationGroup(context.groups || []);
   const quarantined = (context.groups || []).find((group) => ["quarantined", "disabled_by_admin"].includes(group.status));
+  const exactNegative = (context.groups || []).find((group) =>
+    isSpecificEvidenceGroup(group) &&
+    Number(group.closedSignals || 0) >= 20 &&
+    Number(group.estimatedExpectancy || 0) < 0
+  );
   const recentPoor = (context.groups || []).find((group) => group.groupType === "recent_strategy" && group.closedSignals >= 5 && group.winRate < group.breakEvenWinRate);
   const expiredHeavy = (context.groups || []).find((group) => group.expiredRate >= 35 && group.totalSignals >= 10);
   const positiveGroups = (context.groups || []).filter((group) =>
@@ -266,6 +275,10 @@ export function applyCalibrationContext(signal, context = {}) {
   if (severePairTimeframe) addCap(75, "Pair/timeframe has negative generated-signal expectancy.", "historical");
   if (severeStrategy && severePairTimeframe) addCap(68, "Strategy and pair/timeframe are both underperforming.", "historical");
   if (quarantined) addCap(68, `${titleCase(quarantined.groupType)} is ${quarantined.status}.`, "historical");
+  if (exactNegative) {
+    addCap(75, `Specific group ${exactNegative.groupValue} has negative expectancy with ${exactNegative.closedSignals} closed signals.`, "historical");
+    addPenalty(-4, "Specific historical group is negative, so setup should require stronger confirmation.", exactNegative.groupKey);
+  }
 
   const strongestPositive = positiveGroups
     .sort((a, b) => b.confidenceCapLift - a.confidenceCapLift || b.estimatedExpectancy - a.estimatedExpectancy)[0];
@@ -282,10 +295,13 @@ export function applyCalibrationContext(signal, context = {}) {
 
   const confidenceCap = Math.min(ruleCap, historicalCap, expectancyCap);
   const finalConfidence = Math.max(50, Math.min(confidenceCap, originalConfidence + penalty));
-  const status = quarantined?.status || (severeStrategy || severePairTimeframe ? "reduced_confidence" : poorGroups.length ? "watchlist" : "active");
+  const status = hardBlockGroup?.status ||
+    (exactNegative ? "watching" : severeStrategy || severePairTimeframe ? "reduced_confidence" : poorGroups.length ? "watchlist" : "active");
   const calibrationReason = status === "active"
     ? CONFIDENCE_COPY
-    : "Confidence was reduced because generated-signal outcomes for similar setups are below calibration thresholds.";
+    : status === "watching"
+      ? "Historical performance reduced confidence. Setup is watching, not ready."
+      : "Confidence was reduced because generated-signal outcomes for similar setups are below calibration thresholds.";
   const roundedFinalConfidence = Math.round(finalConfidence);
   const calibrationPayload = {
     version: CONFIDENCE_CALIBRATION_VERSION,
@@ -300,7 +316,8 @@ export function applyCalibrationContext(signal, context = {}) {
     penalties,
     status,
     label: confidenceQualityLabel(roundedFinalConfidence, status),
-    blocked: ["quarantined", "disabled_by_admin"].includes(status),
+    blocked: Boolean(hardBlockGroup),
+    blockingEvidence: hardBlockGroup ? summarizeGroupForSignal(hardBlockGroup) : null,
     calibrationReason,
     message: CONFIDENCE_COPY,
     groups: (context.groups || []).map(summarizeGroupForSignal)
@@ -331,7 +348,7 @@ export async function getSignalCalibrationContext(signal) {
     if (group) groups.push(group);
   }
   const hasExactSourceStrategyTimeframeHistory = groups.some((group) =>
-    group.groupType === "source_strategy_timeframe" && group.closedSignals >= 3
+    ["exact_signal_context", "source_strategy_timeframe"].includes(group.groupType) && group.closedSignals >= 3
   );
   return {
     groups,
@@ -622,9 +639,16 @@ function buildSignalGroupDefinitions(signal) {
   const timeframe = signal.timeframe || "unknown";
   const direction = signal.direction || "unknown";
   const source = signal.generationSource || signal.source || signal.indicators?.generationSource || "manual_scan";
+  const regime = normalizeRegime(signal);
   const pattern = signal.patternContext?.pattern || signal.indicators?.patternContext?.pattern || "";
   const confidenceBucket = buildConfidenceBucket(signal.confidenceScore);
   return [
+    {
+      groupType: "exact_signal_context",
+      groupValue: `${source}:${strategy}:${pair}:${timeframe}:${direction}:${regime}`,
+      where: "source = $1 AND strategy = $2 AND pair = $3 AND timeframe = $4 AND direction = $5 AND COALESCE(full_analysis->'indicators'->>'regime', 'unknown') = $6",
+      params: [source, strategy, pair, timeframe, direction, regime]
+    },
     { groupType: "source_strategy_timeframe", groupValue: `${source}:${strategy}:${timeframe}`, where: "source = $1 AND strategy = $2 AND timeframe = $3", params: [source, strategy, timeframe] },
     { groupType: "strategy", groupValue: strategy, where: "strategy = $1", params: [strategy] },
     { groupType: "pair_timeframe", groupValue: `${pair}:${timeframe}`, where: "pair = $1 AND timeframe = $2", params: [pair, timeframe] },
@@ -635,6 +659,30 @@ function buildSignalGroupDefinitions(signal) {
     { groupType: "recent_strategy", groupValue: strategy, where: "strategy = $1 AND created_at >= now() - interval '7 days'", params: [strategy] },
     ...(pattern ? [{ groupType: "pattern", groupValue: pattern, where: "pattern = $1", params: [pattern] }] : [])
   ];
+}
+
+function findHardBlockCalibrationGroup(groups = []) {
+  return groups.find((group) => group.status === "disabled_by_admin") ||
+    groups.find((group) =>
+      isSpecificEvidenceGroup(group) &&
+      ["quarantined"].includes(group.status) &&
+      Number(group.closedSignals || 0) >= 30 &&
+      Number(group.estimatedExpectancy || 0) < 0
+    ) || null;
+}
+
+function isSpecificEvidenceGroup(group = {}) {
+  return ["exact_signal_context"].includes(group.groupType);
+}
+
+function normalizeRegime(signal = {}) {
+  return String(
+    signal.marketRegime ||
+    signal.regime ||
+    signal.indicators?.regime ||
+    signal.fullAnalysis?.indicators?.regime ||
+    "unknown"
+  ).trim() || "unknown";
 }
 
 function findProvenExactSourceStrategyTimeframe(groups = []) {

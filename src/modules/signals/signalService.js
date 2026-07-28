@@ -351,13 +351,14 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
     : null;
   const cappedSignal = historicallyCalibratedSignal ? applyTimeframeConfidencePolicy(historicallyCalibratedSignal) : null;
   const calibrationBlocked = isSignalBlockedByCalibration(cappedSignal);
+  const calibrationWatching = cappedSignal?.indicators?.confidenceCalibration?.status === "watching";
   const qualityGate = cappedSignal
     ? calibrationBlocked
       ? buildCalibrationBlockedQualityGate(cappedSignal)
       : await evaluateGeneratedSignalQualityGate(cappedSignal, { source: generationSource, marketData, candidateId: candidate?.id || null })
     : { passed: true };
   const qualityBlocked = Boolean(cappedSignal && !qualityGate.passed);
-  const signal = cappedSignal && !calibrationBlocked && !qualityBlocked
+  const signal = cappedSignal && !calibrationBlocked && !calibrationWatching && !qualityBlocked
     ? withSignalQuality({
       ...cappedSignal,
       confidenceScore: Math.min(cappedSignal.confidenceScore, candidate?.confidenceEstimate || 99),
@@ -370,6 +371,8 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
     : null;
   const blockedSignal = qualityBlocked
     ? withSignalQuality(applyGeneratedSignalQualityBlock(cappedSignal, qualityGate))
+    : calibrationWatching
+      ? withSignalQuality(applyHistoricalWatchingDecision(cappedSignal))
     : strictnessBlocked
       ? withSignalQuality(applyStrategyStrictnessRejection(readySignal, strictness))
     : null;
@@ -407,7 +410,7 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
       candidateId: candidate?.id || null
     });
   }
-  if (readySignal && (strictnessBlocked || validation || calibrationBlocked || qualityBlocked) && (!validation?.passed || calibrationBlocked || qualityBlocked || strictnessBlocked) && candidate) {
+  if (readySignal && (strictnessBlocked || validation || calibrationBlocked || qualityBlocked || calibrationWatching) && (!validation?.passed || calibrationBlocked || qualityBlocked || strictnessBlocked) && candidate) {
     const rejectionReason = strictnessBlocked
       ? strictness.reason
       : calibrationBlocked
@@ -430,13 +433,15 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
       rejectionReasonCodes: readiness.reasons.map((reason) => reason.includes("entry") ? "entry_not_ready" : "readiness_pending"),
       candidate: candidate ? toCandidatePreview(candidate) : null
     }
-    : result.valid && (strictnessBlocked || validation) && (strictnessBlocked || !validation?.passed || qualityBlocked || calibrationBlocked)
+    : result.valid && (strictnessBlocked || validation || calibrationWatching) && (strictnessBlocked || !validation?.passed || qualityBlocked || calibrationBlocked || calibrationWatching)
       ? validationNoSetupAnalysis(readySignal, strictnessBlocked
         ? qualityGateToValidation(readySignal, { stage: "strategy_strictness", reason: strictness.reason })
         : qualityBlocked
         ? qualityGateToValidation(readySignal, qualityGate)
         : calibrationBlocked
           ? qualityGateToValidation(readySignal, { stage: "generated_quality_calibration", reason: "Performance calibration quarantined or disabled this group." })
+          : calibrationWatching
+            ? qualityGateToValidation(readySignal, { stage: "historical_calibration_watching", reason: cappedSignal.indicators?.confidenceCalibration?.calibrationReason || "Historical performance reduced confidence. Setup is watching, not ready." })
           : validation)
       : result.analysis;
   const publishable = Boolean(valid && signal);
@@ -1286,6 +1291,25 @@ function buildCalibrationBlockedQualityGate(signal) {
       confidenceCalibration: signal?.confidenceCalibration || signal?.indicators?.confidenceCalibration || {}
     },
     checkedAt: new Date().toISOString()
+  };
+}
+
+function applyHistoricalWatchingDecision(signal) {
+  const calibration = signal?.confidenceCalibration || signal?.indicators?.confidenceCalibration || {};
+  const reason = calibration.calibrationReason ||
+    "Historical performance reduced confidence. Setup is watching, not ready.";
+  return {
+    ...signal,
+    status: "Watching",
+    resultReason: reason,
+    validationPassed: true,
+    indicators: {
+      ...(signal.indicators || {}),
+      finalDecision: "watching_setup",
+      alertEligibility: "telegram_blocked_final_decision_watching",
+      historicalWatchingDecision: true,
+      historicalWatchingReason: reason
+    }
   };
 }
 

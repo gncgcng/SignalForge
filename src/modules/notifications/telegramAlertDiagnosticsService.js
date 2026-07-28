@@ -10,22 +10,23 @@ import { sendTelegramMessage } from "./telegramClient.js";
 
 const alertableStatuses = new Set(["Active", "Expiring Soon"]);
 const blockedStatuses = new Map([
-  ["Duplicate blocked", "blocked_duplicate"],
-  ["Cooldown blocked", "blocked_cooldown"],
-  ["Correlated duplicate", "blocked_duplicate"],
-  ["Quarantined timeframe", "blocked_quarantined_timeframe"],
-  ["Readiness failed", "blocked_not_ready"],
-  ["Invalid legacy ready signal", "blocked_legacy"],
-  ["Strategy Misread Rejected", "blocked_not_alertable"],
-  ["Weak Pattern Match", "blocked_not_alertable"],
-  ["Weak strategy match", "blocked_not_alertable"],
-  ["Poor entry quality", "blocked_not_alertable"],
-  ["Invalid stop loss", "blocked_not_alertable"],
-  ["Unrealistic take profit", "blocked_not_alertable"],
-  ["Weak risk/reward", "blocked_not_alertable"],
-  ["Bad market regime", "blocked_not_alertable"],
-  ["Historical underperformer", "blocked_not_alertable"],
-  ["Similar to past losers", "blocked_not_alertable"]
+  ["Duplicate blocked", { status: "blocked_duplicate", reason: "duplicate" }],
+  ["Cooldown blocked", { status: "blocked_cooldown", reason: "cooldown" }],
+  ["Correlated duplicate", { status: "blocked_duplicate", reason: "correlated duplicate" }],
+  ["Quarantined timeframe", { status: "blocked_quarantined_timeframe", reason: "timeframe quarantined" }],
+  ["Readiness failed", { status: "blocked_not_ready", reason: "readiness failed" }],
+  ["Invalid legacy ready signal", { status: "blocked_legacy", reason: "legacy signal" }],
+  ["Watching", { status: "blocked_final_decision_watching", reason: "final decision is watching" }],
+  ["Strategy Misread Rejected", { status: "blocked_failed_quality_gate", reason: "strategy misread rejected" }],
+  ["Weak Pattern Match", { status: "blocked_failed_quality_gate", reason: "weak pattern match" }],
+  ["Weak strategy match", { status: "blocked_failed_quality_gate", reason: "weak strategy match" }],
+  ["Poor entry quality", { status: "blocked_failed_quality_gate", reason: "poor entry quality" }],
+  ["Invalid stop loss", { status: "blocked_failed_quality_gate", reason: "invalid stop loss" }],
+  ["Unrealistic take profit", { status: "blocked_failed_quality_gate", reason: "unrealistic take profit" }],
+  ["Weak risk/reward", { status: "blocked_failed_quality_gate", reason: "weak risk/reward" }],
+  ["Bad market regime", { status: "blocked_failed_quality_gate", reason: "bad market regime" }],
+  ["Historical underperformer", { status: "blocked_historical_underperformance", reason: "historical underperformance with enough evidence" }],
+  ["Similar to past losers", { status: "blocked_failed_quality_gate", reason: "similar to past losers" }]
 ]);
 
 export function evaluateTelegramAlertEligibility({ user = null, settings = null, setup = null, favoriteSymbols = new Set() } = {}) {
@@ -44,12 +45,13 @@ export function evaluateTelegramAlertEligibility({ user = null, settings = null,
     return block("blocked_not_alertable", "Signal timeframe is not enabled in Telegram preferences.");
   }
   if (settings.direction && settings.direction !== "both" && settings.direction !== setup.direction) {
-    return block("blocked_not_alertable", "Signal direction does not match Telegram preferences.");
+    return block("blocked_direction_preference", "Signal direction does not match Telegram preferences.");
   }
-  const blockedStatus = blockedStatuses.get(setup.status);
-  if (blockedStatus) return block(blockedStatus, `Generated signal status is ${setup.status}.`);
+  const finalDecision = getFinalDecision(setup);
+  const blockedStatus = getBlockedStatusDecision(setup);
+  if (blockedStatus) return block(blockedStatus.status, `Telegram blocked: ${blockedStatus.reason}.`, { finalDecision, status: setup.status });
   if (!alertableStatuses.has(setup.status || "Active")) {
-    return block("blocked_not_alertable", `Generated signal status is ${setup.status || "unknown"}.`);
+    return block(finalDecision === "admin_only" ? "blocked_final_decision_admin_only" : "blocked_not_alertable", `Telegram blocked: final decision is ${finalDecisionLabel(finalDecision)}.`, { finalDecision, status: setup.status || null });
   }
   if (["legacy_saved_signal", "legacy_unlocked_signal"].includes(setup.source || setup.generationSource)) {
     return block("blocked_legacy", "Legacy signals are excluded from Telegram ready alerts.");
@@ -60,7 +62,7 @@ export function evaluateTelegramAlertEligibility({ user = null, settings = null,
   const qualityGatePassed = setup.indicators?.qualityGatePassed ?? setup.fullAnalysis?.indicators?.qualityGatePassed ?? setup.qualityGatePassed;
   const qualityGateStatus = setup.indicators?.qualityGateV2?.status || setup.fullAnalysis?.indicators?.qualityGateV2?.status || setup.qualityGateStatus;
   if (qualityGatePassed !== true || (qualityGateStatus && qualityGateStatus !== "passed")) {
-    return block("blocked_not_alertable", `Signal Quality Gate blocked Telegram alert: ${qualityGateStatus || "failed"}.`, {
+    return block("blocked_failed_quality_gate", `Signal Quality Gate blocked Telegram alert: failed Quality Gate (${qualityGateStatus || "failed"}).`, {
       qualityGateStatus,
       qualityGateReason: setup.indicators?.qualityGateV2?.reasonCode || setup.qualityGateReason || null
     });
@@ -96,18 +98,38 @@ export function evaluateGeneratedSignalTelegramDecision(setup = {}) {
   const threshold = Number(appConfig.telegram.readyAlertMinConfidence || 75);
   if (!setup) return telegramBlock("telegram_blocked_not_alertable", "No generated setup was available for Telegram.");
 
-  const blockedStatus = blockedStatuses.get(setup.status);
+  const finalDecision = getFinalDecision(setup);
+  const blockedStatus = getBlockedStatusDecision(setup);
   if (blockedStatus) {
-    return telegramBlock(prefixTelegramStatus(blockedStatus), `Generated signal status is ${setup.status}.`, {
+    return telegramBlock(prefixTelegramStatus(blockedStatus.status), `Telegram blocked: ${blockedStatus.reason}.`, {
       status: setup.status,
+      finalDecision,
       qualityGateStatus: setup.indicators?.qualityGateV2?.status || setup.generatedQualityGate?.status || setup.qualityGateStatus || null,
       qualityGateReason: setup.indicators?.qualityGateV2?.reasonCode || setup.generatedQualityGate?.reasonCode || setup.qualityGateReason || null
     });
   }
 
   if (!alertableStatuses.has(setup.status || "Active")) {
-    return telegramBlock("telegram_blocked_not_alertable", `Generated signal status is ${setup.status || "unknown"}.`, {
-      status: setup.status || null
+    if (finalDecision === "watching_setup" && appConfig.telegram.watchingAlertsEnabled) {
+      const watchingConfidence = Number(setup.confidenceScore ?? setup.confidence ?? 0);
+      const watchingThreshold = Number(appConfig.telegram.watchingAlertMinConfidence || 65);
+      if (Number.isFinite(watchingConfidence) && watchingConfidence >= watchingThreshold) {
+        return {
+          allowed: true,
+          status: "telegram_watching_eligible",
+          reason: "Watching setup, not a trade signal. Eligible only because TELEGRAM_WATCHING_ALERTS_ENABLED=true.",
+          details: { finalDecision, threshold: watchingThreshold, confidence: watchingConfidence }
+        };
+      }
+      return telegramBlock("telegram_blocked_low_confidence", `Telegram blocked: watching confidence ${Number.isFinite(watchingConfidence) ? Math.round(watchingConfidence) : 0} was below watching threshold ${watchingThreshold}.`, {
+        finalDecision,
+        confidence: watchingConfidence,
+        threshold: watchingThreshold
+      });
+    }
+    return telegramBlock(finalDecision === "admin_only" ? "telegram_blocked_final_decision_admin_only" : "telegram_blocked_not_alertable", `Telegram blocked: final decision is ${finalDecisionLabel(finalDecision)}.`, {
+      status: setup.status || null,
+      finalDecision
     });
   }
 
@@ -124,7 +146,7 @@ export function evaluateGeneratedSignalTelegramDecision(setup = {}) {
   const qualityGatePassed = setup.indicators?.qualityGatePassed ?? setup.fullAnalysis?.indicators?.qualityGatePassed ?? setup.qualityGatePassed;
   const qualityGateStatus = setup.indicators?.qualityGateV2?.status || setup.fullAnalysis?.indicators?.qualityGateV2?.status || setup.qualityGateStatus;
   if (qualityGatePassed !== true || (qualityGateStatus && qualityGateStatus !== "passed")) {
-    return telegramBlock("telegram_blocked_failed_quality_gate", `Signal Quality Gate blocked Telegram alert: ${qualityGateStatus || "failed"}.`, {
+    return telegramBlock("telegram_blocked_failed_quality_gate", `Signal Quality Gate blocked Telegram alert: failed Quality Gate (${qualityGateStatus || "failed"}).`, {
       qualityGateStatus,
       qualityGateReason: setup.indicators?.qualityGateV2?.reasonCode || setup.qualityGateReason || null
     });
@@ -154,6 +176,7 @@ export function evaluateGeneratedSignalTelegramDecision(setup = {}) {
     details: {
       threshold,
       confidence,
+      finalDecision: "ready_signal",
       timeframe: setup.timeframe,
       direction: setup.direction
     }
@@ -169,7 +192,7 @@ export async function recordTelegramAlertDiagnostic(input) {
 }
 
 export async function getTelegramAlertHealth() {
-  const [summary, queue, failures] = await Promise.all([
+  const [summary, queue, failures, scarcity] = await Promise.all([
     getTelegramAlertDiagnosticsSummary(),
     query(`
       SELECT
@@ -186,8 +209,18 @@ export async function getTelegramAlertHealth() {
       WHERE status = 'failed' OR last_error IS NOT NULL
       ORDER BY updated_at DESC
       LIMIT 8
+    `),
+    query(`
+      SELECT status, COUNT(*)::integer AS count
+      FROM telegram_alert_diagnostics
+      WHERE created_at >= now() - interval '48 hours'
+      GROUP BY status
+      ORDER BY count DESC
+      LIMIT 8
     `)
   ]);
+  const lastSentTime = summary.last_sent_at ? new Date(summary.last_sent_at).getTime() : 0;
+  const noReadyAlerts48h = !lastSentTime || Date.now() - lastSentTime > 48 * 60 * 60 * 1000;
   return {
     enabled: Boolean(appConfig.telegram.botToken),
     botTokenConfigured: Boolean(appConfig.telegram.botToken),
@@ -201,6 +234,14 @@ export async function getTelegramAlertHealth() {
     minimumConfidenceThreshold: Number(appConfig.telegram.readyAlertMinConfidence || 75),
     watchingAlertsEnabled: appConfig.telegram.watchingAlertsEnabled,
     watchingAlertMinConfidence: Number(appConfig.telegram.watchingAlertMinConfidence || 65),
+    watchingAlertsSentToday: Number(summary.watching_sent_today || 0),
+    noReadyAlerts48h,
+    alertScarcityWarning: noReadyAlerts48h ? {
+      active: true,
+      message: "No ready alerts sent in the last 48 hours.",
+      candidatesGenerated: Number(summary.candidates_generated_48h || 0),
+      blockedByReason: scarcity.rows.map((row) => ({ status: row.status, count: Number(row.count || 0) }))
+    } : { active: false },
     alertableSignalCount: Number(summary.alertable_signal_count || 0),
     nonAlertedGeneratedSignalCount: Number(summary.non_alerted_generated_signal_count || 0),
     failedSends: Number(queue.rows[0]?.failed_sends || 0),
@@ -261,11 +302,42 @@ function telegramBlock(status, reason, details = {}) {
   return { allowed: false, status, reason, details };
 }
 
+function getBlockedStatusDecision(setup = {}) {
+  const status = setup.status || "";
+  return blockedStatuses.get(status) || null;
+}
+
+export function getFinalDecision(setup = {}) {
+  const status = setup.status || "Active";
+  if (["Active", "Expiring Soon"].includes(status)) return "ready_signal";
+  if (status === "Watching") return "watching_setup";
+  if (["Hit TP", "Hit SL", "Expired", "Manually closed"].includes(status)) return "admin_only";
+  if (["Strategy Misread Rejected", "Weak Pattern Match"].includes(status) || /rejected/i.test(status)) return "rejected";
+  if (blockedStatuses.has(status)) return "blocked";
+  if (["legacy_saved_signal", "legacy_unlocked_signal", "backtest_shadow", "admin_test"].includes(setup.source || setup.generationSource)) return "admin_only";
+  return "admin_only";
+}
+
+function finalDecisionLabel(decision) {
+  return {
+    ready_signal: "ready signal",
+    watching_setup: "watching",
+    admin_only: "admin-only",
+    blocked: "blocked",
+    rejected: "rejected"
+  }[decision] || "not alertable";
+}
+
 function prefixTelegramStatus(status) {
   const mapping = {
     blocked_low_confidence: "telegram_blocked_low_confidence",
     blocked_quarantined_timeframe: "telegram_blocked_quarantined_timeframe",
     blocked_not_alertable: "telegram_blocked_not_alertable",
+    blocked_failed_quality_gate: "telegram_blocked_failed_quality_gate",
+    blocked_historical_underperformance: "telegram_blocked_historical_underperformance",
+    blocked_final_decision_watching: "telegram_blocked_final_decision_watching",
+    blocked_final_decision_admin_only: "telegram_blocked_final_decision_admin_only",
+    blocked_direction_preference: "telegram_blocked_direction_preference",
     blocked_duplicate: "telegram_blocked_duplicate",
     blocked_cooldown: "telegram_blocked_cooldown",
     blocked_legacy: "telegram_blocked_legacy",

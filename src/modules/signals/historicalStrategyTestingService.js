@@ -171,21 +171,32 @@ export function applyHistoricalStrategyContext(signal, context = {}) {
   let penalty = 0;
   let cap = 99;
   const reasons = [];
+  const stat = context.stat || null;
+  const evidence = stat ? classifyHistoricalEvidence(stat) : {
+    action: "needs_more_data",
+    sampleSize: 0,
+    layer: "none",
+    reason: "No historical strategy testing group has enough specific evidence yet."
+  };
 
-  if (!context.stat || context.stat.sampleSizeLabel === "not_enough_data") {
+  if (!stat || evidence.action === "needs_more_data") {
     cap = Math.min(cap, 88);
-    reasons.push("Historical strategy testing has fewer than 20 setups for this exact strategy, pair, timeframe, and regime.");
+    reasons.push(evidence.reason);
   } else {
-    const stat = context.stat;
-    if (stat.walkForwardStatus !== "validated") {
-      cap = Math.min(cap, 82);
-      penalty -= 6;
-      reasons.push("Walk-forward validation has not confirmed this strategy in the current regime.");
+    if (stat.walkForwardStatus !== "validated" && evidence.sampleSize >= 20) {
+      cap = Math.min(cap, evidence.specific ? 82 : 86);
+      penalty -= evidence.specific ? 4 : 2;
+      reasons.push(`${evidence.layerLabel} walk-forward validation has not confirmed this setup group.`);
     }
-    if (Number(stat.expectancy || 0) < 0) {
+    if (evidence.action === "cap" || evidence.action === "watching") {
       cap = Math.min(cap, 75);
+      penalty -= evidence.specific ? 6 : 3;
+      reasons.push(evidence.reason);
+    }
+    if (evidence.action === "block") {
+      cap = Math.min(cap, 68);
       penalty -= 10;
-      reasons.push(`Historical expectancy is negative (${Number(stat.expectancy).toFixed(2)}R).`);
+      reasons.push(evidence.reason);
     }
     if (Number(stat.expiredRate || 0) >= 35) {
       cap = Math.min(cap, 78);
@@ -201,15 +212,21 @@ export function applyHistoricalStrategyContext(signal, context = {}) {
 
   const finalConfidence = Math.max(50, Math.min(cap, original + penalty));
   const historicalCalibration = {
-    version: "historical_strategy_v1",
+    version: "historical_strategy_v2",
     originalConfidence: original,
     calibratedConfidence: Math.round(finalConfidence),
     confidenceCap: cap,
     penalty,
-    status: context.stat?.walkForwardStatus || "not_enough_data",
-    sampleSizeLabel: context.stat?.sampleSizeLabel || "not_enough_data",
+    status: evidence.action === "block" ? "historical_underperformer" : evidence.action,
+    action: evidence.action,
+    evidenceLayer: evidence.layer,
+    evidenceLayerLabel: evidence.layerLabel,
+    evidenceSpecificity: evidence.specific ? "specific" : "broad",
+    evidenceSampleSize: evidence.sampleSize,
+    hardBlockEligible: evidence.action === "block",
+    sampleSizeLabel: stat?.sampleSizeLabel || "not_enough_data",
     reasons,
-    stat: context.stat ? summarizeStat(context.stat) : null,
+    stat: stat ? summarizeStat(stat) : null,
     similarity: context.similarity || null,
     copy: "Historical performance helps calibrate confidence, but it does not guarantee future results."
   };
@@ -233,6 +250,77 @@ export async function getHistoricalStrategyContext(signal) {
     stat,
     examples,
     similarity: examples.length ? compareSetupToHistoricalExamples(signal, examples) : null
+  };
+}
+
+export function classifyHistoricalEvidence(stat = {}) {
+  const sampleSize = Number(stat.validSetupCount || stat.totalTested || 0);
+  const expectancy = Number(stat.expectancy || 0);
+  const winRate = Number(stat.winRate || 0);
+  const breakEven = Number(stat.breakEvenWinRate || 0);
+  const layer = stat.evidenceLayer || "exact_strategy_pair_timeframe_regime";
+  const layerLabel = stat.evidenceLayerLabel || "Exact strategy, pair, timeframe, and regime";
+  const specific = layer === "exact_strategy_pair_timeframe_regime";
+  const veryNegative = expectancy <= -0.45 || (winRate < breakEven - 12 && Number(stat.hitSl || 0) >= Math.max(12, Number(stat.hitTp || 0) * 2));
+  const negative = expectancy < 0 || (sampleSize >= 10 && winRate < breakEven);
+
+  if (sampleSize < 10) {
+    return {
+      action: "needs_more_data",
+      sampleSize,
+      layer,
+      layerLabel,
+      specific,
+      reason: `${layerLabel} has fewer than 10 closed historical examples, so it cannot hard-block this setup.`
+    };
+  }
+  if (sampleSize < 20) {
+    return {
+      action: "warning",
+      sampleSize,
+      layer,
+      layerLabel,
+      specific,
+      reason: `${layerLabel} has ${sampleSize} examples. Historical performance is only a warning and confidence cap.`
+    };
+  }
+  if (sampleSize >= 30 && specific && negative && veryNegative) {
+    return {
+      action: "block",
+      sampleSize,
+      layer,
+      layerLabel,
+      specific,
+      reason: `${layerLabel} has ${sampleSize} examples with very negative expectancy (${expectancy.toFixed(2)}R), so ready alerts are blocked.`
+    };
+  }
+  if (specific && negative) {
+    return {
+      action: sampleSize >= 20 ? "watching" : "warning",
+      sampleSize,
+      layer,
+      layerLabel,
+      specific,
+      reason: `${layerLabel} has negative expectancy (${expectancy.toFixed(2)}R). Confidence is capped and this setup should watch until stronger confirmation.`
+    };
+  }
+  if (!specific && negative) {
+    return {
+      action: "cap",
+      sampleSize,
+      layer,
+      layerLabel,
+      specific,
+      reason: `${layerLabel} is broad underperformance, so it caps confidence but does not hard-block this specific setup.`
+    };
+  }
+  return {
+    action: "active",
+    sampleSize,
+    layer,
+    layerLabel,
+    specific,
+    reason: `${layerLabel} does not block this setup.`
   };
 }
 
@@ -346,21 +434,53 @@ async function completeSyntheticBacktestJob(id, scope = {}) {
 }
 
 async function findStrategyBacktestStat(signal) {
-  const result = await query(`
-    SELECT * FROM strategy_backtest_stats
-    WHERE strategy = $1
-      AND pair = $2
-      AND timeframe = $3
-      AND market_regime = $4
-    ORDER BY updated_at DESC
-    LIMIT 1
-  `, [
-    signal.setupType || signal.strategy || "Qualified setup",
-    signal.symbol || signal.pair,
-    signal.timeframe,
-    normalizeRegime(signal)
-  ]);
-  return mapStrategyBacktestStat(result.rows[0]);
+  const strategy = signal.setupType || signal.strategy || "Qualified setup";
+  const pair = signal.symbol || signal.pair;
+  const timeframe = signal.timeframe;
+  const regime = normalizeRegime(signal);
+  const layers = [
+    {
+      layer: "exact_strategy_pair_timeframe_regime",
+      label: "Exact strategy, pair, timeframe, and regime",
+      sql: "strategy = $1 AND pair = $2 AND timeframe = $3 AND market_regime = $4",
+      params: [strategy, pair, timeframe, regime]
+    },
+    {
+      layer: "strategy_timeframe_regime",
+      label: "Strategy, timeframe, and regime",
+      sql: "strategy = $1 AND timeframe = $2 AND market_regime = $3",
+      params: [strategy, timeframe, regime]
+    },
+    {
+      layer: "strategy_timeframe",
+      label: "Strategy and timeframe",
+      sql: "strategy = $1 AND timeframe = $2",
+      params: [strategy, timeframe]
+    },
+    {
+      layer: "strategy_overall",
+      label: "Strategy overall",
+      sql: "strategy = $1",
+      params: [strategy]
+    }
+  ];
+
+  for (const item of layers) {
+    const result = await query(`
+      SELECT * FROM strategy_backtest_stats
+      WHERE ${item.sql}
+      ORDER BY valid_setup_count DESC, updated_at DESC
+      LIMIT 1
+    `, item.params);
+    const stat = mapStrategyBacktestStat(result.rows[0]);
+    if (!stat) continue;
+    return {
+      ...stat,
+      evidenceLayer: item.layer,
+      evidenceLayerLabel: item.label
+    };
+  }
+  return null;
 }
 
 async function listStrategyBacktestExamplesForSignal(signal, statId) {
@@ -509,7 +629,9 @@ function summarizeStat(stat) {
     expectancy: stat.expectancy,
     expiredRate: stat.expiredRate,
     sampleSizeLabel: stat.sampleSizeLabel,
-    walkForwardStatus: stat.walkForwardStatus
+    walkForwardStatus: stat.walkForwardStatus,
+    evidenceLayer: stat.evidenceLayer || null,
+    evidenceLayerLabel: stat.evidenceLayerLabel || null
   };
 }
 

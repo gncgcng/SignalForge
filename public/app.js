@@ -4053,14 +4053,23 @@ function renderAdminTelegramHealth() {
     ["Queue size", telegram.queueSize],
     ["Blocked today", telegram.alertsBlockedToday],
     ["Sent today", telegram.alertsSentToday],
+    ["Watching sent today", telegram.watchingAlertsSentToday],
     ["Min confidence", telegram.minimumConfidenceThreshold],
+    ["Watching alerts", telegram.watchingAlertsEnabled ? `On · ${telegram.watchingAlertMinConfidence}%` : "Off"],
     ["Alertable signals", telegram.alertableSignalCount],
     ["Non-alerted signals", telegram.nonAlertedGeneratedSignalCount],
     ["Failed sends", telegram.failedSends],
     ["Retries", telegram.retryCount]
   ].map(([label, value]) => `<article><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value ?? 0))}</strong></article>`).join("");
-  if (telegram.lastAlertFailure && adminTelegramSimulation && !adminTelegramSimulation.innerHTML.trim()) {
-    adminTelegramSimulation.innerHTML = `<div class="empty-state"><strong>Latest block/failure</strong><p class="reasoning">${escapeHtml(telegram.lastAlertFailure.reason || "No reason recorded.")}</p></div>`;
+  if (adminTelegramSimulation && !adminTelegramSimulation.innerHTML.trim()) {
+    if (telegram.alertScarcityWarning?.active) {
+      const reasons = (telegram.alertScarcityWarning.blockedByReason || [])
+        .map((item) => `${titleCase(item.status)}: ${item.count}`)
+        .join(" · ") || "No block reasons recorded yet.";
+      adminTelegramSimulation.innerHTML = `<div class="empty-state"><strong>No ready alerts sent in the last 48 hours.</strong><p class="reasoning">Candidates generated: ${Number(telegram.alertScarcityWarning.candidatesGenerated || 0)}. ${escapeHtml(reasons)}</p></div>`;
+    } else if (telegram.lastAlertFailure) {
+      adminTelegramSimulation.innerHTML = `<div class="empty-state"><strong>Latest block/failure</strong><p class="reasoning">${escapeHtml(telegram.lastAlertFailure.reason || "No reason recorded.")}</p></div>`;
+    }
   }
 }
 
@@ -4245,7 +4254,7 @@ function renderAdminSignalRow(signal) {
     <span data-label="Setup"><strong class="direction ${escapeHtml(signal.direction)}">${escapeHtml(String(signal.direction).toUpperCase())} &middot; ${escapeHtml(signal.timeframe)}</strong><small>${escapeHtml(signal.strategy)}${signal.pattern ? ` &middot; ${escapeHtml(titleCase(signal.pattern))}` : ""}</small></span>
     <span data-label="Levels"><small>Entry ${formatCurrency(signal.entry)}</small><small>SL ${formatCurrency(signal.stopLoss)} &middot; TP ${formatCurrency(signal.takeProfit)}</small><strong>${Number(signal.riskReward).toFixed(2)}R</strong></span>
     <span data-label="Scores"><small>Confidence ${Number(signal.confidence).toFixed(0)}%</small><small>Raw ${Number(signal.rawSetupScore ?? signal.originalConfidence ?? signal.confidence).toFixed(0)} &middot; Calibrated ${Number(signal.calibratedConfidence ?? signal.confidence).toFixed(0)}</small><small>Quality ${Number(signal.setupQualityScore).toFixed(0)} &middot; Readiness ${Number(signal.entryReadinessScore).toFixed(0)}</small></span>
-    <span data-label="Status"><em class="status-pill ${adminSignalStatusClass(effectiveStatus)}">${escapeHtml(effectiveStatus)}</em><small>${escapeHtml(signal.userVisibility || "Admin-only")}</small><small>${escapeHtml(signal.resultReason || "Tracking")}</small></span>
+    <span data-label="Status"><em class="status-pill ${adminSignalStatusClass(effectiveStatus)}">${escapeHtml(effectiveStatus)}</em><small>Final decision: ${escapeHtml(signal.finalDecisionLabel || "Admin-only")}</small><small>${escapeHtml(signal.userVisibility || "Admin-only")}</small><small>${escapeHtml(signal.resultReason || "Tracking")}</small></span>
     <span data-label="Source"><strong>${escapeHtml(titleCase(signal.source))}</strong><small>${escapeHtml(engineMarker)} &middot; ${escapeHtml(titleCase(calibrationStatus))}</small><small>Quality Gate ${escapeHtml(signal.qualityGateDisplayStatus || titleCase(signal.qualityGateStatus || "not evaluated"))}</small><small>Telegram ${escapeHtml(signal.telegramDecisionLabel || titleCase(signal.telegramStatus || "not evaluated"))}</small><small>${formatDateTime(signal.createdAt)}</small><small>Valid until ${formatDateTime(signal.validUntil)}</small></span>
     <span data-label="Actions" class="admin-signal-row-actions"><button data-admin-signal-view="${escapeHtml(signal.id)}" type="button">Show details</button><button class="secondary-action" data-admin-signal-copy="${escapeHtml(signal.signalId)}" type="button">Copy ID</button>${signal.promotedFromCandidateId ? `<button class="secondary-action" data-admin-signal-view="${escapeHtml(signal.id)}" type="button">Candidate source</button>` : ""}${signal.status !== "Active" ? `<button class="secondary-action" data-admin-signal-view="${escapeHtml(signal.id)}" type="button">Post-mortem</button>` : ""}</span>
   </article>`;
@@ -4271,6 +4280,9 @@ function renderAdminSignalDetail(signal) {
     ...(calibration.groups || []).map((group) => `${titleCase(group.groupType)} ${group.groupValue}: ${Number(group.winRate || 0).toFixed(1)}% win vs ${Number(group.breakEvenWinRate || 0).toFixed(1)}% break-even`)
   ];
   const historicalRows = [
+    signal.finalDecisionLabel ? `Final decision: ${signal.finalDecisionLabel}` : null,
+    signal.userVisibility ? `User visibility: ${signal.userVisibility}` : null,
+    signal.telegramDecisionLabel ? `Telegram decision: ${signal.telegramDecisionLabel}` : null,
     signal.historicalStrategyStatus ? `Historical status: ${titleCase(signal.historicalStrategyStatus)}` : null,
     signal.historicalStrategyReason ? `Historical reason: ${signal.historicalStrategyReason}` : null,
     analysis.indicators?.historicalStrategyCalibration?.copy,

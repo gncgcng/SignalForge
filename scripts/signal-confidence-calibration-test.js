@@ -91,7 +91,22 @@ const blocked = applyCalibrationContext({ ...baseSignal, confidenceScore: 90, ri
   noHistory: false,
   groups: [{ groupKey: "strategy:bad", groupType: "strategy", groupValue: "Bad Strategy", closedSignals: 25, status: "quarantined", penalty: -15, confidenceCap: 72 }]
 });
-assert.equal(blocked.indicators.confidenceCalibration.blocked, true, "quarantined groups must block promotion/alerts");
+assert.equal(blocked.indicators.confidenceCalibration.blocked, false, "broad quarantined groups should cap confidence but not hard-block every ready signal");
+
+const exactBlocked = applyCalibrationContext({ ...baseSignal, confidenceScore: 90, riskRewardRatio: 2.4, indicators: { readinessScore: 95 }, alignmentBadge: "Full Alignment", confirmations: [{ name: "Volume", passed: true }] }, {
+  noHistory: false,
+  groups: [{
+    groupKey: "exact_signal_context:manual-scan:breakout-retest:btc-usd:15m:long:range",
+    groupType: "exact_signal_context",
+    groupValue: "manual_scan:Breakout Retest:BTC-USD:15m:long:Range",
+    closedSignals: 32,
+    estimatedExpectancy: -0.62,
+    status: "quarantined",
+    penalty: -15,
+    confidenceCap: 68
+  }]
+});
+assert.equal(exactBlocked.indicators.confidenceCalibration.blocked, true, "exact underperforming contexts with enough closed signals can block promotion/alerts");
 
 const sampleGroups = [
   { groupKey: "strategy:tiny", groupType: "strategy", groupValue: "Tiny Winner", closedSignals: 3, winRate: 100, breakEvenWinRate: 30, estimatedExpectancy: 2.1, expiredRate: 0, confidenceGap: -10 },

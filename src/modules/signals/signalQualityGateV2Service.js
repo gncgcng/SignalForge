@@ -203,11 +203,30 @@ function validateHigherTimeframe(signal) {
 
 function validateHistoricalContext(signal, context) {
   const historical = context.historicalStrategy || signal.indicators?.historicalStrategyCalibration || signal.confidenceCalibration?.historicalStrategy || {};
-  const expectancy = Number(historical.expectancy ?? historical.validationExpectancy ?? historical.stats?.expectancy);
-  const setups = Number(historical.totalSetups ?? historical.validSetupCount ?? historical.stats?.totalSetups ?? 0);
+  const stats = historical.stat || historical.stats || {};
+  const expectancy = Number(historical.expectancy ?? historical.validationExpectancy ?? stats.expectancy);
+  const setups = Number(
+    historical.totalSetups ??
+    historical.validSetupCount ??
+    historical.evidenceSampleSize ??
+    stats.totalSetups ??
+    stats.validSetupCount ??
+    stats.totalTested ??
+    0
+  );
   const status = normalize(historical.status || historical.walkForwardStatus || "");
-  if ((setups >= 20 && Number.isFinite(expectancy) && expectancy < 0) || /failed|underperform|quarantine|disabled/.test(status)) {
-    return fail("historical_strategy_performance", "historical_underperformer", "negative_historical_expectancy", "Historical strategy evidence is underperforming for this setup context.", "medium");
+  const action = normalize(historical.action || "");
+  const layer = normalize(historical.evidenceLayer || "");
+  const hardBlock = historical.hardBlockEligible === true || action === "block";
+  const exactEvidence = layer === "exact_strategy_pair_timeframe_regime" || historical.evidenceSpecificity === "specific";
+  if (hardBlock && exactEvidence && setups >= 30 && Number.isFinite(expectancy) && expectancy < 0) {
+    return fail("historical_strategy_performance", "historical_underperformer", "negative_historical_expectancy", "Exact historical strategy evidence is very negative for this setup context.", "medium");
+  }
+  if (/quarantine|disabled/.test(status) && exactEvidence && setups >= 30) {
+    return fail("historical_strategy_performance", "historical_underperformer", "historical_group_quarantined", "Exact historical strategy group is quarantined or disabled with enough evidence.", "medium");
+  }
+  if (["cap", "watching", "warning"].includes(action) || (setups >= 10 && Number.isFinite(expectancy) && expectancy < 0)) {
+    return pass("historical_strategy_performance", "Historical performance reduced or capped confidence, but it does not hard-block this setup.");
   }
   return pass("historical_strategy_performance", setups >= 20 ? "Historical performance is not blocking this setup." : "Historical sample is still limited, so it cannot override validation.");
 }

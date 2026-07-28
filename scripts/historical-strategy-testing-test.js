@@ -5,6 +5,7 @@ import {
   calculateHistoricalStrategyMetrics,
   calculateStrategyExpectancy,
   calculateWalkForwardValidation,
+  classifyHistoricalEvidence,
   compareSetupToHistoricalExamples,
   evaluateHistoricalOutcome,
   getSampleSizeLabel
@@ -79,11 +80,44 @@ const calibrated = applyHistoricalStrategyContext({
   riskRewardRatio: 2,
   indicators: {}
 }, {
-  stat: { sampleSizeLabel: "promising", walkForwardStatus: "failed_validation", expectancy: -0.2, expiredRate: 10 },
+  stat: { sampleSizeLabel: "promising", validSetupCount: 60, walkForwardStatus: "failed_validation", expectancy: -0.2, expiredRate: 10 },
   similarity
 });
 assert(calibrated.confidenceScore <= 75);
 assert.match(calibrated.historicalStrategyReason, /negative|Walk-forward|failed/i);
+assert.equal(calibrated.indicators.historicalStrategyCalibration.action, "watching");
+assert.equal(calibrated.indicators.historicalStrategyCalibration.hardBlockEligible, false);
+
+const smallSampleEvidence = classifyHistoricalEvidence({
+  evidenceLayer: "exact_strategy_pair_timeframe_regime",
+  validSetupCount: 9,
+  expectancy: -1.2,
+  winRate: 0,
+  breakEvenWinRate: 35
+});
+assert.equal(smallSampleEvidence.action, "needs_more_data");
+
+const broadUnderperformer = classifyHistoricalEvidence({
+  evidenceLayer: "strategy_overall",
+  evidenceLayerLabel: "Strategy overall",
+  validSetupCount: 45,
+  expectancy: -0.55,
+  winRate: 18,
+  breakEvenWinRate: 35
+});
+assert.equal(broadUnderperformer.action, "cap");
+
+const exactHardBlock = classifyHistoricalEvidence({
+  evidenceLayer: "exact_strategy_pair_timeframe_regime",
+  evidenceLayerLabel: "Exact strategy, pair, timeframe, and regime",
+  validSetupCount: 35,
+  hitTp: 4,
+  hitSl: 24,
+  expectancy: -0.72,
+  winRate: 14,
+  breakEvenWinRate: 34
+});
+assert.equal(exactHardBlock.action, "block");
 
 const misreadRetest = validateStrategyStrictness({
   setupType: "Breakout retest",

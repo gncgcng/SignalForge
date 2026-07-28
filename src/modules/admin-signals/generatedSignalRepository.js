@@ -233,6 +233,7 @@ export async function getTelegramAlertDiagnosticsSummary() {
     query(`
       SELECT
         COUNT(*) FILTER (WHERE status IN ('sent','queued'))::integer AS sent_or_queued_today,
+        COUNT(*) FILTER (WHERE status = 'telegram_watching_eligible')::integer AS watching_sent_today,
         COUNT(*) FILTER (WHERE status LIKE 'blocked_%' OR status IN ('telegram_disabled','missing_chat_id','missing_bot_token'))::integer AS blocked_today,
         MAX(attempted_at) AS last_attempt_at,
         MAX(attempted_at) FILTER (WHERE status IN ('sent','queued')) AS last_sent_at
@@ -243,6 +244,7 @@ export async function getTelegramAlertDiagnosticsSummary() {
       SELECT
         COUNT(*) FILTER (WHERE status = 'Active')::integer AS alertable_signal_count,
         COUNT(*) FILTER (WHERE telegram_status IS NULL AND status = 'Active')::integer AS non_alerted_generated_signal_count,
+        COUNT(*) FILTER (WHERE created_at >= now() - interval '48 hours')::integer AS candidates_generated_48h,
         COUNT(*) FILTER (WHERE telegram_status = 'failed')::integer AS failed_total,
         COUNT(*) FILTER (WHERE telegram_status = 'queued')::integer AS queued_total
       FROM generated_signals
@@ -283,6 +285,8 @@ function withQualityGateFields(signal, row) {
     qualityGateReason: row.quality_gate_reason || null,
     qualityGateDetails: row.quality_gate_details || {},
     qualityGateDisplayStatus: getQualityGateDisplayStatus(row),
+    finalDecision: getFinalDecision(row),
+    finalDecisionLabel: getFinalDecisionLabel(getFinalDecision(row)),
     userVisibility: getUserVisibility(row),
     telegramDecisionStatus: row.telegram_status || null,
     telegramDecisionLabel: getTelegramDecisionLabel(row.telegram_status, row.telegram_block_reason)
@@ -304,6 +308,26 @@ function getUserVisibility(row) {
   if (isBlockedGeneratedStatus(row.status)) return "Blocked";
   if (["Hit TP", "Hit SL", "Expired", "Manually closed"].includes(row.status)) return "Admin-only";
   return "Admin-only";
+}
+
+function getFinalDecision(row) {
+  if (["Active", "Expiring Soon"].includes(row.status)) return "ready_signal";
+  if (row.status === "Watching") return "watching_setup";
+  if (["Hit TP", "Hit SL", "Expired", "Manually closed"].includes(row.status)) return "admin_only";
+  if (["Strategy Misread Rejected", "Weak Pattern Match"].includes(row.status) || /rejected/i.test(String(row.status || ""))) return "rejected";
+  if (isBlockedGeneratedStatus(row.status)) return "blocked";
+  if (["legacy_saved_signal", "legacy_unlocked_signal", "backtest_shadow", "admin_test"].includes(row.source)) return "admin_only";
+  return "admin_only";
+}
+
+function getFinalDecisionLabel(decision) {
+  return {
+    ready_signal: "Ready Signal",
+    watching_setup: "Watching",
+    admin_only: "Admin-only",
+    blocked: "Blocked",
+    rejected: "Rejected"
+  }[decision] || "Admin-only";
 }
 
 function isBlockedGeneratedStatus(status) {
