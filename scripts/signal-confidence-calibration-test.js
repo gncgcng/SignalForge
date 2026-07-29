@@ -87,6 +87,25 @@ const underperforming = applyCalibrationContext({ ...baseSignal, confidenceScore
 assert.equal(underperforming.confidenceScore, 68, "strategy plus pair/timeframe underperformance should cap confidence at 68");
 assert.ok(underperforming.confidenceCalibration.penalties.length >= 2);
 
+const broadWeaknessDoesNotCollapse = applyCalibrationContext({
+  ...baseSignal,
+  confidenceScore: 70,
+  riskRewardRatio: 2.4,
+  alignmentBadge: "Full Alignment",
+  indicators: { regime: "Trend Up", readinessScore: 90, entryQuality: "good" },
+  confirmations: [{ name: "Volume", passed: true }]
+}, {
+  noHistory: false,
+  groups: [
+    { groupKey: "strategy:broad", groupType: "strategy", groupValue: "Broad", closedSignals: 12, winRate: 25, breakEvenWinRate: 33, estimatedExpectancy: -0.2, expiredRate: 10, status: "watchlist", penalty: -10 },
+    { groupKey: "pair:broad", groupType: "pair", groupValue: "BTC-USD", closedSignals: 12, winRate: 25, breakEvenWinRate: 33, estimatedExpectancy: -0.2, expiredRate: 10, status: "watchlist", penalty: -10 },
+    { groupKey: "direction:broad", groupType: "direction", groupValue: "long", closedSignals: 12, winRate: 25, breakEvenWinRate: 33, estimatedExpectancy: -0.2, expiredRate: 10, status: "watchlist", penalty: -10 }
+  ]
+});
+assert.equal(broadWeaknessDoesNotCollapse.confidenceScore, 62, "broad historical weakness should cap/penalize without collapsing a valid setup to 50");
+assert.equal(broadWeaknessDoesNotCollapse.confidenceCalibration.totalPenalty, -18);
+assert.equal(broadWeaknessDoesNotCollapse.confidenceCalibration.unboundedPenalty, -30);
+
 const blocked = applyCalibrationContext({ ...baseSignal, confidenceScore: 90, riskRewardRatio: 2.4, indicators: { readinessScore: 95 }, alignmentBadge: "Full Alignment", confirmations: [{ name: "Volume", passed: true }] }, {
   noHistory: false,
   groups: [{ groupKey: "strategy:bad", groupType: "strategy", groupValue: "Bad Strategy", closedSignals: 25, status: "quarantined", penalty: -15, confidenceCap: 72 }]

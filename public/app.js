@@ -4559,33 +4559,48 @@ function renderAdminSignalSupply() {
   const reasonRows = (supply.topBlockReasons || []).map((item) => `
     <div class="analytics-list-row"><span>${escapeHtml(item.reason)}</span><strong>${Number(item.count || 0)}</strong></div>
   `).join("");
+  const notSentRows = (supply.readySignalsNotSent || []).map((item) => `
+    <div class="analytics-list-row">
+      <span>${escapeHtml(item.pair || "Unknown")} · ${escapeHtml(item.timeframe || "")} · ${escapeHtml(item.direction || "")}<small>${escapeHtml(item.reason || item.telegramDecision || "Not sent")}</small></span>
+      <strong>${Math.round(Number(item.confidence || 0))}%</strong>
+    </div>
+  `).join("");
   adminSignalSupplyPanel.innerHTML = `
     ${supply.warning ? `<div class="signal-supply-warning">${escapeHtml(supply.warning)}</div>` : ""}
     <div class="admin-signal-stats">
       ${[
         ["Candidates", counts.candidates || 0],
-        ["Ready", counts.ready || 0],
-        ["Watching", counts.watching || 0],
-        ["Avoid trade", counts.avoidTrade || 0],
-        ["Admin-only", counts.adminOnly || 0],
-        ["Rejected", counts.rejected || 0],
-        ["Blocked", counts.blocked || 0],
-        ["Ready in 48h", counts.ready48h || 0]
+        ["Quality Gate passed", counts.qualityGatePassed || 0],
+        ["Promoted ready", counts.promotedReadySignals || 0],
+        ["Telegram sent/queued", telegram.readyAlerts || 0],
+        ["Blocked from ready", counts.blocked || 0],
+        ["15m ready", counts.ready15m || 0],
+        ["1h ready", counts.ready1h || 0],
+        ["4h ready", counts.ready4h || 0],
+        ["5m blocked", counts.blocked5m || 0]
       ].map(([label, value]) => `<article><span>${label}</span><strong>${value}</strong></article>`).join("")}
     </div>
     <div class="admin-signal-supply-grid">
       <section>
-        <h4>Telegram alert tiers</h4>
-        <div class="analytics-list-row"><span>Ready alerts sent</span><strong>${telegram.readyAlerts || 0}</strong></div>
-        <div class="analytics-list-row"><span>Watching eligible</span><strong>${telegram.watchingAlerts || 0}</strong></div>
+        <h4>Ready trade delivery</h4>
+        <div class="analytics-list-row"><span>Ready alerts sent/queued</span><strong>${telegram.readyAlerts || 0}</strong></div>
         <div class="analytics-list-row"><span>Blocked</span><strong>${telegram.blocked || 0}</strong></div>
-        <div class="analytics-list-row"><span>Ready threshold</span><strong>${telegram.readyThreshold || 75}%</strong></div>
-        <div class="analytics-list-row"><span>Watching alerts</span><strong>${telegram.watchingEnabled ? "On" : "Off"}</strong></div>
-        <div class="analytics-list-row"><span>Daily brief</span><strong>${telegram.dailyBriefEnabled ? "On" : "Off"}</strong></div>
+        <div class="analytics-list-row"><span>Ready threshold</span><strong>${telegram.readyThreshold || 65}%</strong></div>
+        <div class="analytics-list-row"><span>Main supply blocker</span><strong>${escapeHtml(supply.topReasonReadySignalsNotProduced || "None")}</strong></div>
+      </section>
+      <section>
+        <h4>Seven-day supply</h4>
+        <div class="analytics-list-row"><span>Candidates</span><strong>${counts.candidates7d || 0}</strong></div>
+        <div class="analytics-list-row"><span>Quality Gate passed</span><strong>${counts.qualityGatePassed7d || 0}</strong></div>
+        <div class="analytics-list-row"><span>Promoted ready</span><strong>${counts.promotedReadySignals7d || 0}</strong></div>
       </section>
       <section>
         <h4>Top block reasons</h4>
         ${reasonRows || `<p class="reasoning">No Telegram block diagnostics in the last 24 hours.</p>`}
+      </section>
+      <section>
+        <h4>Ready signals not sent</h4>
+        ${notSentRows || `<p class="reasoning">Every recent ready signal has a queued, sent, failed, or specific blocked decision.</p>`}
       </section>
     </div>
   `;

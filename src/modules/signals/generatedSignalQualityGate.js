@@ -1,6 +1,9 @@
 import { query } from "../../db/client.js";
 import { recordSignalQualityGateResult } from "./signalQualityGateRepository.js";
-import { evaluateSignalQualityGateV2 } from "./signalQualityGateV2Service.js";
+import {
+  evaluateSignalQualityGateV2,
+  repairUnrealisticTakeProfit
+} from "./signalQualityGateV2Service.js";
 
 export const blockedGeneratedSignalStatuses = Object.freeze({
   duplicate: "Duplicate blocked",
@@ -45,17 +48,17 @@ const timeframePolicies = Object.freeze({
 
 export async function evaluateGeneratedSignalQualityGate(signal, context = {}) {
   if (!signal) return passGate();
-  const source = context.source || signal.generationSource || signal.source || signal.indicators?.generationSource || "manual_scan";
-  const readiness = Number(signal.readinessScore ?? signal.entryReadinessScore ?? signal.indicators?.readinessScore ?? signal.indicators?.entryReadinessScore ?? 0);
+  const repairedSignal = repairUnrealisticTakeProfit(signal, context.marketData || {});
+  const readiness = Number(repairedSignal.readinessScore ?? repairedSignal.entryReadinessScore ?? repairedSignal.indicators?.readinessScore ?? repairedSignal.indicators?.entryReadinessScore ?? 0);
   if (!Number.isFinite(readiness) || readiness <= 0) {
     return recordAndReturn(signal, blockGate("readiness", "Readiness score is 0, so this setup cannot be promoted as a ready signal.", { readinessScore: readiness }), context);
   }
 
-  const timeframePolicy = getTimeframeQualityPolicy(signal.timeframe);
+  const timeframePolicy = getTimeframeQualityPolicy(repairedSignal.timeframe);
   if (timeframePolicy.status === "quarantined") {
     return recordAndReturn(signal, blockGate("timeframe", timeframePolicy.reason, { timeframe: signal.timeframe, confidenceCap: timeframePolicy.confidenceCap }), context);
   }
-  const signalWithTimeframeCap = applyTimeframeConfidencePolicy(signal);
+  const signalWithTimeframeCap = applyTimeframeConfidencePolicy(repairedSignal);
 
   const cooldown = await findRecentGeneratedSignalFailure(signalWithTimeframeCap);
   if (cooldown) {
@@ -81,8 +84,22 @@ export async function evaluateGeneratedSignalQualityGate(signal, context = {}) {
     return recordAndReturn(signal, blockGate(v2.status, v2.explanation, { qualityGateV2: v2 }, v2), context);
   }
 
-  await recordGateSafely(signal, v2, context);
-  return passGate({ qualityGateV2: v2 });
+  const confidence = Number(signalWithTimeframeCap.confidenceScore ?? signalWithTimeframeCap.calibratedConfidence ?? 0);
+  if (!Number.isFinite(confidence) || confidence < 62) {
+    return recordAndReturn(
+      signalWithTimeframeCap,
+      blockGate(
+        "weak_strategy_match",
+        `Calibrated confidence ${Number.isFinite(confidence) ? Math.round(confidence) : 0} is below the 62 ready-promotion minimum.`,
+        { qualityGateV2: v2, confidence, minimumReadyConfidence: 62 },
+        v2
+      ),
+      context
+    );
+  }
+
+  await recordGateSafely(signalWithTimeframeCap, v2, context);
+  return passGate({ qualityGateV2: v2, adjustedSignal: signalWithTimeframeCap });
 }
 
 export function applyGeneratedSignalQualityBlock(signal, gate) {
@@ -161,6 +178,13 @@ export function isSimilarEntryPrice(entry, otherEntry) {
   return Math.abs(left - right) / Math.max(left, right) <= 0.0025;
 }
 
+export function isSimilarEntryPriceWithin(entry, otherEntry, tolerance = 0.0025) {
+  const left = Number(entry);
+  const right = Number(otherEntry);
+  if (!Number.isFinite(left) || !Number.isFinite(right) || left <= 0 || right <= 0) return false;
+  return Math.abs(left - right) / Math.max(left, right) <= tolerance;
+}
+
 export function isSimilarStrategyOrPattern(signal, row) {
   const strategy = normalizeText(signal.setupType || signal.strategy);
   const otherStrategy = normalizeText(row.strategy);
@@ -185,7 +209,11 @@ async function findRecentGeneratedSignalDuplicate(signal) {
 
   return result.rows.find((row) =>
     isNearbyTimeframe(signal.timeframe, row.timeframe) &&
-    isSimilarEntryPrice(signal.entryPrice ?? signal.entry, row.entry) &&
+    isSimilarEntryPriceWithin(
+      signal.entryPrice ?? signal.entry,
+      row.entry,
+      row.timeframe === signal.timeframe ? 0.0025 : 0.0015
+    ) &&
     isSimilarStrategyOrPattern(signal, row)
   ) || null;
 }

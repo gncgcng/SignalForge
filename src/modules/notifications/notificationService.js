@@ -155,8 +155,7 @@ export function telegramPreferenceMatchesSetup(settings, favoriteSymbols, setup)
     (!settings.favoriteMarketsOnly || favoriteSymbols.has(setup.symbol)) &&
     settings.timeframes.includes(setup.timeframe) &&
     (settings.direction === "both" || settings.direction === setup.direction) &&
-    Number(setup.confidenceScore) >= Number(settings.minimumConfidence) &&
-    Number(setup.confidenceScore) >= Number(appConfig.telegram.readyAlertMinConfidence || 75)
+    Number(setup.confidenceScore) >= Number(appConfig.telegram.readyAlertMinConfidence)
   );
 }
 

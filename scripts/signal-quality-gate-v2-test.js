@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import {
   classifySignalMistakeLabels,
   evaluateSignalQualityGateV2,
+  repairUnrealisticTakeProfit,
   summarizeUserFacingGateReason
 } from "../src/modules/signals/signalQualityGateV2Service.js";
 
@@ -65,6 +66,16 @@ assert.equal(momentumRange.status, "bad_market_regime", "momentum breakout shoul
 assert.equal(evaluateSignalQualityGateV2({ ...baseSignal, entryQuality: "fair" }, { marketData: baseMarket }).reasonCode, "late_entry");
 assert.equal(evaluateSignalQualityGateV2({ ...baseSignal, stopLoss: 101 }, { marketData: baseMarket }).status, "invalid_stop_loss");
 assert.equal(evaluateSignalQualityGateV2({ ...baseSignal, takeProfit: 130 }, { marketData: baseMarket }).reasonCode, "tp_too_far_for_timeframe");
+const repairedTarget = repairUnrealisticTakeProfit({ ...baseSignal, takeProfit: 130, riskRewardRatio: 10 }, baseMarket);
+assert.equal(repairedTarget.indicators.takeProfitRecalculated, true);
+assert.ok(repairedTarget.takeProfit < 112, "recalculated long target should sit before nearby resistance");
+assert.ok(repairedTarget.riskRewardRatio >= 1.5, "recalculated target must retain minimum R/R");
+assert.equal(evaluateSignalQualityGateV2(repairedTarget, { marketData: baseMarket }).passed, true);
+assert.equal(
+  repairUnrealisticTakeProfit({ ...baseSignal, takeProfit: 130, stopLoss: 99.5 }, baseMarket).takeProfit,
+  130,
+  "target repair must not hide another invalid quality condition"
+);
 assert.equal(evaluateSignalQualityGateV2({ ...baseSignal, riskRewardRatio: 1.2 }, { marketData: baseMarket }).status, "weak_risk_reward");
 
 const htfConflict = evaluateSignalQualityGateV2({

@@ -294,7 +294,11 @@ export function applyCalibrationContext(signal, context = {}) {
   }
 
   const confidenceCap = Math.min(ruleCap, historicalCap, expectancyCap);
-  const finalConfidence = Math.max(50, Math.min(confidenceCap, originalConfidence + penalty));
+  const boundedPenalty = Math.max(penalty, hardBlockGroup ? -35 : -18);
+  const uncertainHistoryFloor = !hardBlockGroup && originalConfidence >= 62
+    ? Math.min(originalConfidence, context.noHistory ? 68 : 62)
+    : 50;
+  const finalConfidence = Math.min(confidenceCap, Math.max(uncertainHistoryFloor, originalConfidence + boundedPenalty));
   const status = hardBlockGroup?.status ||
     (exactNegative ? "watching" : severeStrategy || severePairTimeframe ? "reduced_confidence" : poorGroups.length ? "watchlist" : "active");
   const calibrationReason = status === "active"
@@ -310,7 +314,8 @@ export function applyCalibrationContext(signal, context = {}) {
     calibratedConfidence: roundedFinalConfidence,
     finalConfidence: roundedFinalConfidence,
     confidenceCap,
-    totalPenalty: penalty,
+    totalPenalty: boundedPenalty,
+    unboundedPenalty: penalty,
     caps,
     capRecovery,
     penalties,

@@ -46,10 +46,11 @@ async function ensureGeneratedSignalQualityGate(signal, context = {}) {
 
   const gate = await evaluateGeneratedSignalQualityGate(signal, context);
   if (gate.passed) {
+    const adjustedSignal = gate.adjustedSignal || signal;
     return {
-      ...signal,
+      ...adjustedSignal,
       indicators: {
-        ...(signal.indicators || {}),
+        ...(adjustedSignal.indicators || {}),
         qualityGatePassed: true,
         qualityGateV2: gate.qualityGateV2 || gate.details?.qualityGateV2 || null
       }

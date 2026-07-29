@@ -66,6 +66,60 @@ export function evaluateSignalQualityGateV2(signal, context = {}) {
   });
 }
 
+export function repairUnrealisticTakeProfit(signal, marketData = {}) {
+  if (!signal) return signal;
+  const readings = readSignalNumbers(signal, marketData);
+  const { entry, stop, takeProfit, direction, atr, stopDistance, rewardDistance } = readings;
+  if (![entry, stop, takeProfit].every(Number.isFinite) || stopDistance <= 0) return signal;
+  if (direction === "long" && (stop >= entry || takeProfit <= entry)) return signal;
+  if (direction === "short" && (stop <= entry || takeProfit >= entry)) return signal;
+  if (Number.isFinite(atr) && atr > 0 && (stopDistance < atr * 0.35 || stopDistance > atr * 3.5)) return signal;
+
+  const targetTooFar = Number.isFinite(atr) && atr > 0 &&
+    rewardDistance > atr * timeframeTargetAtrLimit(signal.timeframe);
+  const targetBlocked = isTargetBlocked(signal, marketData, readings);
+  if (!targetTooFar && !targetBlocked) return signal;
+
+  const targetCandidates = [];
+  if (targetTooFar) {
+    const atrDistance = atr * timeframeTargetAtrLimit(signal.timeframe);
+    targetCandidates.push(direction === "long" ? entry + atrDistance : entry - atrDistance);
+  }
+
+  if (targetBlocked) {
+    const levels = readLevels(signal, marketData);
+    const structure = direction === "long" ? Number(levels.resistance) : Number(levels.support);
+    const buffer = Math.max(stopDistance * 0.1, Number.isFinite(atr) && atr > 0 ? atr * 0.1 : 0);
+    targetCandidates.push(direction === "long" ? structure - buffer : structure + buffer);
+  }
+
+  const minimumRewardDistance = stopDistance * minimumRiskReward;
+  const realisticTargets = targetCandidates
+    .filter(Number.isFinite)
+    .filter((target) => direction === "long" ? target > entry : target < entry)
+    .filter((target) => Math.abs(target - entry) >= minimumRewardDistance)
+    .sort((left, right) => Math.abs(left - entry) - Math.abs(right - entry));
+  const repairedTarget = realisticTargets[0];
+  if (!Number.isFinite(repairedTarget)) return signal;
+
+  const repairedRiskReward = Math.abs(repairedTarget - entry) / stopDistance;
+  return {
+    ...signal,
+    takeProfit: repairedTarget,
+    take_profit: repairedTarget,
+    riskRewardRatio: Number(repairedRiskReward.toFixed(2)),
+    riskReward: Number(repairedRiskReward.toFixed(2)),
+    indicators: {
+      ...(signal.indicators || {}),
+      takeProfitRecalculated: true,
+      originalTakeProfit: takeProfit,
+      takeProfitRecalculationReason: targetBlocked
+        ? "Target moved before nearby opposing structure."
+        : "Target reduced to the timeframe ATR limit."
+    }
+  };
+}
+
 export function classifySignalMistakeLabels(signal, context = {}) {
   if (!signal || !["Hit SL", "Expired", "Manually closed"].includes(signal.status)) return [];
   const indicators = signal.indicators || {};

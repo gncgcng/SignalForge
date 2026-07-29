@@ -104,13 +104,20 @@ export function buildSignalActivityResponse({
 }
 
 export async function getAdminSignalSupplyDashboard() {
-  const [generated, telegram, blockReasons] = await Promise.all([
+  const [generated, telegram, blockReasons, readyNotSent] = await Promise.all([
     query(`
       SELECT
         COUNT(*) FILTER (WHERE created_at >= now() - interval '24 hours')::integer AS candidates_24h,
+        COUNT(*) FILTER (WHERE created_at >= now() - interval '7 days')::integer AS candidates_7d,
         COUNT(*) FILTER (WHERE created_at >= now() - interval '24 hours' AND status = 'Active')::integer AS ready_24h,
+        COUNT(*) FILTER (WHERE created_at >= now() - interval '7 days' AND status = 'Active')::integer AS ready_7d,
         COUNT(*) FILTER (WHERE created_at >= now() - interval '24 hours' AND COALESCE(quality_gate_status, '') = 'passed')::integer AS quality_gate_passed_24h,
+        COUNT(*) FILTER (WHERE created_at >= now() - interval '7 days' AND COALESCE(quality_gate_status, '') = 'passed')::integer AS quality_gate_passed_7d,
         COUNT(*) FILTER (WHERE created_at >= now() - interval '24 hours' AND status = 'Active' AND COALESCE(quality_gate_status, '') = 'passed')::integer AS valid_ready_candidates_24h,
+        COUNT(*) FILTER (WHERE created_at >= now() - interval '24 hours' AND status = 'Active' AND timeframe = '15m')::integer AS ready_15m_24h,
+        COUNT(*) FILTER (WHERE created_at >= now() - interval '24 hours' AND status = 'Active' AND timeframe = '1h')::integer AS ready_1h_24h,
+        COUNT(*) FILTER (WHERE created_at >= now() - interval '24 hours' AND status = 'Active' AND timeframe = '4h')::integer AS ready_4h_24h,
+        COUNT(*) FILTER (WHERE created_at >= now() - interval '24 hours' AND status = 'Quarantined timeframe' AND timeframe = '5m')::integer AS blocked_5m_24h,
         COUNT(*) FILTER (WHERE created_at >= now() - interval '24 hours' AND status = 'Watching')::integer AS watching_24h,
         COUNT(*) FILTER (WHERE created_at >= now() - interval '24 hours' AND (
           status = ANY($1::text[]) OR COALESCE(quality_gate_status, '') NOT IN ('', 'passed')
@@ -142,6 +149,16 @@ export async function getAdminSignalSupplyDashboard() {
       GROUP BY reason, status
       ORDER BY count DESC
       LIMIT 8
+    `),
+    query(`
+      SELECT signal_id, display_pair, pair, timeframe, direction, confidence, created_at,
+        telegram_status, telegram_block_reason
+      FROM generated_signals
+      WHERE created_at >= now() - interval '7 days'
+        AND status IN ('Active', 'Expiring Soon')
+        AND COALESCE(telegram_status, '') NOT IN ('sent', 'queued', 'telegram_queued')
+      ORDER BY created_at DESC
+      LIMIT 25
     `)
   ]);
 
@@ -149,22 +166,30 @@ export async function getAdminSignalSupplyDashboard() {
     supply: buildAdminSignalSupplySummary({
       generated: generated.rows[0] || {},
       telegram: telegram.rows[0] || {},
-      blockReasons: blockReasons.rows || []
+      blockReasons: blockReasons.rows || [],
+      readyNotSent: readyNotSent.rows || []
     })
   };
 }
 
-export function buildAdminSignalSupplySummary({ generated = {}, telegram = {}, blockReasons = [] } = {}) {
+export function buildAdminSignalSupplySummary({ generated = {}, telegram = {}, blockReasons = [], readyNotSent = [] } = {}) {
   const ready48h = Number(generated.ready_48h || 0);
   return {
     generatedAt: new Date().toISOString(),
     window: "24h",
     counts: {
       candidates: Number(generated.candidates_24h || 0),
+      candidates7d: Number(generated.candidates_7d || 0),
       qualityGatePassed: Number(generated.quality_gate_passed_24h || 0),
+      qualityGatePassed7d: Number(generated.quality_gate_passed_7d || 0),
       validReadyCandidates: Number(generated.valid_ready_candidates_24h || 0),
       promotedReadySignals: Number(generated.ready_24h || 0),
+      promotedReadySignals7d: Number(generated.ready_7d || 0),
       ready: Number(generated.ready_24h || 0),
+      ready15m: Number(generated.ready_15m_24h || 0),
+      ready1h: Number(generated.ready_1h_24h || 0),
+      ready4h: Number(generated.ready_4h_24h || 0),
+      blocked5m: Number(generated.blocked_5m_24h || 0),
       watching: Number(generated.watching_24h || 0),
       avoidTrade: Number(generated.avoid_24h || 0),
       adminOnly: Number(generated.admin_only_24h || 0),
@@ -187,6 +212,16 @@ export function buildAdminSignalSupplySummary({ generated = {}, telegram = {}, b
       ? "No ready signals in 48 hours. Review watching volume and top block reasons before changing thresholds."
       : null,
     topReasonReadySignalsNotProduced: topSupplyBlocker(blockReasons),
+    readySignalsNotSent: readyNotSent.map((row) => ({
+      signalId: row.signal_id,
+      pair: row.display_pair || row.pair,
+      timeframe: row.timeframe,
+      direction: row.direction,
+      confidence: Number(row.confidence || 0),
+      createdAt: row.created_at,
+      telegramDecision: row.telegram_status || "telegram_blocked_missing_decision",
+      reason: row.telegram_block_reason || "Ready signal has no terminal Telegram decision."
+    })),
     topBlockReasons: blockReasons.map((row) => ({
       reason: row.reason || row.status || "Not specified",
       status: row.status || "unknown",

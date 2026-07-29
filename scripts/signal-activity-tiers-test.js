@@ -110,9 +110,16 @@ function testAdminSupplyWarningAndCounts() {
   const supply = buildAdminSignalSupplySummary({
     generated: {
       candidates_24h: 120,
+      candidates_7d: 420,
       ready_24h: 0,
+      ready_7d: 14,
       quality_gate_passed_24h: 9,
+      quality_gate_passed_7d: 52,
       valid_ready_candidates_24h: 1,
+      ready_15m_24h: 3,
+      ready_1h_24h: 1,
+      ready_4h_24h: 1,
+      blocked_5m_24h: 12,
       watching_24h: 28,
       avoid_24h: 9,
       admin_only_24h: 4,
@@ -125,17 +132,31 @@ function testAdminSupplyWarningAndCounts() {
       watching_alerts_24h: 0,
       telegram_blocked_24h: 42
     },
-    blockReasons: [{ reason: "blocked_low_confidence", status: "blocked_low_confidence", count: 24 }]
+    blockReasons: [{ reason: "blocked_low_confidence", status: "blocked_low_confidence", count: 24 }],
+    readyNotSent: [{
+      signal_id: "sig_missing_delivery",
+      display_pair: "ETHUSD",
+      timeframe: "1h",
+      direction: "long",
+      confidence: 67,
+      telegram_status: "telegram_blocked_config",
+      telegram_block_reason: "Telegram bot token is not configured."
+    }]
   });
   assert.equal(supply.counts.candidates, 120);
   assert.equal(supply.counts.qualityGatePassed, 9);
   assert.equal(supply.counts.validReadyCandidates, 1);
   assert.equal(supply.counts.promotedReadySignals, 0);
+  assert.equal(supply.counts.promotedReadySignals7d, 14);
+  assert.equal(supply.counts.ready15m, 3);
+  assert.equal(supply.counts.blocked5m, 12);
   assert.equal(supply.counts.watching, 28);
   assert.equal(supply.counts.avoidTrade, 9);
   assert.match(supply.warning, /No ready signals in 48 hours/);
   assert.equal(supply.telegram.watchingEnabled, false);
   assert.match(supply.topReasonReadySignalsNotProduced, /confidence threshold/i);
+  assert.equal(supply.readySignalsNotSent[0].telegramDecision, "telegram_blocked_config");
+  assert.match(supply.readySignalsNotSent[0].reason, /bot token/i);
 }
 
 testReadyPreviewDoesNotLeakLevels();

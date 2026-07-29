@@ -89,7 +89,7 @@ const result = {
   ),
   confidenceRejected: !telegramPreferenceMatchesSetup(settings, favorites, {
     ...setup,
-    confidenceScore: 79
+    confidenceScore: 64
   }),
   messageIsReadyTradeSignal: ["Market: BTCUSD", "Provider: Coinbase · BTC-USD", "Timeframe: 1h",
     "Direction: LONG", "Confidence: 86% (Strong)", "Setup: Pullback bounce",

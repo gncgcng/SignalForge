@@ -30,10 +30,7 @@ const blockedStatuses = new Map([
 ]);
 
 export function evaluateTelegramAlertEligibility({ user = null, settings = null, setup = null, favoriteSymbols = new Set() } = {}) {
-  const threshold = Math.max(
-    Number(appConfig.telegram.readyAlertMinConfidence || 75),
-    Number(settings?.minimumConfidence || 0)
-  );
+  const threshold = Number(appConfig.telegram.readyAlertMinConfidence);
   if (!setup) return block("blocked_no_generated_setup", "No generated setup was available for Telegram.");
   if (!appConfig.telegram.botToken) return block("missing_bot_token", "Telegram bot token is not configured.");
   if (!settings?.enabled) return block("telegram_disabled", "Telegram alerts are disabled for this user.");
@@ -95,7 +92,7 @@ export function evaluateTelegramAlertEligibility({ user = null, settings = null,
 }
 
 export function evaluateGeneratedSignalTelegramDecision(setup = {}) {
-  const threshold = Number(appConfig.telegram.readyAlertMinConfidence || 75);
+  const threshold = Number(appConfig.telegram.readyAlertMinConfidence);
   if (!setup) return telegramBlock("telegram_blocked_no_generated_setup", "No generated setup was available for Telegram.");
 
   const finalDecision = getFinalDecision(setup);
@@ -229,7 +226,7 @@ export async function getTelegramAlertHealth() {
     queueSize: Number(queue.rows[0]?.queue_size || 0),
     alertsBlockedToday: blockedToday,
     alertsSentToday: sentOrQueuedToday,
-    minimumConfidenceThreshold: Number(appConfig.telegram.readyAlertMinConfidence || 75),
+    minimumConfidenceThreshold: Number(appConfig.telegram.readyAlertMinConfidence),
     watchingAlertsEnabled: appConfig.telegram.watchingAlertsEnabled,
     watchingAlertMinConfidence: Number(appConfig.telegram.watchingAlertMinConfidence || 65),
     watchingAlertsSentToday: Number(summary.watching_sent_today || 0),
@@ -286,7 +283,7 @@ export async function finalizeUnresolvedGeneratedTelegramDecisions(limit = 50) {
 export async function simulateTelegramAlertLogic(limit = 40) {
   const { signals } = await listGeneratedSignals({ limit, sort: "newest", performanceScope: "current" });
   return {
-    threshold: Number(appConfig.telegram.readyAlertMinConfidence || 75),
+    threshold: Number(appConfig.telegram.readyAlertMinConfidence),
     results: signals.map((setup) => {
       const evaluation = evaluateTelegramAlertEligibility({
         settings: {

@@ -9,7 +9,7 @@ import {
 const originalToken = appConfig.telegram.botToken;
 const originalThreshold = appConfig.telegram.readyAlertMinConfidence;
 appConfig.telegram.botToken = "test-token";
-appConfig.telegram.readyAlertMinConfidence = 68;
+appConfig.telegram.readyAlertMinConfidence = 65;
 
 const settings = {
   enabled: true,
@@ -39,7 +39,8 @@ const readySignal = {
 
 assert.equal(evaluateTelegramAlertEligibility({ settings, setup: readySignal }).allowed, true);
 assert.equal(evaluateTelegramAlertEligibility({ settings, setup: { ...readySignal, confidenceScore: 62 } }).status, "blocked_low_confidence");
-assert.match(evaluateTelegramAlertEligibility({ settings, setup: { ...readySignal, confidenceScore: 62 } }).reason, /below threshold 68/);
+assert.match(evaluateTelegramAlertEligibility({ settings, setup: { ...readySignal, confidenceScore: 62 } }).reason, /below threshold 65/);
+assert.equal(evaluateTelegramAlertEligibility({ settings: { ...settings, minimumConfidence: 90 }, setup: { ...readySignal, confidenceScore: 70 } }).allowed, true);
 assert.equal(evaluateTelegramAlertEligibility({ settings, setup: { ...readySignal, timeframe: "1h" } }).allowed, true);
 assert.equal(evaluateTelegramAlertEligibility({ settings, setup: { ...readySignal, timeframe: "4h" } }).allowed, true);
 assert.equal(evaluateTelegramAlertEligibility({ settings, setup: { ...readySignal, timeframe: "5m" } }).status, "blocked_quarantined_timeframe");
