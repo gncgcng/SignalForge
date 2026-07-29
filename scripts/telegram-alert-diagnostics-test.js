@@ -9,7 +9,7 @@ import {
 const originalToken = appConfig.telegram.botToken;
 const originalThreshold = appConfig.telegram.readyAlertMinConfidence;
 appConfig.telegram.botToken = "test-token";
-appConfig.telegram.readyAlertMinConfidence = 75;
+appConfig.telegram.readyAlertMinConfidence = 68;
 
 const settings = {
   enabled: true,
@@ -17,7 +17,7 @@ const settings = {
   favoriteMarketsOnly: false,
   timeframes: ["5m", "15m", "1h", "4h"],
   direction: "both",
-  minimumConfidence: 75
+  minimumConfidence: 68
 };
 
 const readySignal = {
@@ -39,8 +39,10 @@ const readySignal = {
 
 assert.equal(evaluateTelegramAlertEligibility({ settings, setup: readySignal }).allowed, true);
 assert.equal(evaluateTelegramAlertEligibility({ settings, setup: { ...readySignal, confidenceScore: 62 } }).status, "blocked_low_confidence");
-assert.match(evaluateTelegramAlertEligibility({ settings, setup: { ...readySignal, confidenceScore: 62 } }).reason, /below threshold 75/);
-assert.equal(evaluateTelegramAlertEligibility({ settings, setup: { ...readySignal, timeframe: "1h" } }).status, "blocked_quarantined_timeframe");
+assert.match(evaluateTelegramAlertEligibility({ settings, setup: { ...readySignal, confidenceScore: 62 } }).reason, /below threshold 68/);
+assert.equal(evaluateTelegramAlertEligibility({ settings, setup: { ...readySignal, timeframe: "1h" } }).allowed, true);
+assert.equal(evaluateTelegramAlertEligibility({ settings, setup: { ...readySignal, timeframe: "4h" } }).allowed, true);
+assert.equal(evaluateTelegramAlertEligibility({ settings, setup: { ...readySignal, timeframe: "5m" } }).status, "blocked_quarantined_timeframe");
 assert.equal(evaluateTelegramAlertEligibility({ settings, setup: { ...readySignal, status: "Cooldown blocked" } }).status, "blocked_cooldown");
 assert.equal(evaluateTelegramAlertEligibility({ settings, setup: { ...readySignal, status: "Duplicate blocked" } }).status, "blocked_duplicate");
 assert.equal(evaluateTelegramAlertEligibility({ settings, setup: { ...readySignal, readinessScore: 0 } }).status, "blocked_not_ready");
@@ -52,6 +54,13 @@ assert.equal(evaluateTelegramAlertEligibility({ settings, setup: { ...readySigna
 assert.equal(evaluateTelegramAlertEligibility({ settings, setup: { ...readySignal, status: "Historical underperformer" } }).status, "blocked_historical_underperformance");
 assert.equal(evaluateGeneratedSignalTelegramDecision({ ...readySignal, status: "Watching" }).status, "telegram_blocked_final_decision_watching");
 assert.equal(evaluateGeneratedSignalTelegramDecision({ ...readySignal, status: "Poor entry quality" }).status, "telegram_blocked_failed_quality_gate");
+assert.equal(evaluateGeneratedSignalTelegramDecision({ ...readySignal, status: "Expired" }).status, "telegram_blocked_final_decision_admin_only");
+assert.notEqual(evaluateGeneratedSignalTelegramDecision({ ...readySignal, status: "Expired" }).status, "telegram_blocked_not_alertable");
+assert.equal(evaluateGeneratedSignalTelegramDecision(null).status, "telegram_blocked_no_generated_setup");
+assert.notEqual(evaluateGeneratedSignalTelegramDecision(null).status, "telegram_blocked_not_alertable");
+assert.ok(["telegram_queued", "telegram_blocked_low_confidence", "telegram_blocked_failed_quality_gate", "telegram_blocked_quarantined_timeframe", "telegram_missing_bot_token"].includes(
+  evaluateGeneratedSignalTelegramDecision(readySignal).status
+), "ready signal decision should always end in a concrete Telegram state");
 assert.equal(getFinalDecision(readySignal), "ready_signal");
 assert.equal(getFinalDecision({ ...readySignal, status: "Watching" }), "watching_setup");
 assert.equal(getFinalDecision({ ...readySignal, status: "Hit SL" }), "admin_only");

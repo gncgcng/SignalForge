@@ -111,6 +111,8 @@ function testAdminSupplyWarningAndCounts() {
     generated: {
       candidates_24h: 120,
       ready_24h: 0,
+      quality_gate_passed_24h: 9,
+      valid_ready_candidates_24h: 1,
       watching_24h: 28,
       avoid_24h: 9,
       admin_only_24h: 4,
@@ -126,10 +128,14 @@ function testAdminSupplyWarningAndCounts() {
     blockReasons: [{ reason: "blocked_low_confidence", status: "blocked_low_confidence", count: 24 }]
   });
   assert.equal(supply.counts.candidates, 120);
+  assert.equal(supply.counts.qualityGatePassed, 9);
+  assert.equal(supply.counts.validReadyCandidates, 1);
+  assert.equal(supply.counts.promotedReadySignals, 0);
   assert.equal(supply.counts.watching, 28);
   assert.equal(supply.counts.avoidTrade, 9);
   assert.match(supply.warning, /No ready signals in 48 hours/);
   assert.equal(supply.telegram.watchingEnabled, false);
+  assert.match(supply.topReasonReadySignalsNotProduced, /confidence threshold/i);
 }
 
 testReadyPreviewDoesNotLeakLevels();

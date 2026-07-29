@@ -41,7 +41,7 @@ export async function processTelegramQueue() {
           await recordTelegramAlertDiagnostic({
             signal: delivery.payload,
             userId: delivery.userId,
-            status: "blocked_not_alertable",
+            status: "blocked_signal_expired_before_delivery",
             reason: "Signal expired before Telegram delivery.",
             details: { queueId: delivery.id }
           });

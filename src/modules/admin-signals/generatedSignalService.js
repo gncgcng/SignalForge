@@ -1,6 +1,7 @@
 import { getCachedOhlcv, getOhlcv, getPair } from "../market-data/marketDataService.js";
 import {
   applyGeneratedSignalQualityBlock,
+  applyTimeframeConfidencePolicy,
   evaluateGeneratedSignalQualityGate,
   hasGeneratedSignalQualityGate
 } from "../signals/generatedSignalQualityGate.js";
@@ -25,7 +26,8 @@ import {
 export async function saveGeneratedSignal(signal, context = {}) {
   if (!signal || signal.validationPassed === false) return null;
   const source = context.source || signal.generationSource || signal.source || signal.indicators?.generationSource || "manual_scan";
-  const evaluatedSignal = await ensureGeneratedSignalQualityGate(signal, { ...context, source });
+  const cappedSignal = applyTimeframeConfidencePolicy(signal);
+  const evaluatedSignal = await ensureGeneratedSignalQualityGate(cappedSignal, { ...context, source });
   const stored = await upsertGeneratedSignal(evaluatedSignal, { ...context, source });
   await recordGeneratedSignalTelegramDecision(stored, evaluatedSignal, { ...context, source });
   if (stored && ["Hit TP", "Hit SL", "Expired", "Manually closed"].includes(signal.status)) {

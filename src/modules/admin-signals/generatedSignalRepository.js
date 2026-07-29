@@ -232,21 +232,21 @@ export async function getTelegramAlertDiagnosticsSummary() {
   const [diagnostics, generated, latestFailure] = await Promise.all([
     query(`
       SELECT
-        COUNT(*) FILTER (WHERE status IN ('sent','queued'))::integer AS sent_or_queued_today,
+        COUNT(*) FILTER (WHERE status IN ('sent','queued','telegram_queued'))::integer AS sent_or_queued_today,
         COUNT(*) FILTER (WHERE status = 'telegram_watching_eligible')::integer AS watching_sent_today,
-        COUNT(*) FILTER (WHERE status LIKE 'blocked_%' OR status IN ('telegram_disabled','missing_chat_id','missing_bot_token'))::integer AS blocked_today,
+        COUNT(*) FILTER (WHERE status LIKE 'blocked_%' OR status LIKE 'telegram_blocked_%' OR status IN ('telegram_disabled','missing_chat_id','missing_bot_token','telegram_missing_bot_token'))::integer AS blocked_today,
         MAX(attempted_at) AS last_attempt_at,
-        MAX(attempted_at) FILTER (WHERE status IN ('sent','queued')) AS last_sent_at
+        MAX(attempted_at) FILTER (WHERE status IN ('sent','queued','telegram_queued')) AS last_sent_at
       FROM telegram_alert_diagnostics
       WHERE created_at::date = current_date
     `),
     query(`
       SELECT
-        COUNT(*) FILTER (WHERE status = 'Active')::integer AS alertable_signal_count,
+        COUNT(*) FILTER (WHERE status = 'Active' AND telegram_status IN ('telegram_queued','queued','sent'))::integer AS alertable_signal_count,
         COUNT(*) FILTER (WHERE telegram_status IS NULL AND status = 'Active')::integer AS non_alerted_generated_signal_count,
         COUNT(*) FILTER (WHERE created_at >= now() - interval '48 hours')::integer AS candidates_generated_48h,
         COUNT(*) FILTER (WHERE telegram_status = 'failed')::integer AS failed_total,
-        COUNT(*) FILTER (WHERE telegram_status = 'queued')::integer AS queued_total
+        COUNT(*) FILTER (WHERE telegram_status IN ('telegram_queued','queued'))::integer AS queued_total
       FROM generated_signals
       WHERE created_at >= now() - interval '7 days'
     `),

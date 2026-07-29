@@ -712,14 +712,17 @@ function canAllowEliteConfidence(signal, groups = [], exactPositiveGroup = null)
 }
 
 function getStaticTimeframePolicy(timeframe) {
-  if (timeframe === "5m" || timeframe === "1h") {
-    return { confidenceCap: 72, reason: `${timeframe} generated signals are quarantined and capped at 72%.` };
+  if (timeframe === "5m") {
+    return { confidenceCap: 72, reason: "5m generated signals are quarantined and capped at 72%." };
+  }
+  if (timeframe === "1h") {
+    return { confidenceCap: 72, reason: "1h generated signals are reduced-confidence while current-engine performance is being rebuilt." };
   }
   if (timeframe === "15m") {
     return { confidenceCap: 88, reason: "15m confidence is capped below 90 until stronger current-engine performance develops." };
   }
   if (timeframe === "4h") {
-    return { confidenceCap: 88, reason: "4h confidence is capped while it remains watchlist/promising." };
+    return { confidenceCap: 82, reason: "4h confidence is capped while low-sample current-engine performance develops." };
   }
   return { confidenceCap: null, reason: "" };
 }

@@ -38,9 +38,9 @@ const currentEngineSourceSql = "source NOT IN ('legacy_saved_signal','legacy_unl
 const timeframeOrder = ["5m", "15m", "1h", "4h"];
 const timeframePolicies = Object.freeze({
   "5m": { status: "quarantined", confidenceCap: 72, reason: "5m generated signals are quarantined after weak realized performance." },
-  "1h": { status: "quarantined", confidenceCap: 72, reason: "1h generated signals are quarantined after weak realized performance." },
+  "1h": { status: "watchlist", confidenceCap: 72, reason: "1h can produce ready signals only when the exact setup passes Quality Gate; confidence remains capped while performance is being rebuilt." },
   "15m": { status: "active", confidenceCap: 88, reason: "15m can remain active, but confidence is capped below 90 until stronger evidence develops." },
-  "4h": { status: "watchlist", confidenceCap: 88, reason: "4h remains watchlist/promising until enough current-engine closed outcomes exist." }
+  "4h": { status: "promising", confidenceCap: 82, reason: "4h has low current-engine sample size, so confidence is capped instead of hard-blocked." }
 });
 
 export async function evaluateGeneratedSignalQualityGate(signal, context = {}) {
@@ -55,16 +55,14 @@ export async function evaluateGeneratedSignalQualityGate(signal, context = {}) {
   if (timeframePolicy.status === "quarantined") {
     return recordAndReturn(signal, blockGate("timeframe", timeframePolicy.reason, { timeframe: signal.timeframe, confidenceCap: timeframePolicy.confidenceCap }), context);
   }
-  if (timeframePolicy.status === "watchlist" && !(await hasProvenSourceStrategyTimeframe(signal, source))) {
-    return recordAndReturn(signal, blockGate("timeframe", timeframePolicy.reason, { timeframe: signal.timeframe, confidenceCap: timeframePolicy.confidenceCap }), context);
-  }
+  const signalWithTimeframeCap = applyTimeframeConfidencePolicy(signal);
 
-  const cooldown = await findRecentGeneratedSignalFailure(signal);
+  const cooldown = await findRecentGeneratedSignalFailure(signalWithTimeframeCap);
   if (cooldown) {
     return recordAndReturn(signal, blockGate("cooldown", `Blocked by cooldown because the last similar signal ${cooldown.status === "Hit SL" ? "hit SL" : "expired"}.`, cooldown), context);
   }
 
-  const duplicate = await findRecentGeneratedSignalDuplicate(signal);
+  const duplicate = await findRecentGeneratedSignalDuplicate(signalWithTimeframeCap);
   if (duplicate) {
     return recordAndReturn(signal, blockGate(
       duplicate.timeframe === signal.timeframe ? "duplicate" : "correlated",
@@ -75,7 +73,10 @@ export async function evaluateGeneratedSignalQualityGate(signal, context = {}) {
     ), context);
   }
 
-  const v2 = evaluateSignalQualityGateV2(signal, context);
+  const v2 = evaluateSignalQualityGateV2(signalWithTimeframeCap, {
+    ...context,
+    timeframePolicy
+  });
   if (!v2.passed) {
     return recordAndReturn(signal, blockGate(v2.status, v2.explanation, { qualityGateV2: v2 }, v2), context);
   }

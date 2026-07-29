@@ -20,9 +20,10 @@ const app = readFileSync("public/app.js", "utf8");
 const html = readFileSync("public/index.html", "utf8");
 const migration = readFileSync("migrations/052_generated_signal_quality_controls.sql", "utf8");
 
-assert.equal(getTimeframeQualityPolicy("1h").status, "quarantined", "1h should be quarantined for ready promotion");
+assert.equal(getTimeframeQualityPolicy("1h").status, "watchlist", "1h should be reduced-confidence, not hard quarantined");
 assert.equal(getTimeframeQualityPolicy("5m").status, "quarantined", "5m should be quarantined for ready promotion");
 assert.equal(getTimeframeQualityPolicy("15m").confidenceCap, 88, "15m confidence should be capped below 90");
+assert.equal(getTimeframeQualityPolicy("4h").status, "promising", "4h should be confidence-capped instead of hard blocked for low sample size");
 assert.equal(getFailureCooldownMs("5m", "Hit SL"), 4 * 60 * 60 * 1000, "5m SL cooldown should be 4 hours");
 assert.equal(getFailureCooldownMs("15m", "Hit SL"), 6 * 60 * 60 * 1000, "15m SL cooldown should be 6 hours");
 assert.equal(getFailureCooldownMs("1h", "Hit SL"), 24 * 60 * 60 * 1000, "1h SL cooldown should be 24 hours");
@@ -36,7 +37,9 @@ assert.equal(isSimilarStrategyOrPattern({ setupType: "Breakout Retest" }, { stra
 assert.equal(isSimilarStrategyOrPattern({ patternContext: { pattern: "bull_flag" } }, { pattern: "bull_flag" }), true);
 
 const capped = applyTimeframeConfidencePolicy({ timeframe: "1h", confidenceScore: 94, indicators: {} });
-assert.equal(capped.confidenceScore, 72, "quarantined timeframe confidence should be capped to 72");
+assert.equal(capped.confidenceScore, 72, "1h confidence should be capped to 72 without hard blocking");
+const fourHour = applyTimeframeConfidencePolicy({ timeframe: "4h", confidenceScore: 94, indicators: {} });
+assert.equal(fourHour.confidenceScore, 82, "4h confidence should be capped for low sample size, not blocked");
 
 const blocked = applyGeneratedSignalQualityBlock({
   symbol: "BTC-USD",
@@ -71,8 +74,8 @@ assert.match(signalService, /valid: publishable/);
 assert.match(calibrationService, /statsScopeSql\("current"\)/);
 assert.match(calibrationService, /source NOT IN \('legacy_saved_signal','legacy_unlocked_signal'\)/);
 assert.match(calibrationService, /15m confidence is capped below 90/);
-assert.match(calibrationService, /timeframe === "5m" \|\| timeframe === "1h"/);
-assert.match(calibrationService, /generated signals are quarantined and capped at 72/);
+assert.match(calibrationService, /timeframe === "5m"/);
+assert.match(calibrationService, /1h generated signals are reduced-confidence/);
 
 assert.match(generatedRepository, /Duplicate blocked/);
 assert.match(generatedRepository, /Cooldown blocked/);

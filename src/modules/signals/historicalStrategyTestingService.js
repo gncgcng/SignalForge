@@ -180,13 +180,18 @@ export function applyHistoricalStrategyContext(signal, context = {}) {
   };
 
   if (!stat || evidence.action === "needs_more_data") {
-    cap = Math.min(cap, 88);
+    cap = Math.min(cap, 72);
     reasons.push(evidence.reason);
   } else {
     if (stat.walkForwardStatus !== "validated" && evidence.sampleSize >= 20) {
       cap = Math.min(cap, evidence.specific ? 82 : 86);
       penalty -= evidence.specific ? 4 : 2;
       reasons.push(`${evidence.layerLabel} walk-forward validation has not confirmed this setup group.`);
+    }
+    if (evidence.action === "warning") {
+      cap = Math.min(cap, evidence.negative ? 72 : 82);
+      penalty -= evidence.negative ? 4 : 0;
+      reasons.push(evidence.reason);
     }
     if (evidence.action === "cap" || evidence.action === "watching") {
       cap = Math.min(cap, 75);
@@ -271,6 +276,7 @@ export function classifyHistoricalEvidence(stat = {}) {
       layer,
       layerLabel,
       specific,
+      negative,
       reason: `${layerLabel} has fewer than 10 closed historical examples, so it cannot hard-block this setup.`
     };
   }
@@ -281,6 +287,7 @@ export function classifyHistoricalEvidence(stat = {}) {
       layer,
       layerLabel,
       specific,
+      negative,
       reason: `${layerLabel} has ${sampleSize} examples. Historical performance is only a warning and confidence cap.`
     };
   }
@@ -291,6 +298,7 @@ export function classifyHistoricalEvidence(stat = {}) {
       layer,
       layerLabel,
       specific,
+      negative,
       reason: `${layerLabel} has ${sampleSize} examples with very negative expectancy (${expectancy.toFixed(2)}R), so ready alerts are blocked.`
     };
   }
@@ -301,6 +309,7 @@ export function classifyHistoricalEvidence(stat = {}) {
       layer,
       layerLabel,
       specific,
+      negative,
       reason: `${layerLabel} has negative expectancy (${expectancy.toFixed(2)}R). Confidence is capped and this setup should watch until stronger confirmation.`
     };
   }
@@ -311,6 +320,7 @@ export function classifyHistoricalEvidence(stat = {}) {
       layer,
       layerLabel,
       specific,
+      negative,
       reason: `${layerLabel} is broad underperformance, so it caps confidence but does not hard-block this specific setup.`
     };
   }
@@ -320,6 +330,7 @@ export function classifyHistoricalEvidence(stat = {}) {
     layer,
     layerLabel,
     specific,
+    negative,
     reason: `${layerLabel} does not block this setup.`
   };
 }

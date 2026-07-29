@@ -109,6 +109,8 @@ export async function getAdminSignalSupplyDashboard() {
       SELECT
         COUNT(*) FILTER (WHERE created_at >= now() - interval '24 hours')::integer AS candidates_24h,
         COUNT(*) FILTER (WHERE created_at >= now() - interval '24 hours' AND status = 'Active')::integer AS ready_24h,
+        COUNT(*) FILTER (WHERE created_at >= now() - interval '24 hours' AND COALESCE(quality_gate_status, '') = 'passed')::integer AS quality_gate_passed_24h,
+        COUNT(*) FILTER (WHERE created_at >= now() - interval '24 hours' AND status = 'Active' AND COALESCE(quality_gate_status, '') = 'passed')::integer AS valid_ready_candidates_24h,
         COUNT(*) FILTER (WHERE created_at >= now() - interval '24 hours' AND status = 'Watching')::integer AS watching_24h,
         COUNT(*) FILTER (WHERE created_at >= now() - interval '24 hours' AND (
           status = ANY($1::text[]) OR COALESCE(quality_gate_status, '') NOT IN ('', 'passed')
@@ -123,20 +125,20 @@ export async function getAdminSignalSupplyDashboard() {
     `, [BLOCKED_STATUSES]),
     query(`
       SELECT
-        COUNT(*) FILTER (WHERE created_at >= now() - interval '24 hours' AND status IN ('sent','queued'))::integer AS ready_alerts_24h,
+        COUNT(*) FILTER (WHERE created_at >= now() - interval '24 hours' AND status IN ('sent','queued','telegram_queued'))::integer AS ready_alerts_24h,
         COUNT(*) FILTER (WHERE created_at >= now() - interval '24 hours' AND status = 'telegram_watching_eligible')::integer AS watching_alerts_24h,
         COUNT(*) FILTER (WHERE created_at >= now() - interval '24 hours' AND (
-          status LIKE 'blocked_%' OR status IN ('telegram_disabled','missing_chat_id','missing_bot_token')
+          status LIKE 'blocked_%' OR status LIKE 'telegram_blocked_%' OR status IN ('telegram_disabled','missing_chat_id','missing_bot_token','telegram_missing_bot_token')
         ))::integer AS telegram_blocked_24h,
         MAX(attempted_at) AS last_attempt_at,
-        MAX(attempted_at) FILTER (WHERE status IN ('sent','queued')) AS last_sent_at
+        MAX(attempted_at) FILTER (WHERE status IN ('sent','queued','telegram_queued')) AS last_sent_at
       FROM telegram_alert_diagnostics
     `),
     query(`
       SELECT reason, status, COUNT(*)::integer AS count
       FROM telegram_alert_diagnostics
       WHERE created_at >= now() - interval '24 hours'
-        AND (status LIKE 'blocked_%' OR status IN ('telegram_disabled','missing_chat_id','missing_bot_token','telegram_watching_eligible'))
+        AND (status LIKE 'blocked_%' OR status LIKE 'telegram_blocked_%' OR status IN ('telegram_disabled','missing_chat_id','missing_bot_token','telegram_missing_bot_token','telegram_watching_eligible'))
       GROUP BY reason, status
       ORDER BY count DESC
       LIMIT 8
@@ -159,6 +161,9 @@ export function buildAdminSignalSupplySummary({ generated = {}, telegram = {}, b
     window: "24h",
     counts: {
       candidates: Number(generated.candidates_24h || 0),
+      qualityGatePassed: Number(generated.quality_gate_passed_24h || 0),
+      validReadyCandidates: Number(generated.valid_ready_candidates_24h || 0),
+      promotedReadySignals: Number(generated.ready_24h || 0),
       ready: Number(generated.ready_24h || 0),
       watching: Number(generated.watching_24h || 0),
       avoidTrade: Number(generated.avoid_24h || 0),
@@ -181,12 +186,32 @@ export function buildAdminSignalSupplySummary({ generated = {}, telegram = {}, b
     warning: ready48h === 0
       ? "No ready signals in 48 hours. Review watching volume and top block reasons before changing thresholds."
       : null,
+    topReasonReadySignalsNotProduced: topSupplyBlocker(blockReasons),
     topBlockReasons: blockReasons.map((row) => ({
       reason: row.reason || row.status || "Not specified",
       status: row.status || "unknown",
       count: Number(row.count || 0)
     }))
   };
+}
+
+function topSupplyBlocker(blockReasons = []) {
+  const top = [...blockReasons].sort((left, right) => Number(right.count || 0) - Number(left.count || 0))[0];
+  if (!top) return "No dominant blocker in the last 24 hours.";
+  const status = String(top.status || "");
+  if (status.includes("quarantined_timeframe")) {
+    return "Too many candidates are blocked by timeframe quarantine.";
+  }
+  if (status.includes("low_confidence")) {
+    return "Ready candidates are below the Telegram confidence threshold.";
+  }
+  if (status.includes("failed_quality_gate")) {
+    return "Quality Gate is rejecting the strongest candidates.";
+  }
+  if (status.includes("duplicate") || status.includes("cooldown")) {
+    return "Duplicate or cooldown protection is blocking repeated setups.";
+  }
+  return top.reason || status || "No dominant blocker in the last 24 hours.";
 }
 
 export function toSafeReadyPreview(signal = {}) {
