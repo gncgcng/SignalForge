@@ -73,6 +73,7 @@ const state = {
   expandedSignalKeys: new Set(),
   unlockedRevealSignalId: null,
   telegramExpiredNotice: null,
+  telegramUnlockError: null,
   riskCalculations: new Map(),
   lastScanSummary: null,
   activeScanJob: null,
@@ -3328,6 +3329,7 @@ function getPendingTelegramUnlockKey() {
 async function processPendingTelegramUnlock() {
   const setupKey = getPendingTelegramUnlockKey();
   if (!setupKey) return;
+  state.telegramUnlockError = null;
 
   try {
     statusLine.textContent = "Unlocking Telegram signal preview...";
@@ -3349,15 +3351,22 @@ async function processPendingTelegramUnlock() {
     }
 
     if (!signal) {
-      statusLine.textContent = "Telegram signal preview could not be unlocked.";
+      state.telegramUnlockError = message || "This Telegram signal could not be loaded. It may no longer be available.";
+      removeTelegramUnlockParam();
+      navigateTo("signals", {}, { replace: true });
+      renderSignalsHistory();
+      statusLine.textContent = state.telegramUnlockError;
       return;
     }
 
     removeTelegramUnlockParam();
     await completeSignalUnlock({ signal, subscription, alreadyUnlocked, source: "telegram" });
   } catch (error) {
-    statusLine.textContent = error.message;
+    state.telegramUnlockError = error.message || "This Telegram signal could not be loaded.";
+    removeTelegramUnlockParam();
     navigateTo("signals", {}, { replace: true });
+    renderSignalsHistory();
+    statusLine.textContent = state.telegramUnlockError;
   }
 }
 
@@ -5945,7 +5954,20 @@ function renderSignalsHistory() {
 
 function renderTelegramExpiredNotice() {
   const notice = state.telegramExpiredNotice;
-  if (!notice) return "";
+  const unlockError = state.telegramUnlockError;
+  if (!notice && !unlockError) return "";
+  if (unlockError) {
+    return `
+      <section class="expired-signal-notice" role="alert">
+        <div>
+          <span class="status-pill status-expired">Signal unavailable</span>
+          <strong>${escapeHtml(unlockError)}</strong>
+          <p>No credit was charged. Open a newer Telegram alert or return to Scanner.</p>
+        </div>
+        <button class="secondary-action" type="button" data-nav="scanner">Open Scanner</button>
+      </section>
+    `;
+  }
   const signal = notice.signal || {};
   return `
     <section class="expired-signal-notice" role="status">

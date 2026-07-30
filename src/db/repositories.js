@@ -3151,6 +3151,17 @@ export async function markTelegramNotificationSent(id) {
   `, [id]);
 }
 
+export async function markTelegramNotificationBlocked(id, reason) {
+  await query(`
+    UPDATE telegram_notification_queue
+    SET status = 'blocked',
+      last_error = $2,
+      next_attempt_at = 'infinity'::timestamptz,
+      updated_at = now()
+    WHERE id = $1
+  `, [id, reason]);
+}
+
 export async function markTelegramNotificationFailed(id, error, retry) {
   await query(`
     UPDATE telegram_notification_queue

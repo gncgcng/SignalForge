@@ -1,6 +1,9 @@
 import { appConfig } from "../../config/appConfig.js";
 import {
   claimNextTelegramNotification,
+  getTelegramSettingsByUser,
+  listWatchlistByUser,
+  markTelegramNotificationBlocked,
   markTelegramNotificationFailed,
   markTelegramNotificationSent
 } from "../../db/repositories.js";
@@ -8,7 +11,10 @@ import {
   formatTelegramSignalMessage,
   formatTelegramSignalReplyMarkup
 } from "./notificationService.js";
-import { recordTelegramAlertDiagnostic } from "./telegramAlertDiagnosticsService.js";
+import {
+  evaluateTelegramAlertEligibility,
+  recordTelegramAlertDiagnostic
+} from "./telegramAlertDiagnosticsService.js";
 import { sendTelegramMessage } from "./telegramClient.js";
 import { isSignalExpired } from "../signals/signalValidityService.js";
 
@@ -35,7 +41,34 @@ export async function processTelegramQueue() {
     let delivery;
 
     while ((delivery = await claimNextTelegramNotification())) {
+      let eligibility = null;
       try {
+        const settings = await getTelegramSettingsByUser(delivery.userId);
+        const watchlist = settings?.favoriteMarketsOnly
+          ? await listWatchlistByUser(delivery.userId)
+          : [];
+        const favoriteSymbols = new Set(watchlist.map((item) => item.symbol));
+        eligibility = evaluateTelegramAlertEligibility({
+          settings,
+          setup: delivery.payload,
+          favoriteSymbols
+        });
+        if (!eligibility.allowed) {
+          await markTelegramNotificationBlocked(delivery.id, eligibility.reason);
+          await recordTelegramAlertDiagnostic({
+            signal: delivery.payload,
+            userId: delivery.userId,
+            status: eligibility.status,
+            reason: eligibility.reason,
+            details: {
+              ...eligibility.details,
+              queueId: delivery.id,
+              deliveryRevalidated: true
+            }
+          });
+          console.info(`[telegram] blocked before delivery queue_id=${delivery.id} user=${delivery.userId} reason=${eligibility.status}`);
+          continue;
+        }
         if (isSignalExpired(delivery.payload)) {
           await markTelegramNotificationFailed(delivery.id, "Signal expired before Telegram delivery.", false);
           await recordTelegramAlertDiagnostic({
@@ -49,7 +82,7 @@ export async function processTelegramQueue() {
           continue;
         }
         console.log(`[telegram] sending alert queue_id=${delivery.id} user=${delivery.userId} chat=${maskChatId(delivery.chatId)}`);
-        await sendTelegramMessage(
+        const telegramResponse = await sendTelegramMessage(
           delivery.chatId,
           formatTelegramSignalMessage(delivery.payload),
           formatTelegramSignalReplyMarkup(delivery.payload)
@@ -60,7 +93,15 @@ export async function processTelegramQueue() {
           userId: delivery.userId,
           status: "sent",
           reason: "Telegram alert sent.",
-          details: { queueId: delivery.id, attempts: delivery.attempts }
+          details: {
+            ...eligibility.details,
+            queueId: delivery.id,
+            attempts: delivery.attempts,
+            telegramApiResponse: {
+              messageId: telegramResponse?.message_id || null,
+              chatId: telegramResponse?.chat?.id || null
+            }
+          }
         });
         console.log(`[telegram] sent queue_id=${delivery.id} user=${delivery.userId}`);
       } catch (error) {
@@ -71,7 +112,15 @@ export async function processTelegramQueue() {
           userId: delivery.userId,
           status: "failed",
           reason: error.message,
-          details: { queueId: delivery.id, attempts: delivery.attempts, retry }
+          details: {
+            ...(eligibility?.details || {}),
+            queueId: delivery.id,
+            attempts: delivery.attempts,
+            retry,
+            telegramApiResponse: {
+              error: error.message
+            }
+          }
         });
         console.warn(`[telegram] failed queue_id=${delivery.id} user=${delivery.userId} retry=${retry} error=${error.message}`);
 

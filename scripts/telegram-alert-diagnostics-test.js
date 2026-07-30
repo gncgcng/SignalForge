@@ -29,6 +29,10 @@ const readySignal = {
   status: "Active",
   confidenceScore: 78,
   readinessScore: 84,
+  entryPrice: 100,
+  stopLoss: 97,
+  takeProfit: 106,
+  riskRewardRatio: 2,
   setupType: "Breakout retest",
   source: "manual_scan",
   indicators: {
@@ -39,8 +43,20 @@ const readySignal = {
 
 assert.equal(evaluateTelegramAlertEligibility({ settings, setup: readySignal }).allowed, true);
 assert.equal(evaluateTelegramAlertEligibility({ settings, setup: { ...readySignal, confidenceScore: 62 } }).status, "blocked_low_confidence");
-assert.match(evaluateTelegramAlertEligibility({ settings, setup: { ...readySignal, confidenceScore: 62 } }).reason, /below threshold 65/);
-assert.equal(evaluateTelegramAlertEligibility({ settings: { ...settings, minimumConfidence: 90 }, setup: { ...readySignal, confidenceScore: 70 } }).allowed, true);
+assert.match(evaluateTelegramAlertEligibility({ settings, setup: { ...readySignal, confidenceScore: 62 } }).reason, /below global threshold 65/);
+const preferenceBlocked = evaluateTelegramAlertEligibility({
+  settings: { ...settings, minimumConfidence: 90 },
+  setup: { ...readySignal, confidenceScore: 68 }
+});
+assert.equal(preferenceBlocked.status, "telegram_blocked_user_preference");
+assert.match(preferenceBlocked.reason, /Confidence 68 below your Telegram preference 90/);
+assert.equal(preferenceBlocked.details.globalThreshold, 65);
+assert.equal(preferenceBlocked.details.userThreshold, 90);
+assert.equal(preferenceBlocked.details.finalThreshold, 90);
+assert.equal(evaluateTelegramAlertEligibility({
+  settings: { ...settings, minimumConfidence: 90 },
+  setup: { ...readySignal, confidenceScore: 92 }
+}).allowed, true);
 assert.equal(evaluateTelegramAlertEligibility({ settings, setup: { ...readySignal, timeframe: "1h" } }).allowed, true);
 assert.equal(evaluateTelegramAlertEligibility({ settings, setup: { ...readySignal, timeframe: "4h" } }).allowed, true);
 assert.equal(evaluateTelegramAlertEligibility({ settings, setup: { ...readySignal, timeframe: "5m" } }).status, "blocked_quarantined_timeframe");
@@ -51,6 +67,7 @@ assert.equal(evaluateTelegramAlertEligibility({ settings, setup: { ...readySigna
 assert.equal(evaluateTelegramAlertEligibility({ settings, setup: { ...readySignal, indicators: { qualityGatePassed: false, qualityGateV2: { status: "poor_entry_quality" } } } }).status, "blocked_failed_quality_gate");
 assert.match(evaluateTelegramAlertEligibility({ settings, setup: { ...readySignal, indicators: { qualityGatePassed: false, qualityGateV2: { status: "poor_entry_quality" } } } }).reason, /failed Quality Gate/);
 assert.equal(evaluateTelegramAlertEligibility({ settings, setup: { ...readySignal, indicators: {} } }).status, "blocked_failed_quality_gate");
+assert.equal(evaluateTelegramAlertEligibility({ settings, setup: { ...readySignal, stopLoss: 101 } }).status, "telegram_blocked_invalid_trade_levels");
 assert.equal(evaluateTelegramAlertEligibility({ settings, setup: { ...readySignal, status: "Watching" } }).status, "blocked_final_decision_watching");
 assert.equal(evaluateTelegramAlertEligibility({ settings, setup: { ...readySignal, status: "Historical underperformer" } }).status, "blocked_historical_underperformance");
 assert.equal(evaluateGeneratedSignalTelegramDecision({ ...readySignal, status: "Watching" }).status, "telegram_blocked_final_decision_watching");

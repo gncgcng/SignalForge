@@ -12,6 +12,17 @@ import {
   evaluateTelegramAlertEligibility,
   recordTelegramAlertDiagnostic
 } from "./telegramAlertDiagnosticsService.js";
+import {
+  buildTelegramUnlockUrl,
+  formatTelegramTradeLevels,
+  validateTelegramTradeSignal
+} from "./telegramSignalPolicy.js";
+
+export {
+  buildTelegramUnlockUrl,
+  formatTelegramTradeLevels,
+  validateTelegramTradeSignal
+} from "./telegramSignalPolicy.js";
 
 const directions = new Set(["long", "short", "both"]);
 const timeframes = new Set(["5m", "15m", "1h", "4h"]);
@@ -75,7 +86,7 @@ export async function sendTelegramTestAlert(user) {
   await sendTelegramMessage(
     settings.chatId,
     [
-      "🚨 SignalForge Test Alert",
+      "TEST MESSAGE — not a real signal",
       "",
       "Telegram notifications are connected correctly.",
       "",
@@ -141,7 +152,7 @@ export async function enqueueMatchingTelegramNotifications(user, setups) {
         userId: user.id,
         status: "blocked_duplicate",
         reason: "A Telegram alert for this setup is already queued or sent.",
-        details: { setupKey: setup.setupKey }
+        details: { ...evaluation.details, setupKey: setup.setupKey }
       });
     }
   }
@@ -150,16 +161,25 @@ export async function enqueueMatchingTelegramNotifications(user, setups) {
 }
 
 export function telegramPreferenceMatchesSetup(settings, favoriteSymbols, setup) {
+  const userThreshold = Number(settings.minimumConfidence || 0);
+  const finalThreshold = Math.max(
+    Number(appConfig.telegram.readyAlertMinConfidence),
+    Number.isFinite(userThreshold) ? userThreshold : 0
+  );
   return Boolean(
-    setup?.setupKey &&
+    (setup?.setupKey || setup?.id) &&
     (!settings.favoriteMarketsOnly || favoriteSymbols.has(setup.symbol)) &&
     settings.timeframes.includes(setup.timeframe) &&
     (settings.direction === "both" || settings.direction === setup.direction) &&
-    Number(setup.confidenceScore) >= Number(appConfig.telegram.readyAlertMinConfidence)
+    Number(setup.confidenceScore) >= finalThreshold
   );
 }
 
 export function formatTelegramSignalMessage(setup) {
+  const validation = validateTelegramTradeSignal(setup);
+  if (!validation.valid) {
+    throw new Error(`Telegram signal is not sendable: ${validation.reason}`);
+  }
   const confirmations = summarizeConfirmations(setup.confirmations || []);
   const passed = confirmations.filter((item) => item.passed).map((item) => item.name);
   const reason = passed.length
@@ -167,6 +187,7 @@ export function formatTelegramSignalMessage(setup) {
     : "Rule-based confluence detected. Open SignalForge to review the full setup.";
   const provider = getProviderLabel(setup.symbol);
   const confidence = Number(setup.confidenceScore || 0);
+  const levels = formatTelegramTradeLevels(setup);
 
   return [
     "🚨 SignalForge Setup Ready",
@@ -175,14 +196,14 @@ export function formatTelegramSignalMessage(setup) {
     `Provider: ${provider}`,
     `Timeframe: ${setup.timeframe}`,
     `Direction: ${setup.direction.toUpperCase()}`,
-    `Confidence: ${confidence}% (${getConfidenceTier(confidence)})`,
+    `Confidence: ${confidence}%`,
     `Setup: ${setup.setupType || "Qualified setup"}`,
     `Valid for: ${formatSignalValidityWindow(setup.timeframe)}`,
     "",
     "Trade levels:",
-    `Entry: ${formatLevel(setup.entryPrice)}`,
-    `Stop loss: ${formatLevel(setup.stopLoss)}`,
-    `Take profit: ${formatLevel(setup.takeProfit)}`,
+    `Entry: ${levels.entry}`,
+    `Stop loss: ${levels.stopLoss}`,
+    `Take profit: ${levels.takeProfit}`,
     `Risk/reward: ${Number(setup.riskRewardRatio || 0).toFixed(2)}R`,
     "",
     "Short reason:",
@@ -268,20 +289,6 @@ function normalizeConfirmationName(name = "") {
   return name;
 }
 
-function getConfidenceTier(confidence) {
-  if (confidence >= 98) return "Rare near-perfect";
-  if (confidence >= 90) return "Excellent";
-  if (confidence >= 80) return "Strong";
-  if (confidence >= 70) return "Decent";
-  return "No alert";
-}
-
-function formatLevel(value) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return "n/a";
-  return Number(number.toFixed(number > 1000 ? 2 : 5)).toLocaleString("en-US");
-}
-
 function getDisplaySymbol(symbol = "") {
   return symbol.includes("-") ? symbol.replace("-", "") : symbol;
 }
@@ -292,18 +299,6 @@ function getProviderLabel(symbol = "") {
   }
 
   return `Coinbase · ${symbol}`;
-}
-
-function buildTelegramUnlockUrl(setup) {
-  const appUrl = appConfig.appUrl || appConfig.affiliate.publicAppUrl;
-  const setupKey = setup?.setupKey || setup?.id;
-
-  if (!appUrl || !setupKey) return "";
-
-  const url = new URL(appUrl);
-  url.searchParams.set("telegramUnlock", setupKey);
-  url.hash = "signals";
-  return url.toString();
 }
 
 function assertTelegramConfigured() {
