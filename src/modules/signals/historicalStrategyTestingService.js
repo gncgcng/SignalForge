@@ -160,18 +160,65 @@ export async function applyHistoricalStrategyCalibration(signal) {
     console.warn(`[strategy-lab] historical_calibration_skipped reason=${error.message}`);
     return applyHistoricalStrategyContext(signal, {
       stat: null,
-      similarity: null
+      similarity: null,
+      calibrationError: error.message
     });
   }
 }
 
 export function applyHistoricalStrategyContext(signal, context = {}) {
   if (!signal) return signal;
-  const original = Number(signal.confidenceScore || 0);
+  const original = positiveConfidence(signal.confidenceScore, signal.calibratedConfidence);
+  const rawConfidence = positiveConfidence(
+    signal.rawConfidence,
+    signal.rawSetupScore,
+    signal.confidenceCalibration?.rawSetupScore,
+    signal.indicators?.confidenceCalibration?.rawSetupScore,
+    original
+  );
   let penalty = 0;
   let cap = 99;
   const reasons = [];
   const stat = context.stat || null;
+  const strategyMatchScore = readStrategyMatchScore(signal);
+  if (context.calibrationError || original === null) {
+    const technicalError = String(context.calibrationError || "No finite positive confidence was available for historical calibration.").slice(0, 500);
+    const historicalCalibration = {
+      version: "historical_strategy_v3",
+      rawConfidence,
+      originalConfidence: original,
+      calibratedConfidence: null,
+      finalCalibratedConfidence: null,
+      strategyMatchScore,
+      historicalCalibrationAdjustment: null,
+      confidenceCap: null,
+      status: "calibration_error",
+      action: "calibration_error",
+      evidenceLayer: "none",
+      evidenceLayerLabel: "Calibration unavailable",
+      evidenceSpecificity: "none",
+      evidenceSampleSize: 0,
+      hardBlockEligible: true,
+      sampleSizeLabel: "not_enough_data",
+      reasons: ["Historical calibration failed; candidate remains admin-only."],
+      technicalError,
+      primaryDecisionReason: "calibration_error",
+      stat: null,
+      similarity: null,
+      copy: "Historical performance helps calibrate confidence, but it does not guarantee future results."
+    };
+    return {
+      ...signal,
+      historicalStrategyStatus: "calibration_error",
+      historicalStrategyReason: historicalCalibration.reasons[0],
+      calibratedConfidence: null,
+      finalCalibratedConfidence: null,
+      indicators: {
+        ...(signal.indicators || {}),
+        historicalStrategyCalibration: historicalCalibration
+      }
+    };
+  }
   const evidence = stat ? classifyHistoricalEvidence(stat) : {
     action: "needs_more_data",
     sampleSize: 0,
@@ -180,7 +227,8 @@ export function applyHistoricalStrategyContext(signal, context = {}) {
   };
 
   if (!stat || evidence.action === "needs_more_data") {
-    cap = Math.min(cap, 72);
+    cap = Math.min(cap, 82);
+    penalty -= 3;
     reasons.push(evidence.reason);
   } else {
     if (stat.walkForwardStatus !== "validated" && evidence.sampleSize >= 20) {
@@ -189,7 +237,7 @@ export function applyHistoricalStrategyContext(signal, context = {}) {
       reasons.push(`${evidence.layerLabel} walk-forward validation has not confirmed this setup group.`);
     }
     if (evidence.action === "warning") {
-      cap = Math.min(cap, evidence.negative ? 72 : 82);
+      cap = Math.min(cap, 82);
       penalty -= evidence.negative ? 4 : 0;
       reasons.push(evidence.reason);
     }
@@ -215,14 +263,23 @@ export function applyHistoricalStrategyContext(signal, context = {}) {
     reasons.push(context.similarity.reason);
   }
 
-  const finalConfidence = Math.max(50, Math.min(cap, original + penalty));
+  const finalConfidence = Math.max(0, Math.min(cap, original + penalty));
+  const normalizedStatus = evidence.action === "needs_more_data"
+    ? "insufficient_data"
+    : evidence.action === "block"
+      ? "historical_underperformer"
+      : evidence.action;
   const historicalCalibration = {
-    version: "historical_strategy_v2",
+    version: "historical_strategy_v3",
+    rawConfidence,
     originalConfidence: original,
     calibratedConfidence: Math.round(finalConfidence),
+    finalCalibratedConfidence: Math.round(finalConfidence),
+    strategyMatchScore,
+    historicalCalibrationAdjustment: penalty,
     confidenceCap: cap,
     penalty,
-    status: evidence.action === "block" ? "historical_underperformer" : evidence.action,
+    status: normalizedStatus,
     action: evidence.action,
     evidenceLayer: evidence.layer,
     evidenceLayerLabel: evidence.layerLabel,
@@ -233,12 +290,21 @@ export function applyHistoricalStrategyContext(signal, context = {}) {
     reasons,
     stat: stat ? summarizeStat(stat) : null,
     similarity: context.similarity || null,
+    primaryDecisionReason: evidence.action === "block"
+      ? "exact_historical_underperformance"
+      : evidence.action === "needs_more_data"
+        ? "insufficient_historical_data"
+        : penalty < 0
+          ? "historical_confidence_penalty"
+          : "historical_calibration_applied",
     copy: "Historical performance helps calibrate confidence, but it does not guarantee future results."
   };
 
   return {
     ...signal,
     confidenceScore: Math.round(finalConfidence),
+    calibratedConfidence: Math.round(finalConfidence),
+    finalCalibratedConfidence: Math.round(finalConfidence),
     historicalStrategyStatus: historicalCalibration.status,
     historicalStrategyReason: reasons.join(" ") || "Historical calibration applied.",
     indicators: {
@@ -265,7 +331,9 @@ export function classifyHistoricalEvidence(stat = {}) {
   const breakEven = Number(stat.breakEvenWinRate || 0);
   const layer = stat.evidenceLayer || "exact_strategy_pair_timeframe_regime";
   const layerLabel = stat.evidenceLayerLabel || "Exact strategy, pair, timeframe, and regime";
-  const specific = layer === "exact_strategy_pair_timeframe_regime";
+  const specific = ["exact_strategy_pair_timeframe_regime", "exact_strategy_pair_timeframe_direction_regime"].includes(layer);
+  const hardBlockSpecific = layer === "exact_strategy_pair_timeframe_direction_regime" ||
+    (layer === "exact_strategy_pair_timeframe_regime" && Boolean(stat.direction));
   const veryNegative = expectancy <= -0.45 || (winRate < breakEven - 12 && Number(stat.hitSl || 0) >= Math.max(12, Number(stat.hitTp || 0) * 2));
   const negative = expectancy < 0 || (sampleSize >= 10 && winRate < breakEven);
 
@@ -291,7 +359,7 @@ export function classifyHistoricalEvidence(stat = {}) {
       reason: `${layerLabel} has ${sampleSize} examples. Historical performance is only a warning and confidence cap.`
     };
   }
-  if (sampleSize >= 30 && specific && negative && veryNegative) {
+  if (sampleSize >= 30 && hardBlockSpecific && negative && veryNegative) {
     return {
       action: "block",
       sampleSize,
@@ -621,6 +689,26 @@ function normalizeRegime(signal = {}) {
     signal.fullAnalysis?.marketStructure?.regime ||
     "unknown"
   ).trim() || "unknown";
+}
+
+function positiveConfidence(...values) {
+  for (const value of values) {
+    if (value === null || value === undefined || value === "") continue;
+    const number = Number(value);
+    if (Number.isFinite(number) && number > 0) return Math.max(0, Math.min(99, number));
+  }
+  return null;
+}
+
+function readStrategyMatchScore(signal = {}) {
+  const patternConfidence = Number(signal.patternContext?.confidence ?? signal.indicators?.patternContext?.confidence);
+  return positiveConfidence(
+    signal.strategyMatchScore,
+    signal.indicators?.strategyMatchScore,
+    signal.learnedPattern?.patternMatchScore,
+    signal.indicators?.learnedPattern?.patternMatchScore,
+    Number.isFinite(patternConfidence) && patternConfidence <= 1 ? patternConfidence * 100 : patternConfidence
+  );
 }
 
 function bucket(value, thresholds) {

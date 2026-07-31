@@ -18,6 +18,10 @@ export const blockedGeneratedSignalStatuses = Object.freeze({
   weak_risk_reward: "Weak risk/reward",
   bad_market_regime: "Bad market regime",
   historical_underperformer: "Historical underperformer",
+  insufficient_historical_data: "Insufficient historical data",
+  historical_confidence_penalty: "Historical confidence penalty",
+  calibration_error: "Calibration error",
+  low_confidence: "Confidence below promotion minimum",
   similar_to_past_losers: "Similar to past losers"
 });
 
@@ -34,6 +38,10 @@ const blockedGeneratedSignalReasonCodes = Object.freeze({
   weak_risk_reward: "weak_risk_reward",
   bad_market_regime: "bad_market_regime",
   historical_underperformer: "historical_underperformer",
+  insufficient_historical_data: "insufficient_historical_data",
+  historical_confidence_penalty: "historical_confidence_penalty",
+  calibration_error: "calibration_error",
+  low_confidence: "below_ready_confidence",
   similar_to_past_losers: "similar_to_past_losers"
 });
 
@@ -84,16 +92,11 @@ export async function evaluateGeneratedSignalQualityGate(signal, context = {}) {
     return recordAndReturn(signal, blockGate(v2.status, v2.explanation, { qualityGateV2: v2 }, v2), context);
   }
 
-  const confidence = Number(signalWithTimeframeCap.confidenceScore ?? signalWithTimeframeCap.calibratedConfidence ?? 0);
-  if (!Number.isFinite(confidence) || confidence < 62) {
+  const promotionConfidenceGate = evaluateReadyPromotionConfidence(signalWithTimeframeCap, v2);
+  if (promotionConfidenceGate) {
     return recordAndReturn(
       signalWithTimeframeCap,
-      blockGate(
-        "weak_strategy_match",
-        `Calibrated confidence ${Number.isFinite(confidence) ? Math.round(confidence) : 0} is below the 62 ready-promotion minimum.`,
-        { qualityGateV2: v2, confidence, minimumReadyConfidence: 62 },
-        v2
-      ),
+      promotionConfidenceGate,
       context
     );
   }
@@ -142,16 +145,101 @@ export function applyTimeframeConfidencePolicy(signal) {
   if (!signal) return signal;
   const policy = getTimeframeQualityPolicy(signal.timeframe);
   if (!policy.confidenceCap) return signal;
-  const confidenceScore = Math.min(Number(signal.confidenceScore || 0), policy.confidenceCap);
+  const currentConfidence = resolveFinalCalibratedConfidence(signal);
+  if (currentConfidence === null) return signal;
+  const confidenceScore = Math.min(currentConfidence, policy.confidenceCap);
   return {
     ...signal,
     confidenceScore,
+    calibratedConfidence: confidenceScore,
+    finalCalibratedConfidence: confidenceScore,
     indicators: {
       ...(signal.indicators || {}),
       timeframeConfidenceCap: policy.confidenceCap,
       timeframeConfidenceCapReason: policy.reason
     }
   };
+}
+
+export function evaluateReadyPromotionConfidence(signal, qualityGateV2 = null) {
+  const confidenceCalibration = signal?.confidenceCalibration || signal?.indicators?.confidenceCalibration || {};
+  const historicalCalibration = signal?.indicators?.historicalStrategyCalibration || {};
+  const calibrationError = confidenceCalibration.status === "calibration_error" ||
+    historicalCalibration.status === "calibration_error";
+  if (calibrationError) {
+    const technicalError = historicalCalibration.technicalError || confidenceCalibration.technicalError || "Confidence calibration failed.";
+    return blockGate(
+      "calibration_error",
+      "Confidence calibration failed, so this candidate remains admin-only.",
+      {
+        qualityGateV2,
+        technicalError,
+        confidenceCalibration,
+        historicalCalibration
+      },
+      qualityGateV2
+    );
+  }
+
+  const confidence = resolveFinalCalibratedConfidence(signal);
+  if (confidence === null) {
+    return blockGate(
+      "calibration_error",
+      "Final calibrated confidence is unavailable, so this candidate remains admin-only.",
+      { qualityGateV2, technicalError: "No finite positive final calibrated confidence.", confidenceCalibration, historicalCalibration },
+      qualityGateV2
+    );
+  }
+  if (confidence >= 62) return null;
+
+  const insufficient = ["insufficient_data", "needs_more_data"].includes(confidenceCalibration.status) ||
+    ["insufficient_data", "needs_more_data"].includes(historicalCalibration.status);
+  const historicalPenalty = Number(confidenceCalibration.totalPenalty || 0) < 0 ||
+    Number(historicalCalibration.historicalCalibrationAdjustment ?? historicalCalibration.penalty ?? 0) < 0;
+  const type = insufficient
+    ? "insufficient_historical_data"
+    : historicalPenalty
+      ? "historical_confidence_penalty"
+      : "low_confidence";
+  const reason = insufficient
+    ? `Final confidence ${Math.round(confidence)} is below the 62 ready-promotion minimum while historical calibration has insufficient data.`
+    : historicalPenalty
+      ? `Historical calibration reduced final confidence to ${Math.round(confidence)}, below the 62 ready-promotion minimum.`
+      : `Final confidence ${Math.round(confidence)} is below the 62 ready-promotion minimum.`;
+  return blockGate(
+    type,
+    reason,
+    {
+      qualityGateV2,
+      confidence,
+      minimumReadyConfidence: 62,
+      strategyMatchScore: historicalCalibration.strategyMatchScore ?? confidenceCalibration.strategyMatchScore ?? null,
+      confidenceCalibration,
+      historicalCalibration
+    },
+    qualityGateV2
+  );
+}
+
+export function resolveFinalCalibratedConfidence(signal = {}) {
+  const historical = signal.indicators?.historicalStrategyCalibration || {};
+  const calibration = signal.confidenceCalibration || signal.indicators?.confidenceCalibration || {};
+  const values = [
+    signal.finalCalibratedConfidence,
+    signal.calibratedConfidence,
+    signal.confidenceScore,
+    historical.finalCalibratedConfidence,
+    historical.calibratedConfidence,
+    calibration.finalCalibratedConfidence,
+    calibration.finalConfidence,
+    calibration.calibratedConfidence
+  ];
+  for (const value of values) {
+    if (value === null || value === undefined || value === "") continue;
+    const number = Number(value);
+    if (Number.isFinite(number) && number > 0) return Math.min(99, number);
+  }
+  return null;
 }
 
 export function getTimeframeQualityPolicy(timeframe) {

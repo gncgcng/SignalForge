@@ -272,7 +272,8 @@ function validateHistoricalContext(signal, context) {
   const action = normalize(historical.action || "");
   const layer = normalize(historical.evidenceLayer || "");
   const hardBlock = historical.hardBlockEligible === true || action === "block";
-  const exactEvidence = layer === "exact_strategy_pair_timeframe_regime" || historical.evidenceSpecificity === "specific";
+  const exactEvidence = layer === "exact_strategy_pair_timeframe_direction_regime" ||
+    (layer === "exact_strategy_pair_timeframe_regime" && Boolean(historical.direction || stats.direction));
   if (hardBlock && exactEvidence && setups >= 30 && Number.isFinite(expectancy) && expectancy < 0) {
     return fail("historical_strategy_performance", "historical_underperformer", "negative_historical_expectancy", "Exact historical strategy evidence is very negative for this setup context.", "medium");
   }

@@ -108,8 +108,9 @@ const broadUnderperformer = classifyHistoricalEvidence({
 assert.equal(broadUnderperformer.action, "cap");
 
 const exactHardBlock = classifyHistoricalEvidence({
-  evidenceLayer: "exact_strategy_pair_timeframe_regime",
-  evidenceLayerLabel: "Exact strategy, pair, timeframe, and regime",
+  evidenceLayer: "exact_strategy_pair_timeframe_direction_regime",
+  evidenceLayerLabel: "Exact strategy, pair, timeframe, direction, and regime",
+  direction: "long",
   validSetupCount: 35,
   hitTp: 4,
   hitSl: 24,
@@ -118,6 +119,73 @@ const exactHardBlock = classifyHistoricalEvidence({
   breakEvenWinRate: 34
 });
 assert.equal(exactHardBlock.action, "block");
+
+const exactWithoutDirection = classifyHistoricalEvidence({
+  evidenceLayer: "exact_strategy_pair_timeframe_regime",
+  evidenceLayerLabel: "Strategy, pair, timeframe, and regime",
+  validSetupCount: 35,
+  hitTp: 4,
+  hitSl: 24,
+  expectancy: -0.72,
+  winRate: 14,
+  breakEvenWinRate: 34
+});
+assert.notEqual(exactWithoutDirection.action, "block", "historical evidence without direction is not specific enough to hard-block");
+
+const noHistoryCalibration = applyHistoricalStrategyContext({
+  confidenceScore: 90,
+  rawSetupScore: 90,
+  qualityScore: 100,
+  readinessScore: 100,
+  setupType: "Trend continuation",
+  symbol: "BTC-USD",
+  timeframe: "15m",
+  direction: "long",
+  indicators: {}
+}, { stat: null, similarity: null });
+assert.equal(noHistoryCalibration.confidenceScore, 82);
+assert.equal(noHistoryCalibration.calibratedConfidence, 82);
+assert.equal(noHistoryCalibration.indicators.historicalStrategyCalibration.status, "insufficient_data");
+assert.equal(noHistoryCalibration.indicators.historicalStrategyCalibration.historicalCalibrationAdjustment, -3);
+assert.notEqual(noHistoryCalibration.confidenceScore, 50);
+
+const broadWeakCalibration = applyHistoricalStrategyContext({
+  confidenceScore: 86,
+  rawSetupScore: 86,
+  setupType: "Trend continuation",
+  symbol: "ETH-USD",
+  timeframe: "15m",
+  direction: "long",
+  indicators: {}
+}, {
+  stat: {
+    evidenceLayer: "strategy_overall",
+    evidenceLayerLabel: "Strategy overall",
+    validSetupCount: 45,
+    walkForwardStatus: "failed_validation",
+    expectancy: -0.55,
+    winRate: 18,
+    breakEvenWinRate: 35,
+    expiredRate: 10
+  }
+});
+assert.equal(broadWeakCalibration.indicators.historicalStrategyCalibration.hardBlockEligible, false);
+assert.notEqual(broadWeakCalibration.historicalStrategyStatus, "historical_underperformer");
+assert.ok(broadWeakCalibration.confidenceScore >= 65, "broad strategy weakness should cap/penalize rather than collapse strong current confidence");
+
+const failedCalibration = applyHistoricalStrategyContext({
+  confidenceScore: 88,
+  rawSetupScore: 90,
+  setupType: "Trend continuation",
+  symbol: "SOL-USD",
+  timeframe: "15m",
+  direction: "long",
+  indicators: {}
+}, { calibrationError: "backtest query failed" });
+assert.equal(failedCalibration.historicalStrategyStatus, "calibration_error");
+assert.equal(failedCalibration.calibratedConfidence, null);
+assert.match(failedCalibration.indicators.historicalStrategyCalibration.technicalError, /query failed/);
+assert.notEqual(failedCalibration.confidenceScore, 50);
 
 const misreadRetest = validateStrategyStrictness({
   setupType: "Breakout retest",

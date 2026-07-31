@@ -167,8 +167,13 @@ export function calculateGroupMetrics(row = {}) {
 
 export async function applyConfidenceCalibration(signal) {
   if (!signal) return signal;
-  const context = await getSignalCalibrationContext(signal);
-  return applyCalibrationContext(signal, context);
+  try {
+    const context = await getSignalCalibrationContext(signal);
+    return applyCalibrationContext(signal, context);
+  } catch (error) {
+    console.warn(`[confidence-calibration] failed stage=generated_history reason=${error.message}`);
+    return applyCalibrationError(signal, error, "generated_history");
+  }
 }
 
 export function isSignalBlockedByCalibration(signal) {
@@ -179,6 +184,7 @@ export function isSignalBlockedByCalibration(signal) {
     ["quarantined", "disabled_by_admin"].includes(group.status)
   );
   const broadDirectionOnly = blockingGroups.length > 0 && blockingGroups.every(isBroadDirectionGroup);
+  if (status === "calibration_error") return true;
   if (evidence?.groupType === "direction" || evidence?.hardBlockEligible === false) return false;
   if (!evidence && broadDirectionOnly) return false;
   if (status === "disabled_by_admin") return evidence ? evidence.hardBlockEligible !== false : true;
@@ -191,10 +197,16 @@ export function applyCalibrationContext(signal, context = {}) {
     ...context,
     groups: (context.groups || []).map(normalizeCalibrationGroupScope)
   };
-  const originalConfidence = Number(signal.confidenceScore || 0);
+  if (context.calibrationError) {
+    return applyCalibrationError(signal, context.calibrationError, context.calibrationStage || "generated_history");
+  }
+  const originalConfidence = resolveRawConfidence(signal);
+  if (originalConfidence === null) {
+    return applyCalibrationError(signal, "No finite positive raw confidence was available.", "raw_confidence");
+  }
   const rawSetupScore = originalConfidence;
   let ruleCap = 99;
-  let historicalCap = context.noHistory ? 85 : 99;
+  let historicalCap = context.noHistory ? 82 : 99;
   let expectancyCap = HIGH_CONFIDENCE_EXPECTANCY_CAP;
   let penalty = 0;
   const caps = [];
@@ -215,7 +227,10 @@ export function applyCalibrationContext(signal, context = {}) {
     penalties.push({ points: Number(points), reason, group });
   };
 
-  if (context.noHistory) caps.push({ cap: 85, reason: "No generated-signal history yet for this strategy or pair/timeframe.", type: "historical" });
+  if (context.noHistory) {
+    caps.push({ cap: 82, reason: "Insufficient generated-signal history; current setup confidence is retained with a small uncertainty adjustment.", type: "historical" });
+    addPenalty(-3, "Insufficient generated-signal history for reliable calibration.");
+  }
   const timeframePolicy = getStaticTimeframePolicy(signal.timeframe);
   if (timeframePolicy.confidenceCap) addCap(timeframePolicy.confidenceCap, timeframePolicy.reason, "historical");
   if (hasMissingHigherTimeframe(signal)) addCap(82, "Missing or partial higher-timeframe confirmation.");
@@ -316,25 +331,41 @@ export function applyCalibrationContext(signal, context = {}) {
   }
 
   const confidenceCap = Math.min(ruleCap, historicalCap, expectancyCap);
-  const boundedPenalty = Math.max(penalty, hardBlockGroup ? -35 : -18);
-  const uncertainHistoryFloor = !hardBlockGroup && originalConfidence >= 62
-    ? Math.min(originalConfidence, context.noHistory ? 68 : 62)
-    : 50;
-  const finalConfidence = Math.min(confidenceCap, Math.max(uncertainHistoryFloor, originalConfidence + boundedPenalty));
+  const boundedPenalty = Math.max(penalty, hardBlockGroup ? -35 : -12);
+  const finalConfidence = Math.min(confidenceCap, Math.max(0, originalConfidence + boundedPenalty));
   const status = hardBlockGroup?.status ||
-    (exactNegative ? "watching" : severeStrategy || severePairTimeframe ? "reduced_confidence" : poorGroups.length ? "watchlist" : "active");
+    (exactNegative
+      ? "reduced_confidence"
+      : severeStrategy || severePairTimeframe
+        ? "reduced_confidence"
+        : poorGroups.length
+          ? "watchlist"
+          : context.noHistory
+            ? "insufficient_data"
+            : "active");
   const calibrationReason = status === "active"
     ? CONFIDENCE_COPY
+    : status === "insufficient_data"
+      ? "Historical sample is insufficient, so only a small uncertainty adjustment was applied."
     : status === "watching"
       ? "Historical performance reduced confidence. Setup is watching, not ready."
       : "Confidence was reduced because generated-signal outcomes for similar setups are below calibration thresholds.";
   const roundedFinalConfidence = Math.round(finalConfidence);
+  const strategyMatchScore = resolveStrategyMatchScore(signal);
+  const historicalGroup = selectCalibrationEvidenceGroup(context.groups || []);
   const calibrationPayload = {
     version: CONFIDENCE_CALIBRATION_VERSION,
     rawSetupScore,
     originalConfidence,
     calibratedConfidence: roundedFinalConfidence,
     finalConfidence: roundedFinalConfidence,
+    finalCalibratedConfidence: roundedFinalConfidence,
+    strategyMatchScore,
+    historicalCalibrationAdjustment: boundedPenalty,
+    historicalGroupUsed: historicalGroup ? summarizeGroupForSignal(historicalGroup) : null,
+    historicalSampleSize: Number(historicalGroup?.closedSignals || 0),
+    historicalWinRate: historicalGroup?.winRate ?? null,
+    historicalExpectancy: historicalGroup?.estimatedExpectancy ?? null,
     confidenceCap,
     totalPenalty: boundedPenalty,
     unboundedPenalty: penalty,
@@ -346,6 +377,13 @@ export function applyCalibrationContext(signal, context = {}) {
     blocked: Boolean(hardBlockGroup),
     blockingEvidence: hardBlockGroup ? summarizeGroupForSignal(hardBlockGroup) : null,
     calibrationReason,
+    primaryDecisionReason: hardBlockGroup
+      ? "exact_historical_underperformance"
+      : status === "insufficient_data"
+        ? "insufficient_historical_data"
+        : boundedPenalty < 0
+          ? "historical_confidence_penalty"
+          : "calibration_applied",
     message: CONFIDENCE_COPY,
     groups: (context.groups || []).map(summarizeGroupForSignal)
   };
@@ -354,9 +392,62 @@ export function applyCalibrationContext(signal, context = {}) {
     ...signal,
     confidenceScore: roundedFinalConfidence,
     calibratedConfidence: roundedFinalConfidence,
+    finalCalibratedConfidence: roundedFinalConfidence,
     rawSetupScore,
     confidenceVersion: CONFIDENCE_CALIBRATION_VERSION,
     calibrationReason,
+    confidenceCalibration: calibrationPayload,
+    indicators: {
+      ...(signal.indicators || {}),
+      confidenceCalibration: calibrationPayload,
+      confidenceCalibrationMessage: CONFIDENCE_COPY,
+      confidenceCalibrationApplied: true
+    }
+  };
+}
+
+export function applyCalibrationError(signal, error, stage = "calibration") {
+  const rawSetupScore = resolveRawConfidence(signal);
+  const technicalError = String(error?.message || error || "Unknown calibration error").slice(0, 500);
+  const calibrationPayload = {
+    version: CONFIDENCE_CALIBRATION_VERSION,
+    rawSetupScore,
+    originalConfidence: rawSetupScore,
+    calibratedConfidence: null,
+    finalConfidence: null,
+    finalCalibratedConfidence: null,
+    strategyMatchScore: resolveStrategyMatchScore(signal),
+    historicalCalibrationAdjustment: null,
+    historicalGroupUsed: null,
+    historicalSampleSize: 0,
+    historicalWinRate: null,
+    historicalExpectancy: null,
+    confidenceCap: null,
+    totalPenalty: null,
+    caps: [],
+    penalties: [],
+    status: "calibration_error",
+    label: "Calibration error",
+    blocked: true,
+    blockingEvidence: {
+      groupType: "calibration",
+      groupValue: stage,
+      hardBlockEligible: true
+    },
+    calibrationReason: "Confidence calibration failed; candidate remains admin-only.",
+    primaryDecisionReason: "calibration_error",
+    technicalError,
+    message: CONFIDENCE_COPY,
+    groups: []
+  };
+  return {
+    ...signal,
+    ...(rawSetupScore === null ? {} : { confidenceScore: rawSetupScore }),
+    calibratedConfidence: null,
+    finalCalibratedConfidence: null,
+    rawSetupScore,
+    confidenceVersion: CONFIDENCE_CALIBRATION_VERSION,
+    calibrationReason: calibrationPayload.calibrationReason,
     confidenceCalibration: calibrationPayload,
     indicators: {
       ...(signal.indicators || {}),
@@ -969,6 +1060,8 @@ export function calibrationStatusForGroup(group = {}) {
 }
 
 function confidenceQualityLabel(confidence, status = "active") {
+  if (status === "calibration_error") return "Calibration error";
+  if (status === "insufficient_data") return "Insufficient data";
   if (status === "diagnostic_only") return "Reduced confidence";
   if (["quarantined", "disabled_by_admin"].includes(status)) return "Quarantined";
   if (status === "reduced_confidence") return "Reduced confidence";
@@ -1015,6 +1108,63 @@ function titleCase(value) {
 function finiteOrNull(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+function resolveRawConfidence(signal = {}) {
+  return firstPositiveFinite(
+    signal.rawConfidence,
+    signal.rawSetupScore,
+    signal.confidenceCalibration?.rawSetupScore,
+    signal.indicators?.confidenceCalibration?.rawSetupScore,
+    signal.confidenceScore,
+    signal.confidence,
+    signal.qualityScore,
+    signal.setupQualityScore,
+    signal.candidateScore,
+    signal.confidenceEstimate
+  );
+}
+
+function resolveStrategyMatchScore(signal = {}) {
+  const patternConfidence = signal.patternContext?.confidence ?? signal.indicators?.patternContext?.confidence;
+  const normalizedPatternConfidence = Number(patternConfidence);
+  return firstPositiveFinite(
+    signal.strategyMatchScore,
+    signal.indicators?.strategyMatchScore,
+    signal.learnedPattern?.patternMatchScore,
+    signal.indicators?.learnedPattern?.patternMatchScore,
+    Number.isFinite(normalizedPatternConfidence) && normalizedPatternConfidence <= 1
+      ? normalizedPatternConfidence * 100
+      : normalizedPatternConfidence
+  );
+}
+
+function selectCalibrationEvidenceGroup(groups = []) {
+  const priority = [
+    "exact_signal_context",
+    "source_strategy_timeframe",
+    "pair_timeframe",
+    "strategy",
+    "timeframe",
+    "pair"
+  ];
+  const sampledGroups = groups.filter((group) => Number(group.closedSignals || 0) > 0);
+  return (sampledGroups.length ? sampledGroups : groups).slice().sort((left, right) => {
+    const leftPriority = priority.indexOf(left.groupType);
+    const rightPriority = priority.indexOf(right.groupType);
+    const specificity = (leftPriority < 0 ? 999 : leftPriority) - (rightPriority < 0 ? 999 : rightPriority);
+    if (specificity) return specificity;
+    return Number(right.closedSignals || 0) - Number(left.closedSignals || 0);
+  })[0] || null;
+}
+
+function firstPositiveFinite(...values) {
+  for (const value of values) {
+    if (value === null || value === undefined || value === "") continue;
+    const number = Number(value);
+    if (Number.isFinite(number) && number > 0) return Math.max(0, Math.min(99, number));
+  }
+  return null;
 }
 
 function hash(value) {

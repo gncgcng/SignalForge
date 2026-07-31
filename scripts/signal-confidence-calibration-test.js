@@ -77,9 +77,34 @@ assert.equal(noHistory.confidenceScore, 72, "choppy/range cap should dominate we
 assert.equal(noHistory.confidenceCalibration.rawSetupScore, 91);
 assert.equal(noHistory.confidenceCalibration.calibratedConfidence, 72);
 assert.equal(noHistory.confidenceCalibration.version, "calibration_v2");
-assert.ok(noHistory.indicators.confidenceCalibration.caps.some((item) => item.cap === 85));
+assert.ok(noHistory.indicators.confidenceCalibration.caps.some((item) => item.cap === 82));
 assert.ok(noHistory.indicators.confidenceCalibration.caps.some((item) => item.cap === 80));
 assert.ok(noHistory.indicators.confidenceCalibration.caps.some((item) => item.cap === 72));
+assert.equal(noHistory.indicators.confidenceCalibration.status, "insufficient_data");
+assert.equal(noHistory.indicators.confidenceCalibration.primaryDecisionReason, "insufficient_historical_data");
+assert.notEqual(noHistory.confidenceScore, 0);
+assert.notEqual(noHistory.confidenceScore, 50);
+
+const highQualityNoHistory = applyCalibrationContext({
+  symbol: "BTC-USD",
+  timeframe: "15m",
+  direction: "long",
+  setupType: "Trend Continuation",
+  rawConfidence: 90,
+  qualityScore: 100,
+  readinessScore: 100,
+  entryQuality: "excellent",
+  riskRewardRatio: 2.2,
+  alignmentBadge: "Full Alignment",
+  confluenceScore: 90,
+  confirmations: [{ name: "Volume", passed: true }],
+  indicators: { regime: "Trend Up", readinessScore: 100 }
+}, { noHistory: true, groups: [] });
+assert.equal(highQualityNoHistory.rawSetupScore, 90);
+assert.equal(highQualityNoHistory.confidenceScore, 82);
+assert.equal(highQualityNoHistory.calibratedConfidence, 82);
+assert.equal(highQualityNoHistory.confidenceCalibration.status, "insufficient_data");
+assert.notEqual(highQualityNoHistory.confidenceScore, 50);
 
 const underperforming = applyCalibrationContext({ ...baseSignal, confidenceScore: 92, indicators: { readinessScore: 95 }, alignmentBadge: "Full Alignment", confirmations: [{ name: "Volume", passed: true }] }, {
   noHistory: false,
@@ -106,8 +131,8 @@ const broadWeaknessDoesNotCollapse = applyCalibrationContext({
     { groupKey: "direction:broad", groupType: "direction", groupValue: "long", closedSignals: 12, winRate: 25, breakEvenWinRate: 33, estimatedExpectancy: -0.2, expiredRate: 10, status: "watchlist", penalty: -10 }
   ]
 });
-assert.equal(broadWeaknessDoesNotCollapse.confidenceScore, 62, "broad historical weakness should cap/penalize without collapsing a valid setup to 50");
-assert.equal(broadWeaknessDoesNotCollapse.confidenceCalibration.totalPenalty, -18);
+assert.equal(broadWeaknessDoesNotCollapse.confidenceScore, 58, "multiple broad weak groups may reduce confidence without a hardcoded 50 floor");
+assert.equal(broadWeaknessDoesNotCollapse.confidenceCalibration.totalPenalty, -12);
 assert.equal(broadWeaknessDoesNotCollapse.confidenceCalibration.unboundedPenalty, -23, "direction contributes at most a three-point diagnostic penalty");
 
 const blocked = applyCalibrationContext({ ...baseSignal, confidenceScore: 90, riskRewardRatio: 2.4, indicators: { readinessScore: 95 }, alignmentBadge: "Full Alignment", confirmations: [{ name: "Volume", passed: true }] }, {
@@ -131,6 +156,32 @@ const exactBlocked = applyCalibrationContext({ ...baseSignal, confidenceScore: 9
 });
 assert.equal(exactBlocked.indicators.confidenceCalibration.blocked, true, "exact underperforming contexts with enough closed signals can block promotion/alerts");
 assert.equal(isSignalBlockedByCalibration(exactBlocked), true, "specific exact-context quarantine remains a hard block");
+
+const exactMediumSample = applyCalibrationContext({
+  ...baseSignal,
+  confidenceScore: 86,
+  riskRewardRatio: 2.4,
+  indicators: { readinessScore: 95, regime: "Trend Up" },
+  alignmentBadge: "Full Alignment",
+  confirmations: [{ name: "Volume", passed: true }]
+}, {
+  noHistory: false,
+  groups: [{
+    groupKey: "exact_signal_context:auto-crypto-watcher:trend-continuation:btc-usd:15m:long:trend-up",
+    groupType: "exact_signal_context",
+    groupValue: "auto_crypto_watcher:Trend Continuation:BTC-USD:15m:long:Trend Up",
+    closedSignals: 24,
+    winRate: 20,
+    breakEvenWinRate: 33,
+    estimatedExpectancy: -0.35,
+    status: "reduced_confidence",
+    penalty: -6,
+    confidenceCap: 75
+  }]
+});
+assert.equal(exactMediumSample.confidenceCalibration.blocked, false, "20-29 exact samples may penalize but cannot hard-block");
+assert.equal(exactMediumSample.confidenceCalibration.status, "reduced_confidence");
+assert.equal(isSignalBlockedByCalibration(exactMediumSample), false);
 
 for (const direction of ["long", "short"]) {
   const directionOnly = applyCalibrationContext({
@@ -198,6 +249,19 @@ assert.equal(isSignalBlockedByCalibration({
   }
 }), false, "legacy calibration JSON without blocking evidence must not block when direction is the only broad group");
 
+const calibrationError = applyCalibrationContext({
+  symbol: "BTC-USD",
+  timeframe: "15m",
+  direction: "long",
+  setupType: "Trend Continuation",
+  qualityScore: 0
+}, { noHistory: true, groups: [] });
+assert.equal(calibrationError.confidenceCalibration.status, "calibration_error");
+assert.equal(calibrationError.calibratedConfidence, null);
+assert.equal(calibrationError.confidenceCalibration.primaryDecisionReason, "calibration_error");
+assert.notEqual(calibrationError.confidenceScore, 50);
+assert.equal(isSignalBlockedByCalibration(calibrationError), true);
+
 const sampleGroups = [
   { groupKey: "strategy:tiny", groupType: "strategy", groupValue: "Tiny Winner", closedSignals: 3, winRate: 100, breakEvenWinRate: 30, estimatedExpectancy: 2.1, expiredRate: 0, confidenceGap: -10 },
   { groupKey: "strategy:steady", groupType: "strategy", groupValue: "Steady Retest", closedSignals: 30, winRate: 48, breakEvenWinRate: 28, estimatedExpectancy: 0.52, expiredRate: 5, confidenceGap: 2 },
@@ -223,7 +287,7 @@ const recovered = applyCalibrationContext({
   noHistory: true,
   groups: [{ groupKey: "strategy:steady", groupType: "strategy", groupValue: "Steady Retest", closedSignals: 30, winRate: 48, breakEvenWinRate: 28, estimatedExpectancy: 0.52, expiredRate: 5, confidenceCapLift: 5, status: "active" }]
 });
-assert.equal(recovered.confidenceScore, 88, "broad positive history cannot lift confidence above 88 without exact source/strategy/timeframe proof");
+assert.equal(recovered.confidenceScore, 87, "insufficient exact history keeps a small uncertainty penalty even with broad positive history");
 assert.ok(recovered.indicators.confidenceCalibration.caps.some((item) => item.cap === 88));
 
 const exactRecovered = applyCalibrationContext({

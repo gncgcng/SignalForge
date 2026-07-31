@@ -7,11 +7,33 @@ export async function upsertGeneratedSignal(signal, context = {}) {
   const dedupeKey = buildGeneratedSignalKey(signal);
   const pattern = signal.patternContext || signal.indicators?.patternContext || null;
   const source = normalizeSource(context.source);
-  const calibration = signal.confidenceCalibration || signal.indicators?.confidenceCalibration || {};
-  const originalConfidence = calibration.rawSetupScore ?? calibration.originalConfidence ?? signal.rawSetupScore ?? signal.confidenceScore;
-  const calibratedConfidence = calibration.calibratedConfidence ?? calibration.finalConfidence ?? signal.calibratedConfidence ?? signal.confidenceScore;
+  const baseCalibration = signal.confidenceCalibration || signal.indicators?.confidenceCalibration || {};
+  const historicalCalibration = signal.indicators?.historicalStrategyCalibration || {};
+  const originalConfidence = baseCalibration.rawSetupScore ?? baseCalibration.originalConfidence ?? signal.rawSetupScore ?? signal.rawConfidence ?? signal.confidenceScore;
+  const calibratedConfidence = signal.finalCalibratedConfidence ?? signal.calibratedConfidence ?? signal.confidenceScore ??
+    historicalCalibration.finalCalibratedConfidence ?? historicalCalibration.calibratedConfidence ??
+    baseCalibration.finalCalibratedConfidence ?? baseCalibration.calibratedConfidence ?? baseCalibration.finalConfidence;
+  const calibration = {
+    ...baseCalibration,
+    rawConfidence: originalConfidence,
+    strategyMatchScore: historicalCalibration.strategyMatchScore ?? baseCalibration.strategyMatchScore ?? null,
+    historicalStrategy: historicalCalibration,
+    historicalCalibrationAdjustment: historicalCalibration.historicalCalibrationAdjustment ?? baseCalibration.historicalCalibrationAdjustment ?? null,
+    finalCalibratedConfidence: calibratedConfidence,
+    calibratedConfidence,
+    finalConfidence: calibratedConfidence,
+    primaryDecisionReason: signal.generatedQualityGate?.reasonCode ||
+      historicalCalibration.primaryDecisionReason ||
+      baseCalibration.primaryDecisionReason ||
+      null
+  };
   const confidenceVersion = calibration.version || signal.confidenceVersion || "calibration_v1";
-  const calibrationReason = calibration.calibrationReason || signal.calibrationReason || calibration.message || null;
+  const calibrationReason = signal.historicalStrategyReason ||
+    (historicalCalibration.reasons || []).join(" ") ||
+    calibration.calibrationReason ||
+    signal.calibrationReason ||
+    calibration.message ||
+    null;
   const result = await query(`
     INSERT INTO generated_signals (
       id, signal_id, dedupe_key, setup_key, pair, display_pair, provider, timeframe, direction,
@@ -344,6 +366,10 @@ function isBlockedGeneratedStatus(status) {
     "Weak risk/reward",
     "Bad market regime",
     "Historical underperformer",
+    "Insufficient historical data",
+    "Historical confidence penalty",
+    "Calibration error",
+    "Confidence below promotion minimum",
     "Similar to past losers",
     "Invalid legacy ready signal",
     "Strategy Misread Rejected",
@@ -382,8 +408,23 @@ async function updateGeneratedSignalAnnotations(id, signal) {
 }
 
 async function recordGeneratedSignalConfidenceAdjustment(row, signal) {
-  const calibration = signal.confidenceCalibration || signal.indicators?.confidenceCalibration || {};
-  if (!calibration?.originalConfidence && !calibration?.totalPenalty && !calibration?.confidenceCap) return;
+  const baseCalibration = signal.confidenceCalibration || signal.indicators?.confidenceCalibration || {};
+  const historicalCalibration = signal.indicators?.historicalStrategyCalibration || {};
+  const finalConfidence = signal.finalCalibratedConfidence ?? signal.calibratedConfidence ??
+    row.calibrated_confidence ?? signal.confidenceScore ?? row.confidence;
+  const calibration = {
+    ...baseCalibration,
+    historicalStrategy: historicalCalibration,
+    strategyMatchScore: historicalCalibration.strategyMatchScore ?? baseCalibration.strategyMatchScore ?? null,
+    finalCalibratedConfidence: finalConfidence,
+    calibratedConfidence: finalConfidence,
+    finalConfidence,
+    primaryDecisionReason: signal.generatedQualityGate?.reasonCode ||
+      historicalCalibration.primaryDecisionReason ||
+      baseCalibration.primaryDecisionReason ||
+      null
+  };
+  if (!calibration?.originalConfidence && !calibration?.totalPenalty && !calibration?.confidenceCap && !historicalCalibration.status) return;
   await query(`
     INSERT INTO signal_confidence_adjustments (
       id, signal_id, group_key, original_confidence, final_confidence,
@@ -402,7 +443,7 @@ async function recordGeneratedSignalConfidenceAdjustment(row, signal) {
     row.signal_id,
     calibration.groups?.[0]?.groupKey || null,
     calibration.originalConfidence ?? row.original_confidence ?? row.confidence,
-    calibration.finalConfidence ?? row.confidence,
+    finalConfidence,
     calibration.confidenceCap ?? null,
     calibration.totalPenalty ?? 0,
     calibration.message || null,

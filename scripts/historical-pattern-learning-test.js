@@ -144,16 +144,23 @@ const exactBadEvidence = classifyHistoricalEvidence({
   breakEvenWinRate: 35,
   hitTp: 3,
   hitSl: 20,
-  evidenceLayer: "exact_strategy_pair_timeframe_regime",
-  evidenceLayerLabel: "Exact group"
+  evidenceLayer: "exact_strategy_pair_timeframe_direction_regime",
+  evidenceLayerLabel: "Exact direction-specific group",
+  direction: "short"
 });
 assert.equal(exactBadEvidence.action, "block", "exact bad groups with enough evidence can still hard-block");
 
 const readyTelegram = evaluateGeneratedSignalTelegramDecision({
+  setupKey: "BTC-USD:15m:long:history-test",
   status: "Active",
   source: "manual_scan",
+  symbol: "BTC-USD",
   timeframe: "15m",
   direction: "long",
+  entryPrice: 100,
+  stopLoss: 97,
+  takeProfit: 106,
+  riskRewardRatio: 2,
   confidenceScore: Math.max(76, appConfig.telegram.readyAlertMinConfidence),
   readinessScore: 90,
   qualityGatePassed: true,

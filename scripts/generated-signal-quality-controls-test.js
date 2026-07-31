@@ -3,11 +3,13 @@ import { readFileSync } from "node:fs";
 import {
   applyGeneratedSignalQualityBlock,
   applyTimeframeConfidencePolicy,
+  evaluateReadyPromotionConfidence,
   getFailureCooldownMs,
   getTimeframeQualityPolicy,
   isNearbyTimeframe,
   isSimilarEntryPrice,
-  isSimilarStrategyOrPattern
+  isSimilarStrategyOrPattern,
+  resolveFinalCalibratedConfidence
 } from "../src/modules/signals/generatedSignalQualityGate.js";
 
 const signalService = readFileSync("src/modules/signals/signalService.js", "utf8");
@@ -40,6 +42,53 @@ const capped = applyTimeframeConfidencePolicy({ timeframe: "1h", confidenceScore
 assert.equal(capped.confidenceScore, 72, "1h confidence should be capped to 72 without hard blocking");
 const fourHour = applyTimeframeConfidencePolicy({ timeframe: "4h", confidenceScore: 94, indicators: {} });
 assert.equal(fourHour.confidenceScore, 82, "4h confidence should be capped for low sample size, not blocked");
+
+const passedV2 = { version: "quality_gate_v2", passed: true, status: "passed" };
+const sensibleInsufficientHistory = {
+  timeframe: "15m",
+  confidenceScore: 82,
+  calibratedConfidence: 82,
+  finalCalibratedConfidence: 82,
+  confidenceCalibration: { status: "insufficient_data", calibratedConfidence: 82 },
+  indicators: {
+    historicalStrategyCalibration: {
+      status: "insufficient_data",
+      calibratedConfidence: 82,
+      historicalCalibrationAdjustment: -3
+    }
+  }
+};
+assert.equal(evaluateReadyPromotionConfidence(sensibleInsufficientHistory, passedV2), null, "Quality Gate-passed candidate keeps sensible confidence");
+assert.equal(resolveFinalCalibratedConfidence({ confidenceScore: 90, calibratedConfidence: 0 }), 90, "invalid zero calibration does not override real confidence");
+
+const insufficientLow = evaluateReadyPromotionConfidence({
+  ...sensibleInsufficientHistory,
+  confidenceScore: 60,
+  calibratedConfidence: 60,
+  finalCalibratedConfidence: 60
+}, passedV2);
+assert.equal(insufficientLow.type, "insufficient_historical_data");
+assert.notEqual(insufficientLow.type, "weak_strategy_match");
+assert.doesNotMatch(insufficientLow.reason, /Weak strategy match/i);
+
+const historicalPenaltyLow = evaluateReadyPromotionConfidence({
+  timeframe: "15m",
+  confidenceScore: 59,
+  finalCalibratedConfidence: 59,
+  confidenceCalibration: { status: "reduced_confidence", totalPenalty: -10 },
+  indicators: {}
+}, passedV2);
+assert.equal(historicalPenaltyLow.type, "historical_confidence_penalty");
+assert.notEqual(historicalPenaltyLow.reasonCode, "weak_strategy_match");
+
+const calibrationFailure = evaluateReadyPromotionConfidence({
+  timeframe: "15m",
+  confidenceScore: 88,
+  confidenceCalibration: { status: "calibration_error", technicalError: "database unavailable" },
+  indicators: {}
+}, passedV2);
+assert.equal(calibrationFailure.type, "calibration_error");
+assert.match(calibrationFailure.details.technicalError, /database unavailable/);
 
 const blocked = applyGeneratedSignalQualityBlock({
   symbol: "BTC-USD",

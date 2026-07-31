@@ -1274,21 +1274,26 @@ function qualityGateToValidation(signal, gate = {}) {
 }
 
 function buildCalibrationBlockedQualityGate(signal) {
-  const reason = signal?.confidenceCalibration?.message ||
-    signal?.indicators?.confidenceCalibration?.message ||
+  const calibration = signal?.confidenceCalibration || signal?.indicators?.confidenceCalibration || {};
+  const calibrationError = calibration.status === "calibration_error";
+  const reason = calibrationError
+    ? "Confidence calibration failed, so this candidate remains admin-only."
+    : calibration.message ||
     "Performance calibration quarantined or disabled this group.";
   return {
     version: "quality_gate_v2",
     passed: false,
-    type: "historical_underperformer",
-    stage: "generated_quality_historical_underperformer",
-    status: "Historical underperformer",
+    type: calibrationError ? "calibration_error" : "historical_underperformer",
+    stage: calibrationError ? "generated_quality_calibration_error" : "generated_quality_historical_underperformer",
+    status: calibrationError ? "Calibration error" : "Historical underperformer",
     reason,
-    reasonCode: "historical_underperformer",
+    reasonCode: calibrationError ? "calibration_error" : "historical_underperformer",
     explanation: reason,
-    userExplanation: "No clean signal yet. Historical calibration blocked this setup group.",
+    userExplanation: calibrationError
+      ? "No clean signal yet. Confidence calibration could not be completed."
+      : "No clean signal yet. Historical calibration blocked this setup group.",
     details: {
-      confidenceCalibration: signal?.confidenceCalibration || signal?.indicators?.confidenceCalibration || {}
+      confidenceCalibration: calibration
     },
     checkedAt: new Date().toISOString()
   };
