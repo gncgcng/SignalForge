@@ -14,6 +14,7 @@ import {
   evaluateGeneratedSignalTelegramDecision,
   recordTelegramAlertDiagnostic
 } from "../notifications/telegramAlertDiagnosticsService.js";
+import { applyFinalSignalDecision } from "../signals/signalDecisionService.js";
 import {
   getGeneratedSignalById,
   getGeneratedSignalStats,
@@ -28,8 +29,12 @@ export async function saveGeneratedSignal(signal, context = {}) {
   const source = context.source || signal.generationSource || signal.source || signal.indicators?.generationSource || "manual_scan";
   const cappedSignal = applyTimeframeConfidencePolicy(signal);
   const evaluatedSignal = await ensureGeneratedSignalQualityGate(cappedSignal, { ...context, source });
-  const stored = await upsertGeneratedSignal(evaluatedSignal, { ...context, source });
-  await recordGeneratedSignalTelegramDecision(stored, evaluatedSignal, { ...context, source });
+  const finalizedSignal = applyFinalSignalDecision({
+    ...evaluatedSignal,
+    source
+  });
+  const stored = await upsertGeneratedSignal(finalizedSignal, { ...context, source });
+  await recordGeneratedSignalTelegramDecision(stored, finalizedSignal, { ...context, source });
   if (stored && ["Hit TP", "Hit SL", "Expired", "Manually closed"].includes(signal.status)) {
     return updateGeneratedSignalStatus(stored.id, signal.status, {
       resolvedAt: signal.resolvedAt || signal.closedAt || new Date(),
@@ -66,6 +71,7 @@ function shouldEvaluateGeneratedSignalQualityGate(source) {
 
 async function recordGeneratedSignalTelegramDecision(stored, signal, context = {}) {
   if (!stored || !shouldEvaluateGeneratedSignalQualityGate(context.source)) return;
+  if (signal.finalDecision === "ready_signal") return;
   const decision = evaluateGeneratedSignalTelegramDecision(signal);
   try {
     await recordTelegramAlertDiagnostic({

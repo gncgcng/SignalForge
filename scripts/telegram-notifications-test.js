@@ -15,6 +15,7 @@ const { sendTelegramMessage } = await import("../src/modules/notifications/teleg
 
 const migration = readFileSync(new URL("../migrations/005_telegram_notifications.sql", import.meta.url), "utf8");
 const duplicatePrecisionMigration = readFileSync(new URL("../migrations/059_signal_duplicate_precision.sql", import.meta.url), "utf8");
+const decisionMigration = readFileSync(new URL("../migrations/060_final_signal_and_telegram_decisions.sql", import.meta.url), "utf8");
 const repositories = readFileSync(new URL("../src/db/repositories.js", import.meta.url), "utf8");
 const signalController = readFileSync(new URL("../src/modules/signals/signalController.js", import.meta.url), "utf8");
 const app = readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
@@ -78,10 +79,12 @@ const result = {
   settingsAndQueuePersisted: migration.includes("telegram_notification_settings") &&
     migration.includes("telegram_notification_queue"),
   duplicateQueueConstraint: duplicatePrecisionMigration.includes("user_id, chat_id, setup_key, alert_type") &&
-    repositories.includes("ON CONFLICT (user_id, chat_id, setup_key, alert_type) DO NOTHING"),
-  queueIsUserScoped: repositories.includes("user_id text NOT NULL") === false &&
+    decisionMigration.includes("user_id, signal_id, alert_type") &&
+    repositories.includes("ON CONFLICT DO NOTHING"),
+  queueIsUserScoped:
     repositories.includes("const setupKey = setup.setupKey || setup.id") &&
-    repositories.includes("userId,\n    setupKey"),
+    repositories.includes("const signalId = setup.signalId || setup.id") &&
+    repositories.includes("id, user_id, signal_id, setup_key, chat_id, alert_type"),
   allCryptoMatchesWithoutFavorite: telegramPreferenceMatchesSetup(settings, new Set(), setup),
   favoriteMarketMatches: telegramPreferenceMatchesSetup(watchlistSettings, favorites, setup),
   nonFavoriteRejected: !telegramPreferenceMatchesSetup(watchlistSettings, new Set(["XAU/USD"]), setup),

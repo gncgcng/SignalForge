@@ -31,10 +31,10 @@ const checks = {
     signalService.includes('const generationSource = generationContext.source || "manual_scan"') &&
     signalService.includes("source: generationSource") &&
     autoScan.includes('source: "auto_crypto_watcher"') &&
-    autoScan.includes('source: "telegram_alert"') &&
-    autoScan.includes("calibrateTelegramAlertSetup") &&
+    !autoScan.includes("calibrateTelegramAlertSetup") &&
+    !autoScan.includes('source: "telegram_alert"') &&
     signalService.includes('source: "candidate_promotion"') &&
-    signalService.includes("candidatePromotionSignal") &&
+    !signalService.includes("candidatePromotionSignal") &&
     signalService.includes("if (signal) {") &&
     signalService.includes("validation?.passed"),
   backtestShadowStored:

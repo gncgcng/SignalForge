@@ -1,6 +1,7 @@
 import { appConfig } from "../../config/appConfig.js";
 import {
   claimNextTelegramNotification,
+  findSuccessfulTelegramDelivery,
   getTelegramSettingsByUser,
   listWatchlistByUser,
   markTelegramNotificationBlocked,
@@ -54,7 +55,7 @@ export async function processTelegramQueue() {
           favoriteSymbols
         });
         if (!eligibility.allowed) {
-          await markTelegramNotificationBlocked(delivery.id, eligibility.reason);
+          await markTelegramNotificationBlocked(delivery.id, eligibility.reason, eligibility.status);
           await recordTelegramAlertDiagnostic({
             signal: delivery.payload,
             userId: delivery.userId,
@@ -70,15 +71,44 @@ export async function processTelegramQueue() {
           continue;
         }
         if (isSignalExpired(delivery.payload)) {
-          await markTelegramNotificationFailed(delivery.id, "Signal expired before Telegram delivery.", false);
+          await markTelegramNotificationBlocked(
+            delivery.id,
+            "Signal expired before Telegram delivery.",
+            "telegram_blocked_expired"
+          );
           await recordTelegramAlertDiagnostic({
             signal: delivery.payload,
             userId: delivery.userId,
-            status: "blocked_signal_expired_before_delivery",
+            status: "telegram_blocked_expired",
             reason: "Signal expired before Telegram delivery.",
             details: { queueId: delivery.id }
           });
           console.info(`[telegram] expired alert skipped queue_id=${delivery.id} user=${delivery.userId}`);
+          continue;
+        }
+        const priorSuccessfulDelivery = await findSuccessfulTelegramDelivery(
+          delivery.userId,
+          delivery.signalId || delivery.payload.signalId || delivery.payload.id,
+          delivery.id
+        );
+        if (priorSuccessfulDelivery) {
+          await markTelegramNotificationBlocked(
+            delivery.id,
+            "This exact signal was already sent successfully to this user.",
+            "telegram_blocked_already_sent"
+          );
+          await recordTelegramAlertDiagnostic({
+            signal: delivery.payload,
+            userId: delivery.userId,
+            status: "telegram_blocked_already_sent",
+            reason: "This exact signal was already sent successfully to this user.",
+            details: {
+              ...eligibility.details,
+              queueId: delivery.id,
+              existingQueueId: priorSuccessfulDelivery.id,
+              existingTelegramMessageId: priorSuccessfulDelivery.telegram_message_id
+            }
+          });
           continue;
         }
         console.log(`[telegram] sending alert queue_id=${delivery.id} user=${delivery.userId} chat=${maskChatId(delivery.chatId)}`);
@@ -87,11 +117,11 @@ export async function processTelegramQueue() {
           formatTelegramSignalMessage(delivery.payload),
           formatTelegramSignalReplyMarkup(delivery.payload)
         );
-        await markTelegramNotificationSent(delivery.id);
+        await markTelegramNotificationSent(delivery.id, telegramResponse);
         await recordTelegramAlertDiagnostic({
           signal: delivery.payload,
           userId: delivery.userId,
-          status: "sent",
+          status: "telegram_sent",
           reason: "Telegram alert sent.",
           details: {
             ...eligibility.details,
@@ -106,11 +136,16 @@ export async function processTelegramQueue() {
         console.log(`[telegram] sent queue_id=${delivery.id} user=${delivery.userId}`);
       } catch (error) {
         const retry = delivery.attempts < appConfig.telegram.maxAttempts;
-        await markTelegramNotificationFailed(delivery.id, error.message, retry);
+        await markTelegramNotificationFailed(
+          delivery.id,
+          error.message,
+          retry,
+          error.code || "telegram_delivery_failed"
+        );
         await recordTelegramAlertDiagnostic({
           signal: delivery.payload,
           userId: delivery.userId,
-          status: "failed",
+          status: "telegram_failed",
           reason: error.message,
           details: {
             ...(eligibility?.details || {}),

@@ -1,5 +1,6 @@
 import { query } from "../../db/client.js";
 import { createId } from "../../shared/ids.js";
+import { determineFinalSignalDecision } from "../signals/signalDecisionService.js";
 
 const terminalPriority = Object.freeze({ "Hit TP": 6, "Hit SL": 5, "Manually closed": 4, Expired: 3, Active: 2 });
 
@@ -131,7 +132,8 @@ export async function listGeneratedSignals(filters = {}) {
 }
 
 export async function getGeneratedSignalById(id) {
-  const result = await query(`
+  const [result, telegramAudit] = await Promise.all([
+    query(`
     SELECT g.*, c.status AS candidate_status, c.candidate_score, c.readiness_score,
       c.missing_confirmations, c.first_detected_at, c.last_checked_at,
       cle.max_favorable_excursion, cle.max_adverse_excursion,
@@ -141,8 +143,49 @@ export async function getGeneratedSignalById(id) {
     LEFT JOIN candidate_learning_events cle ON cle.candidate_id = c.id
     LEFT JOIN signal_learning_events sle ON sle.signal_id = g.signal_id
     WHERE g.id = $1
-  `, [id]);
-  return mapGeneratedSignal(result.rows[0]);
+  `, [id]),
+    query(`
+      SELECT d.user_id, d.status, d.reason, d.details, d.attempted_at,
+        q.id AS queue_id, q.status AS queue_status, q.attempts,
+        q.telegram_message_id, q.final_error_code, q.final_error_message
+      FROM generated_signals g
+      LEFT JOIN LATERAL (
+        SELECT user_id, status, reason, details, attempted_at
+        FROM telegram_alert_diagnostics
+        WHERE signal_id = g.signal_id OR (g.setup_key IS NOT NULL AND setup_key = g.setup_key)
+        ORDER BY attempted_at DESC
+        LIMIT 100
+      ) d ON true
+      LEFT JOIN LATERAL (
+        SELECT id, user_id, status, attempts, telegram_message_id,
+          final_error_code, final_error_message
+        FROM telegram_notification_queue
+        WHERE signal_id = g.signal_id OR (g.setup_key IS NOT NULL AND setup_key = g.setup_key)
+        ORDER BY created_at DESC
+        LIMIT 1
+      ) q ON q.user_id IS NOT DISTINCT FROM d.user_id
+      WHERE g.id = $1
+      ORDER BY d.attempted_at DESC NULLS LAST
+    `, [id])
+  ]);
+  const mapped = mapGeneratedSignal(result.rows[0]);
+  if (!mapped) return null;
+  return {
+    ...mapped,
+    telegramDecisions: telegramAudit.rows.filter((row) => row.status).map((row) => ({
+      userId: row.user_id,
+      status: row.status,
+      reason: row.reason,
+      details: row.details || {},
+      attemptedAt: row.attempted_at,
+      queueId: row.queue_id,
+      queueStatus: row.queue_status,
+      attemptCount: Number(row.attempts || 0),
+      telegramMessageId: row.telegram_message_id,
+      finalErrorCode: row.final_error_code,
+      finalErrorMessage: row.final_error_message
+    }))
+  };
 }
 
 export async function getGeneratedSignalStats() {
@@ -191,7 +234,12 @@ export async function updateGeneratedSignalStatus(id, status, details = {}) {
       hit_sl_at = CASE WHEN $2 = 'Hit SL' THEN COALESCE(hit_sl_at,$4) ELSE hit_sl_at END,
       manually_closed_at = CASE WHEN $2 = 'Manually closed' THEN COALESCE(manually_closed_at,$4) ELSE manually_closed_at END,
       expired_at = CASE WHEN $2 = 'Expired' AND status NOT IN ('Hit TP','Hit SL','Manually closed') THEN COALESCE(expired_at,$4) ELSE expired_at END,
-      result_reason = COALESCE($5,result_reason), updated_at = now()
+      result_reason = COALESCE($5,result_reason),
+      final_decision = CASE WHEN $2 IN ('Hit TP','Hit SL','Expired','Manually closed','Cancelled','Invalidated') THEN 'admin_only' ELSE final_decision END,
+      primary_decision_reason = CASE WHEN $2 IN ('Hit TP','Hit SL','Expired','Manually closed','Cancelled','Invalidated') THEN lower(replace($2, ' ', '_')) ELSE primary_decision_reason END,
+      decision_version = CASE WHEN $2 IN ('Hit TP','Hit SL','Expired','Manually closed','Cancelled','Invalidated') THEN 'signal_decision_v1' ELSE decision_version END,
+      decision_created_at = CASE WHEN $2 IN ('Hit TP','Hit SL','Expired','Manually closed','Cancelled','Invalidated') THEN now() ELSE decision_created_at END,
+      updated_at = now()
     WHERE id = $1 RETURNING *
   `, [id, status, terminalPriority[status] || 2, details.resolvedAt || new Date(), details.reason || null]);
   return mapGeneratedSignal(result.rows[0]);
@@ -235,9 +283,18 @@ export async function recordGeneratedSignalTelegramDiagnostic({ signal = {}, use
   ]);
   await query(`
     UPDATE generated_signals SET
-      telegram_status = $3,
-      telegram_block_reason = $4,
-      telegram_block_details = $5,
+      telegram_status = CASE
+        WHEN telegram_status = 'telegram_sent' AND $3 <> 'telegram_sent' THEN telegram_status
+        ELSE $3
+      END,
+      telegram_block_reason = CASE
+        WHEN telegram_status = 'telegram_sent' AND $3 <> 'telegram_sent' THEN telegram_block_reason
+        ELSE $4
+      END,
+      telegram_block_details = CASE
+        WHEN telegram_status = 'telegram_sent' AND $3 <> 'telegram_sent' THEN telegram_block_details
+        ELSE $5
+      END,
       telegram_last_checked_at = now(),
       updated_at = now()
     WHERE signal_id = $1 OR ($2::text IS NOT NULL AND setup_key = $2)
@@ -254,28 +311,28 @@ export async function getTelegramAlertDiagnosticsSummary() {
   const [diagnostics, generated, latestFailure] = await Promise.all([
     query(`
       SELECT
-        COUNT(*) FILTER (WHERE status IN ('sent','queued','telegram_queued'))::integer AS sent_or_queued_today,
+        COUNT(*) FILTER (WHERE status IN ('telegram_sent','telegram_queued'))::integer AS sent_or_queued_today,
         COUNT(*) FILTER (WHERE status = 'telegram_watching_eligible')::integer AS watching_sent_today,
-        COUNT(*) FILTER (WHERE status LIKE 'blocked_%' OR status LIKE 'telegram_blocked_%' OR status IN ('telegram_disabled','missing_chat_id','missing_bot_token','telegram_missing_bot_token'))::integer AS blocked_today,
+        COUNT(*) FILTER (WHERE status LIKE 'telegram_blocked_%')::integer AS blocked_today,
         MAX(attempted_at) AS last_attempt_at,
-        MAX(attempted_at) FILTER (WHERE status IN ('sent','queued','telegram_queued')) AS last_sent_at
+        MAX(attempted_at) FILTER (WHERE status = 'telegram_sent') AS last_sent_at
       FROM telegram_alert_diagnostics
       WHERE created_at::date = current_date
     `),
     query(`
       SELECT
-        COUNT(*) FILTER (WHERE status = 'Active' AND telegram_status IN ('telegram_queued','queued','sent'))::integer AS alertable_signal_count,
-        COUNT(*) FILTER (WHERE telegram_status IS NULL AND status = 'Active')::integer AS non_alerted_generated_signal_count,
+        COUNT(*) FILTER (WHERE final_decision = 'ready_signal' AND telegram_status IN ('telegram_queued','telegram_sent'))::integer AS alertable_signal_count,
+        COUNT(*) FILTER (WHERE telegram_status IS NULL AND final_decision = 'ready_signal')::integer AS non_alerted_generated_signal_count,
         COUNT(*) FILTER (WHERE created_at >= now() - interval '48 hours')::integer AS candidates_generated_48h,
-        COUNT(*) FILTER (WHERE telegram_status = 'failed')::integer AS failed_total,
-        COUNT(*) FILTER (WHERE telegram_status IN ('telegram_queued','queued'))::integer AS queued_total
+        COUNT(*) FILTER (WHERE telegram_status = 'telegram_failed')::integer AS failed_total,
+        COUNT(*) FILTER (WHERE telegram_status = 'telegram_queued')::integer AS queued_total
       FROM generated_signals
       WHERE created_at >= now() - interval '7 days'
     `),
     query(`
       SELECT status, reason, details, attempted_at
       FROM telegram_alert_diagnostics
-      WHERE status IN ('failed','telegram_disabled','missing_chat_id','missing_bot_token') OR status LIKE 'blocked_%'
+      WHERE status = 'telegram_failed' OR status LIKE 'telegram_blocked_%'
       ORDER BY attempted_at DESC
       LIMIT 1
     `)
@@ -315,17 +372,30 @@ function displayPair(symbol) { return String(symbol || "").toUpperCase().replace
 function mapGeneratedSignal(row) { if (!row) return null; return withQualityGateFields({ id: row.id, signalId: row.signal_id, setupKey: row.setup_key, pair: row.pair, displayPair: row.display_pair, provider: row.provider, timeframe: row.timeframe, direction: row.direction, strategy: row.strategy, pattern: row.pattern, patternContext: row.pattern_context || {}, entry: Number(row.entry), stopLoss: Number(row.stop_loss), takeProfit: Number(row.take_profit), riskReward: Number(row.risk_reward), confidence: Number(row.confidence), originalConfidence: row.original_confidence == null ? Number(row.confidence) : Number(row.original_confidence), rawSetupScore: row.original_confidence == null ? Number(row.confidence) : Number(row.original_confidence), calibratedConfidence: row.calibrated_confidence == null ? Number(row.confidence) : Number(row.calibrated_confidence), finalConfidence: row.calibrated_confidence == null ? Number(row.confidence) : Number(row.calibrated_confidence), confidenceVersion: row.confidence_version || row.confidence_calibration?.version || "calibration_v1", calibrationReason: row.calibration_reason || row.confidence_calibration?.calibrationReason || row.confidence_calibration?.message || null, confidenceCalibration: row.confidence_calibration || {}, setupQualityScore: Number(row.setup_quality_score || 0), entryReadinessScore: Number(row.entry_readiness_score || 0), status: row.status, expiringSoon: Boolean(row.expiring_soon), validUntil: row.valid_until, expiredAt: row.expired_at, hitTpAt: row.hit_tp_at, hitSlAt: row.hit_sl_at, source: row.source, sourceHistory: row.source_history || [], generatedBy: row.generated_by, promotedFromCandidateId: row.promoted_from_candidate_id, validationSummary: row.validation_summary || {}, warningReasons: row.warning_reasons || [], qualityBreakdown: row.quality_breakdown || {}, fullAnalysis: row.full_analysis || {}, telegramStatus: row.telegram_status || null, telegramBlockReason: row.telegram_block_reason || null, telegramBlockDetails: row.telegram_block_details || {}, telegramLastCheckedAt: row.telegram_last_checked_at || null, historicalStrategyStatus: row.historical_strategy_status || null, historicalStrategyReason: row.historical_strategy_reason || null, strategyValidationStatus: row.strategy_validation_status || null, strategyValidationReason: row.strategy_validation_reason || null, postMortemTags: row.resolved_post_mortem_tags || row.post_mortem_tags || [], maxFavorableExcursion: row.max_favorable_excursion == null ? null : Number(row.max_favorable_excursion), maxAdverseExcursion: row.max_adverse_excursion == null ? null : Number(row.max_adverse_excursion), resultReason: row.result_reason, candidateOrigin: row.candidate_status ? { status: row.candidate_status, setupQualityScore: Number(row.candidate_score || 0), entryReadinessScore: Number(row.readiness_score || 0), missingConfirmations: row.missing_confirmations || [], firstDetectedAt: row.first_detected_at, lastCheckedAt: row.last_checked_at } : null, createdAt: row.created_at, updatedAt: row.updated_at }, row); }
 
 function withQualityGateFields(signal, row) {
+  const derivedDecision = row.final_decision || determineFinalSignalDecision({
+    ...signal,
+    qualityGateStatus: row.quality_gate_status,
+    qualityGatePassed: row.quality_gate_status === "passed"
+  }).finalDecision;
   return {
     ...signal,
     qualityGateStatus: row.quality_gate_status || null,
     qualityGateReason: row.quality_gate_reason || null,
     qualityGateDetails: row.quality_gate_details || {},
     qualityGateDisplayStatus: getQualityGateDisplayStatus(row),
-    finalDecision: getFinalDecision(row),
-    finalDecisionLabel: getFinalDecisionLabel(getFinalDecision(row)),
-    userVisibility: getUserVisibility(row),
+    finalDecision: derivedDecision,
+    primaryDecisionReason: row.primary_decision_reason || null,
+    secondaryDecisionNotes: row.secondary_decision_notes || [],
+    decisionVersion: row.decision_version || null,
+    decisionCreatedAt: row.decision_created_at || null,
+    finalDecisionLabel: getFinalDecisionLabel(derivedDecision),
+    userVisibility: getUserVisibility(derivedDecision),
     telegramDecisionStatus: row.telegram_status || null,
-    telegramDecisionLabel: getTelegramDecisionLabel(row.telegram_status, row.telegram_block_reason)
+    telegramDecisionLabel: row.telegram_status
+      ? getTelegramDecisionLabel(row.telegram_status, row.telegram_block_reason)
+      : row.decision_version
+        ? "Reconciliation pending"
+        : "Legacy - no decision captured"
   };
 }
 
@@ -336,30 +406,16 @@ function getQualityGateDisplayStatus(row) {
   return "Not evaluated";
 }
 
-function getUserVisibility(row) {
-  if (row.status === "Active") return "User-ready";
-  if (row.status === "Expiring Soon") return "User-ready";
-  if (row.status === "Watching") return "Watching only";
-  if (row.status === "Quarantined timeframe") return "Quarantined";
-  if (isBlockedGeneratedStatus(row.status)) return "Blocked";
-  if (["Hit TP", "Hit SL", "Expired", "Manually closed"].includes(row.status)) return "Admin-only";
+function getUserVisibility(finalDecision) {
+  if (finalDecision === "ready_signal") return "User-ready";
+  if (finalDecision === "blocked") return "Blocked";
+  if (finalDecision === "rejected") return "Rejected";
   return "Admin-only";
-}
-
-function getFinalDecision(row) {
-  if (["Active", "Expiring Soon"].includes(row.status)) return "ready_signal";
-  if (row.status === "Watching") return "watching_setup";
-  if (["Hit TP", "Hit SL", "Expired", "Manually closed"].includes(row.status)) return "admin_only";
-  if (["Strategy Misread Rejected", "Weak Pattern Match"].includes(row.status) || /rejected/i.test(String(row.status || ""))) return "rejected";
-  if (isBlockedGeneratedStatus(row.status)) return "blocked";
-  if (["legacy_saved_signal", "legacy_unlocked_signal", "backtest_shadow", "admin_test"].includes(row.source)) return "admin_only";
-  return "admin_only";
 }
 
 function getFinalDecisionLabel(decision) {
   return {
     ready_signal: "Ready Signal",
-    watching_setup: "Watching",
     admin_only: "Admin-only",
     blocked: "Blocked",
     rejected: "Rejected"
@@ -407,6 +463,11 @@ async function updateGeneratedSignalAnnotations(id, signal) {
       quality_gate_status = COALESCE($6, quality_gate_status),
       quality_gate_reason = COALESCE($7, quality_gate_reason),
       quality_gate_details = CASE WHEN $8::jsonb = '{}'::jsonb THEN quality_gate_details ELSE $8::jsonb END,
+      final_decision = COALESCE($9, final_decision),
+      primary_decision_reason = COALESCE($10, primary_decision_reason),
+      secondary_decision_notes = CASE WHEN $11::jsonb = '[]'::jsonb THEN secondary_decision_notes ELSE $11::jsonb END,
+      decision_version = COALESCE($12, decision_version),
+      decision_created_at = COALESCE($13, decision_created_at),
       updated_at = now()
     WHERE id = $1
   `, [
@@ -417,7 +478,12 @@ async function updateGeneratedSignalAnnotations(id, signal) {
     signal.strategyValidationReason || signal.indicators?.strategyValidationReason || signal.indicators?.strategyStrictness?.reason || null,
     signal.indicators?.qualityGateV2?.status || signal.generatedQualityGate?.qualityGateV2?.status || signal.generatedQualityGate?.status || null,
     signal.indicators?.qualityGateV2?.reasonCode || signal.generatedQualityGate?.reasonCode || signal.indicators?.generatedQualityBlockReason || null,
-    JSON.stringify(signal.indicators?.qualityGateV2 || signal.generatedQualityGate?.qualityGateV2 || signal.generatedQualityGate || {})
+    JSON.stringify(signal.indicators?.qualityGateV2 || signal.generatedQualityGate?.qualityGateV2 || signal.generatedQualityGate || {}),
+    signal.finalDecision || signal.final_decision || null,
+    signal.primaryDecisionReason || signal.primary_decision_reason || null,
+    JSON.stringify(signal.secondaryDecisionNotes || signal.secondary_decision_notes || []),
+    signal.decisionVersion || signal.decision_version || null,
+    signal.decisionCreatedAt || signal.decision_created_at || null
   ]);
 }
 

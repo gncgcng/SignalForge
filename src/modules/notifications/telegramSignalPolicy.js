@@ -33,7 +33,9 @@ export function validateTelegramTradeSignal(setup = {}) {
   const takeProfit = Number(setup.takeProfit ?? setup.take_profit);
   const riskReward = Number(setup.riskRewardRatio ?? setup.riskReward);
   const direction = String(setup.direction || "").toLowerCase();
-  if (!setup.id && !setup.setupKey) return { valid: false, status: "blocked_missing_signal_id", reason: "Signal ID or unlock token is missing." };
+  if (!setup.signalId && !setup.id) {
+    return { valid: false, status: "blocked_missing_signal_id", reason: "A stable signal ID is missing." };
+  }
   if (![entry, stopLoss, takeProfit, riskReward].every(Number.isFinite) || riskReward <= 0) {
     return { valid: false, status: "blocked_invalid_trade_levels", reason: "Entry, stop, target, or R/R is missing or invalid." };
   }
@@ -58,13 +60,14 @@ export function validateTelegramTradeSignal(setup = {}) {
 
 export function buildTelegramUnlockUrl(setup) {
   const appUrl = appConfig.appUrl || appConfig.affiliate.publicAppUrl;
-  const setupKey = setup?.setupKey || setup?.id;
-  if (!appUrl || !setupKey) return "";
+  const signalId = setup?.signalId || setup?.id;
+  const setupKey = setup?.setupKey || signalId;
+  if (!appUrl || !signalId || !setupKey) return "";
 
   const url = new URL(appUrl);
   url.searchParams.delete("telegramUnlock");
   const params = new URLSearchParams({ unlock: setupKey });
-  if (setup?.signalId || setup?.id) params.set("signalId", setup.signalId || setup.id);
+  params.set("signalId", signalId);
   url.hash = `signals?${params.toString()}`;
   return url.toString();
 }

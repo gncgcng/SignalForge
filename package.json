@@ -82,6 +82,7 @@
     "test:historical-strategy-testing": "node scripts/historical-strategy-testing-test.js",
     "test:historical-pattern-learning": "node scripts/historical-pattern-learning-test.js",
     "test:telegram-alert-diagnostics": "node scripts/telegram-alert-diagnostics-test.js",
+    "test:final-telegram-decisions": "node scripts/final-signal-telegram-decision-test.js",
     "test:signal-transparency": "node scripts/signal-transparency-test.js",
     "test:watchlist-alerts": "node scripts/watchlist-alerts-test.js",
     "test:automation-navigation": "node scripts/automation-duplicates-navigation-test.js",

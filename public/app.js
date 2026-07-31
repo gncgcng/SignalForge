@@ -4327,11 +4327,30 @@ function renderAdminSignalDetail(signal) {
     analysis.indicators?.strategyStrictness?.reason ? `Strictness: ${analysis.indicators.strategyStrictness.reason}` : null
   ];
   const telegramRows = [
-    signal.telegramStatus ? `Telegram status: ${titleCase(signal.telegramStatus)}` : "Telegram status: Not evaluated",
+    `Signal decision: ${titleCase(signal.finalDecision || "admin_only")}`,
+    signal.primaryDecisionReason ? `Primary reason: ${titleCase(signal.primaryDecisionReason)}` : null,
+    signal.decisionVersion ? `Decision version: ${signal.decisionVersion}` : null,
+    signal.decisionCreatedAt ? `Decision created: ${formatDateTime(signal.decisionCreatedAt)}` : null,
+    signal.telegramStatus
+      ? `Telegram status: ${titleCase(signal.telegramStatus)}`
+      : signal.decisionVersion
+        ? "Telegram status: Reconciliation pending"
+        : "Telegram status: Legacy record - no decision captured",
     signal.telegramBlockReason,
     signal.telegramLastCheckedAt ? `Last checked: ${formatDateTime(signal.telegramLastCheckedAt)}` : null,
-    signal.telegramBlockDetails?.threshold ? `Threshold: ${signal.telegramBlockDetails.threshold}` : null,
-    signal.telegramBlockDetails?.confidence ? `Confidence checked: ${Number(signal.telegramBlockDetails.confidence).toFixed(0)}%` : null
+    signal.telegramBlockDetails?.finalCalibratedConfidence == null ? null : `Final confidence: ${Number(signal.telegramBlockDetails.finalCalibratedConfidence).toFixed(0)}%`,
+    signal.telegramBlockDetails?.globalAlertThreshold == null ? null : `Global threshold: ${signal.telegramBlockDetails.globalAlertThreshold}%`,
+    signal.telegramBlockDetails?.userAlertThreshold == null ? null : `User threshold: ${signal.telegramBlockDetails.userAlertThreshold}%`,
+    signal.telegramBlockDetails?.effectiveAlertThreshold == null ? null : `Effective threshold: ${signal.telegramBlockDetails.effectiveAlertThreshold}%`,
+    signal.telegramBlockDetails?.preferenceCheckPassed == null ? null : `Preference passed: ${signal.telegramBlockDetails.preferenceCheckPassed ? "Yes" : "No"}`,
+    signal.telegramBlockDetails?.queueId ? `Queue ID: ${signal.telegramBlockDetails.queueId}` : null,
+    signal.telegramBlockDetails?.telegramApiResponse?.messageId ? `Telegram message ID: ${signal.telegramBlockDetails.telegramApiResponse.messageId}` : null,
+    signal.telegramBlockDetails?.deepLinkUrl ? `Deep link: ${signal.telegramBlockDetails.deepLinkUrl}` : null,
+    ...(signal.telegramDecisions || []).slice(0, 12).map((item) =>
+      `${item.userId || "System"}: ${titleCase(item.status)}${item.reason ? ` - ${item.reason}` : ""}` +
+      `${item.queueId ? ` | Queue ${item.queueId}` : ""}` +
+      `${item.telegramMessageId ? ` | Message ${item.telegramMessageId}` : ""}`
+    )
   ];
   document.querySelector("#admin-signal-modal-title").textContent = `${signal.displayPair} / ${signal.timeframe} / ${String(signal.direction).toUpperCase()}`;
   adminSignalDetail.innerHTML = `
@@ -7492,7 +7511,7 @@ function buildScanWhyNoSignalReport(diagnostics = null, summary = null, scanUniv
       candidateSource: "scan_summary",
       attemptedStrategies: ["manual_scan"],
       finalDecision: "no_ready_signal",
-      telegramDecision: "blocked_not_alertable",
+      telegramDecision: "telegram_blocked_not_ready",
       qualityGate: null,
       timeframePolicy: null
     } : null

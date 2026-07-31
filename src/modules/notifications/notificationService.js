@@ -1,6 +1,7 @@
 import { appConfig } from "../../config/appConfig.js";
 import {
   enqueueTelegramNotification,
+  findTelegramNotificationDelivery,
   getTelegramSettingsByUser,
   listWatchlistByUser,
   setTelegramNotificationsEnabled,
@@ -10,7 +11,9 @@ import { sendTelegramMessage } from "./telegramClient.js";
 import { formatSignalValidityWindow } from "../signals/signalValidityService.js";
 import {
   evaluateTelegramAlertEligibility,
-  recordTelegramAlertDiagnostic
+  recordTelegramAlertDiagnostic,
+  resolveFinalCalibratedConfidence,
+  resolveTelegramAlertThreshold
 } from "./telegramAlertDiagnosticsService.js";
 import {
   buildTelegramUnlockUrl,
@@ -133,26 +136,38 @@ export async function enqueueMatchingTelegramNotifications(user, setups) {
       continue;
     }
 
-    const inserted = await enqueueTelegramNotification(user.id, settings, setup);
+    const inserted = await enqueueTelegramNotification(user.id, settings, setup, evaluation);
 
     if (inserted) {
       console.log(`[telegram] queued alert user=${user.id} symbol=${setup.symbol} timeframe=${setup.timeframe} queue_id=${inserted.id}`);
       await recordTelegramAlertDiagnostic({
         signal: setup,
         userId: user.id,
-        status: "queued",
+        status: "telegram_queued",
         reason: "Telegram alert queued for delivery.",
-        details: { queueId: inserted.id, confidence: setup.confidenceScore, threshold: evaluation.details?.threshold }
+        details: {
+          ...evaluation.details,
+          queueId: inserted.id,
+          dispatchAttempted: false
+        }
       });
       queued.push(inserted.id);
     } else {
-      console.log(`[telegram] duplicate alert skipped user=${user.id} symbol=${setup.symbol} timeframe=${setup.timeframe}`);
+      const existing = await findTelegramNotificationDelivery(user.id, setup);
+      console.log(`[telegram] existing delivery skipped user=${user.id} signal=${setup.signalId || setup.id} status=${existing?.status || "unknown"}`);
       await recordTelegramAlertDiagnostic({
         signal: setup,
         userId: user.id,
-        status: "blocked_duplicate",
-        reason: "A Telegram alert for this setup is already queued or sent.",
-        details: { ...evaluation.details, setupKey: setup.setupKey }
+        status: "telegram_blocked_already_sent",
+        reason: existing?.status === "sent"
+          ? "This exact signal was already sent successfully to this user."
+          : "This exact signal already has a Telegram delivery record.",
+        details: {
+          ...evaluation.details,
+          existingQueueId: existing?.id || null,
+          existingQueueStatus: existing?.status || null,
+          existingTelegramMessageId: existing?.telegram_message_id || null
+        }
       });
     }
   }
@@ -161,17 +176,15 @@ export async function enqueueMatchingTelegramNotifications(user, setups) {
 }
 
 export function telegramPreferenceMatchesSetup(settings, favoriteSymbols, setup) {
-  const userThreshold = Number(settings.minimumConfidence || 0);
-  const finalThreshold = Math.max(
-    Number(appConfig.telegram.readyAlertMinConfidence),
-    Number.isFinite(userThreshold) ? userThreshold : 0
-  );
+  const { effectiveAlertThreshold } = resolveTelegramAlertThreshold(settings);
+  const finalConfidence = resolveFinalCalibratedConfidence(setup);
   return Boolean(
     (setup?.setupKey || setup?.id) &&
     (!settings.favoriteMarketsOnly || favoriteSymbols.has(setup.symbol)) &&
     settings.timeframes.includes(setup.timeframe) &&
     (settings.direction === "both" || settings.direction === setup.direction) &&
-    Number(setup.confidenceScore) >= finalThreshold
+    Number.isFinite(finalConfidence) &&
+    finalConfidence >= effectiveAlertThreshold
   );
 }
 
@@ -186,17 +199,17 @@ export function formatTelegramSignalMessage(setup) {
     ? `${passed.slice(0, 4).join(", ")} aligned with the rule set.`
     : "Rule-based confluence detected. Open SignalForge to review the full setup.";
   const provider = getProviderLabel(setup.symbol);
-  const confidence = Number(setup.confidenceScore || 0);
+  const confidence = resolveFinalCalibratedConfidence(setup);
   const levels = formatTelegramTradeLevels(setup);
 
   return [
-    "🚨 SignalForge Setup Ready",
+    "SignalForge Trade Signal",
     "",
     `Market: ${getDisplaySymbol(setup.symbol)}`,
     `Provider: ${provider}`,
     `Timeframe: ${setup.timeframe}`,
     `Direction: ${setup.direction.toUpperCase()}`,
-    `Confidence: ${confidence}%`,
+    `Confidence: ${Math.round(confidence)}%`,
     `Setup: ${setup.setupType || "Qualified setup"}`,
     `Valid for: ${formatSignalValidityWindow(setup.timeframe)}`,
     "",

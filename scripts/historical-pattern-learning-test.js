@@ -10,7 +10,10 @@ const {
   validateLearnedPatternCandidate
 } = await import("../src/modules/signals/historicalPatternLibraryService.js");
 const { classifyHistoricalEvidence } = await import("../src/modules/signals/historicalStrategyTestingService.js");
-const { evaluateGeneratedSignalTelegramDecision } = await import("../src/modules/notifications/telegramAlertDiagnosticsService.js");
+const {
+  evaluateGeneratedSignalTelegramDecision,
+  evaluateTelegramAlertEligibility
+} = await import("../src/modules/notifications/telegramAlertDiagnosticsService.js");
 const { appConfig } = await import("../src/config/appConfig.js");
 
 function makeCandles(count = 72) {
@@ -150,7 +153,18 @@ const exactBadEvidence = classifyHistoricalEvidence({
 });
 assert.equal(exactBadEvidence.action, "block", "exact bad groups with enough evidence can still hard-block");
 
-const readyTelegram = evaluateGeneratedSignalTelegramDecision({
+const readyTelegram = evaluateTelegramAlertEligibility({
+  settings: {
+    enabled: true,
+    chatId: "12345",
+    favoriteMarketsOnly: false,
+    timeframes: ["15m"],
+    direction: "both",
+    minimumConfidence: appConfig.telegram.readyAlertMinConfidence
+  },
+  setup: {
+  id: "sig_history_test",
+  signalId: "sig_history_test",
   setupKey: "BTC-USD:15m:long:history-test",
   status: "Active",
   source: "manual_scan",
@@ -164,7 +178,9 @@ const readyTelegram = evaluateGeneratedSignalTelegramDecision({
   confidenceScore: Math.max(76, appConfig.telegram.readyAlertMinConfidence),
   readinessScore: 90,
   qualityGatePassed: true,
+  validUntil: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
   indicators: { qualityGatePassed: true, qualityGateV2: { status: "passed" } }
+  }
 });
 assert.equal(readyTelegram.allowed, true, "Telegram should allow ready trade signals that pass every alert gate");
 

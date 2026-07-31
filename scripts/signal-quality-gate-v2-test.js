@@ -152,12 +152,11 @@ const dedupeMigration = readFileSync("migrations/056_signal_quality_gate_diagnos
 
 assert.match(gateService, /evaluateSignalQualityGateV2/);
 assert.match(gateService, /qualityGatePassed: false/);
-assert.match(telegramDiagnostics, /qualityGatePassed !== true/);
-assert.match(telegramDiagnostics, /Signal Quality Gate blocked Telegram alert/);
+assert.match(telegramDiagnostics, /determineFinalSignalDecision/);
+assert.match(telegramDiagnostics, /telegram_blocked_quality_gate/);
 assert.match(telegramDiagnostics, /evaluateGeneratedSignalTelegramDecision/);
-assert.match(telegramDiagnostics, /telegram_blocked_low_confidence/);
-assert.match(telegramDiagnostics, /telegram_blocked_quarantined_timeframe/);
-assert.match(telegramDiagnostics, /telegram_blocked_failed_quality_gate/);
+assert.match(telegramDiagnostics, /telegram_blocked_user_preference/);
+assert.match(telegramDiagnostics, /telegram_blocked_quarantine/);
 assert.match(repository, /quality_gate_reason_stats/);
 assert.match(repository, /OFFSET \$1/);
 assert.match(repository, /ON CONFLICT \(dedupe_key\)/);
@@ -184,7 +183,7 @@ assert.match(publicApp, /loadAdminSignalQualityGate/);
 assert.match(publicApp, /Recent rejected setups/);
 assert.match(publicApp, /Blocked before users see them/);
 assert.match(publicApp, /Quality Gate/);
-assert.match(publicApp, /Telegram status: Not evaluated/);
+assert.match(publicApp, /Telegram status: Reconciliation pending/);
 assert.match(publicApp, /admin-detail-section/);
 assert.match(migration, /signal_quality_gate_results/);
 assert.match(migration, /quality_gate_reason_stats/);

@@ -5,208 +5,234 @@ import {
   listGeneratedSignals,
   recordGeneratedSignalTelegramDiagnostic
 } from "../admin-signals/generatedSignalRepository.js";
-import { getTimeframeQualityPolicy } from "../signals/generatedSignalQualityGate.js";
-import { isSignalBlockedByCalibration } from "../signals/signalConfidenceCalibrationService.js";
-import { sendTelegramMessage } from "./telegramClient.js";
 import {
-  buildTelegramUnlockUrl,
-  validateTelegramTradeSignal
-} from "./telegramSignalPolicy.js";
+  determineFinalSignalDecision,
+  validateFinalSignalLevels
+} from "../signals/signalDecisionService.js";
+import { isSignalExpired } from "../signals/signalValidityService.js";
+import { sendTelegramMessage } from "./telegramClient.js";
+import { buildTelegramUnlockUrl } from "./telegramSignalPolicy.js";
 
-const alertableStatuses = new Set(["Active", "Expiring Soon"]);
-const blockedStatuses = new Map([
-  ["Duplicate blocked", { status: "blocked_duplicate", reason: "duplicate" }],
-  ["Cooldown blocked", { status: "blocked_cooldown", reason: "cooldown" }],
-  ["Correlated duplicate", { status: "blocked_duplicate", reason: "correlated duplicate" }],
-  ["Quarantined timeframe", { status: "blocked_quarantined_timeframe", reason: "timeframe quarantined" }],
-  ["Readiness failed", { status: "blocked_not_ready", reason: "readiness failed" }],
-  ["Invalid legacy ready signal", { status: "blocked_legacy", reason: "legacy signal" }],
-  ["Watching", { status: "blocked_final_decision_watching", reason: "final decision is watching" }],
-  ["Strategy Misread Rejected", { status: "blocked_failed_quality_gate", reason: "strategy misread rejected" }],
-  ["Weak Pattern Match", { status: "blocked_failed_quality_gate", reason: "weak pattern match" }],
-  ["Weak strategy match", { status: "blocked_failed_quality_gate", reason: "weak strategy match" }],
-  ["Poor entry quality", { status: "blocked_failed_quality_gate", reason: "poor entry quality" }],
-  ["Invalid stop loss", { status: "blocked_failed_quality_gate", reason: "invalid stop loss" }],
-  ["Unrealistic take profit", { status: "blocked_failed_quality_gate", reason: "unrealistic take profit" }],
-  ["Weak risk/reward", { status: "blocked_failed_quality_gate", reason: "weak risk/reward" }],
-  ["Bad market regime", { status: "blocked_failed_quality_gate", reason: "bad market regime" }],
-  ["Historical underperformer", { status: "blocked_historical_underperformance", reason: "historical underperformance with enough evidence" }],
-  ["Similar to past losers", { status: "blocked_failed_quality_gate", reason: "similar to past losers" }]
+export const TELEGRAM_DECISION_VERSION = "telegram_decision_v1";
+
+export const TELEGRAM_DECISIONS = Object.freeze([
+  "telegram_sent",
+  "telegram_queued",
+  "telegram_failed",
+  "telegram_blocked_user_preference",
+  "telegram_blocked_not_ready",
+  "telegram_blocked_admin_only",
+  "telegram_blocked_quality_gate",
+  "telegram_blocked_duplicate",
+  "telegram_blocked_cooldown",
+  "telegram_blocked_quarantine",
+  "telegram_blocked_invalid_levels",
+  "telegram_blocked_expired",
+  "telegram_blocked_already_sent",
+  "telegram_blocked_disabled",
+  "telegram_blocked_missing_connection",
+  "telegram_blocked_missing_signal_id"
 ]);
 
-export function evaluateTelegramAlertEligibility({ user = null, settings = null, setup = null, favoriteSymbols = new Set() } = {}) {
-  const globalThreshold = Number(appConfig.telegram.readyAlertMinConfidence);
-  const configuredUserThreshold = Number(settings?.minimumConfidence || 0);
-  const userThreshold = Number.isFinite(configuredUserThreshold) ? configuredUserThreshold : 0;
-  const threshold = Math.max(globalThreshold, userThreshold);
-  const audit = telegramAuditDetails({ setup, settings, globalThreshold, userThreshold, threshold });
-  if (!setup) return block("blocked_no_generated_setup", "No generated setup was available for Telegram.");
-  if (!appConfig.telegram.botToken) return block("missing_bot_token", "Telegram bot token is not configured.", audit);
-  if (!settings?.enabled) return block("telegram_disabled", "Telegram alerts are disabled for this user.", audit);
-  if (!settings?.chatId) return block("missing_chat_id", "Telegram chat ID is missing.", audit);
-  if (settings.favoriteMarketsOnly && !favoriteSymbols.has(setup.symbol)) {
-    return block("blocked_watchlist_scope", "User alert scope is Watchlist only and this market is not on the watchlist.", audit);
-  }
-  if (settings.timeframes?.length && !settings.timeframes.includes(setup.timeframe)) {
-    return block("blocked_timeframe_preference", "Signal timeframe is not enabled in Telegram preferences.", audit);
-  }
-  if (settings.direction && settings.direction !== "both" && settings.direction !== setup.direction) {
-    return block("blocked_direction_preference", "Signal direction does not match Telegram preferences.", audit);
-  }
-  const finalDecision = getFinalDecision(setup);
-  const blockedStatus = getBlockedStatusDecision(setup);
-  if (blockedStatus) return block(blockedStatus.status, `Telegram blocked: ${blockedStatus.reason}.`, { ...audit, finalDecision, status: setup.status });
-  if (!alertableStatuses.has(setup.status || "Active")) {
-    return block(finalDecision === "admin_only" ? "blocked_final_decision_admin_only" : `blocked_final_decision_${finalDecision}`, `Telegram blocked: final decision is ${finalDecisionLabel(finalDecision)}.`, { ...audit, finalDecision, status: setup.status || null });
-  }
-  if (["legacy_saved_signal", "legacy_unlocked_signal"].includes(setup.source || setup.generationSource)) {
-    return block("blocked_legacy", "Legacy signals are excluded from Telegram ready alerts.", audit);
-  }
-  if (getTimeframeQualityPolicy(setup.timeframe).status === "quarantined") {
-    return block("blocked_quarantined_timeframe", `${setup.timeframe} is quarantined for ready alerts.`, audit);
-  }
-  const qualityGatePassed = setup.indicators?.qualityGatePassed ?? setup.fullAnalysis?.indicators?.qualityGatePassed ?? setup.qualityGatePassed;
-  const qualityGateStatus = setup.indicators?.qualityGateV2?.status || setup.fullAnalysis?.indicators?.qualityGateV2?.status || setup.qualityGateStatus;
-  if (qualityGatePassed !== true || (qualityGateStatus && qualityGateStatus !== "passed")) {
-    return block("blocked_failed_quality_gate", `Signal Quality Gate blocked Telegram alert: failed Quality Gate (${qualityGateStatus || "failed"}).`, {
-      ...audit,
-      qualityGateStatus,
-      qualityGateReason: setup.indicators?.qualityGateV2?.reasonCode || setup.qualityGateReason || null
-    });
-  }
-  const readiness = Number(setup.readinessScore ?? setup.entryReadinessScore ?? setup.indicators?.readinessScore ?? 0);
-  if (!Number.isFinite(readiness) || readiness <= 0) {
-    return block("blocked_not_ready", "Readiness score is 0.", audit);
-  }
-  const tradeValidation = validateTelegramTradeSignal(setup);
-  if (!tradeValidation.valid) {
-    return block(prefixTelegramStatus(tradeValidation.status), tradeValidation.reason, { ...audit, validation: tradeValidation.reason });
-  }
-  const confidence = Number(setup.confidenceScore ?? setup.confidence ?? 0);
-  if (!Number.isFinite(confidence) || confidence < threshold) {
-    const status = Number.isFinite(confidence) && confidence >= globalThreshold && userThreshold > globalThreshold
-      ? "telegram_blocked_user_preference"
-      : "blocked_low_confidence";
-    const reason = status === "telegram_blocked_user_preference"
-      ? `Confidence ${Math.round(confidence)} below your Telegram preference ${userThreshold}.`
-      : `Calibrated confidence ${Number.isFinite(confidence) ? Math.round(confidence) : 0} was below global threshold ${globalThreshold}.`;
-    return block(status, reason, { ...audit, confidence });
-  }
-  const calibration = setup.indicators?.confidenceCalibration || setup.confidenceCalibration || {};
-  if (isSignalBlockedByCalibration({ confidenceCalibration: calibration })) {
-    return block("blocked_historical_underperformance", `Calibration hard block: ${calibration.blockingEvidence?.groupValue || calibration.status}.`, {
-      ...audit,
-      blockingEvidence: calibration.blockingEvidence || null
-    });
-  }
-  const directionWarning = (calibration.groups || []).find((group) =>
-    group.groupType === "direction" && group.status !== "active"
-  );
-
+export function resolveTelegramAlertThreshold(settings = {}) {
+  const configuredGlobal = Number(appConfig.telegram.readyAlertMinConfidence);
+  const globalAlertThreshold = Number.isFinite(configuredGlobal) ? configuredGlobal : 0;
+  const configuredUser = Number(settings.minimumConfidence);
+  const userAlertThreshold = Number.isFinite(configuredUser) ? configuredUser : 0;
   return {
-    allowed: true,
-    status: "queued",
-    reason: "Ready alert passed Telegram eligibility checks.",
-    details: {
-      ...audit,
-      confidence,
-      userId: user?.id || null,
-      timeframe: setup.timeframe,
-      direction: setup.direction,
-      directionCalibrationWarning: directionWarning
-        ? `Confidence reduced because ${setup.direction} direction is underperforming overall.`
-        : null
-    }
+    globalAlertThreshold,
+    userAlertThreshold,
+    effectiveAlertThreshold: Math.max(globalAlertThreshold, userAlertThreshold)
   };
 }
 
-export function evaluateGeneratedSignalTelegramDecision(setup = {}) {
-  const threshold = Number(appConfig.telegram.readyAlertMinConfidence);
-  if (!setup) return telegramBlock("telegram_blocked_no_generated_setup", "No generated setup was available for Telegram.");
-  const calibration = setup.indicators?.confidenceCalibration || setup.confidenceCalibration || {};
+export function resolveFinalCalibratedConfidence(setup = {}) {
+  const calibration = setup.confidenceCalibration ||
+    setup.indicators?.confidenceCalibration ||
+    setup.fullAnalysis?.indicators?.confidenceCalibration ||
+    {};
+  const historical = setup.indicators?.historicalStrategyCalibration ||
+    setup.fullAnalysis?.indicators?.historicalStrategyCalibration ||
+    calibration.historicalStrategy ||
+    {};
+  const candidates = [
+    setup.finalCalibratedConfidence,
+    setup.finalConfidence,
+    setup.calibratedConfidence,
+    historical.finalCalibratedConfidence,
+    historical.calibratedConfidence,
+    calibration.finalCalibratedConfidence,
+    calibration.calibratedConfidence,
+    calibration.finalConfidence,
+    setup.confidenceScore,
+    setup.confidence
+  ];
+  for (const candidate of candidates) {
+    const value = Number(candidate);
+    if (Number.isFinite(value)) return value;
+  }
+  return null;
+}
 
-  const finalDecision = getFinalDecision(setup);
-  const blockedStatus = getBlockedStatusDecision(setup);
-  if (blockedStatus) {
-    return telegramBlock(prefixTelegramStatus(blockedStatus.status), `Telegram blocked: ${blockedStatus.reason}.`, {
-      status: setup.status,
-      finalDecision,
-      qualityGateStatus: setup.indicators?.qualityGateV2?.status || setup.generatedQualityGate?.status || setup.qualityGateStatus || null,
-      qualityGateReason: setup.indicators?.qualityGateV2?.reasonCode || setup.generatedQualityGate?.reasonCode || setup.qualityGateReason || null
+export function evaluateTelegramAlertEligibility({
+  user = null,
+  settings = null,
+  setup = null,
+  favoriteSymbols = new Set()
+} = {}) {
+  const thresholds = resolveTelegramAlertThreshold(settings || {});
+  const finalCalibratedConfidence = resolveFinalCalibratedConfidence(setup || {});
+  const finalSignalDecision = getFinalDecisionDetails(setup);
+  const calibration = setup?.confidenceCalibration ||
+    setup?.indicators?.confidenceCalibration ||
+    setup?.fullAnalysis?.indicators?.confidenceCalibration ||
+    {};
+  const directionWarning = (calibration.groups || []).find((group) =>
+    group.groupType === "direction" && group.status !== "active"
+  );
+  const audit = {
+    signalId: getSignalId(setup),
+    userId: user?.id || settings?.userId || null,
+    finalSignalDecision: finalSignalDecision.finalDecision,
+    primaryDecisionReason: finalSignalDecision.primaryDecisionReason,
+    finalCalibratedConfidence,
+    ...thresholds,
+    preferenceCheckPassed: false,
+    messageType: "ready_trade_signal",
+    decisionVersion: TELEGRAM_DECISION_VERSION,
+    deepLinkUrl: buildTelegramUnlockUrl(setup),
+    directionCalibrationWarning: directionWarning
+      ? `Confidence reduced because ${setup?.direction} direction is underperforming overall.`
+      : null
+  };
+
+  if (!setup) {
+    return block("telegram_blocked_not_ready", "No generated setup was available for Telegram.", audit);
+  }
+
+  if (finalSignalDecision.finalDecision !== "ready_signal") {
+    return decisionBlock(finalSignalDecision, audit);
+  }
+
+  if (!getSignalId(setup)) {
+    return block("telegram_blocked_missing_signal_id", "A stable signal ID is required before a Telegram alert can be queued.", audit);
+  }
+
+  const levels = validateFinalSignalLevels(setup);
+  if (!levels.valid) {
+    const status = levels.reason === "missing_signal_id"
+      ? "telegram_blocked_missing_signal_id"
+      : "telegram_blocked_invalid_levels";
+    return block(status, `Telegram blocked because final trade levels are invalid (${levels.reason}).`, {
+      ...audit,
+      levelValidationReason: levels.reason
     });
   }
 
-  if (!alertableStatuses.has(setup.status || "Active")) {
-    return telegramBlock(finalDecision === "admin_only" ? "telegram_blocked_final_decision_admin_only" : `telegram_blocked_final_decision_${finalDecision}`, `Telegram blocked: final decision is ${finalDecisionLabel(finalDecision)}.`, {
-      status: setup.status || null,
-      finalDecision
-    });
-  }
-
-  if (["legacy_saved_signal", "legacy_unlocked_signal"].includes(setup.source || setup.generationSource)) {
-    return telegramBlock("telegram_blocked_legacy", "Legacy signals are excluded from Telegram ready alerts.");
-  }
-
-  if (getTimeframeQualityPolicy(setup.timeframe).status === "quarantined") {
-    return telegramBlock("telegram_blocked_quarantined_timeframe", `${setup.timeframe} is quarantined for ready alerts.`, {
-      timeframe: setup.timeframe
-    });
-  }
-  if (isSignalBlockedByCalibration({ confidenceCalibration: calibration })) {
-    return telegramBlock("telegram_blocked_historical_underperformance", `Calibration hard block: ${calibration.blockingEvidence?.groupValue || calibration.status}.`, {
-      blockingEvidence: calibration.blockingEvidence || null
-    });
-  }
-
-  const qualityGatePassed = setup.indicators?.qualityGatePassed ?? setup.fullAnalysis?.indicators?.qualityGatePassed ?? setup.qualityGatePassed;
-  const qualityGateStatus = setup.indicators?.qualityGateV2?.status || setup.fullAnalysis?.indicators?.qualityGateV2?.status || setup.qualityGateStatus;
-  if (qualityGatePassed !== true || (qualityGateStatus && qualityGateStatus !== "passed")) {
-    return telegramBlock("telegram_blocked_failed_quality_gate", `Signal Quality Gate blocked Telegram alert: failed Quality Gate (${qualityGateStatus || "failed"}).`, {
-      qualityGateStatus,
-      qualityGateReason: setup.indicators?.qualityGateV2?.reasonCode || setup.qualityGateReason || null
-    });
-  }
-
-  const readiness = Number(setup.readinessScore ?? setup.entryReadinessScore ?? setup.indicators?.readinessScore ?? 0);
-  if (!Number.isFinite(readiness) || readiness <= 0) {
-    return telegramBlock("telegram_blocked_not_ready", "Readiness score is 0.", { readiness });
-  }
-  const tradeValidation = validateTelegramTradeSignal(setup);
-  if (!tradeValidation.valid) {
-    return telegramBlock(prefixTelegramStatus(tradeValidation.status), tradeValidation.reason, {
-      validation: tradeValidation.reason,
-      signalId: setup.id || setup.signalId || null,
-      deepLinkUrl: buildTelegramUnlockUrl(setup)
-    });
-  }
-
-  const confidence = Number(setup.confidenceScore ?? setup.confidence ?? 0);
-  if (!Number.isFinite(confidence) || confidence < threshold) {
-    return telegramBlock("telegram_blocked_low_confidence", `Calibrated confidence ${Number.isFinite(confidence) ? Math.round(confidence) : 0} was below threshold ${threshold}.`, {
-      confidence,
-      threshold
-    });
+  if (finalSignalDecision.primaryDecisionReason === "signal_expired" || isSignalExpired(setup)) {
+    return block("telegram_blocked_expired", "The signal expired before Telegram delivery.", audit);
   }
 
   if (!appConfig.telegram.botToken) {
-    return telegramBlock("telegram_missing_bot_token", "Telegram bot token is not configured.");
+    return block("telegram_blocked_missing_connection", "Telegram bot token is not configured.", {
+      ...audit,
+      connectionReason: "missing_bot_token"
+    });
+  }
+  if (!settings?.chatId) {
+    return block("telegram_blocked_missing_connection", "This user does not have a Telegram connection.", {
+      ...audit,
+      connectionReason: "missing_chat_id"
+    });
+  }
+  if (!settings.enabled) {
+    return block("telegram_blocked_disabled", "Telegram alerts are disabled for this user.", audit);
+  }
+
+  if (settings.favoriteMarketsOnly && !favoriteSymbols.has(setup.symbol)) {
+    return preferenceBlock("Signal market is outside the user's Watchlist-only alert scope.", {
+      ...audit,
+      preferenceReason: "market_scope"
+    });
+  }
+  if (settings.timeframes?.length && !settings.timeframes.includes(setup.timeframe)) {
+    return preferenceBlock("Signal timeframe is not enabled in the user's Telegram preferences.", {
+      ...audit,
+      preferenceReason: "timeframe"
+    });
+  }
+  if (settings.direction && settings.direction !== "both" &&
+      String(settings.direction).toLowerCase() !== String(setup.direction).toLowerCase()) {
+    return preferenceBlock("Signal direction does not match the user's Telegram preferences.", {
+      ...audit,
+      preferenceReason: "direction"
+    });
+  }
+
+  if (!Number.isFinite(finalCalibratedConfidence) ||
+      finalCalibratedConfidence < thresholds.effectiveAlertThreshold) {
+    const belowGlobal = finalCalibratedConfidence < thresholds.globalAlertThreshold;
+    const reason = !Number.isFinite(finalCalibratedConfidence)
+      ? "Final calibrated confidence is unavailable."
+      : belowGlobal
+        ? `Final confidence ${Math.round(finalCalibratedConfidence)} is below the global trade-alert threshold of ${thresholds.globalAlertThreshold}.`
+        : `Final confidence ${Math.round(finalCalibratedConfidence)} is below the user's alert preference of ${thresholds.userAlertThreshold}.`;
+    return preferenceBlock(reason, {
+      ...audit,
+      preferenceReason: belowGlobal
+        ? "global_confidence_threshold"
+        : "user_confidence_threshold",
+      primaryTelegramReason: belowGlobal
+        ? "telegram_blocked_global_confidence_threshold"
+        : "telegram_blocked_user_confidence_preference"
+    });
+  }
+
+  if (!audit.deepLinkUrl) {
+    return block("telegram_blocked_missing_signal_id", "A valid signal deep link could not be created.", audit);
   }
 
   return {
     allowed: true,
     status: "telegram_queued",
-    reason: "Generated signal passed Telegram decision checks and is eligible to queue for matching users.",
+    reason: "Ready trade signal passed final decision and user preference checks.",
     details: {
-      threshold,
-      confidence,
-      finalDecision: "ready_signal",
-      timeframe: setup.timeframe,
-      direction: setup.direction,
-      directionCalibrationWarning: (calibration.groups || []).some((group) =>
-        group.groupType === "direction" && group.status !== "active"
-      ) ? `Confidence reduced because ${setup.direction} direction is underperforming overall.` : null
+      ...audit,
+      preferenceCheckPassed: true,
+      dispatchAttempted: false
     }
   };
+}
+
+export function evaluateGeneratedSignalTelegramDecision(setup = {}) {
+  if (!setup) {
+    return block("telegram_blocked_not_ready", "No generated setup was available for Telegram.", {
+      decisionVersion: TELEGRAM_DECISION_VERSION
+    });
+  }
+  const finalSignalDecision = getFinalDecisionDetails(setup);
+  const audit = {
+    signalId: getSignalId(setup),
+    finalSignalDecision: finalSignalDecision.finalDecision,
+    primaryDecisionReason: finalSignalDecision.primaryDecisionReason,
+    finalCalibratedConfidence: resolveFinalCalibratedConfidence(setup),
+    decisionVersion: TELEGRAM_DECISION_VERSION
+  };
+  if (finalSignalDecision.finalDecision !== "ready_signal") {
+    return decisionBlock(finalSignalDecision, audit);
+  }
+  if (!getSignalId(setup)) {
+    return block("telegram_blocked_missing_signal_id", "A stable signal ID is required before Telegram evaluation.", audit);
+  }
+  return block(
+    "telegram_blocked_missing_connection",
+    "Ready signal retained; Telegram must be evaluated against each user's saved connection and preferences.",
+    audit
+  );
+}
+
+export function getFinalDecision(setup = {}) {
+  return getFinalDecisionDetails(setup).finalDecision;
 }
 
 export async function recordTelegramAlertDiagnostic(input) {
@@ -218,7 +244,7 @@ export async function recordTelegramAlertDiagnostic(input) {
 }
 
 export async function getTelegramAlertHealth() {
-  const finalized = await finalizeUnresolvedGeneratedTelegramDecisions();
+  const reconciled = await finalizeUnresolvedGeneratedTelegramDecisions();
   const [summary, queue, failures, scarcity] = await Promise.all([
     getTelegramAlertDiagnosticsSummary(),
     query(`
@@ -231,9 +257,10 @@ export async function getTelegramAlertHealth() {
       WHERE created_at >= now() - interval '7 days'
     `),
     query(`
-      SELECT id, user_id, setup_key, status, attempts, last_error, updated_at
+      SELECT id, user_id, signal_id, setup_key, status, attempts,
+        final_error_code, final_error_message, updated_at
       FROM telegram_notification_queue
-      WHERE status = 'failed' OR last_error IS NOT NULL
+      WHERE status = 'failed' OR final_error_message IS NOT NULL
       ORDER BY updated_at DESC
       LIMIT 8
     `),
@@ -248,20 +275,6 @@ export async function getTelegramAlertHealth() {
   ]);
   const lastSentTime = summary.last_sent_at ? new Date(summary.last_sent_at).getTime() : 0;
   const noReadyAlerts48h = !lastSentTime || Date.now() - lastSentTime > 48 * 60 * 60 * 1000;
-  const alertableSignalCount = Number(summary.alertable_signal_count || 0);
-  const sentOrQueuedToday = Number(summary.sent_or_queued_today || 0);
-  const failedSends = Number(queue.rows[0]?.failed_sends || 0);
-  const blockedToday = Number(summary.blocked_today || 0);
-  const inconsistency = alertableSignalCount > 0 &&
-    sentOrQueuedToday === 0 &&
-    failedSends === 0 &&
-    blockedToday === 0;
-  if (inconsistency) {
-    console.warn(
-      `[telegram-alerts] alertable=${alertableSignalCount} sent=${sentOrQueuedToday} ` +
-      `queued=${Number(queue.rows[0]?.queue_size || 0)} failed=${failedSends} blocked=${blockedToday} inconsistency=true`
-    );
-  }
   return {
     enabled: Boolean(appConfig.telegram.botToken),
     botTokenConfigured: Boolean(appConfig.telegram.botToken),
@@ -270,64 +283,94 @@ export async function getTelegramAlertHealth() {
     lastAlertAttemptAt: summary.last_attempt_at || null,
     lastAlertFailure: summary.latestFailure || null,
     queueSize: Number(queue.rows[0]?.queue_size || 0),
-    alertsBlockedToday: blockedToday,
-    alertsSentToday: sentOrQueuedToday,
+    alertsBlockedToday: Number(summary.blocked_today || 0),
+    alertsSentToday: Number(summary.sent_or_queued_today || 0),
     minimumConfidenceThreshold: Number(appConfig.telegram.readyAlertMinConfidence),
-    watchingAlertsEnabled: appConfig.telegram.watchingAlertsEnabled,
+    watchingAlertsEnabled: false,
     watchingAlertMinConfidence: Number(appConfig.telegram.watchingAlertMinConfidence || 65),
-    watchingAlertsSentToday: Number(summary.watching_sent_today || 0),
+    watchingAlertsSentToday: 0,
+    alertableSignalCount: Number(summary.alertable_signal_count || 0),
+    nonAlertedGeneratedSignalCount: Number(summary.non_alerted_generated_signal_count || 0),
+    reconciled,
+    finalizedUnresolvedDecisions:
+      Number(reconciled.missingDecisions || 0) +
+      Number(reconciled.missingQueueRecords || 0),
     noReadyAlerts48h,
     alertScarcityWarning: noReadyAlerts48h ? {
       active: true,
       message: "No ready alerts sent in the last 48 hours.",
       candidatesGenerated: Number(summary.candidates_generated_48h || 0),
-      blockedByReason: scarcity.rows.map((row) => ({ status: row.status, count: Number(row.count || 0) }))
+      blockedByReason: scarcity.rows.map((row) => ({
+        status: row.status,
+        count: Number(row.count || 0)
+      }))
     } : { active: false },
-    alertableSignalCount,
-    nonAlertedGeneratedSignalCount: Number(summary.non_alerted_generated_signal_count || 0),
-    finalizedUnresolvedDecisions: finalized,
-    inconsistency,
-    failedSends,
-    averageDeliverySeconds: queue.rows[0]?.average_delivery_seconds == null ? null : Number(queue.rows[0].average_delivery_seconds),
+    failedSends: Number(queue.rows[0]?.failed_sends || 0),
+    averageDeliverySeconds: queue.rows[0]?.average_delivery_seconds == null
+      ? null
+      : Number(queue.rows[0].average_delivery_seconds),
     retryCount: Number(queue.rows[0]?.retry_count || 0),
     latestFailures: failures.rows
   };
 }
 
 export async function finalizeUnresolvedGeneratedTelegramDecisions(limit = 50) {
-  const { signals } = await listGeneratedSignals({
-    status: "Active",
-    limit: Math.min(100, Math.max(1, Number(limit || 50))),
-    sort: "newest",
-    performanceScope: "current"
-  });
-  let finalized = 0;
-  for (const setup of signals.filter((item) => !item.telegramStatus && !item.telegramDecisionStatus)) {
-    const decision = evaluateGeneratedSignalTelegramDecision(setup);
+  const boundedLimit = Math.min(100, Math.max(1, Number(limit || 50)));
+  const unresolved = await query(`
+    SELECT signal_id, setup_key
+    FROM generated_signals
+    WHERE final_decision = 'ready_signal'
+      AND decision_version = 'signal_decision_v1'
+      AND created_at >= now() - interval '48 hours'
+      AND telegram_status IS NULL
+    ORDER BY created_at DESC
+    LIMIT $1
+  `, [boundedLimit]);
+  const brokenQueued = await query(`
+    SELECT g.signal_id, g.setup_key
+    FROM generated_signals g
+    WHERE g.final_decision = 'ready_signal'
+      AND g.telegram_status = 'telegram_queued'
+      AND g.created_at >= now() - interval '48 hours'
+      AND NOT EXISTS (
+        SELECT 1 FROM telegram_notification_queue q
+        WHERE q.signal_id = g.signal_id OR (g.setup_key IS NOT NULL AND q.setup_key = g.setup_key)
+      )
+    LIMIT $1
+  `, [boundedLimit]);
+
+  for (const signal of unresolved.rows) {
     await recordTelegramAlertDiagnostic({
-      signal: {
-        id: setup.signalId,
-        signalId: setup.signalId,
-        setupKey: setup.setupKey
-      },
-      status: decision.status,
-      reason: decision.reason,
+      signal: { id: signal.signal_id, signalId: signal.signal_id, setupKey: signal.setup_key },
+      status: "telegram_blocked_missing_connection",
+      reason: "Ready signal has no per-user Telegram delivery decision.",
+      details: { reconciled: true, decisionVersion: TELEGRAM_DECISION_VERSION }
+    });
+  }
+  for (const signal of brokenQueued.rows) {
+    await recordTelegramAlertDiagnostic({
+      signal: { id: signal.signal_id, signalId: signal.signal_id, setupKey: signal.setup_key },
+      status: "telegram_failed",
+      reason: "Telegram queue state was inconsistent: queued status had no queue record.",
       details: {
-        ...decision.details,
-        finalizedBy: "telegram_health",
-        signalId: setup.signalId,
-        pair: setup.pair,
-        timeframe: setup.timeframe,
-        confidence: setup.confidence
+        reconciled: true,
+        finalErrorCode: "missing_queue_record",
+        decisionVersion: TELEGRAM_DECISION_VERSION
       }
     });
-    finalized += 1;
   }
-  return finalized;
+  return {
+    missingDecisions: unresolved.rowCount,
+    missingQueueRecords: brokenQueued.rowCount
+  };
 }
 
 export async function simulateTelegramAlertLogic(limit = 40) {
-  const { signals } = await listGeneratedSignals({ limit, sort: "newest", performanceScope: "current" });
+  const { signals } = await listGeneratedSignals({
+    limit,
+    sort: "newest",
+    performanceScope: "current"
+  });
   return {
     threshold: Number(appConfig.telegram.readyAlertMinConfidence),
     results: signals.map((setup) => {
@@ -347,8 +390,8 @@ export async function simulateTelegramAlertLogic(limit = 40) {
         pair: setup.displayPair || setup.pair,
         timeframe: setup.timeframe,
         direction: setup.direction,
-        confidence: setup.confidence,
-        threshold: appConfig.telegram.readyAlertMinConfidence,
+        confidence: resolveFinalCalibratedConfidence(setup),
+        threshold: evaluation.details?.effectiveAlertThreshold,
         wouldSend: evaluation.allowed,
         status: evaluation.allowed ? "would_send" : evaluation.status,
         reason: evaluation.reason
@@ -359,87 +402,115 @@ export async function simulateTelegramAlertLogic(limit = 40) {
 
 export async function sendTelegramAdminTestMessage(chatId) {
   if (!appConfig.telegram.botToken) {
-    return { ok: false, status: "missing_bot_token", message: "Telegram bot token is not configured." };
+    return {
+      ok: false,
+      status: "telegram_blocked_missing_connection",
+      message: "Telegram bot token is not configured."
+    };
   }
   const targetChatId = String(chatId || "").trim();
   if (!targetChatId) {
-    return { ok: false, status: "missing_chat_id", message: "Provide a Telegram chat ID for the admin test message." };
+    return {
+      ok: false,
+      status: "telegram_blocked_missing_connection",
+      message: "Provide a Telegram chat ID for the admin test message."
+    };
   }
-  await sendTelegramMessage(targetChatId, "TEST MESSAGE — not a real signal\n\nSignalForge Telegram alerts are connected.");
-  return { ok: true, status: "sent", message: "Telegram test message sent." };
+  await sendTelegramMessage(
+    targetChatId,
+    "TEST MESSAGE - not a real signal\n\nSignalForge Telegram alerts are connected."
+  );
+  return { ok: true, status: "telegram_sent", message: "Telegram test message sent." };
+}
+
+function getFinalDecisionDetails(setup) {
+  const stored = setup?.finalDecision || setup?.final_decision;
+  const derived = determineFinalSignalDecision(setup || {});
+  if (["ready_signal", "admin_only", "blocked", "rejected"].includes(stored)) {
+    if (derived.finalDecision !== stored) {
+      return {
+        ...derived,
+        secondaryDecisionNotes: [
+          ...(derived.secondaryDecisionNotes || []),
+          `stored_decision_conflict:${stored}`
+        ]
+      };
+    }
+    return {
+      finalDecision: stored,
+      primaryDecisionReason: setup.primaryDecisionReason ||
+        setup.primary_decision_reason ||
+        "stored_final_decision"
+    };
+  }
+  return derived;
+}
+
+function decisionBlock(finalSignalDecision, audit) {
+  const reason = finalSignalDecision.primaryDecisionReason || "not_ready";
+  if (/expired/.test(reason)) {
+    return block(
+      "telegram_blocked_expired",
+      `Telegram blocked because the signal is expired (${reason}).`,
+      audit
+    );
+  }
+  if (/invalid_trade_levels|missing_signal_id/.test(reason)) {
+    return block(
+      reason === "missing_signal_id"
+        ? "telegram_blocked_missing_signal_id"
+        : "telegram_blocked_invalid_levels",
+      `Telegram blocked because final trade levels are invalid (${reason}).`,
+      audit
+    );
+  }
+  if (finalSignalDecision.finalDecision === "admin_only") {
+    return block(
+      "telegram_blocked_admin_only",
+      `Telegram blocked because the final signal decision is admin-only (${reason}).`,
+      audit
+    );
+  }
+  if (finalSignalDecision.finalDecision === "rejected") {
+    return block(
+      "telegram_blocked_not_ready",
+      `Telegram blocked because the setup was rejected (${reason}).`,
+      audit
+    );
+  }
+  const status = telegramStatusForSignalReason(reason);
+  return block(status, `Telegram blocked by final signal decision (${reason}).`, audit);
+}
+
+function telegramStatusForSignalReason(reason = "") {
+  if (/duplicate/.test(reason)) return "telegram_blocked_duplicate";
+  if (/cooldown/.test(reason)) return "telegram_blocked_cooldown";
+  if (/quarantin/.test(reason)) return "telegram_blocked_quarantine";
+  if (/quality|entry|stop|take_profit|risk_reward|market_regime|historical|strategy|loser/.test(reason)) {
+    return "telegram_blocked_quality_gate";
+  }
+  if (/expired/.test(reason)) return "telegram_blocked_expired";
+  if (/invalid_trade_levels|missing_signal_id/.test(reason)) return "telegram_blocked_invalid_levels";
+  return "telegram_blocked_not_ready";
+}
+
+function preferenceBlock(reason, details) {
+  return block("telegram_blocked_user_preference", reason, details);
 }
 
 function block(status, reason, details = {}) {
-  return { allowed: false, status, reason, details };
-}
-
-function telegramBlock(status, reason, details = {}) {
-  return { allowed: false, status, reason, details };
-}
-
-function getBlockedStatusDecision(setup = {}) {
-  const status = setup.status || "";
-  return blockedStatuses.get(status) || null;
-}
-
-export function getFinalDecision(setup = {}) {
-  const status = setup.status || "Active";
-  if (["Active", "Expiring Soon"].includes(status)) return "ready_signal";
-  if (status === "Watching") return "watching_setup";
-  if (["Hit TP", "Hit SL", "Expired", "Manually closed"].includes(status)) return "admin_only";
-  if (["Strategy Misread Rejected", "Weak Pattern Match"].includes(status) || /rejected/i.test(status)) return "rejected";
-  if (blockedStatuses.has(status)) return "blocked";
-  if (["legacy_saved_signal", "legacy_unlocked_signal", "backtest_shadow", "admin_test"].includes(setup.source || setup.generationSource)) return "admin_only";
-  return "admin_only";
-}
-
-function finalDecisionLabel(decision) {
   return {
-    ready_signal: "ready signal",
-    watching_setup: "watching",
-    admin_only: "admin-only",
-    blocked: "blocked",
-    rejected: "rejected"
-  }[decision] || "not alertable";
+    allowed: false,
+    status,
+    reason,
+    details: {
+      ...details,
+      preferenceCheckPassed: Boolean(details.preferenceCheckPassed),
+      decisionVersion: TELEGRAM_DECISION_VERSION
+    }
+  };
 }
 
-function prefixTelegramStatus(status) {
-  const mapping = {
-    blocked_low_confidence: "telegram_blocked_low_confidence",
-    blocked_quarantined_timeframe: "telegram_blocked_quarantined_timeframe",
-    blocked_not_alertable: "telegram_blocked_not_alertable",
-    blocked_failed_quality_gate: "telegram_blocked_failed_quality_gate",
-    blocked_historical_underperformance: "telegram_blocked_historical_underperformance",
-    blocked_final_decision_watching: "telegram_blocked_final_decision_watching",
-    blocked_final_decision_admin_only: "telegram_blocked_final_decision_admin_only",
-    blocked_direction_preference: "telegram_blocked_direction_preference",
-    blocked_user_preference: "telegram_blocked_user_preference",
-    blocked_invalid_trade_levels: "telegram_blocked_invalid_trade_levels",
-    blocked_missing_signal_id: "telegram_blocked_missing_signal_id",
-    blocked_signal_expired: "telegram_blocked_signal_expired",
-    blocked_duplicate: "telegram_blocked_duplicate",
-    blocked_cooldown: "telegram_blocked_cooldown",
-    blocked_legacy: "telegram_blocked_legacy",
-    blocked_not_ready: "telegram_blocked_not_ready",
-    queued: "telegram_queued",
-    sent: "telegram_sent",
-    failed: "telegram_failed",
-    telegram_disabled: "telegram_disabled",
-    missing_chat_id: "telegram_missing_chat_id",
-    missing_bot_token: "telegram_missing_bot_token"
-  };
-  return mapping[status] || (String(status || "").startsWith("telegram_") ? status : `telegram_${status || "blocked_not_alertable"}`);
-}
-
-function telegramAuditDetails({ setup = {}, settings = {}, globalThreshold, userThreshold, threshold }) {
-  return {
-    signalId: setup.id || setup.signalId || null,
-    chatId: settings.chatId || null,
-    finalConfidence: Number(setup.confidenceScore ?? setup.confidence ?? 0),
-    globalThreshold,
-    userThreshold,
-    finalThreshold: threshold,
-    messageType: "ready_trade_signal",
-    deepLinkUrl: buildTelegramUnlockUrl(setup)
-  };
+function getSignalId(setup) {
+  return setup?.signalId || setup?.signal_id || setup?.id || null;
 }

@@ -160,7 +160,8 @@ assert.match(gateSource, /source NOT IN \('legacy_saved_signal','legacy_unlocked
 assert.match(gateSource, /duplicate_entry_distance_percent/);
 assert.match(gateSource, /duplicate_entry_distance_atr/);
 assert.match(gateSource, /duplicate_match_method/);
-assert.match(repositorySource, /ON CONFLICT \(user_id, chat_id, setup_key, alert_type\) DO NOTHING/);
+assert.match(repositorySource, /ON CONFLICT DO NOTHING/);
+assert.match(repositorySource, /signal_id/);
 assert.match(migration, /UNIQUE INDEX[\s\S]*user_id, chat_id, setup_key, alert_type/i);
 assert.match(adminClientSource, /Duplicate decision[\s\S]*Matched signal[\s\S]*Entry difference[\s\S]*Time difference/, "admin details should expose duplicate evidence");
 

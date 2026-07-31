@@ -67,6 +67,7 @@ import {
   refreshDailyMarketBrief
 } from "./dailyMarketBriefService.js";
 import { buildWhyNoSignalReport } from "./missedSetupAnalyzer.js";
+import { applyFinalSignalDecision } from "./signalDecisionService.js";
 
 const scanTimeframes = ["1h", "4h", "15m", "5m"];
 const scanAllJobs = new Map();
@@ -363,7 +364,7 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
     : { passed: true };
   const qualityAdjustedSignal = qualityGate.adjustedSignal || cappedSignal;
   const qualityBlocked = Boolean(cappedSignal && !qualityGate.passed);
-  const signal = qualityAdjustedSignal && !calibrationBlocked && !calibrationWatching && !qualityBlocked
+  const readySignalOutput = qualityAdjustedSignal && !calibrationBlocked && !calibrationWatching && !qualityBlocked
     ? withSignalQuality({
       ...qualityAdjustedSignal,
       confidenceScore: Math.min(qualityAdjustedSignal.confidenceScore, candidate?.confidenceEstimate || 99),
@@ -373,6 +374,12 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
         qualityGateV2: qualityGate.qualityGateV2 || qualityGate.details?.qualityGateV2 || null
       }
     })
+    : null;
+  const finalizedReadySignal = readySignalOutput
+    ? applyFinalSignalDecision({ ...readySignalOutput, source: generationSource })
+    : null;
+  const signal = finalizedReadySignal?.finalDecision === "ready_signal"
+    ? finalizedReadySignal
     : null;
   const blockedSignal = qualityBlocked
     ? withSignalQuality(applyGeneratedSignalQualityBlock(qualityAdjustedSignal, qualityGate))
@@ -391,17 +398,7 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
       candidateId: candidate?.id || null
     });
     if (candidate?.id) {
-      const candidatePromotionSignal = await applyConfidenceCalibration({
-        ...signal,
-        generationSource: "candidate_promotion",
-        indicators: {
-          ...(signal.indicators || {}),
-          generationSource: "candidate_promotion",
-          confidenceCalibration: undefined,
-          confidenceCalibrationApplied: undefined
-        }
-      });
-      await saveGeneratedSignal(candidatePromotionSignal, {
+      await saveGeneratedSignal(signal, {
         source: "candidate_promotion",
         generatedBy: generationContext.generatedBy || user?.id || "system",
         candidateId: candidate.id

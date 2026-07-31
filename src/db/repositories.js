@@ -3064,8 +3064,10 @@ export async function setTelegramNotificationsEnabled(userId, enabled) {
     if (!enabled) {
       await client.query(`
         UPDATE telegram_notification_queue
-        SET status = 'failed',
+        SET status = 'blocked',
           last_error = 'Notifications disabled by user.',
+          final_error_code = 'telegram_blocked_disabled',
+          final_error_message = 'Notifications disabled by user.',
           next_attempt_at = 'infinity'::timestamptz,
           updated_at = now()
         WHERE user_id = $1 AND status IN ('queued', 'failed')
@@ -3076,24 +3078,70 @@ export async function setTelegramNotificationsEnabled(userId, enabled) {
   });
 }
 
-export async function enqueueTelegramNotification(userId, settings, setup) {
+export async function enqueueTelegramNotification(userId, settings, setup, evaluation = {}) {
   const setupKey = setup.setupKey || setup.id;
+  const signalId = setup.signalId || setup.id;
   const alertType = "ready_trade_signal";
   const result = await query(`
     INSERT INTO telegram_notification_queue (
-      id, user_id, setup_key, chat_id, alert_type, payload
+      id, user_id, signal_id, setup_key, chat_id, alert_type, payload, preference_snapshot
     )
-    VALUES ($1,$2,$3,$4,$5,$6)
-    ON CONFLICT (user_id, chat_id, setup_key, alert_type) DO NOTHING
-    RETURNING id
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+    ON CONFLICT DO NOTHING
+    RETURNING id, signal_id, status
   `, [
     createId("tgq"),
     userId,
+    signalId,
     setupKey,
     settings.chatId,
     alertType,
-    JSON.stringify(setup)
+    JSON.stringify(setup),
+    JSON.stringify({
+      globalAlertThreshold: evaluation.details?.globalAlertThreshold ?? null,
+      userAlertThreshold: evaluation.details?.userAlertThreshold ?? settings.minimumConfidence ?? null,
+      effectiveAlertThreshold: evaluation.details?.effectiveAlertThreshold ?? null,
+      finalCalibratedConfidence: evaluation.details?.finalCalibratedConfidence ?? null,
+      preferenceCheckPassed: evaluation.details?.preferenceCheckPassed === true,
+      capturedAt: new Date().toISOString()
+    })
   ]);
+  return result.rows[0] || null;
+}
+
+export async function findTelegramNotificationDelivery(userId, setup) {
+  const signalId = typeof setup === "string"
+    ? setup
+    : setup?.signalId || setup?.id || null;
+  const setupKey = typeof setup === "object" ? setup?.setupKey || null : null;
+  const result = await query(`
+    SELECT id, signal_id, setup_key, status, attempts, telegram_message_id,
+      final_error_code, final_error_message, sent_at, created_at, updated_at
+    FROM telegram_notification_queue
+    WHERE user_id = $1
+      AND alert_type = 'ready_trade_signal'
+      AND (
+        ($2::text IS NOT NULL AND signal_id = $2)
+        OR ($3::text IS NOT NULL AND setup_key = $3)
+      )
+    ORDER BY created_at DESC
+    LIMIT 1
+  `, [userId, signalId, setupKey]);
+  return result.rows[0] || null;
+}
+
+export async function findSuccessfulTelegramDelivery(userId, signalId, excludeQueueId = null) {
+  const result = await query(`
+    SELECT id, telegram_message_id, sent_at
+    FROM telegram_notification_queue
+    WHERE user_id = $1
+      AND signal_id = $2
+      AND alert_type = 'ready_trade_signal'
+      AND status = 'sent'
+      AND ($3::text IS NULL OR id <> $3)
+    ORDER BY sent_at DESC
+    LIMIT 1
+  `, [userId, signalId, excludeQueueId]);
   return result.rows[0] || null;
 }
 
@@ -3131,51 +3179,67 @@ export async function claimNextTelegramNotification() {
 
     await client.query(`
       UPDATE telegram_notification_queue
-      SET status = 'sending', attempts = attempts + 1, updated_at = now()
+      SET status = 'sending', attempts = attempts + 1,
+        last_attempt_at = now(), updated_at = now()
       WHERE id = $1
     `, [row.id]);
 
     return {
       id: row.id,
       userId: row.user_id,
+      signalId: row.signal_id,
       chatId: row.chat_id,
       payload: row.payload,
+      preferenceSnapshot: row.preference_snapshot || {},
       attempts: Number(row.attempts) + 1
     };
   });
 }
 
-export async function markTelegramNotificationSent(id) {
+export async function markTelegramNotificationSent(id, telegramResponse = {}) {
   await query(`
     UPDATE telegram_notification_queue
-    SET status = 'sent', sent_at = now(), last_error = null, updated_at = now()
+    SET status = 'sent', sent_at = now(), last_error = null,
+      telegram_message_id = $2,
+      telegram_response = $3,
+      final_error_code = null,
+      final_error_message = null,
+      updated_at = now()
     WHERE id = $1
-  `, [id]);
+  `, [
+    id,
+    telegramResponse?.message_id == null ? null : String(telegramResponse.message_id),
+    JSON.stringify(telegramResponse || {})
+  ]);
 }
 
-export async function markTelegramNotificationBlocked(id, reason) {
+export async function markTelegramNotificationBlocked(id, reason, code = "delivery_revalidation_blocked") {
   await query(`
     UPDATE telegram_notification_queue
     SET status = 'blocked',
       last_error = $2,
+      final_error_code = $3,
+      final_error_message = $2,
       next_attempt_at = 'infinity'::timestamptz,
       updated_at = now()
     WHERE id = $1
-  `, [id, reason]);
+  `, [id, reason, code]);
 }
 
-export async function markTelegramNotificationFailed(id, error, retry) {
+export async function markTelegramNotificationFailed(id, error, retry, code = "telegram_delivery_failed") {
   await query(`
     UPDATE telegram_notification_queue
     SET status = 'failed',
       last_error = $2,
+      final_error_code = $4,
+      final_error_message = $2,
       next_attempt_at = CASE
         WHEN $3 THEN now() + interval '1 minute'
         ELSE 'infinity'::timestamptz
       END,
       updated_at = now()
     WHERE id = $1
-  `, [id, error, retry]);
+  `, [id, error, retry, code]);
 }
 
 export async function createTelegramConnectionCode(userId, code, expiresAt) {
