@@ -4291,6 +4291,7 @@ function renderAdminSignalDetail(signal) {
   const candidate = signal.candidateOrigin;
   const calibration = signal.confidenceCalibration || {};
   const stopValidation = analysis.stopValidation || analysis.indicators?.stopRepairDiagnostics || null;
+  const takeProfitValidation = analysis.takeProfitValidation || analysis.indicators?.takeProfitRepairDiagnostics || null;
   const calibrationRows = [
     `Raw setup score: ${Number(signal.rawSetupScore ?? signal.originalConfidence ?? calibration.rawSetupScore ?? calibration.originalConfidence ?? signal.confidence).toFixed(0)}%`,
     `Original confidence: ${Number(signal.originalConfidence ?? calibration.originalConfidence ?? signal.confidence).toFixed(0)}%`,
@@ -4343,6 +4344,19 @@ function renderAdminSignalDetail(signal) {
       stopValidation.repairedRiskReward == null ? null : `Repaired R/R: ${Number(stopValidation.repairedRiskReward).toFixed(2)}R`,
       `Result: ${titleCase(stopValidation.finalResult || "failed")}`,
       stopValidation.repairFailureReason ? `Reason: ${titleCase(stopValidation.repairFailureReason)}` : null
+    ] : [])}
+    ${renderAdminDetailSection("Take-profit validation", takeProfitValidation ? [
+      `Original target: ${takeProfitValidation.originalTakeProfit == null ? "Unavailable" : formatCurrency(takeProfitValidation.originalTakeProfit)}`,
+      takeProfitValidation.originalFailureReason ? `Original failure: ${titleCase(takeProfitValidation.originalFailureReason)}` : "Original target passed validation",
+      `Repair attempted: ${takeProfitValidation.repairAttempted ? "Yes" : "No"}`,
+      takeProfitValidation.repairSource ? `Repair source: ${titleCase(takeProfitValidation.repairSource)}` : null,
+      takeProfitValidation.repairedTakeProfit == null ? null : `Repaired target: ${formatCurrency(takeProfitValidation.repairedTakeProfit)}`,
+      takeProfitValidation.originalRiskReward == null ? null : `Original R/R: ${Number(takeProfitValidation.originalRiskReward).toFixed(2)}R`,
+      takeProfitValidation.repairedRiskReward == null ? null : `Repaired R/R: ${Number(takeProfitValidation.repairedRiskReward).toFixed(2)}R`,
+      takeProfitValidation.atrMoveRequired == null ? null : `ATR move required: ${Number(takeProfitValidation.atrMoveRequired).toFixed(2)} ATR`,
+      takeProfitValidation.nearestOpposingStructure == null ? null : `Nearest opposing structure: ${formatCurrency(takeProfitValidation.nearestOpposingStructure)}`,
+      `Result: ${titleCase(takeProfitValidation.finalResult || "failed")}`,
+      takeProfitValidation.repairFailureReason ? `Reason: ${titleCase(takeProfitValidation.repairFailureReason)}` : null
     ] : [])}
     ${renderAdminDetailSection("Signal Quality Gate", [
       signal.qualityGateDisplayStatus ? `Gate decision: ${signal.qualityGateDisplayStatus}` : null,

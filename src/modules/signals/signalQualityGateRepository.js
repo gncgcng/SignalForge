@@ -285,6 +285,11 @@ function labelQualityGateReason(reason) {
     breakout_without_retest: "Breakout without retest",
     late_entry: "Late entry",
     tp_too_far_for_timeframe: "Take profit too far for timeframe",
+    tp_blocked_by_resistance: "Take profit blocked by resistance",
+    tp_blocked_by_support: "Take profit blocked by support",
+    price_already_near_target: "Price already near target",
+    no_realistic_target_available: "No realistic target available",
+    repaired_take_profit_breaks_rr_requirement: "Repaired target below minimum risk/reward",
     higher_timeframe_conflict: "Higher timeframe conflict",
     repeated_mistake_pattern: "Repeated mistake pattern"
   };

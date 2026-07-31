@@ -2,6 +2,12 @@ import {
   inspectStopLoss,
   repairInvalidStopLoss
 } from "./signalStopRepairService.js";
+import {
+  inspectTakeProfit,
+  repairUnrealisticTakeProfit
+} from "./signalTakeProfitRepairService.js";
+
+export { repairUnrealisticTakeProfit };
 
 const minimumRiskReward = 1.5;
 const readyEntryLabels = new Set(["excellent_entry", "acceptable_entry"]);
@@ -77,60 +83,6 @@ export function evaluateSignalQualityGateV2(signal, context = {}) {
     nearestLosingExamples: getNearestExamples(evaluatedSignal, context, "losing"),
     adjustedSignal: evaluatedSignal
   });
-}
-
-export function repairUnrealisticTakeProfit(signal, marketData = {}) {
-  if (!signal) return signal;
-  const readings = readSignalNumbers(signal, marketData);
-  const { entry, stop, takeProfit, direction, atr, stopDistance, rewardDistance } = readings;
-  if (![entry, stop, takeProfit].every(Number.isFinite) || stopDistance <= 0) return signal;
-  if (direction === "long" && (stop >= entry || takeProfit <= entry)) return signal;
-  if (direction === "short" && (stop <= entry || takeProfit >= entry)) return signal;
-  if (Number.isFinite(atr) && atr > 0 && (stopDistance < atr * 0.35 || stopDistance > atr * 3.5)) return signal;
-
-  const targetTooFar = Number.isFinite(atr) && atr > 0 &&
-    rewardDistance > atr * timeframeTargetAtrLimit(signal.timeframe);
-  const targetBlocked = isTargetBlocked(signal, marketData, readings);
-  if (!targetTooFar && !targetBlocked) return signal;
-
-  const targetCandidates = [];
-  if (targetTooFar) {
-    const atrDistance = atr * timeframeTargetAtrLimit(signal.timeframe);
-    targetCandidates.push(direction === "long" ? entry + atrDistance : entry - atrDistance);
-  }
-
-  if (targetBlocked) {
-    const levels = readLevels(signal, marketData);
-    const structure = direction === "long" ? Number(levels.resistance) : Number(levels.support);
-    const buffer = Math.max(stopDistance * 0.1, Number.isFinite(atr) && atr > 0 ? atr * 0.1 : 0);
-    targetCandidates.push(direction === "long" ? structure - buffer : structure + buffer);
-  }
-
-  const minimumRewardDistance = stopDistance * minimumRiskReward;
-  const realisticTargets = targetCandidates
-    .filter(Number.isFinite)
-    .filter((target) => direction === "long" ? target > entry : target < entry)
-    .filter((target) => Math.abs(target - entry) >= minimumRewardDistance)
-    .sort((left, right) => Math.abs(left - entry) - Math.abs(right - entry));
-  const repairedTarget = realisticTargets[0];
-  if (!Number.isFinite(repairedTarget)) return signal;
-
-  const repairedRiskReward = Math.abs(repairedTarget - entry) / stopDistance;
-  return {
-    ...signal,
-    takeProfit: repairedTarget,
-    take_profit: repairedTarget,
-    riskRewardRatio: Number(repairedRiskReward.toFixed(2)),
-    riskReward: Number(repairedRiskReward.toFixed(2)),
-    indicators: {
-      ...(signal.indicators || {}),
-      takeProfitRecalculated: true,
-      originalTakeProfit: takeProfit,
-      takeProfitRecalculationReason: targetBlocked
-        ? "Target moved before nearby opposing structure."
-        : "Target reduced to the timeframe ATR limit."
-    }
-  };
 }
 
 export function classifySignalMistakeLabels(signal, context = {}) {
@@ -252,19 +204,46 @@ function validateStopLossQuality(signal, marketData, readings) {
 }
 
 function validateTakeProfitRealism(signal, marketData, readings) {
-  const { entry, takeProfit, direction, atr, rewardDistance } = readings;
-  if (!Number.isFinite(entry) || !Number.isFinite(takeProfit) || rewardDistance <= 0) {
-    return fail("take_profit_realism", "unrealistic_take_profit", "missing_take_profit", "Take profit is missing or not directionally usable.", "critical");
+  const inspection = inspectTakeProfit(signal, marketData, { minimumRiskReward });
+  const diagnostics = signal.takeProfitRepairDiagnostics || signal.indicators?.takeProfitRepairDiagnostics || null;
+  if (inspection.valid) {
+    return {
+      ...pass(
+        "take_profit_realism",
+        diagnostics?.repairSucceeded
+          ? "Take profit was repaired to a reachable structural target and still meets the existing risk/reward minimum."
+          : "Take profit has realistic room for the timeframe."
+      ),
+      takeProfitRepair: diagnostics
+    };
   }
-  if (direction === "long" && takeProfit <= entry) return fail("take_profit_realism", "unrealistic_take_profit", "long_tp_not_above_entry", "Long signal take profit must be above entry.", "critical");
-  if (direction === "short" && takeProfit >= entry) return fail("take_profit_realism", "unrealistic_take_profit", "short_tp_not_below_entry", "Short signal take profit must be below entry.", "critical");
-  if (Number.isFinite(atr) && atr > 0 && rewardDistance > atr * timeframeTargetAtrLimit(signal.timeframe)) {
-    return fail("take_profit_realism", "unrealistic_take_profit", "tp_too_far_for_timeframe", "Take profit requires a move that is too large for current timeframe volatility.", "high");
-  }
-  if (isTargetBlocked(signal, marketData, readings)) {
-    return fail("take_profit_realism", "unrealistic_take_profit", direction === "long" ? "tp_blocked_by_resistance" : "tp_blocked_by_support", "Take profit is blocked by nearby opposing structure before enough reward is available.", "high");
-  }
-  return pass("take_profit_realism", "Take profit has realistic room for the timeframe.");
+
+  const reasonCode = diagnostics?.repairFailureReason || inspection.reasonCode;
+  const explanations = {
+    invalid_entry: "Take-profit repair cannot rescue an invalid entry.",
+    invalid_stop_loss: "Take-profit validation requires a final valid stop loss.",
+    missing_take_profit: "Take profit is missing or not directionally usable.",
+    target_wrong_side_of_entry: readings.direction === "long"
+      ? "Long signal take profit must be above entry."
+      : "Short signal take profit must be below entry.",
+    price_already_near_target: "Price has already moved too close to the available target.",
+    tp_too_far_for_timeframe: "Take profit requires a move that is too large for current timeframe volatility.",
+    tp_blocked_by_resistance: "Take profit is blocked by nearby resistance before enough reward is available.",
+    tp_blocked_by_support: "Take profit is blocked by nearby support before enough reward is available.",
+    atr_unavailable: "Take-profit repair requires a valid ATR value.",
+    missing_candle_data: "Take-profit repair requires enough recent candles to confirm a realistic target.",
+    stale_candle_data: "Take-profit repair was not attempted because the available candle data is stale.",
+    no_realistic_target_available: "No reachable structural or volatility-supported take-profit target is available.",
+    repaired_take_profit_breaks_rr_requirement: `The nearest realistic target produces risk/reward below the existing ${minimumRiskReward}R minimum.`
+  };
+  return fail(
+    "take_profit_realism",
+    "unrealistic_take_profit",
+    reasonCode,
+    explanations[reasonCode] || "Take profit is not realistic and could not be repaired safely.",
+    ["missing_take_profit", "target_wrong_side_of_entry", "invalid_entry"].includes(inspection.reasonCode) ? "critical" : "high",
+    { takeProfitRepair: diagnostics }
+  );
 }
 
 function validateRiskReward(signal, readings) {
@@ -396,21 +375,6 @@ function isInsideNoisyRange(signal, marketData, { entry, atr }) {
   return Math.abs(entry - mid) <= atr * 0.15 && /range|chop|sideways/.test(readRegime(signal, marketData));
 }
 
-function isTargetBlocked(signal, marketData, { entry, takeProfit, direction }) {
-  const levels = readLevels(signal, marketData);
-  const blocking = direction === "long" ? Number(levels.resistance) : Number(levels.support);
-  if (!Number.isFinite(blocking) || !Number.isFinite(entry) || !Number.isFinite(takeProfit)) return false;
-  if (direction === "long") return blocking > entry && blocking < takeProfit;
-  return blocking < entry && blocking > takeProfit;
-}
-
-function readLevels(signal, marketData) {
-  return {
-    support: finiteOrNull(signal.indicators?.support ?? signal.patternContext?.keyLevels?.support ?? marketData?.levels?.support ?? marketData?.levels?.nearestSupport?.price),
-    resistance: finiteOrNull(signal.indicators?.resistance ?? signal.patternContext?.keyLevels?.resistance ?? marketData?.levels?.resistance ?? marketData?.levels?.nearestResistance?.price)
-  };
-}
-
 function hasHigherTimeframeConflict(signal) {
   const text = [
     signal.alignmentBadge,
@@ -438,10 +402,6 @@ function latestCandle(marketData) {
 
 function latestClose(marketData) {
   return latestCandle(marketData)?.close;
-}
-
-function timeframeTargetAtrLimit(timeframe) {
-  return { "1m": 3, "5m": 4, "15m": 5, "1h": 7, "4h": 10 }[timeframe] || 5;
 }
 
 function getSimilarity(signal, context, side) {

@@ -305,7 +305,8 @@ function toFullAnalysis(signal) {
     confluence: signal.confluence || null,
     riskPlan: signal.riskPlan || null,
     patternContext: signal.patternContext || signal.indicators?.patternContext || null,
-    stopValidation: signal.stopRepairDiagnostics || signal.indicators?.stopRepairDiagnostics || null
+    stopValidation: signal.stopRepairDiagnostics || signal.indicators?.stopRepairDiagnostics || null,
+    takeProfitValidation: signal.takeProfitRepairDiagnostics || signal.indicators?.takeProfitRepairDiagnostics || null
   };
 }
 function normalizeSource(source) { return ["manual_scan","auto_crypto_watcher","telegram_alert","candidate_promotion","backtest_shadow","admin_test","legacy_saved_signal","legacy_unlocked_signal"].includes(source) ? source : "manual_scan"; }

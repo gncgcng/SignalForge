@@ -9,8 +9,16 @@ import {
 
 const baseMarket = {
   volumeAvailable: true,
+  marketStatus: { stale: false },
   regime: { label: "trending up", metrics: { atr14: 2 } },
-  candles: [{ open: 100, high: 101, low: 99, close: 100.5, volume: 1200 }],
+  candles: Array.from({ length: 8 }, (_, index) => ({
+    time: Date.now() - (8 - index) * 60000,
+    open: 99.7 + index * 0.05,
+    high: 100.7 + index * 0.05,
+    low: 98.7 + index * 0.05,
+    close: 100 + index * 0.05,
+    volume: 1200 + index * 10
+  })),
   levels: { support: 96, resistance: 112 }
 };
 
@@ -64,7 +72,9 @@ const momentumRange = evaluateSignalQualityGateV2({
 assert.equal(momentumRange.status, "bad_market_regime", "momentum breakout should be blocked in range-bound conditions");
 
 assert.equal(evaluateSignalQualityGateV2({ ...baseSignal, entryQuality: "fair" }, { marketData: baseMarket }).reasonCode, "late_entry");
-assert.equal(evaluateSignalQualityGateV2({ ...baseSignal, stopLoss: 101 }, { marketData: baseMarket }).status, "invalid_stop_loss");
+assert.equal(evaluateSignalQualityGateV2({ ...baseSignal, stopLoss: 101 }, {
+  marketData: { ...baseMarket, candles: baseMarket.candles.slice(-1) }
+}).status, "invalid_stop_loss");
 assert.equal(evaluateSignalQualityGateV2({ ...baseSignal, takeProfit: 130 }, { marketData: baseMarket }).reasonCode, "tp_too_far_for_timeframe");
 const repairedTarget = repairUnrealisticTakeProfit({ ...baseSignal, takeProfit: 130, riskRewardRatio: 10 }, baseMarket);
 assert.equal(repairedTarget.indicators.takeProfitRecalculated, true);
@@ -98,7 +108,7 @@ const winnerLike = evaluateSignalQualityGateV2(baseSignal, {
 });
 assert.equal(winnerLike.passed, true, "winner similarity can support but should not bypass validation failures");
 assert.equal(evaluateSignalQualityGateV2({ ...baseSignal, stopLoss: 100 }, {
-  marketData: baseMarket,
+  marketData: { ...baseMarket, candles: baseMarket.candles.slice(-1) },
   historicalSimilarity: { similarityToWinners: 0.9, similarityToLosers: 0.1 }
 }).passed, false, "winner similarity must not bypass stop validation");
 

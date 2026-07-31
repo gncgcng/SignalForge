@@ -179,7 +179,13 @@ export const appConfig = {
     readySignalMinConfidence: Number(process.env.READY_SIGNAL_MIN_CONFIDENCE || 65),
     stopMinAtrMultiplier: Math.max(0.1, Number(process.env.SIGNAL_STOP_MIN_ATR_MULTIPLIER || 0.6)),
     stopMaxAtrMultiplier: Math.max(0.5, Number(process.env.SIGNAL_STOP_MAX_ATR_MULTIPLIER || 3)),
-    stopBufferAtrMultiplier: Math.max(0, Number(process.env.SIGNAL_STOP_BUFFER_ATR_MULTIPLIER || 0.15))
+    stopBufferAtrMultiplier: Math.max(0, Number(process.env.SIGNAL_STOP_BUFFER_ATR_MULTIPLIER || 0.15)),
+    takeProfitMaxAtrMultipliers: {
+      "5m": Math.max(1, Number(process.env.SIGNAL_TP_MAX_ATR_MULTIPLIER_5M || 4)),
+      "15m": Math.max(1, Number(process.env.SIGNAL_TP_MAX_ATR_MULTIPLIER_15M || 5)),
+      "1h": Math.max(1, Number(process.env.SIGNAL_TP_MAX_ATR_MULTIPLIER_1H || 7)),
+      "4h": Math.max(1, Number(process.env.SIGNAL_TP_MAX_ATR_MULTIPLIER_4H || 10))
+    }
   },
   autoScan: {
     enabled: process.env.CRYPTO_WATCHER_ENABLED !== "false" && process.env.AUTO_SCAN_ENABLED !== "false",
