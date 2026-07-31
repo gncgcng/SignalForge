@@ -294,7 +294,20 @@ export function buildGeneratedSignalKey(signal) {
   return [signal.symbol, signal.timeframe, signal.direction, signal.setupType, Number(signal.entryPrice).toPrecision(10), Math.floor(created / windowMs)].join(":").toLowerCase();
 }
 
-function toFullAnalysis(signal) { return { reasoning: signal.reasoning, confirmations: signal.confirmations || [], indicators: signal.indicators || {}, analyst: signal.analyst || null, marketStructure: signal.marketStructure || null, smc: signal.smc || null, confluence: signal.confluence || null, riskPlan: signal.riskPlan || null, patternContext: signal.patternContext || signal.indicators?.patternContext || null }; }
+function toFullAnalysis(signal) {
+  return {
+    reasoning: signal.reasoning,
+    confirmations: signal.confirmations || [],
+    indicators: signal.indicators || {},
+    analyst: signal.analyst || null,
+    marketStructure: signal.marketStructure || null,
+    smc: signal.smc || null,
+    confluence: signal.confluence || null,
+    riskPlan: signal.riskPlan || null,
+    patternContext: signal.patternContext || signal.indicators?.patternContext || null,
+    stopValidation: signal.stopRepairDiagnostics || signal.indicators?.stopRepairDiagnostics || null
+  };
+}
 function normalizeSource(source) { return ["manual_scan","auto_crypto_watcher","telegram_alert","candidate_promotion","backtest_shadow","admin_test","legacy_saved_signal","legacy_unlocked_signal"].includes(source) ? source : "manual_scan"; }
 function finiteOrNull(value) { const number = Number(value); return Number.isFinite(number) ? number : null; }
 function displayPair(symbol) { return String(symbol || "").toUpperCase().replace(/[-/]/g, ""); }

@@ -56,17 +56,16 @@ const timeframePolicies = Object.freeze({
 
 export async function evaluateGeneratedSignalQualityGate(signal, context = {}) {
   if (!signal) return passGate();
-  const repairedSignal = repairUnrealisticTakeProfit(signal, context.marketData || {});
-  const readiness = Number(repairedSignal.readinessScore ?? repairedSignal.entryReadinessScore ?? repairedSignal.indicators?.readinessScore ?? repairedSignal.indicators?.entryReadinessScore ?? 0);
+  const readiness = Number(signal.readinessScore ?? signal.entryReadinessScore ?? signal.indicators?.readinessScore ?? signal.indicators?.entryReadinessScore ?? 0);
   if (!Number.isFinite(readiness) || readiness <= 0) {
     return recordAndReturn(signal, blockGate("readiness", "Readiness score is 0, so this setup cannot be promoted as a ready signal.", { readinessScore: readiness }), context);
   }
 
-  const timeframePolicy = getTimeframeQualityPolicy(repairedSignal.timeframe);
+  const timeframePolicy = getTimeframeQualityPolicy(signal.timeframe);
   if (timeframePolicy.status === "quarantined") {
     return recordAndReturn(signal, blockGate("timeframe", timeframePolicy.reason, { timeframe: signal.timeframe, confidenceCap: timeframePolicy.confidenceCap }), context);
   }
-  const signalWithTimeframeCap = applyTimeframeConfidencePolicy(repairedSignal);
+  const signalWithTimeframeCap = applyTimeframeConfidencePolicy(signal);
 
   const cooldown = await findRecentGeneratedSignalFailure(signalWithTimeframeCap);
   if (cooldown) {
@@ -84,25 +83,44 @@ export async function evaluateGeneratedSignalQualityGate(signal, context = {}) {
     ), context);
   }
 
-  const v2 = evaluateSignalQualityGateV2(signalWithTimeframeCap, {
+  const initialV2Result = evaluateSignalQualityGateV2(signalWithTimeframeCap, {
     ...context,
     timeframePolicy
   });
+  const stopAdjustedSignal = initialV2Result.adjustedSignal || signalWithTimeframeCap;
+  const stopFailed = initialV2Result.checks?.some((check) =>
+    check.stage === "stop_loss_quality" && check.passed === false
+  );
+  const fullyAdjustedSignal = stopFailed
+    ? stopAdjustedSignal
+    : repairUnrealisticTakeProfit(stopAdjustedSignal, context.marketData || {});
+  const v2Result = fullyAdjustedSignal === stopAdjustedSignal
+    ? initialV2Result
+    : evaluateSignalQualityGateV2(fullyAdjustedSignal, {
+      ...context,
+      timeframePolicy
+    });
+  const adjustedSignal = v2Result.adjustedSignal || signalWithTimeframeCap;
+  const { adjustedSignal: ignoredAdjustedSignal, ...v2 } = v2Result;
   if (!v2.passed) {
-    return recordAndReturn(signal, blockGate(v2.status, v2.explanation, { qualityGateV2: v2 }, v2), context);
+    const gate = attachAdjustedSignal(
+      blockGate(v2.status, v2.explanation, { qualityGateV2: v2 }, v2),
+      adjustedSignal
+    );
+    return recordAndReturn(adjustedSignal, gate, context);
   }
 
-  const promotionConfidenceGate = evaluateReadyPromotionConfidence(signalWithTimeframeCap, v2);
+  const promotionConfidenceGate = evaluateReadyPromotionConfidence(adjustedSignal, v2);
   if (promotionConfidenceGate) {
     return recordAndReturn(
-      signalWithTimeframeCap,
-      promotionConfidenceGate,
+      adjustedSignal,
+      attachAdjustedSignal(promotionConfidenceGate, adjustedSignal),
       context
     );
   }
 
-  await recordGateSafely(signalWithTimeframeCap, v2, context);
-  return passGate({ qualityGateV2: v2, adjustedSignal: signalWithTimeframeCap });
+  await recordGateSafely(adjustedSignal, v2, context);
+  return attachAdjustedSignal(passGate({ qualityGateV2: v2 }), adjustedSignal);
 }
 
 export function applyGeneratedSignalQualityBlock(signal, gate) {
@@ -368,6 +386,16 @@ async function recordGateSafely(signal, gate, context) {
 
 function passGate(details = {}) {
   return { passed: true, status: "passed", reasons: [], ...details };
+}
+
+function attachAdjustedSignal(gate, signal) {
+  Object.defineProperty(gate, "adjustedSignal", {
+    value: signal,
+    enumerable: false,
+    configurable: false,
+    writable: false
+  });
+  return gate;
 }
 
 function blockGate(type, reason, details = {}, qualityGateV2 = null) {

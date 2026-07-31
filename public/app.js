@@ -4290,6 +4290,7 @@ function renderAdminSignalDetail(signal) {
   const pattern = signal.patternContext || {};
   const candidate = signal.candidateOrigin;
   const calibration = signal.confidenceCalibration || {};
+  const stopValidation = analysis.stopValidation || analysis.indicators?.stopRepairDiagnostics || null;
   const calibrationRows = [
     `Raw setup score: ${Number(signal.rawSetupScore ?? signal.originalConfidence ?? calibration.rawSetupScore ?? calibration.originalConfidence ?? signal.confidence).toFixed(0)}%`,
     `Original confidence: ${Number(signal.originalConfidence ?? calibration.originalConfidence ?? signal.confidence).toFixed(0)}%`,
@@ -4332,6 +4333,17 @@ function renderAdminSignalDetail(signal) {
     ${renderAdminDetailSection("Historical strategy calibration", historicalRows)}
     ${renderAdminDetailSection("Strategy strictness", strategyRows)}
     ${renderAdminDetailSection("Confidence calibration", calibrationRows)}
+    ${renderAdminDetailSection("Stop validation", stopValidation ? [
+      `Original stop: ${stopValidation.originalStopLoss == null ? "Unavailable" : formatCurrency(stopValidation.originalStopLoss)}`,
+      stopValidation.originalFailureReason ? `Original failure: ${titleCase(stopValidation.originalFailureReason)}` : "Original stop passed validation",
+      `Repair attempted: ${stopValidation.repairAttempted ? "Yes" : "No"}`,
+      stopValidation.repairSource ? `Repair source: ${titleCase(stopValidation.repairSource)}` : null,
+      stopValidation.repairedStopLoss == null ? null : `Repaired stop: ${formatCurrency(stopValidation.repairedStopLoss)}`,
+      stopValidation.atrBufferUsed == null ? null : `ATR buffer used: ${formatCurrency(stopValidation.atrBufferUsed)}`,
+      stopValidation.repairedRiskReward == null ? null : `Repaired R/R: ${Number(stopValidation.repairedRiskReward).toFixed(2)}R`,
+      `Result: ${titleCase(stopValidation.finalResult || "failed")}`,
+      stopValidation.repairFailureReason ? `Reason: ${titleCase(stopValidation.repairFailureReason)}` : null
+    ] : [])}
     ${renderAdminDetailSection("Signal Quality Gate", [
       signal.qualityGateDisplayStatus ? `Gate decision: ${signal.qualityGateDisplayStatus}` : null,
       signal.userVisibility ? `User visibility: ${signal.userVisibility}` : null,

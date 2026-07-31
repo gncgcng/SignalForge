@@ -1,3 +1,8 @@
+import {
+  inspectStopLoss,
+  repairInvalidStopLoss
+} from "./signalStopRepairService.js";
+
 const minimumRiskReward = 1.5;
 const readyEntryLabels = new Set(["excellent_entry", "acceptable_entry"]);
 const severeStatuses = new Set([
@@ -16,24 +21,30 @@ const severeStatuses = new Set([
 export function evaluateSignalQualityGateV2(signal, context = {}) {
   const checks = [];
   const marketData = context.marketData || {};
-  const attemptedStrategy = signal?.setupType || signal?.strategy || "Unknown strategy";
 
   if (!signal) {
     return buildGate({ passed: false, status: "rejected", reasonCode: "missing_signal", explanation: "No setup was available for final quality review.", checks });
   }
 
-  const readings = readSignalNumbers(signal, marketData);
-  addCheck(checks, validateStrategyIdentity(signal));
-  addCheck(checks, validateMarketRegime(signal, marketData));
-  addCheck(checks, validateEntryQuality(signal, marketData, readings));
-  addCheck(checks, validateStopLossQuality(signal, marketData, readings));
-  addCheck(checks, validateTakeProfitRealism(signal, marketData, readings));
-  addCheck(checks, validateRiskReward(signal, readings));
-  addCheck(checks, validateVolumeConfirmation(signal, marketData));
-  addCheck(checks, validateHigherTimeframe(signal));
-  addCheck(checks, validateHistoricalContext(signal, context));
-  addCheck(checks, validateSimilarityContext(signal, context));
-  addCheck(checks, validateRepeatedMistakes(signal, context));
+  const initialReadings = readSignalNumbers(signal, marketData);
+  const strategyCheck = validateStrategyIdentity(signal);
+  const entryCheck = validateEntryQuality(signal, marketData, initialReadings);
+  const evaluatedSignal = strategyCheck.passed && entryCheck.passed
+    ? repairInvalidStopLoss(signal, marketData, { minimumRiskReward })
+    : signal;
+  const attemptedStrategy = evaluatedSignal.setupType || evaluatedSignal.strategy || "Unknown strategy";
+  const readings = readSignalNumbers(evaluatedSignal, marketData);
+  addCheck(checks, strategyCheck);
+  addCheck(checks, validateMarketRegime(evaluatedSignal, marketData));
+  addCheck(checks, entryCheck);
+  addCheck(checks, validateStopLossQuality(evaluatedSignal, marketData, readings));
+  addCheck(checks, validateTakeProfitRealism(evaluatedSignal, marketData, readings));
+  addCheck(checks, validateRiskReward(evaluatedSignal, readings));
+  addCheck(checks, validateVolumeConfirmation(evaluatedSignal, marketData));
+  addCheck(checks, validateHigherTimeframe(evaluatedSignal));
+  addCheck(checks, validateHistoricalContext(evaluatedSignal, context));
+  addCheck(checks, validateSimilarityContext(evaluatedSignal, context));
+  addCheck(checks, validateRepeatedMistakes(evaluatedSignal, context));
 
   const failed = checks.filter((item) => item.passed === false);
   if (!failed.length) {
@@ -45,7 +56,8 @@ export function evaluateSignalQualityGateV2(signal, context = {}) {
       userExplanation: "SignalForge found a clean enough setup after checking strategy fit, entry quality, risk/reward, and market context.",
       checks,
       entryQualityLabel: checks.find((item) => item.stage === "entry_quality")?.entryQualityLabel || "acceptable_entry",
-      attemptedStrategy
+      attemptedStrategy,
+      adjustedSignal: evaluatedSignal
     });
   }
 
@@ -59,10 +71,11 @@ export function evaluateSignalQualityGateV2(signal, context = {}) {
     checks,
     entryQualityLabel: checks.find((item) => item.stage === "entry_quality")?.entryQualityLabel || "invalid_entry",
     attemptedStrategy,
-    similarityToWinners: getSimilarity(signal, context, "winners"),
-    similarityToLosers: getSimilarity(signal, context, "losers"),
-    nearestWinningExamples: getNearestExamples(signal, context, "winning"),
-    nearestLosingExamples: getNearestExamples(signal, context, "losing")
+    similarityToWinners: getSimilarity(evaluatedSignal, context, "winners"),
+    similarityToLosers: getSimilarity(evaluatedSignal, context, "losers"),
+    nearestWinningExamples: getNearestExamples(evaluatedSignal, context, "winning"),
+    nearestLosingExamples: getNearestExamples(evaluatedSignal, context, "losing"),
+    adjustedSignal: evaluatedSignal
   });
 }
 
@@ -199,20 +212,43 @@ function validateEntryQuality(signal, marketData, readings) {
 }
 
 function validateStopLossQuality(signal, marketData, readings) {
-  const { entry, stop, atr, direction, stopDistance } = readings;
-  if (!Number.isFinite(entry) || !Number.isFinite(stop) || stopDistance <= 0) {
-    return fail("stop_loss_quality", "invalid_stop_loss", "zero_or_missing_stop_distance", "Stop loss is missing or creates zero stop distance.", "critical");
+  const inspection = inspectStopLoss(signal, marketData);
+  const diagnostics = signal.stopRepairDiagnostics || signal.indicators?.stopRepairDiagnostics || null;
+  if (inspection.valid) {
+    return {
+      ...pass("stop_loss_quality", diagnostics?.repairSucceeded
+        ? "Stop loss was repaired using structural invalidation and remains within ATR distance limits."
+        : "Stop loss is directionally valid and structurally reasonable."),
+      stopRepair: diagnostics
+    };
   }
-  if (direction === "long" && stop >= entry) return fail("stop_loss_quality", "invalid_stop_loss", "long_stop_not_below_entry", "Long signal stop loss must be below entry.", "critical");
-  if (direction === "short" && stop <= entry) return fail("stop_loss_quality", "invalid_stop_loss", "short_stop_not_above_entry", "Short signal stop loss must be above entry.", "critical");
-  if (Number.isFinite(atr) && atr > 0) {
-    if (stopDistance < atr * 0.35) return fail("stop_loss_quality", "invalid_stop_loss", "stop_too_tight", "Stop loss is too tight compared with current ATR and normal candle noise.", "high");
-    if (stopDistance > atr * 3.5) return fail("stop_loss_quality", "invalid_stop_loss", "stop_too_wide", "Stop loss is too wide for the timeframe and may distort position sizing.", "medium");
-  }
-  if (isStopNotStructural(signal, marketData, readings)) {
-    return fail("stop_loss_quality", "invalid_stop_loss", "stop_not_structural", "Stop loss is not protected by recent structure, support/resistance, or an ATR buffer.", "high");
-  }
-  return pass("stop_loss_quality", "Stop loss is directionally valid and structurally reasonable.");
+
+  const reasonCode = diagnostics?.repairFailureReason || inspection.reasonCode;
+  const explanations = {
+    zero_or_missing_stop_distance: "Stop loss is missing or creates zero stop distance.",
+    stop_wrong_side_of_entry: readings.direction === "long"
+      ? "Long signal stop loss must be below entry."
+      : "Short signal stop loss must be above entry.",
+    stop_inside_noise: "Stop loss remains inside normal candle noise.",
+    stop_too_tight: "Stop loss is too tight compared with current ATR and normal candle noise.",
+    stop_too_wide: "No structurally valid stop exists within the maximum ATR distance.",
+    no_structural_stop_available: "No structural invalidation level is available for a safe stop repair.",
+    repaired_stop_breaks_rr_requirement: `The repaired structural stop reduces risk/reward below the existing ${minimumRiskReward}R minimum.`,
+    missing_candle_data: "Stop repair requires enough recent candles to confirm market structure.",
+    stale_candle_data: "Stop repair was not attempted because the available candle data is stale.",
+    atr_unavailable: "Stop repair requires a valid ATR value.",
+    invalid_entry: "Stop repair cannot rescue an invalid entry.",
+    invalid_trade_direction: "Stop repair cannot proceed because the entry and target direction are invalid.",
+    stop_not_structural: "Stop loss is not protected by recent structure, support/resistance, or an ATR buffer."
+  };
+  return fail(
+    "stop_loss_quality",
+    "invalid_stop_loss",
+    reasonCode,
+    explanations[reasonCode] || "Stop loss is not structurally valid and could not be repaired safely.",
+    ["zero_or_missing_stop_distance", "stop_wrong_side_of_entry"].includes(inspection.reasonCode) ? "critical" : "high",
+    { stopRepair: diagnostics }
+  );
 }
 
 function validateTakeProfitRealism(signal, marketData, readings) {
@@ -358,20 +394,6 @@ function isInsideNoisyRange(signal, marketData, { entry, atr }) {
   if (!candle || !Number.isFinite(entry) || !Number.isFinite(atr) || atr <= 0) return false;
   const mid = (Number(candle.high) + Number(candle.low)) / 2;
   return Math.abs(entry - mid) <= atr * 0.15 && /range|chop|sideways/.test(readRegime(signal, marketData));
-}
-
-function isStopNotStructural(signal, marketData, { stop, direction, atr }) {
-  if (signal.indicators?.stopStructural || signal.marketStructure?.stopStructural || signal.riskPlan?.invalidation) return false;
-  const levels = readLevels(signal, marketData);
-  if (!Number.isFinite(stop)) return true;
-  if (!levels.support && !levels.resistance && !signal.marketStructure?.swingLow && !signal.marketStructure?.swingHigh) return false;
-  const buffer = Number.isFinite(atr) && atr > 0 ? atr * 0.15 : 0;
-  if (direction === "long") {
-    const structural = Number(levels.support ?? signal.marketStructure?.swingLow);
-    return Number.isFinite(structural) && stop > structural + buffer;
-  }
-  const structural = Number(levels.resistance ?? signal.marketStructure?.swingHigh);
-  return Number.isFinite(structural) && stop < structural - buffer;
 }
 
 function isTargetBlocked(signal, marketData, { entry, takeProfit, direction }) {

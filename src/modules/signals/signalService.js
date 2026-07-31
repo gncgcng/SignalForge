@@ -53,6 +53,7 @@ import {
   applyStrategyStrictnessRejection,
   validateStrategyStrictness
 } from "./strategyStrictnessService.js";
+import { repairInvalidStopLoss } from "./signalStopRepairService.js";
 import {
   SCANNER_RESULT_TYPES,
   buildAvoidTradeResult,
@@ -333,16 +334,19 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
     }
     : null;
   const strictness = readySignal ? validateStrategyStrictness(readySignal, marketData) : null;
-  const validation = readySignal && strictness?.passed !== false
-    ? await validateSignalForPublication(readySignal, marketData, user, {
+  const stopAdjustedReadySignal = readySignal && strictness?.passed !== false
+    ? repairInvalidStopLoss(readySignal, marketData, { minimumRiskReward: 1.5 })
+    : readySignal;
+  const validation = stopAdjustedReadySignal && strictness?.passed !== false
+    ? await validateSignalForPublication(stopAdjustedReadySignal, marketData, user, {
       source: "scanner",
       duplicate: true
     })
     : null;
   const strictnessBlocked = Boolean(readySignal && strictness?.passed === false);
-  const valid = Boolean(readySignal && !strictnessBlocked && validation?.passed);
+  const valid = Boolean(stopAdjustedReadySignal && !strictnessBlocked && validation?.passed);
   const learnedSignal = valid
-    ? withSignalValidity(await applyLearningToValidatedSignal(applyValidationToSignal(readySignal, validation), {
+    ? withSignalValidity(await applyLearningToValidatedSignal(applyValidationToSignal(stopAdjustedReadySignal, validation), {
       source: generationSource
     }))
     : null;
@@ -357,20 +361,21 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
       ? buildCalibrationBlockedQualityGate(cappedSignal)
       : await evaluateGeneratedSignalQualityGate(cappedSignal, { source: generationSource, marketData, candidateId: candidate?.id || null })
     : { passed: true };
+  const qualityAdjustedSignal = qualityGate.adjustedSignal || cappedSignal;
   const qualityBlocked = Boolean(cappedSignal && !qualityGate.passed);
-  const signal = cappedSignal && !calibrationBlocked && !calibrationWatching && !qualityBlocked
+  const signal = qualityAdjustedSignal && !calibrationBlocked && !calibrationWatching && !qualityBlocked
     ? withSignalQuality({
-      ...cappedSignal,
-      confidenceScore: Math.min(cappedSignal.confidenceScore, candidate?.confidenceEstimate || 99),
+      ...qualityAdjustedSignal,
+      confidenceScore: Math.min(qualityAdjustedSignal.confidenceScore, candidate?.confidenceEstimate || 99),
       indicators: {
-        ...(cappedSignal.indicators || {}),
+        ...(qualityAdjustedSignal.indicators || {}),
         qualityGatePassed: true,
         qualityGateV2: qualityGate.qualityGateV2 || qualityGate.details?.qualityGateV2 || null
       }
     })
     : null;
   const blockedSignal = qualityBlocked
-    ? withSignalQuality(applyGeneratedSignalQualityBlock(cappedSignal, qualityGate))
+    ? withSignalQuality(applyGeneratedSignalQualityBlock(qualityAdjustedSignal, qualityGate))
     : calibrationWatching
       ? withSignalQuality(applyHistoricalWatchingDecision(cappedSignal))
     : strictnessBlocked
@@ -434,14 +439,14 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
       candidate: candidate ? toCandidatePreview(candidate) : null
     }
     : result.valid && (strictnessBlocked || validation || calibrationWatching) && (strictnessBlocked || !validation?.passed || qualityBlocked || calibrationBlocked || calibrationWatching)
-      ? validationNoSetupAnalysis(readySignal, strictnessBlocked
-        ? qualityGateToValidation(readySignal, { stage: "strategy_strictness", reason: strictness.reason })
+      ? validationNoSetupAnalysis(stopAdjustedReadySignal, strictnessBlocked
+        ? qualityGateToValidation(stopAdjustedReadySignal, { stage: "strategy_strictness", reason: strictness.reason })
         : qualityBlocked
-        ? qualityGateToValidation(readySignal, qualityGate)
+        ? qualityGateToValidation(stopAdjustedReadySignal, qualityGate)
         : calibrationBlocked
-          ? qualityGateToValidation(readySignal, { stage: "generated_quality_calibration", reason: "Performance calibration quarantined or disabled this group." })
+          ? qualityGateToValidation(stopAdjustedReadySignal, { stage: "generated_quality_calibration", reason: "Performance calibration quarantined or disabled this group." })
           : calibrationWatching
-            ? qualityGateToValidation(readySignal, { stage: "historical_calibration_watching", reason: cappedSignal.indicators?.confidenceCalibration?.calibrationReason || "Historical performance reduced confidence. Setup is watching, not ready." })
+            ? qualityGateToValidation(stopAdjustedReadySignal, { stage: "historical_calibration_watching", reason: cappedSignal.indicators?.confidenceCalibration?.calibrationReason || "Historical performance reduced confidence. Setup is watching, not ready." })
           : validation)
       : result.analysis;
   const publishable = Boolean(valid && signal);
