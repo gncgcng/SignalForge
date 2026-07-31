@@ -72,6 +72,7 @@
     "test:signal-learning": "node scripts/signal-learning-engine-test.js",
     "test:signal-confidence-calibration": "node scripts/signal-confidence-calibration-test.js",
     "test:generated-signal-quality": "node scripts/generated-signal-quality-controls-test.js",
+    "test:signal-duplicates": "node scripts/signal-duplicate-detection-test.js",
     "test:signal-quality-gate-v2": "node scripts/signal-quality-gate-v2-test.js",
     "test:signal-stop-repair": "node scripts/signal-stop-repair-test.js",
     "test:signal-take-profit-repair": "node scripts/signal-take-profit-repair-test.js",

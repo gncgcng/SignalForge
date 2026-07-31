@@ -4292,6 +4292,9 @@ function renderAdminSignalDetail(signal) {
   const calibration = signal.confidenceCalibration || {};
   const stopValidation = analysis.stopValidation || analysis.indicators?.stopRepairDiagnostics || null;
   const takeProfitValidation = analysis.takeProfitValidation || analysis.indicators?.takeProfitRepairDiagnostics || null;
+  const duplicateDecision = analysis.indicators?.generatedQualityGate?.details ||
+    analysis.indicators?.duplicateSelection ||
+    null;
   const calibrationRows = [
     `Raw setup score: ${Number(signal.rawSetupScore ?? signal.originalConfidence ?? calibration.rawSetupScore ?? calibration.originalConfidence ?? signal.confidence).toFixed(0)}%`,
     `Original confidence: ${Number(signal.originalConfidence ?? calibration.originalConfidence ?? signal.confidence).toFixed(0)}%`,
@@ -4366,6 +4369,23 @@ function renderAdminSignalDetail(signal) {
       signal.qualityGateDetails?.explanation,
       ...(signal.qualityGateDetails?.checks || []).filter((item) => item.passed === false).map((item) => `${titleCase(item.stage)}: ${item.explanation}`)
     ])}
+    ${renderAdminDetailSection("Duplicate decision", duplicateDecision?.matchType ? [
+      `Decision: ${duplicateDecision.selectedSignal === "candidate" ? "Current candidate selected" : "Duplicate blocked"}`,
+      duplicateDecision.matchedSignalId ? `Matched signal: ${duplicateDecision.matchedSignalId}` : null,
+      duplicateDecision.matchedCandidateId ? `Matched candidate: ${duplicateDecision.matchedCandidateId}` : null,
+      duplicateDecision.matchedPair ? `Pair: ${duplicateDecision.matchedPair}` : null,
+      duplicateDecision.matchedTimeframe ? `Timeframe: ${duplicateDecision.matchedTimeframe}` : null,
+      duplicateDecision.matchedDirection ? `Direction: ${titleCase(duplicateDecision.matchedDirection)}` : null,
+      duplicateDecision.matchedStrategy ? `Strategy: ${duplicateDecision.matchedStrategy}` : null,
+      duplicateDecision.priorSignalStatus ? `Previous status: ${duplicateDecision.priorSignalStatus}` : null,
+      duplicateDecision.priorSignalOutcome ? `Previous outcome: ${duplicateDecision.priorSignalOutcome}` : null,
+      duplicateDecision.entryDistancePercent == null ? null : `Entry difference: ${Number(duplicateDecision.entryDistancePercent).toFixed(3)}%`,
+      duplicateDecision.entryDistanceAtr == null ? null : `Entry difference: ${Number(duplicateDecision.entryDistanceAtr).toFixed(3)} ATR`,
+      duplicateDecision.timeDifferenceMinutes == null ? null : `Time difference: ${Number(duplicateDecision.timeDifferenceMinutes).toFixed(1)} minutes`,
+      `Match type: ${titleCase(duplicateDecision.matchType)}`,
+      duplicateDecision.duplicateMatchMethod ? `Rule: ${titleCase(duplicateDecision.duplicateMatchMethod)}` : null,
+      duplicateDecision.selectionReason
+    ] : [])}
     ${renderAdminDetailSection("Signal quality breakdown", Object.values(quality).map((item) => `${item.label}: ${titleCase(item.status)} - ${item.reason}`))}
     ${renderAdminDetailSection("Why it was generated", [analysis.reasoning, ...(analysis.confirmations || []).map((item) => `${item.passed ? "Passed" : "Failed"}: ${item.name} - ${item.detail}`), ...(signal.warningReasons || []).map((item) => `Warning: ${typeof item === "string" ? item : item.reason}`)])}
     ${signal.pattern ? renderAdminDetailSection("Pattern context", [`${pattern.label || titleCase(signal.pattern)} - ${titleCase(pattern.bias)} ${pattern.category || "pattern"}`, `Pattern confidence: ${Math.round(Number(pattern.confidence || 0) * 100)}%`, ...(pattern.reasons || []), ...(pattern.warnings || []).map((item) => `Warning: ${item}`)]) : ""}

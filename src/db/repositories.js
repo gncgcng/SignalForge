@@ -3078,18 +3078,20 @@ export async function setTelegramNotificationsEnabled(userId, enabled) {
 
 export async function enqueueTelegramNotification(userId, settings, setup) {
   const setupKey = setup.setupKey || setup.id;
+  const alertType = "ready_trade_signal";
   const result = await query(`
     INSERT INTO telegram_notification_queue (
-      id, user_id, setup_key, chat_id, payload
+      id, user_id, setup_key, chat_id, alert_type, payload
     )
-    VALUES ($1,$2,$3,$4,$5)
-    ON CONFLICT (user_id, setup_key) DO NOTHING
+    VALUES ($1,$2,$3,$4,$5,$6)
+    ON CONFLICT (user_id, chat_id, setup_key, alert_type) DO NOTHING
     RETURNING id
   `, [
     createId("tgq"),
     userId,
     setupKey,
     settings.chatId,
+    alertType,
     JSON.stringify(setup)
   ]);
   return result.rows[0] || null;

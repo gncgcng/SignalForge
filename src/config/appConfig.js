@@ -185,7 +185,9 @@ export const appConfig = {
       "15m": Math.max(1, Number(process.env.SIGNAL_TP_MAX_ATR_MULTIPLIER_15M || 5)),
       "1h": Math.max(1, Number(process.env.SIGNAL_TP_MAX_ATR_MULTIPLIER_1H || 7)),
       "4h": Math.max(1, Number(process.env.SIGNAL_TP_MAX_ATR_MULTIPLIER_4H || 10))
-    }
+    },
+    duplicateEntryPercentTolerance: Math.max(0, Number(process.env.SIGNAL_DUPLICATE_ENTRY_PERCENT_TOLERANCE || 0.35)) / 100,
+    duplicateEntryAtrTolerance: Math.max(0, Number(process.env.SIGNAL_DUPLICATE_ENTRY_ATR_TOLERANCE || 0.5))
   },
   autoScan: {
     enabled: process.env.CRYPTO_WATCHER_ENABLED !== "false" && process.env.AUTO_SCAN_ENABLED !== "false",

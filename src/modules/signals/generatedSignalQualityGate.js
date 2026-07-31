@@ -1,4 +1,5 @@
 import { query } from "../../db/client.js";
+import { appConfig } from "../../config/appConfig.js";
 import { recordSignalQualityGateResult } from "./signalQualityGateRepository.js";
 import {
   evaluateSignalQualityGateV2,
@@ -72,17 +73,6 @@ export async function evaluateGeneratedSignalQualityGate(signal, context = {}) {
     return recordAndReturn(signal, blockGate("cooldown", `Blocked by cooldown because the last similar signal ${cooldown.status === "Hit SL" ? "hit SL" : "expired"}.`, cooldown), context);
   }
 
-  const duplicate = await findRecentGeneratedSignalDuplicate(signalWithTimeframeCap);
-  if (duplicate) {
-    return recordAndReturn(signal, blockGate(
-      duplicate.timeframe === signal.timeframe ? "duplicate" : "correlated",
-      duplicate.timeframe === signal.timeframe
-        ? "A recent similar ready signal already exists for this pair, direction, timeframe, and strategy."
-        : "A recent correlated signal already exists for this pair and direction on a nearby timeframe.",
-      duplicate
-    ), context);
-  }
-
   const initialV2Result = evaluateSignalQualityGateV2(signalWithTimeframeCap, {
     ...context,
     timeframePolicy
@@ -119,8 +109,30 @@ export async function evaluateGeneratedSignalQualityGate(signal, context = {}) {
     );
   }
 
-  await recordGateSafely(adjustedSignal, v2, context);
-  return attachAdjustedSignal(passGate({ qualityGateV2: v2 }), adjustedSignal);
+  const duplicateDecision = await findRecentGeneratedSignalDuplicate(adjustedSignal);
+  if (duplicateDecision?.blocked) {
+    const duplicateType = duplicateDecision.matchType === "direct_duplicate" ? "duplicate" : "correlated";
+    const gate = attachAdjustedSignal(
+      blockGate(
+        duplicateType,
+        duplicateType === "duplicate"
+          ? "A substantially identical active trade idea already exists."
+          : "A stronger active setup already represents this correlated cross-timeframe trade idea.",
+        duplicateDecision.details
+      ),
+      adjustedSignal
+    );
+    return recordAndReturn(adjustedSignal, gate, context);
+  }
+
+  const selectedSignal = duplicateDecision?.selectedCurrent
+    ? withDuplicateSelectionDiagnostics(adjustedSignal, duplicateDecision.details)
+    : adjustedSignal;
+  await recordGateSafely(selectedSignal, v2, context);
+  return attachAdjustedSignal(passGate({
+    qualityGateV2: v2,
+    duplicateSelection: duplicateDecision?.selectedCurrent ? duplicateDecision.details : null
+  }), selectedSignal);
 }
 
 export function applyGeneratedSignalQualityBlock(signal, gate) {
@@ -278,10 +290,7 @@ export function isNearbyTimeframe(timeframe, otherTimeframe) {
 }
 
 export function isSimilarEntryPrice(entry, otherEntry) {
-  const left = Number(entry);
-  const right = Number(otherEntry);
-  if (!Number.isFinite(left) || !Number.isFinite(right) || left <= 0 || right <= 0) return false;
-  return Math.abs(left - right) / Math.max(left, right) <= 0.0025;
+  return getEntryZoneSimilarity(entry, otherEntry).matched;
 }
 
 export function isSimilarEntryPriceWithin(entry, otherEntry, tolerance = 0.0025) {
@@ -292,36 +301,477 @@ export function isSimilarEntryPriceWithin(entry, otherEntry, tolerance = 0.0025)
 }
 
 export function isSimilarStrategyOrPattern(signal, row) {
-  const strategy = normalizeText(signal.setupType || signal.strategy);
-  const otherStrategy = normalizeText(row.strategy);
-  const pattern = normalizeText(signal.patternContext?.pattern || signal.indicators?.patternContext?.pattern);
-  const otherPattern = normalizeText(row.pattern);
-  return Boolean(strategy && otherStrategy && strategy === otherStrategy) || Boolean(pattern && otherPattern && pattern === otherPattern);
+  const strategy = strategyFamily(signal.setupType || signal.strategy);
+  const otherStrategy = strategyFamily(row.setupType || row.strategy);
+  const pattern = patternFamily(readPattern(signal));
+  const otherPattern = patternFamily(readPattern(row));
+  return Boolean(strategy && otherStrategy && strategy === otherStrategy) ||
+    Boolean(pattern && otherPattern && pattern === otherPattern);
+}
+
+export function getEntryZoneSimilarity(entry, otherEntry, atr = null, options = {}) {
+  const left = Number(entry);
+  const right = Number(otherEntry);
+  const atrValue = Number(atr);
+  const percentTolerance = Number(options.percentTolerance ?? appConfig.signals.duplicateEntryPercentTolerance);
+  const atrTolerance = Number(options.atrTolerance ?? appConfig.signals.duplicateEntryAtrTolerance);
+  if (!Number.isFinite(left) || !Number.isFinite(right) || left <= 0 || right <= 0) {
+    return {
+      matched: false,
+      distancePercent: null,
+      distanceAtr: null,
+      matchMethod: "invalid_entry"
+    };
+  }
+  const distance = Math.abs(left - right);
+  const distanceRatio = distance / Math.max(Math.abs(left), Math.abs(right));
+  const distanceAtr = Number.isFinite(atrValue) && atrValue > 0 ? distance / atrValue : null;
+  const percentMatched = distanceRatio <= percentTolerance;
+  const atrMatched = Number.isFinite(distanceAtr) && distanceAtr <= atrTolerance;
+  return {
+    matched: percentMatched || atrMatched,
+    distancePercent: Number((distanceRatio * 100).toFixed(6)),
+    distanceAtr: Number.isFinite(distanceAtr) ? Number(distanceAtr.toFixed(6)) : null,
+    matchMethod: percentMatched && atrMatched
+      ? "entry_percent_and_atr"
+      : percentMatched
+        ? "entry_percent"
+        : atrMatched
+          ? "entry_atr"
+          : "entry_outside_tolerance"
+  };
+}
+
+export function isDuplicateBlockingRecord(row, now = Date.now()) {
+  if (!row) return false;
+  const status = normalizeText(row.status);
+  if (!["active", "expiring-soon", "pending", "ready", "alerted"].includes(status)) return false;
+  const validUntil = new Date(row.valid_until ?? row.validUntil ?? Infinity).getTime();
+  if (Number.isFinite(validUntil) && validUntil <= now) return false;
+  const source = normalizeText(row.source);
+  if (["legacy-saved-signal", "legacy-unlocked-signal", "backtest-shadow", "admin-test", "test", "debug"].includes(source)) return false;
+  const gateStatus = normalizeText(row.quality_gate_status ?? row.qualityGateStatus);
+  if (gateStatus && gateStatus !== "passed") return false;
+  if (normalizeText(row.user_visibility ?? row.userVisibility) === "admin-only") return false;
+
+  const sourceHistory = Array.isArray(row.source_history ?? row.sourceHistory)
+    ? row.source_history ?? row.sourceHistory
+    : [];
+  const telegramStatus = normalizeText(row.telegram_status ?? row.telegramStatus);
+  const promotedToUsers = ["manual-scan", "telegram-alert"].includes(source) ||
+    sourceHistory.some((item) => normalizeText(item) === "telegram-alert") ||
+    ["queued", "sent"].includes(telegramStatus) ||
+    row.shownToUsers === true;
+  return promotedToUsers;
+}
+
+export function evaluateDuplicateSignalMatch(signal, row, options = {}) {
+  if (!signal || !isDuplicateBlockingRecord(row, options.now)) return noDuplicate("record_not_eligible");
+  const pair = normalizePair(signal.symbol || signal.pair);
+  const otherPair = normalizePair(row.pair || row.symbol || row.display_pair);
+  if (!pair || pair !== otherPair) return noDuplicate("different_pair");
+  const direction = normalizeText(signal.direction);
+  const otherDirection = normalizeText(row.direction);
+  if (!direction || direction !== otherDirection) return noDuplicate("different_direction");
+  const sameTimeframe = signal.timeframe === row.timeframe;
+  if (!sameTimeframe && !isNearbyTimeframe(signal.timeframe, row.timeframe)) return noDuplicate("unrelated_timeframe");
+
+  const strategy = strategyFamily(signal.setupType || signal.strategy);
+  const otherStrategy = strategyFamily(row.setupType || row.strategy);
+  const pattern = patternFamily(readPattern(signal));
+  const otherPattern = patternFamily(readPattern(row));
+  const strategyMatched = Boolean(strategy && otherStrategy && strategy === otherStrategy);
+  const patternMatched = Boolean(pattern && otherPattern && pattern === otherPattern);
+  if (strategy && otherStrategy && !strategyMatched) return noDuplicate("different_strategy_family");
+  if (!strategyMatched && !patternMatched) return noDuplicate("different_strategy_family");
+
+  const atr = firstFinite(readAtr(signal), readAtr(row));
+  const entrySimilarity = getEntryZoneSimilarity(
+    signal.entryPrice ?? signal.entry,
+    row.entryPrice ?? row.entry,
+    atr,
+    options
+  );
+  if (!entrySimilarity.matched) return noDuplicate("different_entry_zone", entrySimilarity);
+
+  const triggerSimilarity = compareTriggerStructure(signal, row, atr, options);
+  const tradePlanSimilarity = compareTradePlan(signal, row, atr, options);
+  const otherSetupKey = row.setup_key || row.setupKey;
+  const exactSetupKey = Boolean(signal.setupKey && otherSetupKey && signal.setupKey === otherSetupKey);
+  const hasStrategy = Boolean(strategy && otherStrategy);
+  const patternStructureMatch = patternMatched && !triggerSimilarity.available;
+  const directStructureMatch = exactSetupKey || triggerSimilarity.matched || patternStructureMatch || tradePlanSimilarity.matched;
+  const correlatedStructureMatch = exactSetupKey || triggerSimilarity.matched || (patternStructureMatch && tradePlanSimilarity.matched);
+  if (hasStrategy ? !(sameTimeframe ? directStructureMatch : correlatedStructureMatch) : !(triggerSimilarity.matched && (patternMatched || tradePlanSimilarity.matched))) {
+    return noDuplicate("different_market_structure", {
+      ...entrySimilarity,
+      triggerMatchMethod: triggerSimilarity.matchMethod
+    });
+  }
+
+  const createdAt = new Date(row.created_at ?? row.createdAt).getTime();
+  const now = Number(options.now ?? Date.now());
+  const duplicateWindowMs = Number(options.duplicateWindowMs ?? 6 * 60 * 60 * 1000);
+  const timeDifferenceMs = Number.isFinite(createdAt) ? Math.max(0, now - createdAt) : null;
+  if (Number.isFinite(timeDifferenceMs) && timeDifferenceMs > duplicateWindowMs) {
+    return noDuplicate("outside_duplicate_window");
+  }
+
+  const matchType = sameTimeframe ? "direct_duplicate" : "correlated_duplicate";
+  const candidateStrength = duplicateStrength(signal);
+  const existingStrength = duplicateStrength(row);
+  const alreadyAlerted = ["queued", "sent"].includes(normalizeText(row.telegram_status ?? row.telegramStatus));
+  const selected = matchType === "direct_duplicate" || alreadyAlerted || existingStrength.score >= candidateStrength.score
+    ? "existing"
+    : "candidate";
+  const structureMethod = exactSetupKey
+    ? "exact_setup_key"
+    : triggerSimilarity.matched
+      ? triggerSimilarity.matchMethod
+      : patternMatched && tradePlanSimilarity.matched
+        ? "pattern_and_trade_plan"
+        : patternMatched
+          ? "pattern_family"
+          : tradePlanSimilarity.matchMethod;
+  const details = duplicateDiagnostics({
+    signal,
+    row,
+    matchType,
+    selected,
+    entrySimilarity,
+    triggerSimilarity,
+    structureMethod,
+    timeDifferenceMs,
+    candidateStrength,
+    existingStrength
+  });
+  return {
+    matched: true,
+    blocked: selected === "existing",
+    selectedCurrent: selected === "candidate",
+    matchType,
+    details
+  };
 }
 
 async function findRecentGeneratedSignalDuplicate(signal) {
+  const normalizedPair = normalizePair(signal.symbol || signal.pair);
   const result = await query(`
-    SELECT id, pair, timeframe, direction, strategy, pattern, entry, confidence,
-      risk_reward, setup_quality_score, entry_readiness_score, status, created_at
+    SELECT id, signal_id, setup_key, promoted_from_candidate_id, pair, display_pair,
+      timeframe, direction, strategy, pattern, pattern_context, entry, stop_loss,
+      take_profit, confidence, calibrated_confidence, confidence_calibration,
+      risk_reward, setup_quality_score, entry_readiness_score, status, valid_until,
+      source, source_history, quality_gate_status, telegram_status, full_analysis,
+      result_reason, created_at
     FROM generated_signals
-    WHERE pair = $1
-      AND direction = $2
-      AND status = 'Active'
-      AND ${currentEngineSourceSql}
+    WHERE regexp_replace(upper(pair), '[^A-Z0-9]', '', 'g') = $1
+      AND lower(direction) = $2
+      AND status IN ('Active', 'Expiring Soon', 'Pending', 'Ready', 'Alerted')
+      AND valid_until > now()
+      AND source NOT IN ('legacy_saved_signal','legacy_unlocked_signal','backtest_shadow','admin_test')
+      AND (quality_gate_status = 'passed' OR quality_gate_status IS NULL)
+      AND (
+        source IN ('manual_scan', 'telegram_alert')
+        OR source_history ? 'telegram_alert'
+        OR telegram_status IN ('queued', 'sent')
+      )
       AND created_at >= now() - interval '6 hours'
     ORDER BY created_at DESC
-    LIMIT 25
-  `, [signal.symbol || signal.pair, signal.direction]);
+    LIMIT 50
+  `, [normalizedPair, normalizeText(signal.direction)]);
 
-  return result.rows.find((row) =>
-    isNearbyTimeframe(signal.timeframe, row.timeframe) &&
-    isSimilarEntryPriceWithin(
-      signal.entryPrice ?? signal.entry,
-      row.entry,
-      row.timeframe === signal.timeframe ? 0.0025 : 0.0015
-    ) &&
-    isSimilarStrategyOrPattern(signal, row)
-  ) || null;
+  const matches = result.rows
+    .map((row) => ({ row, decision: evaluateDuplicateSignalMatch(signal, row) }))
+    .filter((item) => item.decision.matched);
+  if (!matches.length) return null;
+
+  const direct = matches.find((item) => item.decision.matchType === "direct_duplicate");
+  if (direct) return direct.decision;
+
+  const strongestExisting = matches.sort((left, right) =>
+    Number(right.decision.details?.existingStrength?.score || 0) -
+    Number(left.decision.details?.existingStrength?.score || 0)
+  )[0];
+  if (strongestExisting.decision.blocked) return strongestExisting.decision;
+
+  const supersededIds = matches
+    .filter((item) => item.decision.selectedCurrent)
+    .map((item) => item.row.id);
+  if (supersededIds.length) {
+    await query(`
+      UPDATE generated_signals
+      SET status = 'Correlated duplicate',
+        result_reason = $2,
+        updated_at = now()
+      WHERE id = ANY($1::text[])
+        AND status IN ('Active', 'Expiring Soon', 'Pending', 'Ready')
+        AND COALESCE(telegram_status, '') NOT IN ('queued', 'sent')
+    `, [
+      supersededIds,
+      `Superseded by stronger correlated setup ${signal.id || signal.setupKey || "candidate"}.`
+    ]);
+  }
+  return strongestExisting.decision;
+}
+
+function compareTriggerStructure(signal, row, atr, options) {
+  const triggers = readTriggerLevels(signal);
+  const otherTriggers = readTriggerLevels(row);
+  let closest = null;
+  for (const trigger of triggers) {
+    for (const otherTrigger of otherTriggers) {
+      const comparison = getEntryZoneSimilarity(trigger.price, otherTrigger.price, atr, options);
+      if (!closest || diagnosticDistance(comparison) < diagnosticDistance(closest)) {
+        closest = {
+          ...comparison,
+          available: true,
+          trigger: trigger.price,
+          matchedTrigger: otherTrigger.price,
+          matchMethod: comparison.matched
+            ? `${trigger.source}:${otherTrigger.source}:${comparison.matchMethod}`
+            : "trigger_outside_tolerance"
+        };
+      }
+    }
+  }
+  return closest || {
+    matched: false,
+    available: false,
+    distancePercent: null,
+    distanceAtr: null,
+    matchMethod: "trigger_unavailable"
+  };
+}
+
+function compareTradePlan(signal, row, atr, options) {
+  const stop = getEntryZoneSimilarity(
+    signal.stopLoss ?? signal.stop_loss,
+    row.stopLoss ?? row.stop_loss,
+    atr,
+    options
+  );
+  const target = getEntryZoneSimilarity(
+    signal.takeProfit ?? signal.take_profit,
+    row.takeProfit ?? row.take_profit,
+    atr,
+    options
+  );
+  return {
+    matched: stop.matched && target.matched,
+    matchMethod: stop.matched && target.matched ? "similar_stop_and_target" : "different_trade_plan",
+    stopDistancePercent: stop.distancePercent,
+    targetDistancePercent: target.distancePercent
+  };
+}
+
+function readTriggerLevels(value = {}) {
+  const fullAnalysis = value.full_analysis || value.fullAnalysis || {};
+  const indicators = value.indicators || fullAnalysis.indicators || {};
+  const structure = value.marketStructure || value.market_structure || fullAnalysis.marketStructure || {};
+  const patternContext = value.patternContext || value.pattern_context || indicators.patternContext || fullAnalysis.patternContext || {};
+  const keyLevels = patternContext.keyLevels || {};
+  const riskPlan = value.riskPlan || value.risk_plan || fullAnalysis.riskPlan || {};
+  const strategy = strategyFamily(value.setupType || value.strategy);
+  const direction = normalizeText(value.direction);
+  const levels = [];
+  const add = (input, source) => {
+    const price = readLevelPrice(input);
+    if (!Number.isFinite(price) || price <= 0) return;
+    if (levels.some((level) => Math.abs(level.price - price) <= Math.max(price, 1) * 1e-9)) return;
+    levels.push({ price, source });
+  };
+
+  add(value.triggerLevel ?? value.trigger_level, "signal_trigger");
+  add(indicators.triggerLevel ?? indicators.triggerPrice, "indicator_trigger");
+  add(structure.triggerLevel ?? structure.entryTrigger, "structure_trigger");
+  add(structure.retestLevel ?? structure.breakoutLevel, "structure_retest");
+  add(riskPlan.triggerLevel ?? riskPlan.retestLevel, "risk_plan_trigger");
+  add(keyLevels.breakoutLevel, "pattern_breakout");
+  add(keyLevels.neckline, "pattern_neckline");
+
+  if (strategy === "breakout_retest" || strategy === "structure_breakout") {
+    add(direction === "long" ? keyLevels.resistance : keyLevels.support, "broken_structure");
+  } else if (strategy === "range_bounce" || strategy === "support_resistance_retest") {
+    add(direction === "long" ? keyLevels.support : keyLevels.resistance, "retest_structure");
+  } else if (strategy === "liquidity_sweep_reversal") {
+    add(keyLevels.invalidation ?? indicators.liquiditySweepLevel, "liquidity_sweep");
+  }
+  return levels;
+}
+
+function strategyFamily(value) {
+  const strategy = normalizeText(value);
+  if (!strategy || ["unknown-strategy", "qualified-setup"].includes(strategy)) return "";
+  if (/breakout.*retest|retest.*breakout|resistance-break-retest|support-break-retest|structure-breakout-retest/.test(strategy)) return "breakout_retest";
+  if (/support-breakdown|resistance-breakout|momentum-breakout|range-breakout/.test(strategy)) return "structure_breakout";
+  if (/liquidity-sweep/.test(strategy)) return "liquidity_sweep_reversal";
+  if (/range-bounce|mean-reversion/.test(strategy)) return "range_bounce";
+  if (/support-resistance-retest|resistance-rejection|support-bounce/.test(strategy)) return "support_resistance_retest";
+  if (/trend-continuation|pullback-continuation|higher-low-continuation|lower-high-continuation|multi-timeframe-continuation/.test(strategy)) return "trend_continuation";
+  if (/momentum-exhaustion|failed-breakout|false-breakout/.test(strategy)) return "momentum_reversal";
+  if (/double-top|double-bottom/.test(strategy)) return "double_reversal";
+  if (/head-and-shoulders|inverse-head-and-shoulders/.test(strategy)) return "head_shoulders";
+  return strategy;
+}
+
+function patternFamily(value) {
+  const pattern = normalizeText(value);
+  if (!pattern) return "";
+  if (/bull-flag|bear-flag/.test(pattern)) return "flag";
+  if (/ascending-triangle|descending-triangle|symmetrical-triangle/.test(pattern)) return "triangle";
+  if (/bullish-rectangle|bearish-rectangle|range-rectangle/.test(pattern)) return "rectangle";
+  if (/double-top|double-bottom/.test(pattern)) return "double_reversal";
+  if (/head-and-shoulders|inverse-head-and-shoulders/.test(pattern)) return "head_shoulders";
+  return pattern;
+}
+
+function readPattern(value = {}) {
+  const fullAnalysis = value.full_analysis || value.fullAnalysis || {};
+  const indicators = value.indicators || fullAnalysis.indicators || {};
+  const patternContext = value.patternContext || value.pattern_context || indicators.patternContext || fullAnalysis.patternContext || {};
+  return value.pattern || patternContext.pattern || patternContext.label || "";
+}
+
+function readAtr(value = {}) {
+  const fullAnalysis = value.full_analysis || value.fullAnalysis || {};
+  const indicators = value.indicators || fullAnalysis.indicators || {};
+  return firstFinite(
+    value.atr,
+    indicators.atr14,
+    fullAnalysis.riskPlan?.atr,
+    value.confidence_calibration?.atr
+  );
+}
+
+function duplicateStrength(value = {}) {
+  const fullAnalysis = value.full_analysis || value.fullAnalysis || {};
+  const indicators = value.indicators || fullAnalysis.indicators || {};
+  const confidence = firstFinite(
+    value.finalCalibratedConfidence,
+    value.calibratedConfidence,
+    value.calibrated_confidence,
+    value.confidenceScore,
+    value.confidence
+  ) || 0;
+  const quality = firstFinite(value.qualityScore, value.setupQualityScore, value.setup_quality_score) || 0;
+  const readiness = firstFinite(value.readinessScore, value.entryReadinessScore, value.entry_readiness_score, indicators.readinessScore) || 0;
+  const riskReward = firstFinite(value.riskRewardRatio, value.riskReward, value.risk_reward) || 0;
+  const entryQuality = normalizeText(value.entryQuality || indicators.entryQuality);
+  const entryQualityBonus = /excellent/.test(entryQuality) ? 4 : /good|acceptable/.test(entryQuality) ? 2 : 0;
+  const timeframeBonus = { "15m": 3, "1h": 2, "4h": 1, "5m": 0 }[value.timeframe] || 0;
+  const score = confidence + quality * 0.15 + readiness * 0.15 +
+    Math.min(5, Math.max(0, riskReward)) * 2 + entryQualityBonus + timeframeBonus;
+  return {
+    score: Number(score.toFixed(3)),
+    confidence,
+    quality,
+    readiness,
+    riskReward,
+    entryQuality: entryQuality || null,
+    timeframeBonus
+  };
+}
+
+function duplicateDiagnostics({
+  signal,
+  row,
+  matchType,
+  selected,
+  entrySimilarity,
+  triggerSimilarity,
+  structureMethod,
+  timeDifferenceMs,
+  candidateStrength,
+  existingStrength
+}) {
+  const timeDifferenceMinutes = Number.isFinite(timeDifferenceMs)
+    ? Number((timeDifferenceMs / 60_000).toFixed(2))
+    : null;
+  const matchedSignalId = row.signal_id || row.signalId || row.id || null;
+  const details = {
+    matchedSignalId,
+    matchedCandidateId: row.promoted_from_candidate_id || row.promotedFromCandidateId || null,
+    matchedPair: row.pair || row.symbol || null,
+    matchedTimeframe: row.timeframe || null,
+    matchedDirection: row.direction || null,
+    matchedStrategy: row.strategy || row.setupType || null,
+    priorSignalStatus: row.status || null,
+    priorSignalOutcome: row.result_reason || row.resultReason || null,
+    entryDistancePercent: entrySimilarity.distancePercent,
+    entryDistanceAtr: entrySimilarity.distanceAtr,
+    timeDifferenceMinutes,
+    matchType,
+    duplicateMatchMethod: `${entrySimilarity.matchMethod}+${structureMethod}`,
+    triggerMatchMethod: triggerSimilarity.matchMethod,
+    exactRule: matchType === "direct_duplicate"
+      ? "same_pair_timeframe_direction_strategy_entry_and_structure"
+      : "nearby_timeframe_same_pair_direction_strategy_entry_and_structure",
+    selectedSignal: selected,
+    selectedSignalId: selected === "candidate"
+      ? signal.id || signal.setupKey || null
+      : matchedSignalId,
+    selectionReason: selected === "candidate"
+      ? "Current candidate has the stronger validated setup score."
+      : ["queued", "sent"].includes(normalizeText(row.telegram_status ?? row.telegramStatus))
+        ? "The existing signal was already queued or alerted."
+        : "The existing active signal is at least as strong as the current candidate.",
+    candidateStrength,
+    existingStrength
+  };
+  return {
+    ...details,
+    matched_signal_id: details.matchedSignalId,
+    matched_candidate_id: details.matchedCandidateId,
+    duplicate_entry_distance_percent: details.entryDistancePercent,
+    duplicate_entry_distance_atr: details.entryDistanceAtr,
+    duplicate_match_method: details.duplicateMatchMethod,
+    time_difference_minutes: details.timeDifferenceMinutes
+  };
+}
+
+function noDuplicate(reason, details = {}) {
+  return {
+    matched: false,
+    blocked: false,
+    selectedCurrent: false,
+    matchType: null,
+    reason,
+    details
+  };
+}
+
+function withDuplicateSelectionDiagnostics(signal, details) {
+  return {
+    ...signal,
+    duplicateSelection: details,
+    indicators: {
+      ...(signal.indicators || {}),
+      duplicateSelection: details
+    }
+  };
+}
+
+function normalizePair(value) {
+  return String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+function readLevelPrice(value) {
+  if (value && typeof value === "object") return firstFinite(value.price, value.level, value.value);
+  return firstFinite(value);
+}
+
+function firstFinite(...values) {
+  for (const value of values) {
+    const number = Number(value);
+    if (value !== null && value !== undefined && value !== "" && Number.isFinite(number)) return number;
+  }
+  return null;
+}
+
+function diagnosticDistance(value) {
+  if (Number.isFinite(value?.distanceAtr)) return value.distanceAtr;
+  if (Number.isFinite(value?.distancePercent)) return value.distancePercent;
+  return Infinity;
 }
 
 async function findRecentGeneratedSignalFailure(signal) {
