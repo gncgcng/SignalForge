@@ -151,7 +151,7 @@ const repositorySource = readFileSync(new URL("../src/db/repositories.js", impor
 const migration = readFileSync(new URL("../migrations/059_signal_duplicate_precision.sql", import.meta.url), "utf8");
 const adminClientSource = readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
 assert.ok(
-  gateSource.indexOf("findRecentGeneratedSignalFailure") < gateSource.indexOf("findRecentGeneratedSignalDuplicate(adjustedSignal)"),
+  gateSource.indexOf("findRecentGeneratedSignalFailure") < gateSource.indexOf("findRecentGeneratedSignalDuplicate(cooldownAdjustedSignal)"),
   "cooldown must remain a separate earlier rule"
 );
 assert.match(gateSource, /status IN \('Active', 'Expiring Soon', 'Pending', 'Ready', 'Alerted'\)/);

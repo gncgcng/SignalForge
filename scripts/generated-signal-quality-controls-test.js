@@ -28,8 +28,8 @@ assert.equal(getTimeframeQualityPolicy("15m").confidenceCap, 88, "15m confidence
 assert.equal(getTimeframeQualityPolicy("4h").status, "promising", "4h should be confidence-capped instead of hard blocked for low sample size");
 assert.equal(getFailureCooldownMs("5m", "Hit SL"), 4 * 60 * 60 * 1000, "5m SL cooldown should be 4 hours");
 assert.equal(getFailureCooldownMs("15m", "Hit SL"), 6 * 60 * 60 * 1000, "15m SL cooldown should be 6 hours");
-assert.equal(getFailureCooldownMs("1h", "Hit SL"), 24 * 60 * 60 * 1000, "1h SL cooldown should be 24 hours");
-assert.equal(getFailureCooldownMs("4h", "Hit SL"), 48 * 60 * 60 * 1000, "4h SL cooldown should be 48 hours");
+assert.equal(getFailureCooldownMs("1h", "Hit SL"), 12 * 60 * 60 * 1000, "1h SL cooldown should be 12 hours");
+assert.equal(getFailureCooldownMs("4h", "Hit SL"), 24 * 60 * 60 * 1000, "4h SL cooldown should be 24 hours");
 assert.equal(getFailureCooldownMs("15m", "Expired"), 3 * 60 * 60 * 1000, "Expired cooldown should be half the SL cooldown");
 assert.equal(isNearbyTimeframe("15m", "1h"), true, "nearby timeframes should be correlated");
 assert.equal(isNearbyTimeframe("5m", "4h"), false, "distant timeframes should not be correlated");
@@ -109,7 +109,7 @@ assert.match(blocked.resultReason, /last similar signal hit SL/);
 
 assert.match(gateService, /findRecentGeneratedSignalDuplicate/);
 assert.match(gateService, /findRecentGeneratedSignalFailure/);
-assert.match(gateService, /status IN \('Hit SL', 'Expired'\)/);
+assert.match(gateService, /status IN \('Hit SL', 'Expired', 'Manually closed'\)/);
 assert.match(gateService, /source NOT IN \('legacy_saved_signal','legacy_unlocked_signal'\)/);
 assert.match(gateService, /Readiness score is 0/);
 assert.match(gateService, /Correlated duplicate/);

@@ -187,7 +187,14 @@ export const appConfig = {
       "4h": Math.max(1, Number(process.env.SIGNAL_TP_MAX_ATR_MULTIPLIER_4H || 10))
     },
     duplicateEntryPercentTolerance: Math.max(0, Number(process.env.SIGNAL_DUPLICATE_ENTRY_PERCENT_TOLERANCE || 0.35)) / 100,
-    duplicateEntryAtrTolerance: Math.max(0, Number(process.env.SIGNAL_DUPLICATE_ENTRY_ATR_TOLERANCE || 0.5))
+    duplicateEntryAtrTolerance: Math.max(0, Number(process.env.SIGNAL_DUPLICATE_ENTRY_ATR_TOLERANCE || 0.5)),
+    cooldownAfterSlHours: {
+      "5m": Math.max(0, Number(process.env.SIGNAL_COOLDOWN_AFTER_SL_5M_HOURS || 4)),
+      "15m": Math.max(0, Number(process.env.SIGNAL_COOLDOWN_AFTER_SL_15M_HOURS || 6)),
+      "1h": Math.max(0, Number(process.env.SIGNAL_COOLDOWN_AFTER_SL_1H_HOURS || 12)),
+      "4h": Math.max(0, Number(process.env.SIGNAL_COOLDOWN_AFTER_SL_4H_HOURS || 24))
+    },
+    cooldownAfterExpiredMultiplier: Math.max(0, Number(process.env.SIGNAL_COOLDOWN_AFTER_EXPIRED_MULTIPLIER || 0.5))
   },
   autoScan: {
     enabled: process.env.CRYPTO_WATCHER_ENABLED !== "false" && process.env.AUTO_SCAN_ENABLED !== "false",

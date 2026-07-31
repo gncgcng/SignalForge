@@ -4292,9 +4292,13 @@ function renderAdminSignalDetail(signal) {
   const calibration = signal.confidenceCalibration || {};
   const stopValidation = analysis.stopValidation || analysis.indicators?.stopRepairDiagnostics || null;
   const takeProfitValidation = analysis.takeProfitValidation || analysis.indicators?.takeProfitRepairDiagnostics || null;
-  const duplicateDecision = analysis.indicators?.generatedQualityGate?.details ||
-    analysis.indicators?.duplicateSelection ||
-    null;
+  const generatedGate = analysis.indicators?.generatedQualityGate || {};
+  const duplicateDecision = ["duplicate", "correlated"].includes(generatedGate.type)
+    ? generatedGate.details
+    : analysis.indicators?.duplicateSelection || null;
+  const cooldownDecision = generatedGate.type === "cooldown"
+    ? generatedGate.details
+    : analysis.indicators?.cooldownDecision || null;
   const calibrationRows = [
     `Raw setup score: ${Number(signal.rawSetupScore ?? signal.originalConfidence ?? calibration.rawSetupScore ?? calibration.originalConfidence ?? signal.confidence).toFixed(0)}%`,
     `Original confidence: ${Number(signal.originalConfidence ?? calibration.originalConfidence ?? signal.confidence).toFixed(0)}%`,
@@ -4369,6 +4373,26 @@ function renderAdminSignalDetail(signal) {
       signal.qualityGateDetails?.explanation,
       ...(signal.qualityGateDetails?.checks || []).filter((item) => item.passed === false).map((item) => `${titleCase(item.stage)}: ${item.explanation}`)
     ])}
+    ${renderAdminDetailSection("Cooldown decision", cooldownDecision ? [
+      `Decision: ${titleCase(cooldownDecision.finalCooldownDecision || "not applied")}`,
+      cooldownDecision.matchedSignalId ? `Previous signal: ${cooldownDecision.matchedSignalId}` : null,
+      cooldownDecision.previousPair ? `Pair: ${cooldownDecision.previousPair}` : null,
+      cooldownDecision.previousTimeframe ? `Timeframe: ${cooldownDecision.previousTimeframe}` : null,
+      cooldownDecision.previousDirection ? `Direction: ${titleCase(cooldownDecision.previousDirection)}` : null,
+      cooldownDecision.previousStrategy ? `Strategy: ${cooldownDecision.previousStrategy}` : null,
+      cooldownDecision.previousOutcome ? `Outcome: ${cooldownDecision.previousOutcome}` : null,
+      `Previous signal promoted: ${cooldownDecision.previousSignalPromoted ? "Yes" : "No"}`,
+      `Previous Telegram sent: ${cooldownDecision.previousTelegramSent ? "Yes" : "No"}`,
+      cooldownDecision.cooldownStartedAt ? `Cooldown started: ${formatDateTime(cooldownDecision.cooldownStartedAt)}` : null,
+      cooldownDecision.cooldownExpiresAt ? `Cooldown expires: ${formatDateTime(cooldownDecision.cooldownExpiresAt)}` : null,
+      cooldownDecision.remainingDurationLabel ? `Remaining: ${cooldownDecision.remainingDurationLabel}` : null,
+      cooldownDecision.structureSimilarity ? `Structure match: ${titleCase(cooldownDecision.structureSimilarity)}` : null,
+      cooldownDecision.exactMatchingRule ? `Rule: ${titleCase(cooldownDecision.exactMatchingRule)}` : null,
+      `Early release allowed: ${cooldownDecision.earlyReleaseAllowed ? "Yes" : "No"}`,
+      cooldownDecision.cooldownReleaseReason ? `Release reason: ${titleCase(cooldownDecision.cooldownReleaseReason)}` : null,
+      cooldownDecision.previousStructureId ? `Previous structure: ${cooldownDecision.previousStructureId}` : null,
+      cooldownDecision.currentStructureId ? `Current structure: ${cooldownDecision.currentStructureId}` : null
+    ] : [])}
     ${renderAdminDetailSection("Duplicate decision", duplicateDecision?.matchType ? [
       `Decision: ${duplicateDecision.selectedSignal === "candidate" ? "Current candidate selected" : "Duplicate blocked"}`,
       duplicateDecision.matchedSignalId ? `Matched signal: ${duplicateDecision.matchedSignalId}` : null,

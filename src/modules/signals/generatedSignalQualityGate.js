@@ -68,11 +68,6 @@ export async function evaluateGeneratedSignalQualityGate(signal, context = {}) {
   }
   const signalWithTimeframeCap = applyTimeframeConfidencePolicy(signal);
 
-  const cooldown = await findRecentGeneratedSignalFailure(signalWithTimeframeCap);
-  if (cooldown) {
-    return recordAndReturn(signal, blockGate("cooldown", `Blocked by cooldown because the last similar signal ${cooldown.status === "Hit SL" ? "hit SL" : "expired"}.`, cooldown), context);
-  }
-
   const initialV2Result = evaluateSignalQualityGateV2(signalWithTimeframeCap, {
     ...context,
     timeframePolicy
@@ -109,7 +104,23 @@ export async function evaluateGeneratedSignalQualityGate(signal, context = {}) {
     );
   }
 
-  const duplicateDecision = await findRecentGeneratedSignalDuplicate(adjustedSignal);
+  const cooldownDecision = await findRecentGeneratedSignalFailure(adjustedSignal, context.marketData || {});
+  if (cooldownDecision?.blocked) {
+    const gate = attachAdjustedSignal(
+      blockGate(
+        "cooldown",
+        "Blocked by cooldown because a genuinely similar promoted signal recently closed with a loss.",
+        cooldownDecision.details
+      ),
+      adjustedSignal
+    );
+    return recordAndReturn(adjustedSignal, gate, context);
+  }
+
+  const cooldownAdjustedSignal = cooldownDecision?.releasedEarly
+    ? withCooldownDecisionDiagnostics(adjustedSignal, cooldownDecision.details)
+    : adjustedSignal;
+  const duplicateDecision = await findRecentGeneratedSignalDuplicate(cooldownAdjustedSignal);
   if (duplicateDecision?.blocked) {
     const duplicateType = duplicateDecision.matchType === "direct_duplicate" ? "duplicate" : "correlated";
     const gate = attachAdjustedSignal(
@@ -120,14 +131,14 @@ export async function evaluateGeneratedSignalQualityGate(signal, context = {}) {
           : "A stronger active setup already represents this correlated cross-timeframe trade idea.",
         duplicateDecision.details
       ),
-      adjustedSignal
+      cooldownAdjustedSignal
     );
-    return recordAndReturn(adjustedSignal, gate, context);
+    return recordAndReturn(cooldownAdjustedSignal, gate, context);
   }
 
   const selectedSignal = duplicateDecision?.selectedCurrent
-    ? withDuplicateSelectionDiagnostics(adjustedSignal, duplicateDecision.details)
-    : adjustedSignal;
+    ? withDuplicateSelectionDiagnostics(cooldownAdjustedSignal, duplicateDecision.details)
+    : cooldownAdjustedSignal;
   await recordGateSafely(selectedSignal, v2, context);
   return attachAdjustedSignal(passGate({
     qualityGateV2: v2,
@@ -277,9 +288,165 @@ export function getTimeframeQualityPolicy(timeframe) {
 }
 
 export function getFailureCooldownMs(timeframe, status = "Hit SL") {
-  const hours = { "5m": 4, "15m": 6, "1h": 24, "4h": 48 }[timeframe] || 6;
-  const multiplier = status === "Expired" ? 0.5 : 1;
+  const configured = appConfig.signals.cooldownAfterSlHours || {};
+  const hours = Number(configured[timeframe] ?? configured["15m"] ?? 6);
+  const normalizedStatus = normalizeText(status);
+  const multiplier = ["expired", "expired-after-entry"].includes(normalizedStatus)
+    ? Number(appConfig.signals.cooldownAfterExpiredMultiplier ?? 0.5)
+    : 1;
   return hours * multiplier * 60 * 60 * 1000;
+}
+
+export function isTradeCooldownEligibleRecord(row = {}) {
+  const status = normalizeText(row.status);
+  if (!["hit-sl", "expired", "manually-closed"].includes(status)) return false;
+
+  const source = normalizeText(row.source);
+  if (["legacy-saved-signal", "legacy-unlocked-signal", "backtest-shadow", "admin-test", "test", "debug"].includes(source)) {
+    return false;
+  }
+  const sourceHistory = arrayValue(row.source_history ?? row.sourceHistory);
+  const telegramStatus = normalizeText(row.telegram_status ?? row.telegramStatus);
+  const userVisibility = normalizeText(row.user_visibility ?? row.userVisibility);
+  const promoted = source === "manual-scan" ||
+    sourceHistory.some((item) => normalizeText(item) === "manual-scan") ||
+    telegramStatus === "sent" ||
+    row.shownToUsers === true ||
+    userVisibility === "user-ready";
+  if (!promoted || userVisibility === "admin-only") return false;
+
+  const gateStatus = normalizeText(row.quality_gate_status ?? row.qualityGateStatus);
+  if (gateStatus && gateStatus !== "passed") return false;
+  if (!hasValidTradeLevels(row)) return false;
+
+  if (status === "expired") {
+    return readExpirationClassification(row) === "expired-after-entry";
+  }
+  if (status === "manually-closed") {
+    return hasMeaningfulRealizedLoss(row);
+  }
+  return true;
+}
+
+export function evaluateSignalTradeCooldown(signal, row, marketData = {}, options = {}) {
+  const now = Number(options.now ?? Date.now());
+  const base = {
+    matchedSignalId: row?.signal_id || row?.signalId || row?.id || null,
+    matchedCandidateId: row?.promoted_from_candidate_id || row?.promotedFromCandidateId || null,
+    previousPair: row?.pair || row?.symbol || null,
+    previousTimeframe: row?.timeframe || null,
+    previousDirection: row?.direction || null,
+    previousStrategy: row?.strategy || row?.setupType || null,
+    previousOutcome: row?.status || null,
+    previousSignalPromoted: isTradeCooldownEligibleRecord(row),
+    previousTelegramSent: normalizeText(row?.telegram_status ?? row?.telegramStatus) === "sent",
+    cooldownReleasedEarly: false,
+    cooldownReleaseReason: null,
+    previousStructureId: readStructureId(row),
+    currentStructureId: readStructureId(signal),
+    earlyReleaseAllowed: false,
+    finalCooldownDecision: "not_applied"
+  };
+  if (!signal || !isTradeCooldownEligibleRecord(row)) {
+    return noCooldown("prior_record_not_eligible", base);
+  }
+
+  const pair = normalizePair(signal.symbol || signal.pair);
+  const previousPair = normalizePair(row.pair || row.symbol || row.display_pair);
+  if (!pair || pair !== previousPair) return noCooldown("different_pair", base);
+  if (String(signal.timeframe || "") !== String(row.timeframe || "")) {
+    return releaseCooldown("different_timeframe", base);
+  }
+
+  const resolvedAt = readCooldownResolvedAt(row);
+  const cooldownStatus = normalizeText(row.status) === "expired" ? "Expired" : "Hit SL";
+  const durationMs = getFailureCooldownMs(signal.timeframe, cooldownStatus);
+  const expiresAt = Number.isFinite(resolvedAt) ? resolvedAt + durationMs : null;
+  const remainingMs = Number.isFinite(expiresAt) ? Math.max(0, expiresAt - now) : 0;
+  const timed = {
+    ...base,
+    cooldownStartedAt: Number.isFinite(resolvedAt) ? new Date(resolvedAt).toISOString() : null,
+    cooldownExpiresAt: Number.isFinite(expiresAt) ? new Date(expiresAt).toISOString() : null,
+    cooldownDurationMs: durationMs,
+    remainingDurationMs: remainingMs,
+    remainingDurationLabel: formatCooldownDuration(remainingMs)
+  };
+  if (!Number.isFinite(resolvedAt)) return noCooldown("missing_resolution_time", timed);
+  if (remainingMs <= 0) return noCooldown("cooldown_expired", timed);
+
+  const direction = normalizeText(signal.direction);
+  const previousDirection = normalizeText(row.direction);
+  if (!direction || direction !== previousDirection) {
+    return releaseCooldown("direction_changed", timed);
+  }
+
+  const strategy = strategyFamily(signal.setupType || signal.strategy);
+  const previousStrategy = strategyFamily(row.setupType || row.strategy);
+  if (!strategy || !previousStrategy || strategy !== previousStrategy) {
+    return releaseCooldown("strategy_family_changed", timed);
+  }
+
+  if (timed.previousStructureId && timed.currentStructureId &&
+      timed.previousStructureId !== timed.currentStructureId) {
+    return releaseCooldown("new_confirmed_structure", timed);
+  }
+
+  const atr = firstFinite(readAtr(signal), readAtr(row));
+  const entrySimilarity = getEntryZoneSimilarity(
+    signal.entryPrice ?? signal.entry,
+    row.entryPrice ?? row.entry,
+    atr,
+    options
+  );
+  const triggerSimilarity = compareTriggerStructure(signal, row, atr, options);
+  const pattern = patternFamily(readPattern(signal));
+  const previousPattern = patternFamily(readPattern(row));
+  const patternMatched = Boolean(pattern && previousPattern && pattern === previousPattern);
+  const sameSetupKey = Boolean(signal.setupKey && (row.setup_key || row.setupKey) &&
+    signal.setupKey === (row.setup_key || row.setupKey));
+  const structureMatched = sameSetupKey || triggerSimilarity.matched ||
+    (patternMatched && !triggerSimilarity.available && entrySimilarity.matched);
+  const previousRegime = readCooldownRegime(row);
+  const currentRegime = readCooldownRegime(signal, marketData);
+  const regimeChanged = Boolean(previousRegime && currentRegime && previousRegime !== currentRegime);
+  const candlesSinceFailure = countCandlesSince(marketData?.candles, resolvedAt);
+  const structuralChanges = [
+    !entrySimilarity.matched,
+    triggerSimilarity.available && !triggerSimilarity.matched,
+    regimeChanged,
+    candlesSinceFailure >= 8
+  ].filter(Boolean).length;
+  const compared = {
+    ...timed,
+    entryDistancePercent: entrySimilarity.distancePercent,
+    entryDistanceAtr: entrySimilarity.distanceAtr,
+    entryMatchMethod: entrySimilarity.matchMethod,
+    triggerMatchMethod: triggerSimilarity.matchMethod,
+    structureSimilarity: structureMatched ? "same_trade_structure" : "different_trade_structure",
+    previousRegime: previousRegime || null,
+    currentRegime: currentRegime || null,
+    candlesSinceFailure,
+    exactMatchingRule: "same_pair_timeframe_direction_strategy_family_and_materially_similar_structure"
+  };
+
+  if (!structureMatched || structuralChanges >= 2) {
+    const reason = regimeChanged && structuralChanges >= 2
+      ? "market_regime_and_structure_changed"
+      : "materially_new_trade_structure";
+    return releaseCooldown(reason, compared);
+  }
+
+  return {
+    matched: true,
+    blocked: true,
+    releasedEarly: false,
+    reason: "similar_promoted_loss_within_cooldown",
+    details: cooldownDiagnosticAliases({
+      ...compared,
+      earlyReleaseAllowed: true,
+      finalCooldownDecision: "blocked"
+    })
+  };
 }
 
 export function isNearbyTimeframe(timeframe, otherTimeframe) {
@@ -751,6 +918,173 @@ function withDuplicateSelectionDiagnostics(signal, details) {
   };
 }
 
+function withCooldownDecisionDiagnostics(signal, details) {
+  return {
+    ...signal,
+    cooldownDecision: details,
+    indicators: {
+      ...(signal.indicators || {}),
+      cooldownDecision: details
+    }
+  };
+}
+
+function noCooldown(reason, details = {}) {
+  return {
+    matched: false,
+    blocked: false,
+    releasedEarly: false,
+    reason,
+    details: cooldownDiagnosticAliases(details)
+  };
+}
+
+function releaseCooldown(reason, details = {}) {
+  return {
+    matched: false,
+    blocked: false,
+    releasedEarly: true,
+    reason,
+    details: cooldownDiagnosticAliases({
+      ...details,
+      cooldownReleasedEarly: true,
+      cooldownReleaseReason: reason,
+      earlyReleaseAllowed: true,
+      finalCooldownDecision: "released_early"
+    })
+  };
+}
+
+function cooldownDiagnosticAliases(details = {}) {
+  return {
+    ...details,
+    matched_signal_id: details.matchedSignalId ?? null,
+    matched_candidate_id: details.matchedCandidateId ?? null,
+    cooldown_started_at: details.cooldownStartedAt ?? null,
+    cooldown_expires_at: details.cooldownExpiresAt ?? null,
+    remaining_duration_ms: details.remainingDurationMs ?? null,
+    cooldown_released_early: Boolean(details.cooldownReleasedEarly),
+    cooldown_release_reason: details.cooldownReleaseReason ?? null,
+    previous_structure_id: details.previousStructureId ?? null,
+    current_structure_id: details.currentStructureId ?? null
+  };
+}
+
+function arrayValue(value) {
+  if (Array.isArray(value)) return value;
+  if (typeof value !== "string") return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function hasValidTradeLevels(value = {}) {
+  const entry = firstFinite(value.entryPrice, value.entry);
+  const stop = firstFinite(value.stopLoss, value.stop_loss);
+  const target = firstFinite(value.takeProfit, value.take_profit);
+  const direction = normalizeText(value.direction);
+  if (![entry, stop, target].every((number) => Number.isFinite(number) && number > 0)) return false;
+  if (direction === "long") return stop < entry && target > entry;
+  if (direction === "short") return stop > entry && target < entry;
+  return false;
+}
+
+function readExpirationClassification(value = {}) {
+  const fullAnalysis = value.full_analysis || value.fullAnalysis || {};
+  const indicators = value.indicators || fullAnalysis.indicators || {};
+  const classification = value.expirationClassification ||
+    value.expiration_classification ||
+    indicators.expirationClassification ||
+    fullAnalysis.expirationClassification ||
+    value.result_reason ||
+    value.resultReason;
+  const normalized = normalizeText(classification);
+  if (normalized.includes("expired-after-entry")) return "expired-after-entry";
+  if (normalized.includes("expired-without-entry")) return "expired-without-entry";
+  if (normalized.includes("invalidated-before-entry")) return "invalidated-before-entry";
+  if (normalized.includes("stale-signal")) return "stale-signal";
+  return normalized;
+}
+
+function hasMeaningfulRealizedLoss(value = {}) {
+  const fullAnalysis = value.full_analysis || value.fullAnalysis || {};
+  const indicators = value.indicators || fullAnalysis.indicators || {};
+  const realizedR = firstFinite(
+    value.realizedR,
+    value.realized_r,
+    value.resultR,
+    value.result_r,
+    indicators.realizedR,
+    fullAnalysis.realizedR
+  );
+  if (Number.isFinite(realizedR)) return realizedR < 0;
+  return /\b(loss|stopped|hit sl|negative r)\b/i.test(String(value.result_reason || value.resultReason || ""));
+}
+
+function readStructureId(value = {}) {
+  const fullAnalysis = value.full_analysis || value.fullAnalysis || {};
+  const indicators = value.indicators || fullAnalysis.indicators || {};
+  const structure = value.marketStructure || value.market_structure || fullAnalysis.marketStructure || {};
+  const pattern = value.patternContext || value.pattern_context || indicators.patternContext || fullAnalysis.patternContext || {};
+  return String(
+    value.structureId ||
+    value.structure_id ||
+    structure.structureId ||
+    structure.id ||
+    pattern.structureId ||
+    ""
+  ).trim() || null;
+}
+
+function readCooldownRegime(value = {}, marketData = {}) {
+  const fullAnalysis = value.full_analysis || value.fullAnalysis || {};
+  const indicators = value.indicators || fullAnalysis.indicators || {};
+  const regime = value.marketRegime ||
+    value.regime ||
+    indicators.regime ||
+    fullAnalysis.marketStructure?.regime ||
+    marketData?.regime?.label ||
+    marketData?.analysis?.regime;
+  return normalizeText(regime);
+}
+
+function readCooldownResolvedAt(row = {}) {
+  const value = row.resolved_at ??
+    row.resolvedAt ??
+    row.hit_sl_at ??
+    row.hitSlAt ??
+    row.manually_closed_at ??
+    row.manuallyClosedAt ??
+    row.expired_at ??
+    row.expiredAt ??
+    row.updated_at ??
+    row.updatedAt;
+  const resolvedAt = new Date(value).getTime();
+  return Number.isFinite(resolvedAt) ? resolvedAt : null;
+}
+
+function countCandlesSince(candles, timestamp) {
+  if (!Array.isArray(candles) || !Number.isFinite(timestamp)) return 0;
+  return candles.filter((candle) => {
+    const value = candle?.time ?? candle?.timestamp ?? candle?.openTime ?? candle?.date;
+    const candleTime = typeof value === "number" && value < 10_000_000_000
+      ? value * 1000
+      : new Date(value).getTime();
+    return Number.isFinite(candleTime) && candleTime > timestamp;
+  }).length;
+}
+
+function formatCooldownDuration(durationMs) {
+  if (!Number.isFinite(durationMs) || durationMs <= 0) return "0m";
+  const minutes = Math.ceil(durationMs / 60_000);
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  return hours ? `${hours}h ${remainder}m` : `${minutes}m`;
+}
+
 function normalizePair(value) {
   return String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
@@ -774,28 +1108,33 @@ function diagnosticDistance(value) {
   return Infinity;
 }
 
-async function findRecentGeneratedSignalFailure(signal) {
+async function findRecentGeneratedSignalFailure(signal, marketData = {}) {
   const maxCooldownMs = getFailureCooldownMs("4h", "Hit SL");
+  const normalizedPair = normalizePair(signal.symbol || signal.pair);
   const result = await query(`
-    SELECT id, pair, timeframe, direction, strategy, pattern, entry, status,
-      COALESCE(hit_sl_at, expired_at, updated_at, created_at) AS resolved_at
+    SELECT id, signal_id, setup_key, promoted_from_candidate_id, pair, timeframe,
+      direction, strategy, pattern, pattern_context, entry, stop_loss, take_profit,
+      status, source, source_history, quality_gate_status, telegram_status,
+      full_analysis, result_reason, max_adverse_excursion,
+      COALESCE(hit_sl_at, manually_closed_at, expired_at, updated_at, created_at) AS resolved_at
     FROM generated_signals
-    WHERE pair = $1
+    WHERE regexp_replace(upper(pair), '[^A-Z0-9]', '', 'g') = $1
       AND timeframe = $2
-      AND direction = $3
-      AND status IN ('Hit SL', 'Expired')
+      AND status IN ('Hit SL', 'Expired', 'Manually closed')
       AND ${currentEngineSourceSql}
-      AND COALESCE(hit_sl_at, expired_at, updated_at, created_at) >= now() - ($4::text || ' milliseconds')::interval
-    ORDER BY COALESCE(hit_sl_at, expired_at, updated_at, created_at) DESC
-    LIMIT 10
-  `, [signal.symbol || signal.pair, signal.timeframe, signal.direction, String(maxCooldownMs)]);
+      AND COALESCE(hit_sl_at, manually_closed_at, expired_at, updated_at, created_at)
+        >= now() - ($3::text || ' milliseconds')::interval
+    ORDER BY COALESCE(hit_sl_at, manually_closed_at, expired_at, updated_at, created_at) DESC
+    LIMIT 25
+  `, [normalizedPair, signal.timeframe, String(maxCooldownMs)]);
 
-  const now = Date.now();
-  return result.rows.find((row) => {
-    if (!isSimilarStrategyOrPattern(signal, row)) return false;
-    const resolvedAt = new Date(row.resolved_at).getTime();
-    return Number.isFinite(resolvedAt) && now - resolvedAt <= getFailureCooldownMs(signal.timeframe, row.status);
-  }) || null;
+  let released = null;
+  for (const row of result.rows) {
+    const decision = evaluateSignalTradeCooldown(signal, row, marketData);
+    if (decision.blocked) return decision;
+    if (!released && decision.releasedEarly) released = decision;
+  }
+  return released;
 }
 
 async function hasProvenSourceStrategyTimeframe(signal, source) {
