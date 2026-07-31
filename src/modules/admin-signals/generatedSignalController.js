@@ -1,18 +1,6 @@
 import { readJson, sendError, sendJson } from "../../shared/http.js";
 import { isAdminUser } from "../auth/authService.js";
 import { getAdminGeneratedSignal, getAdminGeneratedSignals, updateAdminSignalGroupStatus } from "./generatedSignalService.js";
-import {
-  getTelegramAlertHealth,
-  sendTelegramAdminTestMessage,
-  simulateTelegramAlertLogic
-} from "../notifications/telegramAlertDiagnosticsService.js";
-import {
-  getStrategyBacktestJob,
-  listStrategyLabSummary,
-  startStrategyBacktestJob
-} from "../signals/historicalStrategyTestingService.js";
-import { getAdminSignalSupplyDashboard } from "../signals/signalActivityService.js";
-import { getSignalQualityGateDashboard } from "../signals/signalQualityGateRepository.js";
 
 export async function handleAdminGeneratedSignalRoutes(req, res, pathname, url) {
   if (!pathname.startsWith("/api/admin/signals")) return false;
@@ -34,43 +22,6 @@ export async function handleAdminGeneratedSignalRoutes(req, res, pathname, url) 
     return sendJson(res, 200, { ok: true, status: updated });
   }
 
-  if (pathname === "/api/admin/signals/telegram/health" && req.method === "GET") {
-    return sendJson(res, 200, { telegram: await getTelegramAlertHealth() });
-  }
-
-  if (pathname === "/api/admin/signals/quality-gate" && req.method === "GET") {
-    return sendJson(res, 200, { qualityGate: await getSignalQualityGateDashboard() });
-  }
-
-  if (pathname === "/api/admin/signals/supply" && req.method === "GET") {
-    return sendJson(res, 200, await getAdminSignalSupplyDashboard());
-  }
-
-  if (pathname === "/api/admin/signals/telegram/simulate" && req.method === "POST") {
-    const body = await readJson(req);
-    return sendJson(res, 200, await simulateTelegramAlertLogic(Math.min(100, Math.max(1, Number(body.limit || 40)))));
-  }
-
-  if (pathname === "/api/admin/signals/telegram/test-message" && req.method === "POST") {
-    const body = await readJson(req);
-    return sendJson(res, 200, await sendTelegramAdminTestMessage(clean(body.chatId, 80)));
-  }
-
-  if (pathname === "/api/admin/signals/strategy-lab" && req.method === "GET") {
-    return sendJson(res, 200, await listStrategyLabSummary());
-  }
-
-  if (pathname === "/api/admin/signals/strategy-lab/backtest/start" && req.method === "POST") {
-    const body = await readJson(req);
-    return sendJson(res, 202, { job: await startStrategyBacktestJob(body.scope || {}, req.user) });
-  }
-
-  const jobMatch = pathname.match(/^\/api\/admin\/signals\/strategy-lab\/backtest\/([^/]+)$/);
-  if (jobMatch && req.method === "GET") {
-    const job = await getStrategyBacktestJob(decodeURIComponent(jobMatch[1]));
-    return job ? sendJson(res, 200, { job }) : sendError(res, 404, "Backtest job not found.");
-  }
-
   if (req.method !== "GET") return sendError(res, 405, "Method not allowed.");
 
   if (pathname === "/api/admin/signals") {
@@ -90,14 +41,6 @@ function parseFilters(params) {
     status: clean(params.get("status"), 32), pair: clean(params.get("pair"), 32), timeframe: clean(params.get("timeframe"), 8),
     direction: ["long", "short"].includes(params.get("direction")) ? params.get("direction") : "",
     strategy: clean(params.get("strategy"), 80), pattern: clean(params.get("pattern"), 80), source: clean(params.get("source"), 40),
-    finalDecision: ["ready_signal", "admin_only", "blocked", "rejected"].includes(params.get("finalDecision")) ? params.get("finalDecision") : "",
-    primaryReason: clean(params.get("primaryReason"), 80),
-    qualityGateResult: ["passed", "failed", "not_recorded"].includes(params.get("qualityGateResult")) ? params.get("qualityGateResult") : "",
-    stopRepair: ["attempted", "succeeded", "failed", "not_attempted"].includes(params.get("stopRepair")) ? params.get("stopRepair") : "",
-    takeProfitRepair: ["attempted", "succeeded", "failed", "not_attempted"].includes(params.get("takeProfitRepair")) ? params.get("takeProfitRepair") : "",
-    duplicateBlocked: params.get("duplicateBlocked") === "true",
-    cooldownBlocked: params.get("cooldownBlocked") === "true",
-    telegramResult: ["sent", "blocked", "failed"].includes(params.get("telegramResult")) ? params.get("telegramResult") : "",
     confidenceMin: number("confidenceMin"), confidenceMax: number("confidenceMax"), qualityMin: number("qualityMin"), qualityMax: number("qualityMax"),
     from: clean(params.get("from"), 40), to: clean(params.get("to"), 40), search: clean(params.get("search"), 120),
     performanceScope: ["current", "legacy", "all"].includes(params.get("performanceScope")) ? params.get("performanceScope") : "current",

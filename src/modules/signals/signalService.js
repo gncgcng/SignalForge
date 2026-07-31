@@ -43,17 +43,11 @@ import {
   applyConfidenceCalibration,
   isSignalBlockedByCalibration
 } from "./signalConfidenceCalibrationService.js";
-import { applyHistoricalStrategyCalibration } from "./historicalStrategyTestingService.js";
 import {
   applyGeneratedSignalQualityBlock,
   applyTimeframeConfidencePolicy,
   evaluateGeneratedSignalQualityGate
 } from "./generatedSignalQualityGate.js";
-import {
-  applyStrategyStrictnessRejection,
-  validateStrategyStrictness
-} from "./strategyStrictnessService.js";
-import { repairInvalidStopLoss } from "./signalStopRepairService.js";
 import {
   SCANNER_RESULT_TYPES,
   buildAvoidTradeResult,
@@ -66,8 +60,6 @@ import {
   getLatestDailyMarketBrief,
   refreshDailyMarketBrief
 } from "./dailyMarketBriefService.js";
-import { buildWhyNoSignalReport } from "./missedSetupAnalyzer.js";
-import { applyFinalSignalDecision } from "./signalDecisionService.js";
 
 const scanTimeframes = ["1h", "4h", "15m", "5m"];
 const scanAllJobs = new Map();
@@ -334,59 +326,29 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
       }
     }
     : null;
-  const strictness = readySignal ? validateStrategyStrictness(readySignal, marketData) : null;
-  const stopAdjustedReadySignal = readySignal && strictness?.passed !== false
-    ? repairInvalidStopLoss(readySignal, marketData, { minimumRiskReward: 1.5 })
-    : readySignal;
-  const validation = stopAdjustedReadySignal && strictness?.passed !== false
-    ? await validateSignalForPublication(stopAdjustedReadySignal, marketData, user, {
+  const validation = readySignal
+    ? await validateSignalForPublication(readySignal, marketData, user, {
       source: "scanner",
       duplicate: true
     })
     : null;
-  const strictnessBlocked = Boolean(readySignal && strictness?.passed === false);
-  const valid = Boolean(stopAdjustedReadySignal && !strictnessBlocked && validation?.passed);
+  const valid = Boolean(readySignal && validation?.passed);
   const learnedSignal = valid
-    ? withSignalValidity(await applyLearningToValidatedSignal(applyValidationToSignal(stopAdjustedReadySignal, validation), {
+    ? withSignalValidity(await applyLearningToValidatedSignal(applyValidationToSignal(readySignal, validation), {
       source: generationSource
     }))
     : null;
-  const historicallyCalibratedSignal = learnedSignal
-    ? await applyHistoricalStrategyCalibration(learnedSignal)
-    : null;
-  const cappedSignal = historicallyCalibratedSignal ? applyTimeframeConfidencePolicy(historicallyCalibratedSignal) : null;
+  const cappedSignal = learnedSignal ? applyTimeframeConfidencePolicy(learnedSignal) : null;
   const calibrationBlocked = isSignalBlockedByCalibration(cappedSignal);
-  const calibrationWatching = cappedSignal?.indicators?.confidenceCalibration?.status === "watching";
-  const qualityGate = cappedSignal
-    ? calibrationBlocked
-      ? buildCalibrationBlockedQualityGate(cappedSignal)
-      : await evaluateGeneratedSignalQualityGate(cappedSignal, { source: generationSource, marketData, candidateId: candidate?.id || null })
-    : { passed: true };
-  const qualityAdjustedSignal = qualityGate.adjustedSignal || cappedSignal;
+  const qualityGate = cappedSignal && !calibrationBlocked
+    ? await evaluateGeneratedSignalQualityGate(cappedSignal, { source: generationSource })
+    : { passed: !cappedSignal || calibrationBlocked };
   const qualityBlocked = Boolean(cappedSignal && !qualityGate.passed);
-  const readySignalOutput = qualityAdjustedSignal && !calibrationBlocked && !calibrationWatching && !qualityBlocked
-    ? withSignalQuality({
-      ...qualityAdjustedSignal,
-      confidenceScore: Math.min(qualityAdjustedSignal.confidenceScore, candidate?.confidenceEstimate || 99),
-      indicators: {
-        ...(qualityAdjustedSignal.indicators || {}),
-        qualityGatePassed: true,
-        qualityGateV2: qualityGate.qualityGateV2 || qualityGate.details?.qualityGateV2 || null
-      }
-    })
-    : null;
-  const finalizedReadySignal = readySignalOutput
-    ? applyFinalSignalDecision({ ...readySignalOutput, source: generationSource })
-    : null;
-  const signal = finalizedReadySignal?.finalDecision === "ready_signal"
-    ? finalizedReadySignal
+  const signal = cappedSignal && !calibrationBlocked && !qualityBlocked
+    ? withSignalQuality({ ...cappedSignal, confidenceScore: Math.min(cappedSignal.confidenceScore, candidate?.confidenceEstimate || 99) })
     : null;
   const blockedSignal = qualityBlocked
-    ? withSignalQuality(applyGeneratedSignalQualityBlock(qualityAdjustedSignal, qualityGate))
-    : calibrationWatching
-      ? withSignalQuality(applyHistoricalWatchingDecision(cappedSignal))
-    : strictnessBlocked
-      ? withSignalQuality(applyStrategyStrictnessRejection(readySignal, strictness))
+    ? withSignalQuality(applyGeneratedSignalQualityBlock(cappedSignal, qualityGate))
     : null;
   if (signal && candidate) {
     candidate = await markCandidatePromoted(candidate, signal) || { ...candidate, status: "promoted_to_signal" };
@@ -398,7 +360,17 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
       candidateId: candidate?.id || null
     });
     if (candidate?.id) {
-      await saveGeneratedSignal(signal, {
+      const candidatePromotionSignal = await applyConfidenceCalibration({
+        ...signal,
+        generationSource: "candidate_promotion",
+        indicators: {
+          ...(signal.indicators || {}),
+          generationSource: "candidate_promotion",
+          confidenceCalibration: undefined,
+          confidenceCalibrationApplied: undefined
+        }
+      });
+      await saveGeneratedSignal(candidatePromotionSignal, {
         source: "candidate_promotion",
         generatedBy: generationContext.generatedBy || user?.id || "system",
         candidateId: candidate.id
@@ -412,10 +384,8 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
       candidateId: candidate?.id || null
     });
   }
-  if (readySignal && (strictnessBlocked || validation || calibrationBlocked || qualityBlocked || calibrationWatching) && (!validation?.passed || calibrationBlocked || qualityBlocked || strictnessBlocked) && candidate) {
-    const rejectionReason = strictnessBlocked
-      ? strictness.reason
-      : calibrationBlocked
+  if (readySignal && validation && (!validation.passed || calibrationBlocked || qualityBlocked) && candidate) {
+    const rejectionReason = calibrationBlocked
       ? "Performance calibration quarantined or disabled this group."
       : qualityBlocked
         ? qualityGate.reason
@@ -435,15 +405,11 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
       rejectionReasonCodes: readiness.reasons.map((reason) => reason.includes("entry") ? "entry_not_ready" : "readiness_pending"),
       candidate: candidate ? toCandidatePreview(candidate) : null
     }
-    : result.valid && (strictnessBlocked || validation || calibrationWatching) && (strictnessBlocked || !validation?.passed || qualityBlocked || calibrationBlocked || calibrationWatching)
-      ? validationNoSetupAnalysis(stopAdjustedReadySignal, strictnessBlocked
-        ? qualityGateToValidation(stopAdjustedReadySignal, { stage: "strategy_strictness", reason: strictness.reason })
-        : qualityBlocked
-        ? qualityGateToValidation(stopAdjustedReadySignal, qualityGate)
+    : result.valid && validation && (!validation.passed || qualityBlocked || calibrationBlocked)
+      ? validationNoSetupAnalysis(readySignal, qualityBlocked
+        ? qualityGateToValidation(readySignal, qualityGate)
         : calibrationBlocked
-          ? qualityGateToValidation(stopAdjustedReadySignal, { stage: "generated_quality_calibration", reason: "Performance calibration quarantined or disabled this group." })
-          : calibrationWatching
-            ? qualityGateToValidation(stopAdjustedReadySignal, { stage: "historical_calibration_watching", reason: cappedSignal.indicators?.confidenceCalibration?.calibrationReason || "Historical performance reduced confidence. Setup is watching, not ready." })
+          ? qualityGateToValidation(readySignal, { stage: "generated_quality_calibration", reason: "Performance calibration quarantined or disabled this group." })
           : validation)
       : result.analysis;
   const publishable = Boolean(valid && signal);
@@ -452,24 +418,6 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
     ? buildAvoidTradeResult({ symbol, timeframe, analysis, candidate })
     : null;
   if (avoidTrade) await recordAvoidTradeSafely(avoidTrade);
-  const whyNoSignal = !publishable
-    ? buildWhyNoSignalReport({
-      symbol,
-      timeframe,
-      marketData,
-      generatorResult: result,
-      analysis,
-      readiness,
-      candidate: candidate ? toCandidatePreview(candidate) : null,
-      strictness,
-      validation,
-      qualityGate,
-      calibrationBlocked,
-      qualityBlocked,
-      publishable,
-      admin: Boolean(user?.isAdmin)
-    })
-    : null;
   const briefObservation = buildMarketBriefObservation({
     symbol,
     timeframe,
@@ -488,17 +436,13 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
       valid: publishable,
       resultType,
       setup: publishable ? toScanPreview(signal) : null,
-      analysis: whyNoSignal
-        ? { ...analysis, whyNoSignal }
-        : analysis,
-      whyNoSignal,
+      analysis,
       candidate: candidate ? toCandidatePreview(candidate) : null,
       avoidTrade
     },
     fullSetup: publishable ? signal : null,
     analysis,
-    briefObservation,
-    qualityGateDecision: cappedSignal ? qualityGate : null
+    briefObservation
   };
 }
 
@@ -762,7 +706,6 @@ async function createManualScanContext(user, options = {}) {
     rejectionReasons: {},
     samples: []
   };
-  const qualityGateDiagnostics = createQualityGateRunDiagnostics();
   const universe = options.universe || getManualScannerUniverse(options);
   const scanMarkets = universe.markets;
   const marketsToScan = scanMarkets.slice(0, appConfig.manualScan.maxMarkets);
@@ -815,8 +758,7 @@ async function createManualScanContext(user, options = {}) {
     avoidTrades,
     briefObservations,
     errors,
-    diagnostics,
-    qualityGateDiagnostics
+    diagnostics
   };
 }
 
@@ -840,7 +782,6 @@ async function scanManualMarket(context, market, onProgress = null, shouldCancel
         { symbol, timeframe },
         context.analystProfile
       );
-      trackQualityGateRunDecision(context.qualityGateDiagnostics, detailed.qualityGateDecision);
       const result = detailed.publicResult;
       const analysis = result.analysis || {};
       if (detailed.briefObservation) context.briefObservations.push(detailed.briefObservation);
@@ -924,7 +865,6 @@ async function finalizeManualScanContext(context) {
     `avoid=${scanSummary.avoidTrade} rejected=${scanSummary.rejected} expired=${scanSummary.expired}`
   );
   console.info(`[scanner] top_rejection_reason=${scanSummary.topRejectionCode}`);
-  logQualityGateRunSummary("manual_scan", context.qualityGateDiagnostics);
 
   return {
     publicResult: {
@@ -1170,44 +1110,6 @@ function recordScanDiagnostics(diagnostics, symbol, timeframe, analysis = {}) {
   }
 }
 
-export function createQualityGateRunDiagnostics() {
-  return {
-    checked: 0,
-    passed: 0,
-    failed: 0,
-    blocked: 0,
-    reasons: {}
-  };
-}
-
-export function trackQualityGateRunDecision(diagnostics, decision = null) {
-  if (!diagnostics || !decision?.version) return diagnostics;
-  diagnostics.checked += 1;
-  if (decision.passed) {
-    diagnostics.passed += 1;
-    return diagnostics;
-  }
-  diagnostics.failed += 1;
-  diagnostics.blocked += 1;
-  const reason = normalizeDiagnosticReason(decision.reasonCode || decision.type || decision.status || "failed_quality_gate");
-  diagnostics.reasons[reason] = Number(diagnostics.reasons[reason] || 0) + 1;
-  return diagnostics;
-}
-
-export function logQualityGateRunSummary(source, diagnostics = createQualityGateRunDiagnostics()) {
-  const topReason = Object.entries(diagnostics.reasons || {})
-    .sort((left, right) => right[1] - left[1])[0]?.[0] || "none";
-  console.info(
-    `[quality-gate] source=${source} checked=${Number(diagnostics.checked || 0)} ` +
-    `passed=${Number(diagnostics.passed || 0)} failed=${Number(diagnostics.failed || 0)} ` +
-    `blocked=${Number(diagnostics.blocked || 0)} topReason=${topReason}`
-  );
-}
-
-function normalizeDiagnosticReason(reason) {
-  return String(reason || "unknown").trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^timeframe$/, "quarantined_timeframe");
-}
-
 function finalizeScanDiagnostics(diagnostics) {
   const topReasons = Object.entries(diagnostics.rejectionReasons)
     .sort((a, b) => b[1] - a[1])
@@ -1272,51 +1174,6 @@ function qualityGateToValidation(signal, gate = {}) {
       market: signal?.symbol,
       strategy: signal?.setupType
     }]
-  };
-}
-
-function buildCalibrationBlockedQualityGate(signal) {
-  const calibration = signal?.confidenceCalibration || signal?.indicators?.confidenceCalibration || {};
-  const calibrationError = calibration.status === "calibration_error";
-  const reason = calibrationError
-    ? "Confidence calibration failed, so this candidate remains admin-only."
-    : calibration.message ||
-    "Performance calibration quarantined or disabled this group.";
-  return {
-    version: "quality_gate_v2",
-    passed: false,
-    type: calibrationError ? "calibration_error" : "historical_underperformer",
-    stage: calibrationError ? "generated_quality_calibration_error" : "generated_quality_historical_underperformer",
-    status: calibrationError ? "Calibration error" : "Historical underperformer",
-    reason,
-    reasonCode: calibrationError ? "calibration_error" : "historical_underperformer",
-    explanation: reason,
-    userExplanation: calibrationError
-      ? "No clean signal yet. Confidence calibration could not be completed."
-      : "No clean signal yet. Historical calibration blocked this setup group.",
-    details: {
-      confidenceCalibration: calibration
-    },
-    checkedAt: new Date().toISOString()
-  };
-}
-
-function applyHistoricalWatchingDecision(signal) {
-  const calibration = signal?.confidenceCalibration || signal?.indicators?.confidenceCalibration || {};
-  const reason = calibration.calibrationReason ||
-    "Historical performance reduced confidence. Setup is watching, not ready.";
-  return {
-    ...signal,
-    status: "Watching",
-    resultReason: reason,
-    validationPassed: true,
-    indicators: {
-      ...(signal.indicators || {}),
-      finalDecision: "watching_setup",
-      alertEligibility: "telegram_blocked_final_decision_watching",
-      historicalWatchingDecision: true,
-      historicalWatchingReason: reason
-    }
   };
 }
 

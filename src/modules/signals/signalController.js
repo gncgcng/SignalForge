@@ -13,8 +13,6 @@ import {
 } from "./signalService.js";
 import { getCandidateQualitySummary, listSetupCandidates } from "./setupCandidateService.js";
 import { getLatestDailyMarketBrief } from "./dailyMarketBriefService.js";
-import { getSignalActivityFeed } from "./signalActivityService.js";
-import { analyzeMissedSetup, saveMissedSetupExample } from "./missedSetupService.js";
 
 // scanMarketSetupDetailed stays service-private so Telegram receives full setups
 // without exposing locked price levels in scan responses.
@@ -40,10 +38,6 @@ export async function handleSignalRoutes(req, res, pathname) {
     return sendJson(res, 200, { marketBrief: await getLatestDailyMarketBrief() });
   }
 
-  if (pathname === "/api/signals/activity" && req.method === "GET") {
-    return sendJson(res, 200, await getSignalActivityFeed(req.user));
-  }
-
   if (pathname === "/api/signals/candidates/quality" && req.method === "GET") {
     if (!req.user.isAdmin) return sendError(res, 403, "Admin access required.");
     const [quality, marketBrief] = await Promise.all([
@@ -51,22 +45,6 @@ export async function handleSignalRoutes(req, res, pathname) {
       getLatestDailyMarketBrief()
     ]);
     return sendJson(res, 200, { quality, marketBrief });
-  }
-
-  if (pathname === "/api/signals/missed-setup/analyze" && req.method === "POST") {
-    try {
-      return sendJson(res, 200, await analyzeMissedSetup(req.user, await readJson(req)));
-    } catch (error) {
-      return sendError(res, error.statusCode || 400, error.message);
-    }
-  }
-
-  if (pathname === "/api/signals/missed-setup/examples" && req.method === "POST") {
-    try {
-      return sendJson(res, 201, await saveMissedSetupExample(req.user, await readJson(req)));
-    } catch (error) {
-      return sendError(res, error.statusCode || 400, error.message);
-    }
   }
 
   if (pathname === "/api/signals/scan" && req.method === "POST") {

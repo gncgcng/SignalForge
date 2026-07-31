@@ -66,12 +66,8 @@ export function evaluateSetupReadiness(signal, marketData) {
   const publicReasons = reasons.length
     ? reasons
     : missing.map((item) => `${item} confirmation is missing.`);
-  const readyQualityThreshold = Number(
-    appConfig.signals?.readySignalMinConfidence ||
-    appConfig.candidates.readyQualityThreshold
-  );
   return {
-    ready: quality >= readyQualityThreshold && readiness >= appConfig.candidates.readyThreshold && ["excellent", "good"].includes(entryQuality) && candleConfirmed && !cryptoVolumeMissing,
+    ready: quality >= appConfig.candidates.readyQualityThreshold && readiness >= appConfig.candidates.readyThreshold && ["excellent", "good"].includes(entryQuality) && candleConfirmed && !cryptoVolumeMissing,
     rejected: entryQuality === "poor" || rr < 1.5,
     candidateScore: quality,
     readinessScore: readiness,

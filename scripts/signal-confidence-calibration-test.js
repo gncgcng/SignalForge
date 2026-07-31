@@ -9,9 +9,6 @@ import {
   calculateGroupStatus,
   calculateQualityAdjustedScore,
   calibrationStatusForGroup,
-  isSignalBlockedByCalibration,
-  normalizeCalibrationGroupScope,
-  normalizeSignalGroupStatusInput,
   sampleSizeStatusForGroup,
   underconfidentWinners
 } from "../src/modules/signals/signalConfidenceCalibrationService.js";
@@ -25,7 +22,6 @@ const app = readFileSync("public/app.js", "utf8");
 const html = readFileSync("public/index.html", "utf8");
 const migration = readFileSync("migrations/050_signal_confidence_calibration.sql", "utf8");
 const calibratedMigration = readFileSync("migrations/053_generated_signal_calibrated_confidence.sql", "utf8");
-const directionScopeMigration = readFileSync("migrations/058_broad_direction_quarantine_scope.sql", "utf8");
 const quality = readFileSync("src/modules/signals/signalQualityService.js", "utf8");
 
 assert.equal(breakEvenWinRate(2.42), 29.2, "break-even win rate should use 1 / (1 + average RR)");
@@ -77,34 +73,9 @@ assert.equal(noHistory.confidenceScore, 72, "choppy/range cap should dominate we
 assert.equal(noHistory.confidenceCalibration.rawSetupScore, 91);
 assert.equal(noHistory.confidenceCalibration.calibratedConfidence, 72);
 assert.equal(noHistory.confidenceCalibration.version, "calibration_v2");
-assert.ok(noHistory.indicators.confidenceCalibration.caps.some((item) => item.cap === 82));
+assert.ok(noHistory.indicators.confidenceCalibration.caps.some((item) => item.cap === 85));
 assert.ok(noHistory.indicators.confidenceCalibration.caps.some((item) => item.cap === 80));
 assert.ok(noHistory.indicators.confidenceCalibration.caps.some((item) => item.cap === 72));
-assert.equal(noHistory.indicators.confidenceCalibration.status, "insufficient_data");
-assert.equal(noHistory.indicators.confidenceCalibration.primaryDecisionReason, "insufficient_historical_data");
-assert.notEqual(noHistory.confidenceScore, 0);
-assert.notEqual(noHistory.confidenceScore, 50);
-
-const highQualityNoHistory = applyCalibrationContext({
-  symbol: "BTC-USD",
-  timeframe: "15m",
-  direction: "long",
-  setupType: "Trend Continuation",
-  rawConfidence: 90,
-  qualityScore: 100,
-  readinessScore: 100,
-  entryQuality: "excellent",
-  riskRewardRatio: 2.2,
-  alignmentBadge: "Full Alignment",
-  confluenceScore: 90,
-  confirmations: [{ name: "Volume", passed: true }],
-  indicators: { regime: "Trend Up", readinessScore: 100 }
-}, { noHistory: true, groups: [] });
-assert.equal(highQualityNoHistory.rawSetupScore, 90);
-assert.equal(highQualityNoHistory.confidenceScore, 82);
-assert.equal(highQualityNoHistory.calibratedConfidence, 82);
-assert.equal(highQualityNoHistory.confidenceCalibration.status, "insufficient_data");
-assert.notEqual(highQualityNoHistory.confidenceScore, 50);
 
 const underperforming = applyCalibrationContext({ ...baseSignal, confidenceScore: 92, indicators: { readinessScore: 95 }, alignmentBadge: "Full Alignment", confirmations: [{ name: "Volume", passed: true }] }, {
   noHistory: false,
@@ -116,151 +87,11 @@ const underperforming = applyCalibrationContext({ ...baseSignal, confidenceScore
 assert.equal(underperforming.confidenceScore, 68, "strategy plus pair/timeframe underperformance should cap confidence at 68");
 assert.ok(underperforming.confidenceCalibration.penalties.length >= 2);
 
-const broadWeaknessDoesNotCollapse = applyCalibrationContext({
-  ...baseSignal,
-  confidenceScore: 70,
-  riskRewardRatio: 2.4,
-  alignmentBadge: "Full Alignment",
-  indicators: { regime: "Trend Up", readinessScore: 90, entryQuality: "good" },
-  confirmations: [{ name: "Volume", passed: true }]
-}, {
-  noHistory: false,
-  groups: [
-    { groupKey: "strategy:broad", groupType: "strategy", groupValue: "Broad", closedSignals: 12, winRate: 25, breakEvenWinRate: 33, estimatedExpectancy: -0.2, expiredRate: 10, status: "watchlist", penalty: -10 },
-    { groupKey: "pair:broad", groupType: "pair", groupValue: "BTC-USD", closedSignals: 12, winRate: 25, breakEvenWinRate: 33, estimatedExpectancy: -0.2, expiredRate: 10, status: "watchlist", penalty: -10 },
-    { groupKey: "direction:broad", groupType: "direction", groupValue: "long", closedSignals: 12, winRate: 25, breakEvenWinRate: 33, estimatedExpectancy: -0.2, expiredRate: 10, status: "watchlist", penalty: -10 }
-  ]
-});
-assert.equal(broadWeaknessDoesNotCollapse.confidenceScore, 58, "multiple broad weak groups may reduce confidence without a hardcoded 50 floor");
-assert.equal(broadWeaknessDoesNotCollapse.confidenceCalibration.totalPenalty, -12);
-assert.equal(broadWeaknessDoesNotCollapse.confidenceCalibration.unboundedPenalty, -23, "direction contributes at most a three-point diagnostic penalty");
-
 const blocked = applyCalibrationContext({ ...baseSignal, confidenceScore: 90, riskRewardRatio: 2.4, indicators: { readinessScore: 95 }, alignmentBadge: "Full Alignment", confirmations: [{ name: "Volume", passed: true }] }, {
   noHistory: false,
   groups: [{ groupKey: "strategy:bad", groupType: "strategy", groupValue: "Bad Strategy", closedSignals: 25, status: "quarantined", penalty: -15, confidenceCap: 72 }]
 });
-assert.equal(blocked.indicators.confidenceCalibration.blocked, false, "broad quarantined groups should cap confidence but not hard-block every ready signal");
-
-const exactBlocked = applyCalibrationContext({ ...baseSignal, confidenceScore: 90, riskRewardRatio: 2.4, indicators: { readinessScore: 95 }, alignmentBadge: "Full Alignment", confirmations: [{ name: "Volume", passed: true }] }, {
-  noHistory: false,
-  groups: [{
-    groupKey: "exact_signal_context:manual-scan:breakout-retest:btc-usd:15m:long:range",
-    groupType: "exact_signal_context",
-    groupValue: "manual_scan:Breakout Retest:BTC-USD:15m:long:Range",
-    closedSignals: 32,
-    estimatedExpectancy: -0.62,
-    status: "quarantined",
-    penalty: -15,
-    confidenceCap: 68
-  }]
-});
-assert.equal(exactBlocked.indicators.confidenceCalibration.blocked, true, "exact underperforming contexts with enough closed signals can block promotion/alerts");
-assert.equal(isSignalBlockedByCalibration(exactBlocked), true, "specific exact-context quarantine remains a hard block");
-
-const exactMediumSample = applyCalibrationContext({
-  ...baseSignal,
-  confidenceScore: 86,
-  riskRewardRatio: 2.4,
-  indicators: { readinessScore: 95, regime: "Trend Up" },
-  alignmentBadge: "Full Alignment",
-  confirmations: [{ name: "Volume", passed: true }]
-}, {
-  noHistory: false,
-  groups: [{
-    groupKey: "exact_signal_context:auto-crypto-watcher:trend-continuation:btc-usd:15m:long:trend-up",
-    groupType: "exact_signal_context",
-    groupValue: "auto_crypto_watcher:Trend Continuation:BTC-USD:15m:long:Trend Up",
-    closedSignals: 24,
-    winRate: 20,
-    breakEvenWinRate: 33,
-    estimatedExpectancy: -0.35,
-    status: "reduced_confidence",
-    penalty: -6,
-    confidenceCap: 75
-  }]
-});
-assert.equal(exactMediumSample.confidenceCalibration.blocked, false, "20-29 exact samples may penalize but cannot hard-block");
-assert.equal(exactMediumSample.confidenceCalibration.status, "reduced_confidence");
-assert.equal(isSignalBlockedByCalibration(exactMediumSample), false);
-
-for (const direction of ["long", "short"]) {
-  const directionOnly = applyCalibrationContext({
-    ...baseSignal,
-    direction,
-    confidenceScore: 80,
-    riskRewardRatio: 2.4,
-    alignmentBadge: "Full Alignment",
-    indicators: { regime: "Trend Up", readinessScore: 95, entryQuality: "excellent" },
-    confirmations: [{ name: "Volume", passed: true }]
-  }, {
-    noHistory: false,
-    groups: [{
-      groupKey: `direction:${direction}`,
-      groupType: "direction",
-      groupValue: direction,
-      closedSignals: 37,
-      winRate: 20,
-      breakEvenWinRate: 29,
-      estimatedExpectancy: -0.38,
-      status: "quarantined",
-      penalty: -15,
-      confidenceCap: 68
-    }]
-  });
-  assert.equal(directionOnly.confidenceScore, 77, `${direction} weakness should apply no more than a three-point penalty`);
-  assert.equal(directionOnly.confidenceCalibration.status, "watchlist", `${direction} weakness may warn but must not quarantine the signal`);
-  assert.equal(directionOnly.confidenceCalibration.blocked, false, `${direction} direction must not hard-block promotion`);
-  assert.equal(isSignalBlockedByCalibration(directionOnly), false, `${direction} direction must not hard-block alerts`);
-  assert.equal(directionOnly.confidenceCalibration.groups[0].diagnosticOnly, true);
-  assert.equal(directionOnly.confidenceCalibration.groups[0].hardBlockEligible, false);
-}
-
-const staleDirectionOverride = normalizeCalibrationGroupScope({
-  groupKey: "direction:short",
-  groupType: "direction",
-  groupValue: "short",
-  status: "disabled_by_admin",
-  penalty: -15,
-  confidenceCap: 68
-});
-assert.equal(staleDirectionOverride.status, "diagnostic_only");
-assert.equal(staleDirectionOverride.penalty, -3);
-assert.equal(staleDirectionOverride.confidenceCap, null);
-const directionAdminWrite = normalizeSignalGroupStatusInput({
-  groupKey: "direction:long",
-  status: "quarantined",
-  penaltyOverride: -15,
-  confidenceCapOverride: 68
-});
-assert.equal(directionAdminWrite.status, "diagnostic_only", "admin API cannot hard-quarantine a broad direction");
-assert.equal(directionAdminWrite.penaltyOverride, -3, "admin direction penalty is capped at three points");
-assert.equal(directionAdminWrite.confidenceCapOverride, null, "broad direction cannot impose a confidence cap");
-assert.match(directionAdminWrite.adminNote, /too broad to hard quarantine/i);
-assert.equal(isSignalBlockedByCalibration({
-  confidenceCalibration: {
-    status: "quarantined",
-    blockingEvidence: { groupType: "direction", groupValue: "long", hardBlockEligible: true }
-  }
-}), false, "stale direction quarantine evidence must not block");
-assert.equal(isSignalBlockedByCalibration({
-  confidenceCalibration: {
-    status: "disabled_by_admin",
-    groups: [{ groupKey: "direction:short", groupType: "direction", status: "disabled_by_admin" }]
-  }
-}), false, "legacy calibration JSON without blocking evidence must not block when direction is the only broad group");
-
-const calibrationError = applyCalibrationContext({
-  symbol: "BTC-USD",
-  timeframe: "15m",
-  direction: "long",
-  setupType: "Trend Continuation",
-  qualityScore: 0
-}, { noHistory: true, groups: [] });
-assert.equal(calibrationError.confidenceCalibration.status, "calibration_error");
-assert.equal(calibrationError.calibratedConfidence, null);
-assert.equal(calibrationError.confidenceCalibration.primaryDecisionReason, "calibration_error");
-assert.notEqual(calibrationError.confidenceScore, 50);
-assert.equal(isSignalBlockedByCalibration(calibrationError), true);
+assert.equal(blocked.indicators.confidenceCalibration.blocked, true, "quarantined groups must block promotion/alerts");
 
 const sampleGroups = [
   { groupKey: "strategy:tiny", groupType: "strategy", groupValue: "Tiny Winner", closedSignals: 3, winRate: 100, breakEvenWinRate: 30, estimatedExpectancy: 2.1, expiredRate: 0, confidenceGap: -10 },
@@ -287,7 +118,7 @@ const recovered = applyCalibrationContext({
   noHistory: true,
   groups: [{ groupKey: "strategy:steady", groupType: "strategy", groupValue: "Steady Retest", closedSignals: 30, winRate: 48, breakEvenWinRate: 28, estimatedExpectancy: 0.52, expiredRate: 5, confidenceCapLift: 5, status: "active" }]
 });
-assert.equal(recovered.confidenceScore, 87, "insufficient exact history keeps a small uncertainty penalty even with broad positive history");
+assert.equal(recovered.confidenceScore, 88, "broad positive history cannot lift confidence above 88 without exact source/strategy/timeframe proof");
 assert.ok(recovered.indicators.confidenceCalibration.caps.some((item) => item.cap === 88));
 
 const exactRecovered = applyCalibrationContext({
@@ -353,11 +184,6 @@ assert.match(migration, /ADD COLUMN IF NOT EXISTS confidence_calibration/);
 assert.match(calibratedMigration, /ADD COLUMN IF NOT EXISTS calibrated_confidence/);
 assert.match(calibratedMigration, /ADD COLUMN IF NOT EXISTS confidence_version/);
 assert.match(calibratedMigration, /ADD COLUMN IF NOT EXISTS calibration_reason/);
-assert.match(directionScopeMigration, /UPDATE signal_strategy_statuses/);
-assert.match(directionScopeMigration, /status = 'diagnostic_only'/);
-assert.match(directionScopeMigration, /group_type = 'direction'/);
-assert.match(directionScopeMigration, /penalty_override = -3/);
-assert.match(directionScopeMigration, /confidence_cap_override = NULL/);
 
 assert.match(service, /status = 'Hit TP' THEN risk_reward WHEN status = 'Hit SL' THEN -1 WHEN status = 'Expired' THEN -0\.35/);
 assert.match(service, /Confidence reflects setup alignment after historical calibration/);
@@ -369,9 +195,10 @@ assert.match(service, /CONFIDENCE_WARNING_COPY/);
 assert.match(signalService, /isSignalBlockedByCalibration/);
 assert.match(signalService, /Performance calibration quarantined or disabled this group/);
 assert.match(signalService, /generationSource/);
-assert.match(signalService, /source: "candidate_promotion"/);
-assert.doesNotMatch(autoScanService, /calibrateTelegramAlertSetup/);
-assert.doesNotMatch(autoScanService, /generationSource: "telegram_alert"/);
+assert.match(signalService, /generationSource: "candidate_promotion"/);
+assert.match(autoScanService, /calibrateTelegramAlertSetup/);
+assert.match(autoScanService, /generationSource: "telegram_alert"/);
+assert.match(autoScanService, /isSignalBlockedByCalibration/);
 assert.match(repository, /recordGeneratedSignalConfidenceAdjustment/);
 assert.match(repository, /calibrated_confidence/);
 assert.match(repository, /confidence_version/);
@@ -384,12 +211,9 @@ assert.match(app, /Underconfident winners/);
 assert.match(app, /Trust more/);
 assert.match(app, /Increase confidence carefully/);
 assert.match(app, /data-signal-quality-status="quarantined"/);
-assert.match(app, /group\.groupType === "direction"/);
-assert.match(app, /Diagnostic only &mdash; direction-level performance is too broad to hard quarantine/);
-assert.match(app, /data-signal-quality-status="diagnostic_only" data-penalty-override="-3"/);
-assert.match(app, /Raw confidence/);
-assert.match(app, /Strategy match score/);
-assert.match(app, /Final calibrated confidence/);
+assert.match(app, /Original confidence/);
+assert.match(app, /Raw setup score/);
+assert.match(app, /Calibrated confidence/);
 assert.match(app, /Quality Calibration Summary/);
 assert.match(html, /admin-signal-quality-panel/);
 assert.match(service, /function bestGroupSort/);

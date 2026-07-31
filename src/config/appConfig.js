@@ -165,36 +165,11 @@ export const appConfig = {
     queueIntervalMs: Number(process.env.TELEGRAM_QUEUE_INTERVAL_MS || 2000),
     maxAttempts: Number(process.env.TELEGRAM_MAX_ATTEMPTS || 3),
     connectionCodeTtlMinutes: Number(process.env.TELEGRAM_CONNECTION_CODE_TTL_MINUTES || 10),
-    updatePollIntervalMs: Number(process.env.TELEGRAM_UPDATE_POLL_INTERVAL_MS || 3000),
-    readyAlertMinConfidence: Number(process.env.TELEGRAM_READY_ALERT_MIN_CONFIDENCE || 65),
-    watchingAlertsEnabled: process.env.TELEGRAM_WATCHING_ALERTS_ENABLED === "true",
-    watchingAlertMinConfidence: Number(process.env.TELEGRAM_WATCHING_ALERT_MIN_CONFIDENCE || 65),
-    dailyBriefEnabled: process.env.TELEGRAM_DAILY_BRIEF_ENABLED === "true"
+    updatePollIntervalMs: Number(process.env.TELEGRAM_UPDATE_POLL_INTERVAL_MS || 3000)
   },
   signalTracking: {
     enabled: true,
     intervalMs: Number(process.env.SIGNAL_TRACKING_INTERVAL_MS || 60000)
-  },
-  signals: {
-    readySignalMinConfidence: Number(process.env.READY_SIGNAL_MIN_CONFIDENCE || 65),
-    stopMinAtrMultiplier: Math.max(0.1, Number(process.env.SIGNAL_STOP_MIN_ATR_MULTIPLIER || 0.6)),
-    stopMaxAtrMultiplier: Math.max(0.5, Number(process.env.SIGNAL_STOP_MAX_ATR_MULTIPLIER || 3)),
-    stopBufferAtrMultiplier: Math.max(0, Number(process.env.SIGNAL_STOP_BUFFER_ATR_MULTIPLIER || 0.15)),
-    takeProfitMaxAtrMultipliers: {
-      "5m": Math.max(1, Number(process.env.SIGNAL_TP_MAX_ATR_MULTIPLIER_5M || 4)),
-      "15m": Math.max(1, Number(process.env.SIGNAL_TP_MAX_ATR_MULTIPLIER_15M || 5)),
-      "1h": Math.max(1, Number(process.env.SIGNAL_TP_MAX_ATR_MULTIPLIER_1H || 7)),
-      "4h": Math.max(1, Number(process.env.SIGNAL_TP_MAX_ATR_MULTIPLIER_4H || 10))
-    },
-    duplicateEntryPercentTolerance: Math.max(0, Number(process.env.SIGNAL_DUPLICATE_ENTRY_PERCENT_TOLERANCE || 0.35)) / 100,
-    duplicateEntryAtrTolerance: Math.max(0, Number(process.env.SIGNAL_DUPLICATE_ENTRY_ATR_TOLERANCE || 0.5)),
-    cooldownAfterSlHours: {
-      "5m": Math.max(0, Number(process.env.SIGNAL_COOLDOWN_AFTER_SL_5M_HOURS || 4)),
-      "15m": Math.max(0, Number(process.env.SIGNAL_COOLDOWN_AFTER_SL_15M_HOURS || 6)),
-      "1h": Math.max(0, Number(process.env.SIGNAL_COOLDOWN_AFTER_SL_1H_HOURS || 12)),
-      "4h": Math.max(0, Number(process.env.SIGNAL_COOLDOWN_AFTER_SL_4H_HOURS || 24))
-    },
-    cooldownAfterExpiredMultiplier: Math.max(0, Number(process.env.SIGNAL_COOLDOWN_AFTER_EXPIRED_MULTIPLIER || 0.5))
   },
   autoScan: {
     enabled: process.env.CRYPTO_WATCHER_ENABLED !== "false" && process.env.AUTO_SCAN_ENABLED !== "false",
@@ -213,10 +188,6 @@ export const appConfig = {
     retentionDays: Math.max(1, Number(process.env.AVOID_TRADE_EVENT_RETENTION_DAYS || 7)),
     maxRows: Math.max(1000, Number(process.env.AVOID_TRADE_EVENT_MAX_ROWS || 25000)),
     dedupMinutes: Math.max(1, Number(process.env.AVOID_TRADE_EVENT_DEDUP_MINUTES || 60))
-  },
-  signalQualityGate: {
-    detailRetentionDays: Math.max(1, Number(process.env.SIGNAL_QUALITY_GATE_DETAIL_RETENTION_DAYS || 30)),
-    maxDetailRows: Math.max(1000, Number(process.env.SIGNAL_QUALITY_GATE_DETAIL_MAX_ROWS || 25000))
   },
   stripe: {
     publishableKey: process.env.STRIPE_PUBLISHABLE_KEY || "",

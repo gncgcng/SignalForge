@@ -3,13 +3,11 @@ import { readFileSync } from "node:fs";
 import {
   applyGeneratedSignalQualityBlock,
   applyTimeframeConfidencePolicy,
-  evaluateReadyPromotionConfidence,
   getFailureCooldownMs,
   getTimeframeQualityPolicy,
   isNearbyTimeframe,
   isSimilarEntryPrice,
-  isSimilarStrategyOrPattern,
-  resolveFinalCalibratedConfidence
+  isSimilarStrategyOrPattern
 } from "../src/modules/signals/generatedSignalQualityGate.js";
 
 const signalService = readFileSync("src/modules/signals/signalService.js", "utf8");
@@ -22,14 +20,13 @@ const app = readFileSync("public/app.js", "utf8");
 const html = readFileSync("public/index.html", "utf8");
 const migration = readFileSync("migrations/052_generated_signal_quality_controls.sql", "utf8");
 
-assert.equal(getTimeframeQualityPolicy("1h").status, "watchlist", "1h should be reduced-confidence, not hard quarantined");
+assert.equal(getTimeframeQualityPolicy("1h").status, "quarantined", "1h should be quarantined for ready promotion");
 assert.equal(getTimeframeQualityPolicy("5m").status, "quarantined", "5m should be quarantined for ready promotion");
 assert.equal(getTimeframeQualityPolicy("15m").confidenceCap, 88, "15m confidence should be capped below 90");
-assert.equal(getTimeframeQualityPolicy("4h").status, "promising", "4h should be confidence-capped instead of hard blocked for low sample size");
 assert.equal(getFailureCooldownMs("5m", "Hit SL"), 4 * 60 * 60 * 1000, "5m SL cooldown should be 4 hours");
 assert.equal(getFailureCooldownMs("15m", "Hit SL"), 6 * 60 * 60 * 1000, "15m SL cooldown should be 6 hours");
-assert.equal(getFailureCooldownMs("1h", "Hit SL"), 12 * 60 * 60 * 1000, "1h SL cooldown should be 12 hours");
-assert.equal(getFailureCooldownMs("4h", "Hit SL"), 24 * 60 * 60 * 1000, "4h SL cooldown should be 24 hours");
+assert.equal(getFailureCooldownMs("1h", "Hit SL"), 24 * 60 * 60 * 1000, "1h SL cooldown should be 24 hours");
+assert.equal(getFailureCooldownMs("4h", "Hit SL"), 48 * 60 * 60 * 1000, "4h SL cooldown should be 48 hours");
 assert.equal(getFailureCooldownMs("15m", "Expired"), 3 * 60 * 60 * 1000, "Expired cooldown should be half the SL cooldown");
 assert.equal(isNearbyTimeframe("15m", "1h"), true, "nearby timeframes should be correlated");
 assert.equal(isNearbyTimeframe("5m", "4h"), false, "distant timeframes should not be correlated");
@@ -39,56 +36,7 @@ assert.equal(isSimilarStrategyOrPattern({ setupType: "Breakout Retest" }, { stra
 assert.equal(isSimilarStrategyOrPattern({ patternContext: { pattern: "bull_flag" } }, { pattern: "bull_flag" }), true);
 
 const capped = applyTimeframeConfidencePolicy({ timeframe: "1h", confidenceScore: 94, indicators: {} });
-assert.equal(capped.confidenceScore, 72, "1h confidence should be capped to 72 without hard blocking");
-const fourHour = applyTimeframeConfidencePolicy({ timeframe: "4h", confidenceScore: 94, indicators: {} });
-assert.equal(fourHour.confidenceScore, 82, "4h confidence should be capped for low sample size, not blocked");
-
-const passedV2 = { version: "quality_gate_v2", passed: true, status: "passed" };
-const sensibleInsufficientHistory = {
-  timeframe: "15m",
-  confidenceScore: 82,
-  calibratedConfidence: 82,
-  finalCalibratedConfidence: 82,
-  confidenceCalibration: { status: "insufficient_data", calibratedConfidence: 82 },
-  indicators: {
-    historicalStrategyCalibration: {
-      status: "insufficient_data",
-      calibratedConfidence: 82,
-      historicalCalibrationAdjustment: -3
-    }
-  }
-};
-assert.equal(evaluateReadyPromotionConfidence(sensibleInsufficientHistory, passedV2), null, "Quality Gate-passed candidate keeps sensible confidence");
-assert.equal(resolveFinalCalibratedConfidence({ confidenceScore: 90, calibratedConfidence: 0 }), 90, "invalid zero calibration does not override real confidence");
-
-const insufficientLow = evaluateReadyPromotionConfidence({
-  ...sensibleInsufficientHistory,
-  confidenceScore: 60,
-  calibratedConfidence: 60,
-  finalCalibratedConfidence: 60
-}, passedV2);
-assert.equal(insufficientLow.type, "insufficient_historical_data");
-assert.notEqual(insufficientLow.type, "weak_strategy_match");
-assert.doesNotMatch(insufficientLow.reason, /Weak strategy match/i);
-
-const historicalPenaltyLow = evaluateReadyPromotionConfidence({
-  timeframe: "15m",
-  confidenceScore: 59,
-  finalCalibratedConfidence: 59,
-  confidenceCalibration: { status: "reduced_confidence", totalPenalty: -10 },
-  indicators: {}
-}, passedV2);
-assert.equal(historicalPenaltyLow.type, "historical_confidence_penalty");
-assert.notEqual(historicalPenaltyLow.reasonCode, "weak_strategy_match");
-
-const calibrationFailure = evaluateReadyPromotionConfidence({
-  timeframe: "15m",
-  confidenceScore: 88,
-  confidenceCalibration: { status: "calibration_error", technicalError: "database unavailable" },
-  indicators: {}
-}, passedV2);
-assert.equal(calibrationFailure.type, "calibration_error");
-assert.match(calibrationFailure.details.technicalError, /database unavailable/);
+assert.equal(capped.confidenceScore, 72, "quarantined timeframe confidence should be capped to 72");
 
 const blocked = applyGeneratedSignalQualityBlock({
   symbol: "BTC-USD",
@@ -109,7 +57,7 @@ assert.match(blocked.resultReason, /last similar signal hit SL/);
 
 assert.match(gateService, /findRecentGeneratedSignalDuplicate/);
 assert.match(gateService, /findRecentGeneratedSignalFailure/);
-assert.match(gateService, /status IN \('Hit SL', 'Expired', 'Manually closed'\)/);
+assert.match(gateService, /status IN \('Hit SL', 'Expired'\)/);
 assert.match(gateService, /source NOT IN \('legacy_saved_signal','legacy_unlocked_signal'\)/);
 assert.match(gateService, /Readiness score is 0/);
 assert.match(gateService, /Correlated duplicate/);
@@ -123,8 +71,8 @@ assert.match(signalService, /valid: publishable/);
 assert.match(calibrationService, /statsScopeSql\("current"\)/);
 assert.match(calibrationService, /source NOT IN \('legacy_saved_signal','legacy_unlocked_signal'\)/);
 assert.match(calibrationService, /15m confidence is capped below 90/);
-assert.match(calibrationService, /timeframe === "5m"/);
-assert.match(calibrationService, /1h generated signals are reduced-confidence/);
+assert.match(calibrationService, /timeframe === "5m" \|\| timeframe === "1h"/);
+assert.match(calibrationService, /generated signals are quarantined and capped at 72/);
 
 assert.match(generatedRepository, /Duplicate blocked/);
 assert.match(generatedRepository, /Cooldown blocked/);

@@ -31,10 +31,10 @@ const checks = {
     signalService.includes('const generationSource = generationContext.source || "manual_scan"') &&
     signalService.includes("source: generationSource") &&
     autoScan.includes('source: "auto_crypto_watcher"') &&
-    !autoScan.includes("calibrateTelegramAlertSetup") &&
-    !autoScan.includes('source: "telegram_alert"') &&
+    autoScan.includes('source: "telegram_alert"') &&
+    autoScan.includes("calibrateTelegramAlertSetup") &&
     signalService.includes('source: "candidate_promotion"') &&
-    !signalService.includes("candidatePromotionSignal") &&
+    signalService.includes("candidatePromotionSignal") &&
     signalService.includes("if (signal) {") &&
     signalService.includes("validation?.passed"),
   backtestShadowStored:
@@ -86,7 +86,7 @@ const checks = {
     css.includes("grid-template-columns: repeat(2, minmax(0, 1fr))") &&
     css.includes("word-break: normal") &&
     app.includes("Show details") &&
-    app.includes("formatAdminPercent(confidence.rawConfidence)")
+    app.includes("Raw ${Number(signal.rawSetupScore")
 };
 
 for (const [name, passed] of Object.entries(checks)) {

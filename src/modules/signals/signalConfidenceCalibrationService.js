@@ -1,8 +1,7 @@
 import { query } from "../../db/client.js";
 
 const terminalStatuses = new Set(["Hit TP", "Hit SL", "Expired", "Manually closed"]);
-const adminStatuses = new Set(["active", "watchlist", "reduced_confidence", "diagnostic_only", "quarantined", "disabled_by_admin"]);
-const DIRECTION_MAX_CONFIDENCE_PENALTY = -3;
+const adminStatuses = new Set(["active", "watchlist", "reduced_confidence", "quarantined", "disabled_by_admin"]);
 const HIGH_CONFIDENCE_EXPECTANCY_CAP = 88;
 const EXACT_SOURCE_STRATEGY_TIMEFRAME_MIN_CLOSED = 20;
 const CONFIDENCE_CALIBRATION_VERSION = "calibration_v2";
@@ -167,46 +166,20 @@ export function calculateGroupMetrics(row = {}) {
 
 export async function applyConfidenceCalibration(signal) {
   if (!signal) return signal;
-  try {
-    const context = await getSignalCalibrationContext(signal);
-    return applyCalibrationContext(signal, context);
-  } catch (error) {
-    console.warn(`[confidence-calibration] failed stage=generated_history reason=${error.message}`);
-    return applyCalibrationError(signal, error, "generated_history");
-  }
+  const context = await getSignalCalibrationContext(signal);
+  return applyCalibrationContext(signal, context);
 }
 
 export function isSignalBlockedByCalibration(signal) {
-  const calibration = signal?.indicators?.confidenceCalibration || signal?.confidenceCalibration || {};
-  const status = calibration.status;
-  const evidence = calibration.blockingEvidence;
-  const blockingGroups = (calibration.groups || []).filter((group) =>
-    ["quarantined", "disabled_by_admin"].includes(group.status)
-  );
-  const broadDirectionOnly = blockingGroups.length > 0 && blockingGroups.every(isBroadDirectionGroup);
-  if (status === "calibration_error") return true;
-  if (evidence?.groupType === "direction" || evidence?.hardBlockEligible === false) return false;
-  if (!evidence && broadDirectionOnly) return false;
-  if (status === "disabled_by_admin") return evidence ? evidence.hardBlockEligible !== false : true;
-  if (status === "quarantined" && calibration.blockingEvidence?.hardBlockEligible) return true;
-  return false;
+  const status = signal?.indicators?.confidenceCalibration?.status;
+  return ["quarantined", "disabled_by_admin"].includes(status);
 }
 
 export function applyCalibrationContext(signal, context = {}) {
-  context = {
-    ...context,
-    groups: (context.groups || []).map(normalizeCalibrationGroupScope)
-  };
-  if (context.calibrationError) {
-    return applyCalibrationError(signal, context.calibrationError, context.calibrationStage || "generated_history");
-  }
-  const originalConfidence = resolveRawConfidence(signal);
-  if (originalConfidence === null) {
-    return applyCalibrationError(signal, "No finite positive raw confidence was available.", "raw_confidence");
-  }
+  const originalConfidence = Number(signal.confidenceScore || 0);
   const rawSetupScore = originalConfidence;
   let ruleCap = 99;
-  let historicalCap = context.noHistory ? 82 : 99;
+  let historicalCap = context.noHistory ? 85 : 99;
   let expectancyCap = HIGH_CONFIDENCE_EXPECTANCY_CAP;
   let penalty = 0;
   const caps = [];
@@ -227,10 +200,7 @@ export function applyCalibrationContext(signal, context = {}) {
     penalties.push({ points: Number(points), reason, group });
   };
 
-  if (context.noHistory) {
-    caps.push({ cap: 82, reason: "Insufficient generated-signal history; current setup confidence is retained with a small uncertainty adjustment.", type: "historical" });
-    addPenalty(-3, "Insufficient generated-signal history for reliable calibration.");
-  }
+  if (context.noHistory) caps.push({ cap: 85, reason: "No generated-signal history yet for this strategy or pair/timeframe.", type: "historical" });
   const timeframePolicy = getStaticTimeframePolicy(signal.timeframe);
   if (timeframePolicy.confidenceCap) addCap(timeframePolicy.confidenceCap, timeframePolicy.reason, "historical");
   if (hasMissingHigherTimeframe(signal)) addCap(82, "Missing or partial higher-timeframe confirmation.");
@@ -245,13 +215,7 @@ export function applyCalibrationContext(signal, context = {}) {
   );
   const severeStrategy = poorGroups.find((group) => group.groupType === "strategy" && group.closedSignals >= 20 && group.estimatedExpectancy < 0);
   const severePairTimeframe = poorGroups.find((group) => group.groupType === "pair_timeframe" && group.closedSignals >= 20 && group.estimatedExpectancy < 0);
-  const hardBlockGroup = findHardBlockCalibrationGroup(context.groups || []);
   const quarantined = (context.groups || []).find((group) => ["quarantined", "disabled_by_admin"].includes(group.status));
-  const exactNegative = (context.groups || []).find((group) =>
-    isSpecificEvidenceGroup(group) &&
-    Number(group.closedSignals || 0) >= 20 &&
-    Number(group.estimatedExpectancy || 0) < 0
-  );
   const recentPoor = (context.groups || []).find((group) => group.groupType === "recent_strategy" && group.closedSignals >= 5 && group.winRate < group.breakEvenWinRate);
   const expiredHeavy = (context.groups || []).find((group) => group.expiredRate >= 35 && group.totalSignals >= 10);
   const positiveGroups = (context.groups || []).filter((group) =>
@@ -277,16 +241,6 @@ export function applyCalibrationContext(signal, context = {}) {
   }
 
   for (const group of context.groups || []) {
-    if (isBroadDirectionGroup(group)) {
-      if (group.penalty < 0) {
-        addPenalty(
-          Math.max(DIRECTION_MAX_CONFIDENCE_PENALTY, Number(group.penalty)),
-          `${titleCase(group.groupValue)} direction is underperforming overall; diagnostic confidence adjustment only.`,
-          group.groupKey
-        );
-      }
-      continue;
-    }
     if (group.penalty < 0) {
       addPenalty(group.penalty, `${titleCase(group.groupType)} underperformance: ${group.status}.`, group.groupKey);
     }
@@ -312,10 +266,6 @@ export function applyCalibrationContext(signal, context = {}) {
   if (severePairTimeframe) addCap(75, "Pair/timeframe has negative generated-signal expectancy.", "historical");
   if (severeStrategy && severePairTimeframe) addCap(68, "Strategy and pair/timeframe are both underperforming.", "historical");
   if (quarantined) addCap(68, `${titleCase(quarantined.groupType)} is ${quarantined.status}.`, "historical");
-  if (exactNegative) {
-    addCap(75, `Specific group ${exactNegative.groupValue} has negative expectancy with ${exactNegative.closedSignals} closed signals.`, "historical");
-    addPenalty(-4, "Specific historical group is negative, so setup should require stronger confirmation.", exactNegative.groupKey);
-  }
 
   const strongestPositive = positiveGroups
     .sort((a, b) => b.confidenceCapLift - a.confidenceCapLift || b.estimatedExpectancy - a.estimatedExpectancy)[0];
@@ -331,59 +281,27 @@ export function applyCalibrationContext(signal, context = {}) {
   }
 
   const confidenceCap = Math.min(ruleCap, historicalCap, expectancyCap);
-  const boundedPenalty = Math.max(penalty, hardBlockGroup ? -35 : -12);
-  const finalConfidence = Math.min(confidenceCap, Math.max(0, originalConfidence + boundedPenalty));
-  const status = hardBlockGroup?.status ||
-    (exactNegative
-      ? "reduced_confidence"
-      : severeStrategy || severePairTimeframe
-        ? "reduced_confidence"
-        : poorGroups.length
-          ? "watchlist"
-          : context.noHistory
-            ? "insufficient_data"
-            : "active");
+  const finalConfidence = Math.max(50, Math.min(confidenceCap, originalConfidence + penalty));
+  const status = quarantined?.status || (severeStrategy || severePairTimeframe ? "reduced_confidence" : poorGroups.length ? "watchlist" : "active");
   const calibrationReason = status === "active"
     ? CONFIDENCE_COPY
-    : status === "insufficient_data"
-      ? "Historical sample is insufficient, so only a small uncertainty adjustment was applied."
-    : status === "watching"
-      ? "Historical performance reduced confidence. Setup is watching, not ready."
-      : "Confidence was reduced because generated-signal outcomes for similar setups are below calibration thresholds.";
+    : "Confidence was reduced because generated-signal outcomes for similar setups are below calibration thresholds.";
   const roundedFinalConfidence = Math.round(finalConfidence);
-  const strategyMatchScore = resolveStrategyMatchScore(signal);
-  const historicalGroup = selectCalibrationEvidenceGroup(context.groups || []);
   const calibrationPayload = {
     version: CONFIDENCE_CALIBRATION_VERSION,
     rawSetupScore,
     originalConfidence,
     calibratedConfidence: roundedFinalConfidence,
     finalConfidence: roundedFinalConfidence,
-    finalCalibratedConfidence: roundedFinalConfidence,
-    strategyMatchScore,
-    historicalCalibrationAdjustment: boundedPenalty,
-    historicalGroupUsed: historicalGroup ? summarizeGroupForSignal(historicalGroup) : null,
-    historicalSampleSize: Number(historicalGroup?.closedSignals || 0),
-    historicalWinRate: historicalGroup?.winRate ?? null,
-    historicalExpectancy: historicalGroup?.estimatedExpectancy ?? null,
     confidenceCap,
-    totalPenalty: boundedPenalty,
-    unboundedPenalty: penalty,
+    totalPenalty: penalty,
     caps,
     capRecovery,
     penalties,
     status,
     label: confidenceQualityLabel(roundedFinalConfidence, status),
-    blocked: Boolean(hardBlockGroup),
-    blockingEvidence: hardBlockGroup ? summarizeGroupForSignal(hardBlockGroup) : null,
+    blocked: ["quarantined", "disabled_by_admin"].includes(status),
     calibrationReason,
-    primaryDecisionReason: hardBlockGroup
-      ? "exact_historical_underperformance"
-      : status === "insufficient_data"
-        ? "insufficient_historical_data"
-        : boundedPenalty < 0
-          ? "historical_confidence_penalty"
-          : "calibration_applied",
     message: CONFIDENCE_COPY,
     groups: (context.groups || []).map(summarizeGroupForSignal)
   };
@@ -392,62 +310,9 @@ export function applyCalibrationContext(signal, context = {}) {
     ...signal,
     confidenceScore: roundedFinalConfidence,
     calibratedConfidence: roundedFinalConfidence,
-    finalCalibratedConfidence: roundedFinalConfidence,
     rawSetupScore,
     confidenceVersion: CONFIDENCE_CALIBRATION_VERSION,
     calibrationReason,
-    confidenceCalibration: calibrationPayload,
-    indicators: {
-      ...(signal.indicators || {}),
-      confidenceCalibration: calibrationPayload,
-      confidenceCalibrationMessage: CONFIDENCE_COPY,
-      confidenceCalibrationApplied: true
-    }
-  };
-}
-
-export function applyCalibrationError(signal, error, stage = "calibration") {
-  const rawSetupScore = resolveRawConfidence(signal);
-  const technicalError = String(error?.message || error || "Unknown calibration error").slice(0, 500);
-  const calibrationPayload = {
-    version: CONFIDENCE_CALIBRATION_VERSION,
-    rawSetupScore,
-    originalConfidence: rawSetupScore,
-    calibratedConfidence: null,
-    finalConfidence: null,
-    finalCalibratedConfidence: null,
-    strategyMatchScore: resolveStrategyMatchScore(signal),
-    historicalCalibrationAdjustment: null,
-    historicalGroupUsed: null,
-    historicalSampleSize: 0,
-    historicalWinRate: null,
-    historicalExpectancy: null,
-    confidenceCap: null,
-    totalPenalty: null,
-    caps: [],
-    penalties: [],
-    status: "calibration_error",
-    label: "Calibration error",
-    blocked: true,
-    blockingEvidence: {
-      groupType: "calibration",
-      groupValue: stage,
-      hardBlockEligible: true
-    },
-    calibrationReason: "Confidence calibration failed; candidate remains admin-only.",
-    primaryDecisionReason: "calibration_error",
-    technicalError,
-    message: CONFIDENCE_COPY,
-    groups: []
-  };
-  return {
-    ...signal,
-    ...(rawSetupScore === null ? {} : { confidenceScore: rawSetupScore }),
-    calibratedConfidence: null,
-    finalCalibratedConfidence: null,
-    rawSetupScore,
-    confidenceVersion: CONFIDENCE_CALIBRATION_VERSION,
-    calibrationReason: calibrationPayload.calibrationReason,
     confidenceCalibration: calibrationPayload,
     indicators: {
       ...(signal.indicators || {}),
@@ -466,7 +331,7 @@ export async function getSignalCalibrationContext(signal) {
     if (group) groups.push(group);
   }
   const hasExactSourceStrategyTimeframeHistory = groups.some((group) =>
-    ["exact_signal_context", "source_strategy_timeframe"].includes(group.groupType) && group.closedSignals >= 3
+    group.groupType === "source_strategy_timeframe" && group.closedSignals >= 3
   );
   return {
     groups,
@@ -544,22 +409,9 @@ export async function getAdminSignalQualityBreakdown(scope = "current") {
 }
 
 export async function updateSignalGroupStatus({ groupKey, status, adminNote = "", userId = "admin", penaltyOverride = null, confidenceCapOverride = null }) {
-  const normalized = normalizeSignalGroupStatusInput({
-    groupKey,
-    status,
-    adminNote,
-    penaltyOverride,
-    confidenceCapOverride
-  });
-  const {
-    groupType,
-    groupValue,
-    status: cleanStatus,
-    adminNote: cleanAdminNote,
-    penaltyOverride: cleanPenaltyOverride,
-    confidenceCapOverride: cleanConfidenceCapOverride
-  } = normalized;
-  groupKey = normalized.groupKey;
+  const cleanStatus = adminStatuses.has(status) ? status : "active";
+  const [groupType, ...valueParts] = String(groupKey || "").split(":");
+  const groupValue = valueParts.join(":") || "unknown";
   const result = await query(`
     INSERT INTO signal_strategy_statuses (
       group_key, group_type, group_value, status, admin_note, penalty_override,
@@ -575,47 +427,15 @@ export async function updateSignalGroupStatus({ groupKey, status, adminNote = ""
     RETURNING *
   `, [
     groupKey,
-    groupType,
+    groupType || "unknown",
     groupValue,
     cleanStatus,
-    cleanAdminNote,
-    cleanPenaltyOverride,
-    cleanConfidenceCapOverride,
+    String(adminNote || "").slice(0, 500),
+    finiteOrNull(penaltyOverride),
+    finiteOrNull(confidenceCapOverride),
     userId || "admin"
   ]);
   return result.rows[0];
-}
-
-export function normalizeSignalGroupStatusInput({
-  groupKey,
-  status,
-  adminNote = "",
-  penaltyOverride = null,
-  confidenceCapOverride = null
-} = {}) {
-  const [groupType, ...valueParts] = String(groupKey || "").split(":");
-  const groupValue = valueParts.join(":") || "unknown";
-  const directionGroup = groupType === "direction";
-  const requestedStatus = adminStatuses.has(status) ? status : "active";
-  const cleanStatus = directionGroup && ["quarantined", "disabled_by_admin", "diagnostic_only"].includes(requestedStatus)
-    ? "diagnostic_only"
-    : requestedStatus;
-  const cleanPenaltyOverride = directionGroup && cleanStatus !== "active"
-    ? Math.min(0, Math.max(DIRECTION_MAX_CONFIDENCE_PENALTY, finiteOrNull(penaltyOverride) ?? DIRECTION_MAX_CONFIDENCE_PENALTY))
-    : finiteOrNull(penaltyOverride);
-  const cleanConfidenceCapOverride = directionGroup ? null : finiteOrNull(confidenceCapOverride);
-  const cleanAdminNote = directionGroup && cleanStatus !== "active"
-    ? "Diagnostic only - direction-level performance is too broad to hard quarantine."
-    : String(adminNote || "").slice(0, 500);
-  return {
-    groupKey: String(groupKey || ""),
-    groupType: groupType || "unknown",
-    groupValue,
-    status: cleanStatus,
-    adminNote: cleanAdminNote,
-    penaltyOverride: cleanPenaltyOverride,
-    confidenceCapOverride: cleanConfidenceCapOverride
-  };
 }
 
 async function loadSignalGroup(definition) {
@@ -624,13 +444,13 @@ async function loadSignalGroup(definition) {
   const groupKey = buildGroupKey(definition.groupType, definition.groupValue);
   const override = await loadStatusOverride(groupKey);
   const status = calculateGroupStatus(metrics, override);
-  return normalizeCalibrationGroupScope({
+  return {
     groupKey,
     groupType: definition.groupType,
     groupValue: definition.groupValue,
     ...metrics,
     ...status
-  });
+  };
 }
 
 async function aggregatePerformanceGroups(groupType, groupExpression, where = "true", scope = "current") {
@@ -658,7 +478,7 @@ async function aggregatePerformanceGroups(groupType, groupExpression, where = "t
       const groupKey = buildGroupKey(groupType, groupValue);
       const metrics = calculateGroupMetrics(row);
       const status = calculateGroupStatus(metrics, overrides.get(groupKey));
-      return normalizeCalibrationGroupScope({ groupKey, groupType, groupValue, ...metrics, ...status });
+      return { groupKey, groupType, groupValue, ...metrics, ...status };
     });
 }
 
@@ -802,16 +622,9 @@ function buildSignalGroupDefinitions(signal) {
   const timeframe = signal.timeframe || "unknown";
   const direction = signal.direction || "unknown";
   const source = signal.generationSource || signal.source || signal.indicators?.generationSource || "manual_scan";
-  const regime = normalizeRegime(signal);
   const pattern = signal.patternContext?.pattern || signal.indicators?.patternContext?.pattern || "";
   const confidenceBucket = buildConfidenceBucket(signal.confidenceScore);
   return [
-    {
-      groupType: "exact_signal_context",
-      groupValue: `${source}:${strategy}:${pair}:${timeframe}:${direction}:${regime}`,
-      where: "source = $1 AND strategy = $2 AND pair = $3 AND timeframe = $4 AND direction = $5 AND COALESCE(full_analysis->'indicators'->>'regime', 'unknown') = $6",
-      params: [source, strategy, pair, timeframe, direction, regime]
-    },
     { groupType: "source_strategy_timeframe", groupValue: `${source}:${strategy}:${timeframe}`, where: "source = $1 AND strategy = $2 AND timeframe = $3", params: [source, strategy, timeframe] },
     { groupType: "strategy", groupValue: strategy, where: "strategy = $1", params: [strategy] },
     { groupType: "pair_timeframe", groupValue: `${pair}:${timeframe}`, where: "pair = $1 AND timeframe = $2", params: [pair, timeframe] },
@@ -822,56 +635,6 @@ function buildSignalGroupDefinitions(signal) {
     { groupType: "recent_strategy", groupValue: strategy, where: "strategy = $1 AND created_at >= now() - interval '7 days'", params: [strategy] },
     ...(pattern ? [{ groupType: "pattern", groupValue: pattern, where: "pattern = $1", params: [pattern] }] : [])
   ];
-}
-
-function findHardBlockCalibrationGroup(groups = []) {
-  return groups.find((group) => group.status === "disabled_by_admin" && !isBroadDirectionGroup(group)) ||
-    groups.find((group) =>
-      isSpecificEvidenceGroup(group) &&
-      ["quarantined"].includes(group.status) &&
-      Number(group.closedSignals || 0) >= 30 &&
-      Number(group.estimatedExpectancy || 0) < 0
-    ) || null;
-}
-
-export function normalizeCalibrationGroupScope(group = {}) {
-  if (!isBroadDirectionGroup(group)) return group;
-  const weak = group.status && group.status !== "active";
-  const status = ["quarantined", "disabled_by_admin", "diagnostic_only"].includes(group.status)
-    ? "diagnostic_only"
-    : group.status;
-  return {
-    ...group,
-    status,
-    suggestedStatus: status,
-    penalty: weak
-      ? Math.max(DIRECTION_MAX_CONFIDENCE_PENALTY, Math.min(0, Number(group.penalty || DIRECTION_MAX_CONFIDENCE_PENALTY)))
-      : 0,
-    confidenceCap: null,
-    confidenceCapLift: 0,
-    performanceLabel: weak ? (status === "diagnostic_only" ? "Diagnostic only" : "Reduced confidence") : group.performanceLabel,
-    recommendedAction: "Diagnostic only - direction-level performance is too broad to hard quarantine.",
-    diagnosticOnly: true,
-    hardBlockEligible: false
-  };
-}
-
-function isBroadDirectionGroup(group = {}) {
-  return group.groupType === "direction" || String(group.groupKey || "").startsWith("direction:");
-}
-
-function isSpecificEvidenceGroup(group = {}) {
-  return ["exact_signal_context"].includes(group.groupType);
-}
-
-function normalizeRegime(signal = {}) {
-  return String(
-    signal.marketRegime ||
-    signal.regime ||
-    signal.indicators?.regime ||
-    signal.fullAnalysis?.indicators?.regime ||
-    "unknown"
-  ).trim() || "unknown";
 }
 
 function findProvenExactSourceStrategyTimeframe(groups = []) {
@@ -897,24 +660,18 @@ function canAllowEliteConfidence(signal, groups = [], exactPositiveGroup = null)
   if (!strategy || Number(strategy.closedSignals || 0) < 20 || Number(strategy.estimatedExpectancy || 0) <= 0) return false;
   const pairTimeframe = groups.find((group) => group.groupType === "pair_timeframe");
   if (pairTimeframe && Number(pairTimeframe.closedSignals || 0) >= 20 && Number(pairTimeframe.estimatedExpectancy || 0) <= 0) return false;
-  return !groups.some((group) =>
-    !isBroadDirectionGroup(group) &&
-    ["quarantined", "disabled_by_admin", "reduced_confidence"].includes(group.status)
-  );
+  return !groups.some((group) => ["quarantined", "disabled_by_admin", "reduced_confidence"].includes(group.status));
 }
 
 function getStaticTimeframePolicy(timeframe) {
-  if (timeframe === "5m") {
-    return { confidenceCap: 72, reason: "5m generated signals are quarantined and capped at 72%." };
-  }
-  if (timeframe === "1h") {
-    return { confidenceCap: 72, reason: "1h generated signals are reduced-confidence while current-engine performance is being rebuilt." };
+  if (timeframe === "5m" || timeframe === "1h") {
+    return { confidenceCap: 72, reason: `${timeframe} generated signals are quarantined and capped at 72%.` };
   }
   if (timeframe === "15m") {
     return { confidenceCap: 88, reason: "15m confidence is capped below 90 until stronger current-engine performance develops." };
   }
   if (timeframe === "4h") {
-    return { confidenceCap: 82, reason: "4h confidence is capped while low-sample current-engine performance develops." };
+    return { confidenceCap: 88, reason: "4h confidence is capped while it remains watchlist/promising." };
   }
   return { confidenceCap: null, reason: "" };
 }
@@ -1025,20 +782,7 @@ function summarizeGroupForSignal(group) {
     confidenceCapLift: group.confidenceCapLift,
     status: group.status,
     penalty: group.penalty,
-    confidenceCap: group.confidenceCap,
-    diagnosticOnly: Boolean(group.diagnosticOnly || isBroadDirectionGroup(group)),
-    hardBlockEligible: Boolean(
-      !isBroadDirectionGroup(group) &&
-      (
-        group.status === "disabled_by_admin" ||
-        (
-          isSpecificEvidenceGroup(group) &&
-          group.status === "quarantined" &&
-          Number(group.closedSignals || 0) >= 30 &&
-          Number(group.estimatedExpectancy || 0) < 0
-        )
-      )
-    )
+    confidenceCap: group.confidenceCap
   };
 }
 
@@ -1050,7 +794,6 @@ export function sampleSizeStatusForGroup(group = {}) {
 }
 
 export function calibrationStatusForGroup(group = {}) {
-  if (isBroadDirectionGroup(group) && ["quarantined", "disabled_by_admin", "diagnostic_only"].includes(group.status)) return "Diagnostic only";
   if (["quarantined", "disabled_by_admin"].includes(group.status)) return group.status === "quarantined" ? "Quarantined" : "Disabled by admin";
   if (Number(group.closedSignals || 0) < 10) return "Needs more data";
   if (Number(group.winRate || 0) < Number(group.breakEvenWinRate || 0)) return "Overconfident";
@@ -1060,9 +803,6 @@ export function calibrationStatusForGroup(group = {}) {
 }
 
 function confidenceQualityLabel(confidence, status = "active") {
-  if (status === "calibration_error") return "Calibration error";
-  if (status === "insufficient_data") return "Insufficient data";
-  if (status === "diagnostic_only") return "Reduced confidence";
   if (["quarantined", "disabled_by_admin"].includes(status)) return "Quarantined";
   if (status === "reduced_confidence") return "Reduced confidence";
   if (status === "watchlist") return "Under calibration";
@@ -1108,63 +848,6 @@ function titleCase(value) {
 function finiteOrNull(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
-}
-
-function resolveRawConfidence(signal = {}) {
-  return firstPositiveFinite(
-    signal.rawConfidence,
-    signal.rawSetupScore,
-    signal.confidenceCalibration?.rawSetupScore,
-    signal.indicators?.confidenceCalibration?.rawSetupScore,
-    signal.confidenceScore,
-    signal.confidence,
-    signal.qualityScore,
-    signal.setupQualityScore,
-    signal.candidateScore,
-    signal.confidenceEstimate
-  );
-}
-
-function resolveStrategyMatchScore(signal = {}) {
-  const patternConfidence = signal.patternContext?.confidence ?? signal.indicators?.patternContext?.confidence;
-  const normalizedPatternConfidence = Number(patternConfidence);
-  return firstPositiveFinite(
-    signal.strategyMatchScore,
-    signal.indicators?.strategyMatchScore,
-    signal.learnedPattern?.patternMatchScore,
-    signal.indicators?.learnedPattern?.patternMatchScore,
-    Number.isFinite(normalizedPatternConfidence) && normalizedPatternConfidence <= 1
-      ? normalizedPatternConfidence * 100
-      : normalizedPatternConfidence
-  );
-}
-
-function selectCalibrationEvidenceGroup(groups = []) {
-  const priority = [
-    "exact_signal_context",
-    "source_strategy_timeframe",
-    "pair_timeframe",
-    "strategy",
-    "timeframe",
-    "pair"
-  ];
-  const sampledGroups = groups.filter((group) => Number(group.closedSignals || 0) > 0);
-  return (sampledGroups.length ? sampledGroups : groups).slice().sort((left, right) => {
-    const leftPriority = priority.indexOf(left.groupType);
-    const rightPriority = priority.indexOf(right.groupType);
-    const specificity = (leftPriority < 0 ? 999 : leftPriority) - (rightPriority < 0 ? 999 : rightPriority);
-    if (specificity) return specificity;
-    return Number(right.closedSignals || 0) - Number(left.closedSignals || 0);
-  })[0] || null;
-}
-
-function firstPositiveFinite(...values) {
-  for (const value of values) {
-    if (value === null || value === undefined || value === "") continue;
-    const number = Number(value);
-    if (Number.isFinite(number) && number > 0) return Math.max(0, Math.min(99, number));
-  }
-  return null;
 }
 
 function hash(value) {

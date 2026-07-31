@@ -1,10 +1,6 @@
 import { appConfig } from "../../config/appConfig.js";
 import {
   claimNextTelegramNotification,
-  findSuccessfulTelegramDelivery,
-  getTelegramSettingsByUser,
-  listWatchlistByUser,
-  markTelegramNotificationBlocked,
   markTelegramNotificationFailed,
   markTelegramNotificationSent
 } from "../../db/repositories.js";
@@ -12,10 +8,6 @@ import {
   formatTelegramSignalMessage,
   formatTelegramSignalReplyMarkup
 } from "./notificationService.js";
-import {
-  evaluateTelegramAlertEligibility,
-  recordTelegramAlertDiagnostic
-} from "./telegramAlertDiagnosticsService.js";
 import { sendTelegramMessage } from "./telegramClient.js";
 import { isSignalExpired } from "../signals/signalValidityService.js";
 
@@ -42,121 +34,23 @@ export async function processTelegramQueue() {
     let delivery;
 
     while ((delivery = await claimNextTelegramNotification())) {
-      let eligibility = null;
       try {
-        const settings = await getTelegramSettingsByUser(delivery.userId);
-        const watchlist = settings?.favoriteMarketsOnly
-          ? await listWatchlistByUser(delivery.userId)
-          : [];
-        const favoriteSymbols = new Set(watchlist.map((item) => item.symbol));
-        eligibility = evaluateTelegramAlertEligibility({
-          settings,
-          setup: delivery.payload,
-          favoriteSymbols
-        });
-        if (!eligibility.allowed) {
-          await markTelegramNotificationBlocked(delivery.id, eligibility.reason, eligibility.status);
-          await recordTelegramAlertDiagnostic({
-            signal: delivery.payload,
-            userId: delivery.userId,
-            status: eligibility.status,
-            reason: eligibility.reason,
-            details: {
-              ...eligibility.details,
-              queueId: delivery.id,
-              deliveryRevalidated: true
-            }
-          });
-          console.info(`[telegram] blocked before delivery queue_id=${delivery.id} user=${delivery.userId} reason=${eligibility.status}`);
-          continue;
-        }
         if (isSignalExpired(delivery.payload)) {
-          await markTelegramNotificationBlocked(
-            delivery.id,
-            "Signal expired before Telegram delivery.",
-            "telegram_blocked_expired"
-          );
-          await recordTelegramAlertDiagnostic({
-            signal: delivery.payload,
-            userId: delivery.userId,
-            status: "telegram_blocked_expired",
-            reason: "Signal expired before Telegram delivery.",
-            details: { queueId: delivery.id }
-          });
+          await markTelegramNotificationFailed(delivery.id, "Signal expired before Telegram delivery.", false);
           console.info(`[telegram] expired alert skipped queue_id=${delivery.id} user=${delivery.userId}`);
           continue;
         }
-        const priorSuccessfulDelivery = await findSuccessfulTelegramDelivery(
-          delivery.userId,
-          delivery.signalId || delivery.payload.signalId || delivery.payload.id,
-          delivery.id
-        );
-        if (priorSuccessfulDelivery) {
-          await markTelegramNotificationBlocked(
-            delivery.id,
-            "This exact signal was already sent successfully to this user.",
-            "telegram_blocked_already_sent"
-          );
-          await recordTelegramAlertDiagnostic({
-            signal: delivery.payload,
-            userId: delivery.userId,
-            status: "telegram_blocked_already_sent",
-            reason: "This exact signal was already sent successfully to this user.",
-            details: {
-              ...eligibility.details,
-              queueId: delivery.id,
-              existingQueueId: priorSuccessfulDelivery.id,
-              existingTelegramMessageId: priorSuccessfulDelivery.telegram_message_id
-            }
-          });
-          continue;
-        }
         console.log(`[telegram] sending alert queue_id=${delivery.id} user=${delivery.userId} chat=${maskChatId(delivery.chatId)}`);
-        const telegramResponse = await sendTelegramMessage(
+        await sendTelegramMessage(
           delivery.chatId,
           formatTelegramSignalMessage(delivery.payload),
           formatTelegramSignalReplyMarkup(delivery.payload)
         );
-        await markTelegramNotificationSent(delivery.id, telegramResponse);
-        await recordTelegramAlertDiagnostic({
-          signal: delivery.payload,
-          userId: delivery.userId,
-          status: "telegram_sent",
-          reason: "Telegram alert sent.",
-          details: {
-            ...eligibility.details,
-            queueId: delivery.id,
-            attempts: delivery.attempts,
-            telegramApiResponse: {
-              messageId: telegramResponse?.message_id || null,
-              chatId: telegramResponse?.chat?.id || null
-            }
-          }
-        });
+        await markTelegramNotificationSent(delivery.id);
         console.log(`[telegram] sent queue_id=${delivery.id} user=${delivery.userId}`);
       } catch (error) {
         const retry = delivery.attempts < appConfig.telegram.maxAttempts;
-        await markTelegramNotificationFailed(
-          delivery.id,
-          error.message,
-          retry,
-          error.code || "telegram_delivery_failed"
-        );
-        await recordTelegramAlertDiagnostic({
-          signal: delivery.payload,
-          userId: delivery.userId,
-          status: "telegram_failed",
-          reason: error.message,
-          details: {
-            ...(eligibility?.details || {}),
-            queueId: delivery.id,
-            attempts: delivery.attempts,
-            retry,
-            telegramApiResponse: {
-              error: error.message
-            }
-          }
-        });
+        await markTelegramNotificationFailed(delivery.id, error.message, retry);
         console.warn(`[telegram] failed queue_id=${delivery.id} user=${delivery.userId} retry=${retry} error=${error.message}`);
 
         if (!retry) {

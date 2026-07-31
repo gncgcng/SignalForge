@@ -4,18 +4,13 @@ process.env.TELEGRAM_BOT_USERNAME = "signalforge_test_bot";
 import { readFileSync } from "node:fs";
 
 const {
-  buildTelegramUnlockUrl,
-  formatTelegramTradeLevels,
   formatTelegramSignalReplyMarkup,
   formatTelegramSignalMessage,
-  telegramPreferenceMatchesSetup,
-  validateTelegramTradeSignal
+  telegramPreferenceMatchesSetup
 } = await import("../src/modules/notifications/notificationService.js");
 const { sendTelegramMessage } = await import("../src/modules/notifications/telegramClient.js");
 
 const migration = readFileSync(new URL("../migrations/005_telegram_notifications.sql", import.meta.url), "utf8");
-const duplicatePrecisionMigration = readFileSync(new URL("../migrations/059_signal_duplicate_precision.sql", import.meta.url), "utf8");
-const decisionMigration = readFileSync(new URL("../migrations/060_final_signal_and_telegram_decisions.sql", import.meta.url), "utf8");
 const repositories = readFileSync(new URL("../src/db/repositories.js", import.meta.url), "utf8");
 const signalController = readFileSync(new URL("../src/modules/signals/signalController.js", import.meta.url), "utf8");
 const app = readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
@@ -78,13 +73,11 @@ await sendTelegramMessage("123456789", message, replyMarkup);
 const result = {
   settingsAndQueuePersisted: migration.includes("telegram_notification_settings") &&
     migration.includes("telegram_notification_queue"),
-  duplicateQueueConstraint: duplicatePrecisionMigration.includes("user_id, chat_id, setup_key, alert_type") &&
-    decisionMigration.includes("user_id, signal_id, alert_type") &&
-    repositories.includes("ON CONFLICT DO NOTHING"),
-  queueIsUserScoped:
+  duplicateQueueConstraint: migration.includes("UNIQUE (user_id, setup_key)") &&
+    repositories.includes("ON CONFLICT (user_id, setup_key) DO NOTHING"),
+  queueIsUserScoped: repositories.includes("user_id text NOT NULL") === false &&
     repositories.includes("const setupKey = setup.setupKey || setup.id") &&
-    repositories.includes("const signalId = setup.signalId || setup.id") &&
-    repositories.includes("id, user_id, signal_id, setup_key, chat_id, alert_type"),
+    repositories.includes("userId,\n    setupKey"),
   allCryptoMatchesWithoutFavorite: telegramPreferenceMatchesSetup(settings, new Set(), setup),
   favoriteMarketMatches: telegramPreferenceMatchesSetup(watchlistSettings, favorites, setup),
   nonFavoriteRejected: !telegramPreferenceMatchesSetup(watchlistSettings, new Set(["XAU/USD"]), setup),
@@ -98,19 +91,17 @@ const result = {
     ...setup,
     confidenceScore: 79
   }),
-  messageIsReadyTradeSignal: ["Market: BTCUSD", "Provider: Coinbase · BTC-USD", "Timeframe: 1h",
-    "Direction: LONG", "Confidence: 86%", "Setup: Pullback bounce",
-    "Trade levels:", "Entry: 68,000", "Stop loss: 67,000", "Take profit: 70,000", "Risk/reward: 2.00R"]
+  messageIsPreviewOnly: ["Market: BTCUSD", "Provider: Coinbase · BTC-USD", "Timeframe: 1h",
+    "Direction: LONG", "Confidence: 86% (Strong)", "Setup: Pullback bounce",
+    "Preview only. Unlock to view full levels."]
     .every((value) => message.includes(value)),
-  messageDoesNotSendWatchingOrDigestCopy: !["Watching setup", "Market digest", "Daily brief", "Why no signal"]
+  messageDoesNotLeakPaidLevels: !["Entry:", "Stop Loss:", "Take Profit:", "Risk/Reward:"]
     .some((value) => message.includes(value)),
-  sentMessageNeverSaysNoAlert: !message.includes("No alert"),
-  messageContainsReasonAndDisclaimer: message.includes("Short reason:") &&
+  messageContainsReasonAndDisclaimer: message.includes("Preview reason:") &&
     message.includes("Trend") &&
     message.includes("Educational tool only. Not financial advice."),
   telegramReplyMarkupUnlocksExactSetup: replyMarkup.reply_markup.inline_keyboard[0][0].text === "Unlock Signal" &&
-    replyMarkup.reply_markup.inline_keyboard[0][0].url.includes("#signals?unlock=BTC-USD%3A1h%3Along%3A1770000000") &&
-    replyMarkup.reply_markup.inline_keyboard[0][0].url.includes("signalId=sig_test"),
+    replyMarkup.reply_markup.inline_keyboard[0][0].url.includes("telegramUnlock=BTC-USD%3A1h%3Along%3A1770000000"),
   telegramApiCalledSafely: telegramRequest.url.includes("/bottest-token/sendMessage") &&
     telegramRequest.body.chat_id === "123456789" &&
     telegramRequest.body.text === message &&
@@ -160,46 +151,6 @@ const result = {
     signalController.indexOf('pathname === "/api/signals/generate"')
   ).includes("recordSignalUsage")
 };
-
-const lowPriceShort = {
-  ...setup,
-  id: "sig_low_price",
-  setupKey: "A8-USD:4h:short:1",
-  symbol: "A8-USD",
-  timeframe: "4h",
-  direction: "short",
-  entryPrice: 0.005248,
-  stopLoss: 0.005391,
-  takeProfit: 0.004871,
-  riskRewardRatio: 2.64,
-  confidenceScore: 92
-};
-const lowPriceLevels = formatTelegramTradeLevels(lowPriceShort);
-result.lowPriceLevelsRemainDistinct = new Set([
-  lowPriceLevels.entry,
-  lowPriceLevels.stopLoss,
-  lowPriceLevels.takeProfit
-]).size === 3 && lowPriceLevels.decimals >= 6;
-result.validShortDirectionAccepted = validateTelegramTradeSignal(lowPriceShort).valid;
-result.invalidShortDirectionRejected = !validateTelegramTradeSignal({ ...lowPriceShort, stopLoss: 0.0051 }).valid;
-result.validLongDirectionAccepted = validateTelegramTradeSignal({
-  ...lowPriceShort,
-  direction: "long",
-  stopLoss: 0.0049,
-  takeProfit: 0.006
-}).valid;
-result.invalidLongDirectionRejected = !validateTelegramTradeSignal({
-  ...lowPriceShort,
-  direction: "long",
-  stopLoss: 0.0054,
-  takeProfit: 0.006
-}).valid;
-result.deepLinkIncludesSignalAndUnlockToken = buildTelegramUnlockUrl(lowPriceShort).includes("signalId=sig_low_price") &&
-  buildTelegramUnlockUrl(lowPriceShort).includes("unlock=A8-USD%3A4h%3Ashort%3A1");
-result.deliveryWorkerRevalidatesPreferences = queue.includes("evaluateTelegramAlertEligibility") &&
-  queue.includes("markTelegramNotificationBlocked");
-result.failedDeepLinkShowsUsefulError = app.includes("state.telegramUnlockError") &&
-  app.includes("Signal unavailable");
 
 console.log(JSON.stringify(result, null, 2));
 

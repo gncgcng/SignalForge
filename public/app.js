@@ -73,7 +73,6 @@ const state = {
   expandedSignalKeys: new Set(),
   unlockedRevealSignalId: null,
   telegramExpiredNotice: null,
-  telegramUnlockError: null,
   riskCalculations: new Map(),
   lastScanSummary: null,
   activeScanJob: null,
@@ -102,11 +101,8 @@ const state = {
   candidates: [],
   marketBrief: null,
   marketBriefCollapsed: getStoredMarketBriefCollapsed(),
-  signalActivity: null,
   avoidTrades: [],
   showAllAvoidTrades: false,
-  whyNoSignal: null,
-  missedSetupAnalysis: null,
   scanResults: [],
   watchlist: [],
   alerts: [],
@@ -140,9 +136,6 @@ const state = {
   validationDashboard: null,
   candidateQuality: null,
   adminSignals: { signals: [], stats: {}, page: 1, totalPages: 1, total: 0, filters: {} },
-  adminSignalSupply: null,
-  adminTelegramHealth: null,
-  adminStrategyLab: null,
   adminCryptoMarkets: { markets: [], summary: {}, filters: {} },
   profile: null,
   publicProfile: null,
@@ -199,12 +192,6 @@ const avoidTradeSection = document.querySelector("#avoid-trade-section");
 const avoidTradeGrid = document.querySelector("#avoid-trade-grid");
 const avoidTradeCount = document.querySelector("#avoid-trade-count");
 const avoidTradeMore = document.querySelector("#avoid-trade-more");
-const signalActivitySummary = document.querySelector("#signal-activity-summary");
-const activityReadyList = document.querySelector("#activity-ready-list");
-const activityWatchingList = document.querySelector("#activity-watching-list");
-const activityAvoidList = document.querySelector("#activity-avoid-list");
-const activityMarketBrief = document.querySelector("#activity-market-brief");
-const activityWhyNoSignal = document.querySelector("#activity-why-no-signal");
 const landingPage = document.querySelector("#landing-page");
 const publicHowItWorksPage = document.querySelector("#public-how-it-works-page");
 const publicProfilePage = document.querySelector("#public-profile-page");
@@ -263,18 +250,6 @@ const scanProgressCount = document.querySelector("#scan-progress-count");
 const scanProgressBar = document.querySelector("#scan-progress-bar");
 const scanSummaryPanel = document.querySelector("#scan-summary-panel");
 const viewOpportunitiesButton = document.querySelector("#view-opportunities-button");
-const whyNoSignalPanel = document.querySelector("#why-no-signal-panel");
-const whyNoSignalStatus = document.querySelector("#why-no-signal-status");
-const whyNoSignalSummary = document.querySelector("#why-no-signal-summary");
-const whyNoSignalReasons = document.querySelector("#why-no-signal-reasons");
-const missedSetupList = document.querySelector("#missed-setup-list");
-const whyNoSignalAdminDetails = document.querySelector("#why-no-signal-admin-details");
-const whyNoSignalAdminContent = document.querySelector("#why-no-signal-admin-content");
-const missedSetupAdminActions = document.querySelector("#missed-setup-admin-actions");
-const analyzeMissedSetupButton = document.querySelector("#analyze-missed-setup-button");
-const saveMissedSetupButton = document.querySelector("#save-missed-setup-button");
-const missedSetupClassification = document.querySelector("#missed-setup-classification");
-const missedSetupNote = document.querySelector("#missed-setup-note");
 const onboardingPanel = document.querySelector("#onboarding-panel");
 const onboardingChecklist = document.querySelector("#onboarding-checklist");
 const onboardingProgressText = document.querySelector("#onboarding-progress-text");
@@ -379,8 +354,6 @@ const onboardingPublicProfile = document.querySelector("#onboarding-public-profi
 const usernameOnboardingMessage = document.querySelector("#username-onboarding-message");
 const adminNavLink = document.querySelector("#admin-nav-link");
 const adminSignalsNavLink = document.querySelector("#admin-signals-nav-link");
-const adminSignalQualityGateNavLink = document.querySelector("#admin-signal-quality-gate-nav-link");
-const adminStrategyLabNavLink = document.querySelector("#admin-strategy-lab-nav-link");
 const adminCryptoMarketsNavLink = document.querySelector("#admin-crypto-markets-nav-link");
 const affiliateAdminNavLink = document.querySelector("#affiliate-admin-nav-link");
 const webhookEventsNavLink = document.querySelector("#webhook-events-nav-link");
@@ -411,13 +384,6 @@ const adminSignalFilters = document.querySelector("#admin-signal-filters");
 const adminSignalsTable = document.querySelector("#admin-signals-table");
 const adminSignalModal = document.querySelector("#admin-signal-modal");
 const adminSignalDetail = document.querySelector("#admin-signal-detail");
-const adminTelegramHealthStats = document.querySelector("#admin-telegram-health-stats");
-const adminTelegramSimulation = document.querySelector("#admin-telegram-simulation");
-const adminTelegramSimulate = document.querySelector("#admin-telegram-simulate");
-const adminTelegramTestMessage = document.querySelector("#admin-telegram-test-message");
-const adminSignalSupplyPanel = document.querySelector("#admin-signal-supply-panel");
-const adminSignalQualityGatePanel = document.querySelector("#admin-signal-quality-gate-panel");
-const adminStrategyBacktestStart = document.querySelector("#admin-strategy-backtest-start");
 const adminCryptoFilters = document.querySelector("#admin-crypto-filters");
 const adminCryptoMarketList = document.querySelector("#admin-crypto-market-list");
 const adminCryptoRebuildActive = document.querySelector("#admin-crypto-rebuild-active");
@@ -426,8 +392,6 @@ const adminCryptoVerifyPending = document.querySelector("#admin-crypto-verify-pe
 const adminCryptoDiagnostics = document.querySelector("#admin-crypto-diagnostics");
 const adminCryptoOperationStatus = document.querySelector("#admin-crypto-operation-status");
 const adminCryptoProgress = document.querySelector("#admin-crypto-progress");
-const routeNotFoundName = document.querySelector("#route-not-found-name");
-const routeAccessDeniedName = document.querySelector("#route-access-denied-name");
 const backtestForm = document.querySelector("#backtest-form");
 const backtestSymbol = document.querySelector("#backtest-symbol");
 const backtestTimeframe = document.querySelector("#backtest-timeframe");
@@ -1362,13 +1326,6 @@ document.querySelectorAll("[data-view-link]").forEach((link) => {
   });
 });
 
-document.addEventListener("click", (event) => {
-  const route = event.target.closest("[data-route-fallback]")?.dataset.routeFallback;
-  if (!route) return;
-  event.preventDefault();
-  navigateTo(route);
-});
-
 window.addEventListener("hashchange", handleBrowserRouteChange);
 window.addEventListener("popstate", handleBrowserRouteChange);
 
@@ -1462,9 +1419,6 @@ scanAllButton.addEventListener("click", async () => {
   scanProgress.classList.remove("hidden");
   scanSummaryPanel.classList.add("hidden");
   state.scanResults = [];
-  state.whyNoSignal = null;
-  state.missedSetupAnalysis = null;
-  renderWhyNoSignalPanel(null);
   state.activeScanJob = null;
   signalsGrid.innerHTML = "";
   updateScanProgress(
@@ -1610,9 +1564,6 @@ generateButton.addEventListener("click", async () => {
     }
 
     state.scanResults = [];
-    state.whyNoSignal = null;
-    state.missedSetupAnalysis = null;
-    renderWhyNoSignalPanel(null);
     state.signals = [signal, ...state.signals];
     markFirstScanCompleted();
     await loadSignals();
@@ -1814,63 +1765,6 @@ avoidTradeMore?.addEventListener("click", () => {
   renderAvoidTrades();
 });
 
-analyzeMissedSetupButton?.addEventListener("click", async () => {
-  if (!state.user?.isAdmin || !state.selectedPair) return;
-  analyzeMissedSetupButton.disabled = true;
-  statusLine.textContent = "Analyzing missed setup...";
-  try {
-    const result = await api.request("/api/signals/missed-setup/analyze", {
-      method: "POST",
-      body: JSON.stringify({
-        symbol: state.selectedPair.symbol,
-        timeframe: state.timeframe
-      })
-    });
-    state.missedSetupAnalysis = result;
-    state.whyNoSignal = result.whyNoSignal || null;
-    renderWhyNoSignalPanel(state.whyNoSignal, {
-      fallbackSummary: result.analysis?.rejectionSummary || result.analysis?.message,
-      fallbackReasons: result.analysis?.rejectionReasons || []
-    });
-    statusLine.textContent = result.hasReadySignal
-      ? "Analyzer found a ready setup. Check the generated signal output."
-      : "Missed setup analysis complete.";
-  } catch (error) {
-    statusLine.textContent = error.message;
-  } finally {
-    analyzeMissedSetupButton.disabled = false;
-  }
-});
-
-saveMissedSetupButton?.addEventListener("click", async () => {
-  if (!state.user?.isAdmin || !state.selectedPair) return;
-  const snapshot = state.missedSetupAnalysis || { whyNoSignal: state.whyNoSignal };
-  const firstSetup = snapshot?.whyNoSignal?.possibleSetups?.[0] || {};
-  saveMissedSetupButton.disabled = true;
-  statusLine.textContent = "Saving missed setup example...";
-  try {
-    await api.request("/api/signals/missed-setup/examples", {
-      method: "POST",
-      body: JSON.stringify({
-        symbol: state.selectedPair.symbol,
-        timeframe: state.timeframe,
-        direction: firstSetup.direction || "",
-        attemptedStrategy: firstSetup.attemptedStrategy || "",
-        classification: missedSetupClassification?.value || "unsure",
-        reason: firstSetup.reason || snapshot?.whyNoSignal?.summary || "",
-        adminNote: missedSetupNote?.value || "",
-        analyzerSnapshot: snapshot
-      })
-    });
-    if (missedSetupNote) missedSetupNote.value = "";
-    statusLine.textContent = "Missed setup example saved for admin review.";
-  } catch (error) {
-    statusLine.textContent = error.message;
-  } finally {
-    saveMissedSetupButton.disabled = false;
-  }
-});
-
 dailyMarketBrief?.addEventListener("click", (event) => {
   if (event.target.closest("#daily-brief-toggle") || event.target.closest("[data-daily-brief-show]")) {
     state.marketBriefCollapsed = !state.marketBriefCollapsed;
@@ -1932,71 +1826,12 @@ document.querySelector("#admin-signal-filters-clear")?.addEventListener("click",
 });
 document.querySelector("#admin-signals-prev")?.addEventListener("click", () => { if (state.adminSignals.page > 1) { state.adminSignals.page -= 1; loadAdminSignals(); } });
 document.querySelector("#admin-signals-next")?.addEventListener("click", () => { if (state.adminSignals.page < state.adminSignals.totalPages) { state.adminSignals.page += 1; loadAdminSignals(); } });
-adminTelegramSimulate?.addEventListener("click", async () => {
-  adminTelegramSimulate.disabled = true;
-  adminTelegramSimulation.innerHTML = `<div class="empty-state"><strong>Testing alert logic...</strong></div>`;
-  try {
-    const result = await api.request("/api/admin/signals/telegram/simulate", {
-      method: "POST",
-      body: JSON.stringify({ limit: 40 })
-    });
-    renderTelegramAlertSimulation(result);
-  } catch (error) {
-    adminTelegramSimulation.innerHTML = `<div class="empty-state"><strong>Telegram simulation failed</strong><p class="reasoning">${escapeHtml(error.message)}</p></div>`;
-  } finally {
-    adminTelegramSimulate.disabled = false;
-  }
-});
-adminTelegramTestMessage?.addEventListener("click", async () => {
-  const chatId = window.prompt("Telegram chat ID for this admin test message:");
-  if (!chatId) return;
-  adminTelegramTestMessage.disabled = true;
-  try {
-    const result = await api.request("/api/admin/signals/telegram/test-message", {
-      method: "POST",
-      body: JSON.stringify({ chatId })
-    });
-    showToast(result.message || "Telegram test complete");
-    await loadAdminTelegramHealth();
-  } catch (error) {
-    showToast(error.message);
-  } finally {
-    adminTelegramTestMessage.disabled = false;
-  }
-});
-adminStrategyBacktestStart?.addEventListener("click", async () => {
-  adminStrategyBacktestStart.disabled = true;
-  try {
-    const result = await api.request("/api/admin/signals/strategy-lab/backtest/start", {
-      method: "POST",
-      body: JSON.stringify({ scope: { mode: "active_crypto_batch" } })
-    });
-    showToast(`Backtest job started: ${result.job?.id || "queued"}`);
-    await loadAdminStrategyLab();
-  } catch (error) {
-    showToast(error.message);
-  } finally {
-    adminStrategyBacktestStart.disabled = false;
-  }
-});
 adminSignalsTable?.addEventListener("click", async (event) => {
   const copy = event.target.closest("[data-admin-signal-copy]");
   if (copy) { await navigator.clipboard.writeText(copy.dataset.adminSignalCopy); showToast("Signal ID copied"); return; }
   const button = event.target.closest("[data-admin-signal-view]");
   if (!button) return;
   try { const { signal } = await api.request(`/api/admin/signals/${encodeURIComponent(button.dataset.adminSignalView)}`); renderAdminSignalDetail(signal); adminSignalModal.classList.remove("hidden"); document.body.classList.add("modal-open"); } catch (error) { showToast(error.message); }
-});
-adminSignalModal?.addEventListener("click", async (event) => {
-  const button = event.target.closest("[data-admin-related-signal]");
-  if (!button) return;
-  button.disabled = true;
-  try {
-    const { signal } = await api.request(`/api/admin/signals/${encodeURIComponent(button.dataset.adminRelatedSignal)}`);
-    renderAdminSignalDetail(signal);
-  } catch (error) {
-    showToast(error.message);
-    button.disabled = false;
-  }
 });
 document.querySelector("#admin-signal-quality-panel")?.addEventListener("click", async (event) => {
   const button = event.target.closest("[data-signal-quality-status]");
@@ -3264,8 +3099,6 @@ async function bootDashboard() {
   document.querySelector("#user-name").textContent = getUserDisplayName();
   adminNavLink.classList.toggle("hidden", !state.user.isAdmin);
   adminSignalsNavLink.classList.toggle("hidden", !state.user.isAdmin);
-  adminSignalQualityGateNavLink?.classList.toggle("hidden", !state.user.isAdmin);
-  adminStrategyLabNavLink?.classList.toggle("hidden", !state.user.isAdmin);
   adminCryptoMarketsNavLink.classList.toggle("hidden", !state.user.isAdmin);
   adminSupportNavLink.classList.toggle("hidden", !state.user.isAdmin);
   affiliateAdminNavLink.classList.toggle("hidden", !state.user.isAdmin);
@@ -3341,7 +3174,6 @@ function getPendingTelegramUnlockKey() {
 async function processPendingTelegramUnlock() {
   const setupKey = getPendingTelegramUnlockKey();
   if (!setupKey) return;
-  state.telegramUnlockError = null;
 
   try {
     statusLine.textContent = "Unlocking Telegram signal preview...";
@@ -3363,22 +3195,15 @@ async function processPendingTelegramUnlock() {
     }
 
     if (!signal) {
-      state.telegramUnlockError = message || "This Telegram signal could not be loaded. It may no longer be available.";
-      removeTelegramUnlockParam();
-      navigateTo("signals", {}, { replace: true });
-      renderSignalsHistory();
-      statusLine.textContent = state.telegramUnlockError;
+      statusLine.textContent = "Telegram signal preview could not be unlocked.";
       return;
     }
 
     removeTelegramUnlockParam();
     await completeSignalUnlock({ signal, subscription, alreadyUnlocked, source: "telegram" });
   } catch (error) {
-    state.telegramUnlockError = error.message || "This Telegram signal could not be loaded.";
-    removeTelegramUnlockParam();
+    statusLine.textContent = error.message;
     navigateTo("signals", {}, { replace: true });
-    renderSignalsHistory();
-    statusLine.textContent = state.telegramUnlockError;
   }
 }
 
@@ -3895,32 +3720,6 @@ async function loadAdminSignals() {
   const result = await api.request(`/api/admin/signals?${params}`);
   state.adminSignals = { ...state.adminSignals, ...result, signals: result.signals || [], stats: result.stats || {} };
   renderAdminSignals();
-  loadAdminTelegramHealth().catch((error) => {
-    if (adminTelegramHealthStats) {
-      adminTelegramHealthStats.innerHTML = `<article><span>Telegram health</span><strong>Unavailable</strong><small>${escapeHtml(error.message)}</small></article>`;
-    }
-  });
-}
-
-async function loadAdminTelegramHealth() {
-  if (!state.user?.isAdmin || !adminTelegramHealthStats) return;
-  const result = await api.request("/api/admin/signals/telegram/health");
-  state.adminTelegramHealth = result.telegram || {};
-  renderAdminTelegramHealth();
-}
-
-async function loadAdminSignalQualityGate() {
-  if (!state.user?.isAdmin) throw new Error("Admin access required.");
-  if (adminSignalQualityGatePanel) adminSignalQualityGatePanel.innerHTML = `<div class="empty-state"><strong>Loading quality gate diagnostics...</strong></div>`;
-  const result = await api.request("/api/admin/signals/quality-gate");
-  if (adminSignalQualityGatePanel) adminSignalQualityGatePanel.innerHTML = renderSignalQualityGateDiagnostics(result.qualityGate || {});
-}
-
-async function loadAdminStrategyLab() {
-  if (!state.user?.isAdmin) throw new Error("Admin access required.");
-  const lab = await api.request("/api/admin/signals/strategy-lab");
-  state.adminStrategyLab = lab;
-  renderAdminStrategyLab();
 }
 
 async function loadAdminCryptoMarkets() {
@@ -4054,14 +3853,10 @@ function renderAdminSignals() {
     ["Duplicate blocked", stats.duplicateBlocked], ["Cooldown blocked", stats.cooldownBlocked],
     ["Correlated blocked", stats.correlatedDuplicate], ["Timeframe blocked", stats.quarantinedTimeframe],
     ["Readiness failed", stats.readinessFailed], ["Invalid legacy", stats.invalidLegacyReady],
-    ["Weak strategy", stats.weakStrategyMatch], ["Poor entry", stats.poorEntryQuality],
-    ["Invalid stop", stats.invalidStopLoss], ["Unrealistic TP", stats.unrealisticTakeProfit],
-    ["Weak R/R", stats.weakRiskReward], ["Bad regime", stats.badMarketRegime],
-    ["Historical block", stats.historicalUnderperformer], ["Past-loser match", stats.similarToPastLosers],
     ["Win rate", `${Number(stats.winRate || 0).toFixed(1)}%`], ["Average R/R", `${Number(stats.averageRiskReward || 0).toFixed(2)}R`],
     ["Average confidence", `${Number(stats.averageConfidence || 0).toFixed(1)}%`], ["Today", stats.today], ["This week", stats.week]
   ].map(([label, value]) => `<article><span>${label}</span><strong>${value ?? 0}</strong></article>`).join("");
-  renderAdminSignalQualityPanel(data.qualityBreakdown || {}, data.qualityGate || {});
+  renderAdminSignalQualityPanel(data.qualityBreakdown || {});
   adminSignalsTable.innerHTML = data.signals.length ? `
     <div class="admin-generated-table">
       <div class="admin-generated-row admin-generated-head"><span>Pair</span><span>Setup</span><span>Levels</span><span>Scores</span><span>Status</span><span>Source / created</span><span>Actions</span></div>
@@ -4072,76 +3867,7 @@ function renderAdminSignals() {
   document.querySelector("#admin-signals-next").disabled = Number(data.page || 1) >= Number(data.totalPages || 1);
 }
 
-function renderAdminTelegramHealth() {
-  const telegram = state.adminTelegramHealth || {};
-  if (!adminTelegramHealthStats) return;
-  adminTelegramHealthStats.innerHTML = [
-    ["Telegram enabled", telegram.enabled ? "Yes" : "No"],
-    ["Bot token", telegram.botTokenConfigured ? "Configured" : "Missing"],
-    ["Last alert sent", telegram.lastAlertSentAt ? formatDateTime(telegram.lastAlertSentAt) : "None"],
-    ["Last attempt", telegram.lastAlertAttemptAt ? formatDateTime(telegram.lastAlertAttemptAt) : "None"],
-    ["Queue size", telegram.queueSize],
-    ["Blocked today", telegram.alertsBlockedToday],
-    ["Sent today", telegram.alertsSentToday],
-    ["Watching sent today", telegram.watchingAlertsSentToday],
-    ["Min confidence", telegram.minimumConfidenceThreshold],
-    ["Watching alerts", telegram.watchingAlertsEnabled ? `On · ${telegram.watchingAlertMinConfidence}%` : "Off"],
-    ["Alertable signals", telegram.alertableSignalCount],
-    ["Non-alerted signals", telegram.nonAlertedGeneratedSignalCount],
-    ["Failed sends", telegram.failedSends],
-    ["Retries", telegram.retryCount]
-  ].map(([label, value]) => `<article><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value ?? 0))}</strong></article>`).join("");
-  if (adminTelegramSimulation && !adminTelegramSimulation.innerHTML.trim()) {
-    if (telegram.alertScarcityWarning?.active) {
-      const reasons = (telegram.alertScarcityWarning.blockedByReason || [])
-        .map((item) => `${titleCase(item.status)}: ${item.count}`)
-        .join(" · ") || "No block reasons recorded yet.";
-      adminTelegramSimulation.innerHTML = `<div class="empty-state"><strong>No ready alerts sent in the last 48 hours.</strong><p class="reasoning">Candidates generated: ${Number(telegram.alertScarcityWarning.candidatesGenerated || 0)}. ${escapeHtml(reasons)}</p></div>`;
-    } else if (telegram.lastAlertFailure) {
-      adminTelegramSimulation.innerHTML = `<div class="empty-state"><strong>Latest block/failure</strong><p class="reasoning">${escapeHtml(telegram.lastAlertFailure.reason || "No reason recorded.")}</p></div>`;
-    }
-  }
-}
-
-function renderTelegramAlertSimulation(result = {}) {
-  const rows = result.results || [];
-  if (!adminTelegramSimulation) return;
-  adminTelegramSimulation.innerHTML = rows.length ? `
-    <div class="admin-generated-row admin-generated-head"><span>Signal</span><span>Confidence</span><span>Decision</span><span>Reason</span></div>
-    ${rows.map((row) => `<div class="admin-generated-row">
-      <span data-label="Signal"><strong>${escapeHtml(row.pair)}</strong><small>${escapeHtml(row.timeframe)} · ${escapeHtml(String(row.direction).toUpperCase())}</small></span>
-      <span data-label="Confidence"><strong>${Number(row.confidence || 0).toFixed(0)}%</strong><small>Threshold ${Number(row.threshold || result.threshold || 75).toFixed(0)}%</small></span>
-      <span data-label="Decision"><em class="status-pill ${row.wouldSend ? "status-hit-tp" : "status-expired"}">${row.wouldSend ? "Would send" : escapeHtml(titleCase(row.status))}</em></span>
-      <span data-label="Reason"><small>${escapeHtml(row.reason)}</small></span>
-    </div>`).join("")}` : `<div class="empty-state"><strong>No recent generated signals to simulate.</strong></div>`;
-}
-
-function renderAdminStrategyLab() {
-  const lab = state.adminStrategyLab || {};
-  const stats = lab.stats || [];
-  const best = lab.bestStrategies || [];
-  const quarantine = lab.quarantinedRecommendations || [];
-  const examples = lab.examples || [];
-  const runs = lab.runs || [];
-  document.querySelector("#admin-strategy-lab-summary").innerHTML = [
-    ["Strategies tested", new Set(stats.map((item) => item.strategy)).size],
-    ["Pair/timeframes", stats.length],
-    ["Validated", stats.filter((item) => item.walkForwardStatus === "validated").length],
-    ["Failed validation", stats.filter((item) => item.walkForwardStatus === "failed_validation").length],
-    ["Best examples", examples.filter((item) => item.exampleType === "best").length],
-    ["Worst examples", examples.filter((item) => item.exampleType === "worst").length]
-  ].map(([label, value]) => `<article><span>${escapeHtml(label)}</span><strong>${Number(value || 0)}</strong></article>`).join("");
-  renderAdminCompactTable("#admin-strategy-performance", ["Strategy", "Pair", "TF", "Regime", "Win", "BE", "Exp"], stats, (item) => [
-    item.strategy, item.pair, item.timeframe, item.marketRegime,
-    `${Number(item.winRate || 0).toFixed(1)}%`, `${Number(item.breakEvenWinRate || 0).toFixed(1)}%`, `${Number(item.expectancy || 0).toFixed(2)}R`
-  ]);
-  renderAdminRows("#admin-strategy-active", best, (item) => `<div class="analytics-list-row"><span><strong>${escapeHtml(item.strategy)}</strong><small>${escapeHtml(item.pair)} · ${escapeHtml(item.timeframe)} · ${escapeHtml(item.sampleSizeLabel)}</small></span><strong>${Number(item.expectancy || 0).toFixed(2)}R</strong></div>`);
-  renderAdminRows("#admin-strategy-quarantine", quarantine, (item) => `<div class="analytics-list-row"><span><strong>${escapeHtml(item.strategy)}</strong><small>${escapeHtml(item.pair)} · ${escapeHtml(item.timeframe)} · ${escapeHtml(titleCase(item.walkForwardStatus))}</small></span><strong>${Number(item.expectancy || 0).toFixed(2)}R</strong></div>`);
-  renderAdminRows("#admin-strategy-examples", examples, (item) => `<div class="analytics-list-row"><span><strong>${escapeHtml(item.strategy)}</strong><small>${escapeHtml(item.pair)} · ${escapeHtml(item.timeframe)} · ${escapeHtml(item.result)}</small></span><strong>${item.entryCandleTime ? formatDateTime(item.entryCandleTime) : "Historical"}</strong></div>`);
-  renderAdminRows("#admin-strategy-runs", runs, (item) => `<div class="analytics-list-row"><span><strong>${escapeHtml(item.status)}</strong><small>${escapeHtml(item.id)}</small></span><strong>${formatDateTime(item.updatedAt)}</strong></div>`);
-}
-
-function renderAdminSignalQualityPanel(quality = {}, qualityGate = {}) {
+function renderAdminSignalQualityPanel(quality = {}) {
   const panel = document.querySelector("#admin-signal-quality-panel");
   if (!panel) return;
   const warning = quality.warning || {};
@@ -4179,37 +3905,7 @@ function renderAdminSignalQualityPanel(quality = {}, qualityGate = {}) {
     <div class="signal-quality-groups">
       ${groups.map(([title, items, mode]) => renderSignalQualityGroupList(title, items, mode)).join("")}
     </div>
-    ${renderSignalQualityGateDiagnostics(qualityGate)}
     <article class="signal-quality-buckets"><h4>Confidence buckets</h4>${renderSignalQualityBucketRows(quality.confidenceBuckets || [])}</article>`;
-}
-
-function renderSignalQualityGateDiagnostics(gate = {}) {
-  const failed = gate.failedByReason || {};
-  const reasonRows = gate.topReasons?.length
-    ? gate.topReasons.map((item) => `<div class="signal-quality-row compact">
-      <span><strong>${escapeHtml(item.label || titleCase(item.reason))}</strong><small>${escapeHtml(item.pair || "All pairs")} · ${escapeHtml(item.timeframe || "All TF")} · ${escapeHtml(item.strategy || "All strategies")}</small></span>
-      <span><strong>${Number(item.count || 0)}</strong><small>Last seen ${item.lastSeenAt ? formatDateTime(item.lastSeenAt) : "n/a"}</small></span>
-    </div>`).join("")
-    : `<p class="reasoning">No quality-gate rejects recorded yet.</p>`;
-  const recentRows = gate.recentRejected?.length
-    ? gate.recentRejected.map((item) => `<div class="signal-quality-row compact">
-      <span><strong>${escapeHtml(item.pair || "Unknown")} ${escapeHtml(item.timeframe || "")}</strong><small>${escapeHtml(String(item.direction || "").toUpperCase())} · ${escapeHtml(item.attemptedStrategy || "Unknown strategy")}</small></span>
-      <span><strong>${escapeHtml(item.gateLabel || item.rejectionLabel || titleCase(item.gateStatus || "rejected"))}</strong><small>${escapeHtml(item.explanation || item.userExplanation || "No explanation recorded.")}</small><small>Seen ${Number(item.count || 1)} times · Last seen ${item.lastSeenAt ? formatDateTime(item.lastSeenAt) : "n/a"}</small></span>
-    </div>`).join("")
-    : `<p class="reasoning">Recent rejected examples will appear here as the gate reviews setups.</p>`;
-  return `<article class="signal-quality-card">
-    <h4>Signal Quality Gate v2</h4>
-    <div class="signal-quality-summary">
-      <div><span>Setups checked</span><strong>${Number(gate.totalSetupsChecked || 0)}</strong><small>Last 30 days</small></div>
-      <div><span>Passed gate</span><strong>${Number(gate.passedQualityGate || 0)}</strong><small>${Number(gate.passRate || 0).toFixed(1)}% pass rate</small></div>
-      <div><span>Failed gate</span><strong>${Number(gate.failedQualityGate || 0)}</strong><small>Did not pass final gate</small></div>
-      <div><span>Blocked before users see them</span><strong>${Number(gate.blockedBeforeUsers || gate.failedQualityGate || 0)}</strong><small>Includes quarantine, duplicate, cooldown, low confidence</small></div>
-    </div>
-    <div class="signal-quality-groups">
-      <section><h4>Top rejection reasons</h4>${reasonRows}</section>
-      <section><h4>Recent rejected setups</h4>${recentRows}</section>
-    </div>
-  </article>`;
 }
 
 function renderConfidenceCalibrationSummary(summary = {}) {
@@ -4257,12 +3953,6 @@ function renderBestSignalQualityActions(group) {
 }
 
 function renderWorstSignalQualityActions(group) {
-  if (group.groupType === "direction") {
-    return `
-      <button class="secondary-action" data-signal-quality-status="active" data-penalty-override="0" data-group-key="${escapeHtml(group.groupKey)}" type="button">Restore</button>
-      <button class="secondary-action" data-signal-quality-status="diagnostic_only" data-penalty-override="-3" data-group-key="${escapeHtml(group.groupKey)}" type="button">Reduce confidence</button>
-      <small>Diagnostic only &mdash; direction-level performance is too broad to hard quarantine.</small>`;
-  }
   return `
     <button class="secondary-action" data-signal-quality-status="active" data-group-key="${escapeHtml(group.groupKey)}" type="button">Restore</button>
     <button class="secondary-action" data-signal-quality-status="reduced_confidence" data-group-key="${escapeHtml(group.groupKey)}" type="button">Reduce</button>
@@ -4289,9 +3979,9 @@ function renderAdminSignalRow(signal) {
     <span data-label="Pair"><strong>${escapeHtml(signal.displayPair || signal.pair)}</strong><small>${escapeHtml(signal.provider)} &middot; ${escapeHtml(signal.pair)}</small></span>
     <span data-label="Setup"><strong class="direction ${escapeHtml(signal.direction)}">${escapeHtml(String(signal.direction).toUpperCase())} &middot; ${escapeHtml(signal.timeframe)}</strong><small>${escapeHtml(signal.strategy)}${signal.pattern ? ` &middot; ${escapeHtml(titleCase(signal.pattern))}` : ""}</small></span>
     <span data-label="Levels"><small>Entry ${formatCurrency(signal.entry)}</small><small>SL ${formatCurrency(signal.stopLoss)} &middot; TP ${formatCurrency(signal.takeProfit)}</small><strong>${Number(signal.riskReward).toFixed(2)}R</strong></span>
-    <span data-label="Scores"><small>Confidence ${Number(signal.confidence).toFixed(0)}%</small><small>Raw ${formatAdminPercent(signal.diagnosticAvailability?.rawConfidenceRecorded ? signal.rawSetupScore : null)} &middot; Calibrated ${formatAdminPercent(signal.diagnosticAvailability?.calibratedConfidenceRecorded ? signal.calibratedConfidence : null)}</small><small>Quality ${Number(signal.setupQualityScore).toFixed(0)} &middot; Readiness ${Number(signal.entryReadinessScore).toFixed(0)}</small></span>
-    <span data-label="Status"><em class="status-pill ${adminSignalStatusClass(effectiveStatus)}">${escapeHtml(effectiveStatus)}</em><small>Final decision: ${escapeHtml(signal.finalDecisionLabel || "Admin-only")}</small><small>${escapeHtml(signal.userVisibility || "Admin-only")}</small><small>${escapeHtml(signal.resultReason || "Tracking")}</small></span>
-    <span data-label="Source"><strong>${escapeHtml(titleCase(signal.source))}</strong><small>${escapeHtml(engineMarker)} &middot; ${escapeHtml(titleCase(calibrationStatus))}</small><small>Quality Gate ${escapeHtml(signal.qualityGateDisplayStatus || titleCase(signal.qualityGateStatus || "not evaluated"))}</small><small>Telegram ${escapeHtml(signal.telegramDecisionLabel || titleCase(signal.telegramStatus || "not evaluated"))}</small><small>${formatDateTime(signal.createdAt)}</small><small>Valid until ${formatDateTime(signal.validUntil)}</small></span>
+    <span data-label="Scores"><small>Confidence ${Number(signal.confidence).toFixed(0)}%</small><small>Raw ${Number(signal.rawSetupScore ?? signal.originalConfidence ?? signal.confidence).toFixed(0)} &middot; Calibrated ${Number(signal.calibratedConfidence ?? signal.confidence).toFixed(0)}</small><small>Quality ${Number(signal.setupQualityScore).toFixed(0)} &middot; Readiness ${Number(signal.entryReadinessScore).toFixed(0)}</small></span>
+    <span data-label="Status"><em class="status-pill ${adminSignalStatusClass(effectiveStatus)}">${escapeHtml(effectiveStatus)}</em><small>${escapeHtml(signal.resultReason || "Tracking")}</small></span>
+    <span data-label="Source"><strong>${escapeHtml(titleCase(signal.source))}</strong><small>${escapeHtml(engineMarker)} &middot; ${escapeHtml(titleCase(calibrationStatus))}</small><small>${formatDateTime(signal.createdAt)}</small><small>Valid until ${formatDateTime(signal.validUntil)}</small></span>
     <span data-label="Actions" class="admin-signal-row-actions"><button data-admin-signal-view="${escapeHtml(signal.id)}" type="button">Show details</button><button class="secondary-action" data-admin-signal-copy="${escapeHtml(signal.signalId)}" type="button">Copy ID</button>${signal.promotedFromCandidateId ? `<button class="secondary-action" data-admin-signal-view="${escapeHtml(signal.id)}" type="button">Candidate source</button>` : ""}${signal.status !== "Active" ? `<button class="secondary-action" data-admin-signal-view="${escapeHtml(signal.id)}" type="button">Post-mortem</button>` : ""}</span>
   </article>`;
 }
@@ -4301,160 +3991,25 @@ function renderAdminSignalDetail(signal) {
   const analysis = signal.fullAnalysis || {};
   const pattern = signal.patternContext || {};
   const candidate = signal.candidateOrigin;
-  const diagnostics = signal.adminDiagnostics || {};
-  const summary = diagnostics.summary || {};
-  const confidence = diagnostics.confidence || {};
-  const stop = diagnostics.stopLoss || {};
-  const target = diagnostics.takeProfit || {};
-  const duplicate = diagnostics.duplicate || {};
-  const cooldown = diagnostics.cooldown || {};
-  const gate = diagnostics.qualityGate || {};
-  const quarantine = diagnostics.quarantine || {};
-  const telegram = diagnostics.telegram || {};
-  const historical = confidence.historicalGroup;
+  const calibration = signal.confidenceCalibration || {};
+  const calibrationRows = [
+    `Raw setup score: ${Number(signal.rawSetupScore ?? signal.originalConfidence ?? calibration.rawSetupScore ?? calibration.originalConfidence ?? signal.confidence).toFixed(0)}%`,
+    `Original confidence: ${Number(signal.originalConfidence ?? calibration.originalConfidence ?? signal.confidence).toFixed(0)}%`,
+    `Calibrated confidence: ${Number(signal.calibratedConfidence ?? signal.finalConfidence ?? calibration.calibratedConfidence ?? calibration.finalConfidence ?? signal.confidence).toFixed(0)}%`,
+    `Confidence version: ${signal.confidenceVersion || calibration.version || "calibration_v1"}`,
+    signal.calibrationReason || calibration.calibrationReason ? `Calibration reason: ${signal.calibrationReason || calibration.calibrationReason}` : null,
+    calibration.confidenceCap ? `Cap applied: ${Number(calibration.confidenceCap).toFixed(0)}%` : null,
+    calibration.totalPenalty ? `Total penalty: ${Number(calibration.totalPenalty)} points` : null,
+    calibration.status ? `Calibration status: ${titleCase(calibration.status)}` : null,
+    ...(calibration.caps || []).map((item) => `Cap ${item.cap}: ${item.reason}`),
+    ...(calibration.penalties || []).map((item) => `Penalty ${item.points}: ${item.reason}`),
+    ...(calibration.groups || []).map((group) => `${titleCase(group.groupType)} ${group.groupValue}: ${Number(group.winRate || 0).toFixed(1)}% win vs ${Number(group.breakEvenWinRate || 0).toFixed(1)}% break-even`)
+  ];
   document.querySelector("#admin-signal-modal-title").textContent = `${signal.displayPair} / ${signal.timeframe} / ${String(signal.direction).toUpperCase()}`;
   adminSignalDetail.innerHTML = `
     <section class="admin-detail-levels"><div><span>Entry</span><strong>${formatCurrency(signal.entry)}</strong></div><div><span>Stop loss</span><strong>${formatCurrency(signal.stopLoss)}</strong></div><div><span>Take profit</span><strong>${formatCurrency(signal.takeProfit)}</strong></div><div><span>Risk/reward</span><strong>${Number(signal.riskReward).toFixed(2)}R</strong></div></section>
-    <section class="admin-detail-meta"><span class="status-pill ${adminSignalStatusClass(signal.status)}">${escapeHtml(signal.status)}</span><span>${escapeHtml(signal.strategy)}</span><span>Raw ${formatAdminPercent(confidence.rawConfidence)}</span><span>Final ${formatAdminPercent(confidence.finalCalibratedConfidence)}</span><span>${Number(signal.setupQualityScore).toFixed(0)} quality</span><span>${Number(signal.entryReadinessScore).toFixed(0)} readiness</span></section>
-    <section class="admin-decision-summary">
-      <header><div><span class="eyebrow">Final decision</span><h4>${escapeHtml(summary.finalDecisionLabel || "Unavailable")}</h4></div><span class="status-pill ${adminSignalStatusClass(summary.finalDecisionLabel)}">${escapeHtml(summary.userVisibility || "Unavailable")}</span></header>
-      <p>${escapeHtml(summary.primaryReason || "No primary decision reason was recorded.")}</p>
-      ${summary.primaryReasonCode ? `<code>${escapeHtml(summary.primaryReasonCode)}</code>` : ""}
-      <div class="admin-decision-facts">
-        ${renderAdminDecisionFact("Credit eligible", formatAdminBoolean(summary.creditEligible))}
-        ${renderAdminDecisionFact("Telegram eligible", formatAdminBoolean(summary.telegramEligible))}
-        ${renderAdminDecisionFact("Signal source", titleCase(summary.signalSource || "Unavailable"))}
-        ${renderAdminDecisionFact("Decision version", summary.decisionVersion || "Legacy / unavailable")}
-        ${renderAdminDecisionFact("Created", summary.createdAt ? formatDateTime(summary.createdAt) : "Unavailable")}
-      </div>
-    </section>
-    <section class="admin-decision-verdicts">
-      ${renderAdminDecisionFact("Quality Gate", gate.available ? titleCase(gate.status || "Not recorded") : gate.unavailableReason || "Unavailable")}
-      ${renderAdminDecisionFact("Telegram", telegram.statusLabel || "Unavailable")}
-    </section>
-    ${renderAdminDecisionTimeline(diagnostics.timeline || [])}
-    ${renderAdminAuditSection("Confidence calibration", [
-      ["Raw confidence", formatAdminPercent(confidence.rawConfidence)],
-      ["Strategy match score", formatAdminScore(confidence.strategyMatchScore)],
-      ["Calibration status", titleCase(confidence.calibrationStatus || "Unavailable")],
-      ["Historical penalty", confidence.historicalPenalty == null ? "Unavailable" : `${Number(confidence.historicalPenalty)} points`],
-      ["Confidence cap", formatAdminPercent(confidence.confidenceCap)],
-      ["Final calibrated confidence", formatAdminPercent(confidence.finalCalibratedConfidence)],
-      ["Ready-promotion threshold", formatAdminPercent(confidence.readyPromotionThreshold)],
-      ["User Telegram threshold", formatAdminPercent(confidence.userTelegramThreshold)],
-      ["Effective Telegram threshold", formatAdminPercent(confidence.effectiveTelegramThreshold)],
-      ["Historical group", historical ? [historical.pair, historical.timeframe, historical.strategy, historical.direction, historical.marketRegime].filter(Boolean).join(" · ") || historical.value : confidence.unavailableReason || "Unavailable"],
-      ["Closed sample", historical?.sampleSize == null ? "Unavailable" : String(historical.sampleSize)],
-      ["Group win rate", formatAdminPercent(historical?.winRate)],
-      ["Group expectancy", historical?.expectancy == null ? "Unavailable" : `${Number(historical.expectancy).toFixed(2)}R`],
-      ["Reason", confidence.reason || "Not recorded"],
-      ["Technical error", confidence.technicalError]
-    ])}
-    ${renderAdminAuditSection("Stop validation", stop.available ? [
-      ["Original stop", formatAdminPrice(stop.originalStop)],
-      ["Validation", titleCase(stop.validationResult)],
-      ["Original failure", stop.originalFailureReason ? titleCase(stop.originalFailureReason) : "None"],
-      ["Repair attempted", formatAdminBoolean(stop.repairAttempted)],
-      ["Repair source", stop.repairSource ? titleCase(stop.repairSource) : stop.repairNotAttemptedReason || "Not applicable"],
-      ["Repaired stop", formatAdminPrice(stop.repairedStop)],
-      ["ATR buffer", formatAdminPrice(stop.atrBuffer)],
-      ["Original distance", formatAdminPrice(stop.originalDistance)],
-      ["Repaired distance", formatAdminPrice(stop.repairedDistance)],
-      ["Stop distance", stop.distanceAtr == null ? "Unavailable" : `${Number(stop.distanceAtr).toFixed(2)} ATR`],
-      ["R/R after repair", stop.riskRewardAfterRepair == null ? "Unavailable" : `${Number(stop.riskRewardAfterRepair).toFixed(2)}R`],
-      ["Final result", titleCase(stop.finalResult)],
-      ["Final reason", stop.finalReason ? titleCase(stop.finalReason) : null]
-    ] : [["Status", stop.unavailableReason || "Not recorded"]])}
-    ${renderAdminAuditSection("Take-profit validation", target.available ? [
-      ["Original target", formatAdminPrice(target.originalTarget)],
-      ["Validation", titleCase(target.validationResult)],
-      ["Original failure", target.originalFailureReason ? titleCase(target.originalFailureReason) : "None"],
-      ["Repair attempted", formatAdminBoolean(target.repairAttempted)],
-      ["Repair source", target.repairSource ? titleCase(target.repairSource) : target.repairNotAttemptedReason || "Not applicable"],
-      ["Repaired target", formatAdminPrice(target.repairedTarget)],
-      ["Nearest opposing structure", formatAdminPrice(target.nearestOpposingStructure)],
-      ["Required ATR move", target.requiredAtrMove == null ? "Unavailable" : `${Number(target.requiredAtrMove).toFixed(2)} ATR`],
-      ["Original R/R", target.originalRiskReward == null ? "Unavailable" : `${Number(target.originalRiskReward).toFixed(2)}R`],
-      ["Repaired R/R", target.repairedRiskReward == null ? "Unavailable" : `${Number(target.repairedRiskReward).toFixed(2)}R`],
-      ["Final result", titleCase(target.finalResult)],
-      ["Final reason", target.finalReason ? titleCase(target.finalReason) : null]
-    ] : [["Status", target.unavailableReason || "Not recorded"]])}
-    ${renderAdminAuditSection("Duplicate details", duplicate.result === "blocked" ? [
-      ["Result", "Duplicate blocked"],
-      ["Matched signal", duplicate.matchedSignalId || "Unavailable", renderRelatedAdminSignalButton(duplicate)],
-      ["Matched status", duplicate.matchedStatus || "Unavailable"],
-      ["Matched outcome", duplicate.matchedOutcome || "Unavailable"],
-      ["Same pair", formatAdminBoolean(duplicate.samePair)],
-      ["Same timeframe", formatAdminBoolean(duplicate.sameTimeframe)],
-      ["Same direction", formatAdminBoolean(duplicate.sameDirection)],
-      ["Same strategy family", formatAdminBoolean(duplicate.sameStrategyFamily)],
-      ["Entry distance", duplicate.entryDistancePercent == null ? "Unavailable" : `${Number(duplicate.entryDistancePercent).toFixed(3)}%`],
-      ["Entry distance ATR", duplicate.entryDistanceAtr == null ? "Unavailable" : `${Number(duplicate.entryDistanceAtr).toFixed(3)} ATR`],
-      ["Time difference", duplicate.timeDifferenceMinutes == null ? "Unavailable" : `${Number(duplicate.timeDifferenceMinutes).toFixed(1)} minutes`],
-      ["Match type", titleCase(duplicate.matchType || "Unavailable")],
-      ["Rule", titleCase(duplicate.rule || "Unavailable")]
-    ] : [["Duplicate check", duplicate.result === "passed" ? "Passed" : duplicate.unavailableReason || "Unavailable"]])}
-    ${renderAdminAuditSection("Cooldown details", cooldown.result === "blocked" ? [
-      ["Result", "Cooldown blocked"],
-      ["Prior signal", cooldown.priorSignalId || "Unavailable", renderRelatedAdminSignalButton(cooldown)],
-      ["Prior outcome", cooldown.priorOutcome || "Unavailable"],
-      ["Prior signal user-ready", formatAdminBoolean(cooldown.priorUserReady)],
-      ["Prior Telegram sent", formatAdminBoolean(cooldown.priorTelegramSent)],
-      ["Pair / timeframe / direction / strategy", [cooldown.pairSimilarity, cooldown.timeframeSimilarity, cooldown.directionSimilarity, cooldown.strategySimilarity].map(formatAdminBoolean).join(" / ")],
-      ["Cooldown started", cooldown.startedAt ? formatDateTime(cooldown.startedAt) : "Unavailable"],
-      ["Cooldown expires", cooldown.expiresAt ? formatDateTime(cooldown.expiresAt) : "Unavailable"],
-      ["Time remaining", cooldown.remainingDuration || "Unavailable"],
-      ["Structure similarity", titleCase(cooldown.structureSimilarity || "Unavailable")],
-      ["Early release allowed", formatAdminBoolean(cooldown.earlyReleaseAllowed)],
-      ["Rule", titleCase(cooldown.rule || "Unavailable")]
-    ] : [["Cooldown check", cooldown.result === "passed" ? "Passed" : cooldown.result === "released" ? `Released early: ${cooldown.releaseReason || "new structure"}` : cooldown.unavailableReason || "Unavailable"]])}
-    ${renderAdminAuditSection("Quality Gate checks", [
-      ["Result", gate.available ? titleCase(gate.status || "Unavailable") : gate.unavailableReason],
-      ["Gate version", gate.version || "Unavailable"],
-      ["Primary gate reason", gate.primaryReason ? titleCase(gate.primaryReason) : "None recorded"],
-      ["Checks passed", gate.checksPassed?.length ? gate.checksPassed.map(formatGateCheck).join("; ") : "None recorded"],
-      ["Checks failed", gate.checksFailed?.length ? gate.checksFailed.map(formatGateCheck).join("; ") : "None"],
-      ["Needed to pass", Array.isArray(gate.neededToPass) ? gate.neededToPass.join("; ") : gate.neededToPass || "Not applicable"],
-      ["Later protection", gate.laterBlockExplanation]
-    ])}
-    ${renderAdminAuditSection("Quarantine details", [
-      ["Result", quarantine.result === "blocked" ? "Blocked" : quarantine.result === "passed" ? "Passed" : quarantine.unavailableReason || "Unavailable"],
-      ["Scope", quarantine.scope ? titleCase(quarantine.scope) : "None"],
-      ["Group", quarantine.group || "None"],
-      ["Admin manual quarantine", formatAdminBoolean(quarantine.manual)],
-      ["Explanation", quarantine.explanation]
-    ])}
-    ${renderAdminAuditSection("Telegram audit", [
-      ["Final status", telegram.statusLabel || "Unavailable"],
-      ["Dispatch considered", formatAdminBoolean(telegram.dispatchConsidered)],
-      ["Signal final decision", titleCase(telegram.signalFinalDecision || "Unavailable")],
-      ["Final confidence", formatAdminPercent(telegram.finalCalibratedConfidence)],
-      ["Global threshold", formatAdminPercent(telegram.globalThreshold)],
-      ["User threshold", formatAdminPercent(telegram.userThreshold)],
-      ["Effective threshold", formatAdminPercent(telegram.effectiveThreshold)],
-      ["Preference passed", formatAdminBoolean(telegram.preferencePassed)],
-      ["Signal ID", telegram.signalId || "Unavailable"],
-      ["Queue ID", telegram.queueId || "Not queued"],
-      ["Attempt count", telegram.attemptCount == null ? "Unavailable" : String(telegram.attemptCount)],
-      ["Last attempt", telegram.lastAttemptAt ? formatDateTime(telegram.lastAttemptAt) : "Not attempted"],
-      ["Telegram message ID", telegram.telegramMessageId || "Not sent"],
-      ["Deep link", telegram.deepLinkUrl || "Not created"],
-      ["Reason", telegram.reason || "None"],
-      ["Final error", telegram.finalErrorMessage || telegram.finalErrorCode]
-    ])}
-    ${renderAdminAuditSection("Raw diagnostic data", [
-      ["Generated record ID", signal.id],
-      ["Signal ID", signal.signalId],
-      ["Setup key", signal.setupKey || "Not recorded"],
-      ["Final decision code", summary.finalDecision || "Not recorded"],
-      ["Primary reason code", summary.primaryReasonCode || "Not recorded"],
-      ["Secondary decision notes", summary.secondaryNotes?.length ? summary.secondaryNotes.join("; ") : "None recorded"],
-      ["Quality Gate reason code", gate.primaryReason || "Not recorded"],
-      ["Telegram reason code", telegram.reasonCode || "Not recorded"],
-      ["Raw confidence recorded", formatAdminBoolean(signal.diagnosticAvailability?.rawConfidenceRecorded)],
-      ["Calibrated confidence recorded", formatAdminBoolean(signal.diagnosticAvailability?.calibratedConfidenceRecorded)],
-      ["Updated", signal.updatedAt ? formatDateTime(signal.updatedAt) : "Unavailable"]
-    ])}
+    <section class="admin-detail-meta"><span class="status-pill ${adminSignalStatusClass(signal.status)}">${escapeHtml(signal.status)}</span><span>${escapeHtml(signal.strategy)}</span><span>${Number(signal.confidence).toFixed(0)}% confidence</span><span>${Number(signal.setupQualityScore).toFixed(0)} quality</span><span>${Number(signal.entryReadinessScore).toFixed(0)} readiness</span></section>
+    ${renderAdminDetailSection("Confidence calibration", calibrationRows)}
     ${renderAdminDetailSection("Signal quality breakdown", Object.values(quality).map((item) => `${item.label}: ${titleCase(item.status)} - ${item.reason}`))}
     ${renderAdminDetailSection("Why it was generated", [analysis.reasoning, ...(analysis.confirmations || []).map((item) => `${item.passed ? "Passed" : "Failed"}: ${item.name} - ${item.detail}`), ...(signal.warningReasons || []).map((item) => `Warning: ${typeof item === "string" ? item : item.reason}`)])}
     ${signal.pattern ? renderAdminDetailSection("Pattern context", [`${pattern.label || titleCase(signal.pattern)} - ${titleCase(pattern.bias)} ${pattern.category || "pattern"}`, `Pattern confidence: ${Math.round(Number(pattern.confidence || 0) * 100)}%`, ...(pattern.reasons || []), ...(pattern.warnings || []).map((item) => `Warning: ${item}`)]) : ""}
@@ -4466,35 +4021,8 @@ function renderAdminSignalDetail(signal) {
 function renderAdminDetailSection(title, rows) {
   const visible = (rows || []).filter(Boolean);
   if (!visible.length) return "";
-  return `<details class="admin-detail-section admin-audit-section"><summary>${escapeHtml(title)}</summary><ul>${visible.map((row) => `<li>${escapeHtml(String(row))}</li>`).join("")}</ul></details>`;
+  return `<section class="admin-detail-section"><h4>${escapeHtml(title)}</h4><ul>${visible.map((row) => `<li>${escapeHtml(String(row))}</li>`).join("")}</ul></section>`;
 }
-
-function renderAdminAuditSection(title, rows) {
-  const visible = (rows || []).filter((row) => row && row[1] !== null && row[1] !== undefined && row[1] !== "");
-  if (!visible.length) return "";
-  return `<details class="admin-detail-section admin-audit-section"><summary>${escapeHtml(title)}</summary><dl>${visible.map(([label, value, action]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(String(value))}${action || ""}</dd></div>`).join("")}</dl></details>`;
-}
-
-function renderAdminDecisionTimeline(steps) {
-  if (!steps.length) return "";
-  return `<details class="admin-detail-section admin-audit-section admin-decision-timeline"><summary>Decision timeline</summary><ol>${steps.map((step) => `<li class="audit-${escapeHtml(step.status)}"><span>${escapeHtml(titleCase(step.status))}</span><strong>${escapeHtml(step.label)}</strong><small>${escapeHtml(step.summary || "No detail recorded")}</small></li>`).join("")}</ol></details>`;
-}
-
-function renderAdminDecisionFact(label, value) {
-  return `<span><small>${escapeHtml(label)}</small><strong>${escapeHtml(String(value ?? "Unavailable"))}</strong></span>`;
-}
-
-function renderRelatedAdminSignalButton(value) {
-  return value?.relatedGeneratedSignalId
-    ? ` <button class="secondary-action admin-related-signal" data-admin-related-signal="${escapeHtml(value.relatedGeneratedSignalId)}" type="button">Open signal</button>`
-    : "";
-}
-
-function formatAdminBoolean(value) { return value === true ? "Yes" : value === false ? "No" : "Unavailable"; }
-function formatAdminPercent(value) { return value == null ? "Unavailable" : `${Number(value).toFixed(Number(value) % 1 ? 1 : 0)}%`; }
-function formatAdminScore(value) { return value == null ? "Unavailable" : Number(value).toFixed(Number(value) % 1 ? 1 : 0); }
-function formatAdminPrice(value) { return value == null ? "Unavailable" : formatCurrency(value); }
-function formatGateCheck(check) { return [check.stage ? titleCase(check.stage) : null, check.explanation || check.reason].filter(Boolean).join(": "); }
 
 function closeAdminSignalModal() { adminSignalModal?.classList.add("hidden"); document.body.classList.remove("modal-open"); }
 function adminSignalStatusClass(status) { const value = String(status || "").toLowerCase(); if (value.includes("tp")) return "status-hit-tp"; if (value.includes("sl")) return "status-hit-sl"; if (value.includes("expir")) return "status-expired"; return "status-active"; }
@@ -4580,187 +4108,6 @@ function renderAvoidTrades() {
   `).join("");
   avoidTradeMore.classList.toggle("hidden", avoidTrades.length <= 3);
   avoidTradeMore.textContent = state.showAllAvoidTrades ? "Show top 3" : `View ${avoidTrades.length - 3} more`;
-}
-
-async function loadSignalActivity() {
-  if (!signalActivitySummary) return;
-  signalActivitySummary.innerHTML = `<article><span>Loading</span><strong>Signal activity...</strong></article>`;
-  const result = await api.request("/api/signals/activity");
-  state.signalActivity = result.activity || null;
-  renderSignalActivity();
-}
-
-function renderSignalActivity() {
-  const activity = state.signalActivity || {};
-  const summary = activity.summary || {};
-  if (signalActivitySummary) {
-    signalActivitySummary.innerHTML = [
-      ["Ready signals", summary.readySignals || 0],
-      ["Watching setups", summary.watchingSetups || 0],
-      ["Avoid trade", summary.avoidTrades || 0],
-      ["Market insights", summary.marketInsights || 0]
-    ].map(([label, value]) => `<article><span>${label}</span><strong>${value}</strong></article>`).join("");
-  }
-  if (activityReadyList) activityReadyList.innerHTML = renderActivityReadySignals(activity.readySignals || []);
-  if (activityWatchingList) activityWatchingList.innerHTML = renderActivityWatchingSetups(activity.watchingSetups || []);
-  if (activityAvoidList) activityAvoidList.innerHTML = renderActivityAvoidTrades(activity.avoidTrades || []);
-  if (activityMarketBrief) activityMarketBrief.innerHTML = renderActivityMarketBrief(activity);
-  if (activityWhyNoSignal) activityWhyNoSignal.innerHTML = renderActivityWhyNoSignal(activity.whyNoSignal || {}, activity.copy || {});
-}
-
-function renderActivityReadySignals(signals = []) {
-  if (!signals.length) {
-    return `
-      <div class="empty-state">
-        <strong>No ready signals right now.</strong>
-        <p class="reasoning">SignalForge is tracking forming setups and will only promote signals that pass the final quality gate.</p>
-        <button type="button" data-activity-nav="scanner">Run scanner</button>
-      </div>
-    `;
-  }
-  return `<div class="activity-card-list">${signals.map((signal) => `
-    <article class="activity-tier-card ready">
-      <header>
-        <div><strong>${escapeHtml(signal.displaySymbol || signal.pair)}</strong><span>${escapeHtml(signal.timeframe)} · ${escapeHtml(titleCase(signal.direction))}</span></div>
-        <span class="status-pill status-active">${escapeHtml(signal.confidenceBand || "Ready")}</span>
-      </header>
-      <p>${escapeHtml(signal.strategy || "Qualified setup")} passed strict validation. Entry, stop, and target remain locked until unlock.</p>
-      <div class="activity-metrics">
-        <span>Confidence <strong>${Number(signal.confidence || 0)}%</strong></span>
-        <span>R/R <strong>${Number(signal.riskReward || 0).toFixed(2)}R</strong></span>
-      </div>
-      <button type="button" data-activity-nav="scanner">Open Scanner</button>
-    </article>
-  `).join("")}</div>`;
-}
-
-function renderActivityWatchingSetups(setups = []) {
-  if (!setups.length) {
-    return `<div class="empty-state"><strong>No watching setups yet.</strong><p class="reasoning">Run a scan to let SignalForge show forming setups before they become ready signals.</p></div>`;
-  }
-  return `<div class="activity-card-list">${setups.map((setup) => `
-    <article class="activity-tier-card watching">
-      <header>
-        <div><strong>${escapeHtml(setup.displaySymbol || setup.pair)}</strong><span>${escapeHtml(setup.timeframe)} · ${escapeHtml(titleCase(setup.direction))}</span></div>
-        <span class="status-pill">Watching</span>
-      </header>
-      <p>${escapeHtml(setup.reason || "Setup is forming, but it has not passed the ready-signal checks.")}</p>
-      <div class="activity-metrics">
-        <span>Setup score <strong>${Number(setup.setupScore || 0).toFixed(0)}</strong></span>
-        <span>Readiness <strong>${Number(setup.readinessScore || 0).toFixed(0)}</strong></span>
-      </div>
-      <small>Needs: ${escapeHtml(setup.nextCondition || (setup.missingConfirmations || [])[0] || "More confirmation")}</small>
-    </article>
-  `).join("")}</div>`;
-}
-
-function renderActivityAvoidTrades(avoidTrades = []) {
-  if (!avoidTrades.length) {
-    return `<div class="empty-state"><strong>No avoid-trade zones in the latest brief.</strong><p class="reasoning">Avoid-trade cards appear when SignalForge detects choppy, risky, or weak conditions.</p></div>`;
-  }
-  return `<div class="activity-card-list">${avoidTrades.map((item) => `
-    <article class="activity-tier-card avoid">
-      <header>
-        <div><strong>${escapeHtml(item.displaySymbol || item.pair)}</strong><span>${escapeHtml(item.timeframe || "mixed")} · No Trade</span></div>
-        <span class="avoid-trade-badge">Avoid</span>
-      </header>
-      <p>${escapeHtml(item.reason)}</p>
-      <small>${escapeHtml((item.avoidBecause || []).slice(0, 2).join(" · ") || "Market conditions are not clean enough yet.")}</small>
-    </article>
-  `).join("")}</div>`;
-}
-
-function renderActivityMarketBrief(activity = {}) {
-  const brief = activity.marketBrief;
-  if (!brief) {
-    return `<div class="empty-state"><strong>Market brief is building.</strong><p class="reasoning">Run a scan to refresh strongest pairs, weak pairs, and scanner activity.</p></div>`;
-  }
-  const strongest = (brief.strongestPairs || []).slice(0, 3).map((item) => escapeHtml(item.symbol || item.displaySymbol)).join(", ") || "None";
-  const weakest = (brief.weakestPairs || []).slice(0, 3).map((item) => escapeHtml(item.symbol || item.displaySymbol)).join(", ") || "None";
-  return `
-    <div class="activity-brief">
-      <div><span>Ready</span><strong>${brief.readySignalCount || activity.summary?.readySignals || 0}</strong></div>
-      <div><span>Watching</span><strong>${brief.watchingCount || activity.summary?.watchingSetups || 0}</strong></div>
-      <div><span>Avoid</span><strong>${brief.avoidCount || activity.summary?.avoidTrades || 0}</strong></div>
-      <p><strong>Strongest:</strong> ${strongest}</p>
-      <p><strong>Weak/choppy:</strong> ${weakest}</p>
-    </div>
-  `;
-}
-
-function renderActivityWhyNoSignal(why = {}, copy = {}) {
-  const reasons = (why.reasons || []).slice(0, 5);
-  return `
-    <div class="activity-why">
-      <strong>${escapeHtml(why.title || "No ready signal right now.")}</strong>
-      <p>${escapeHtml(why.summary || copy.selective || "SignalForge is selective. Not every setup becomes a trade signal.")}</p>
-      ${reasons.length ? `<ul>${reasons.map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}
-      <p class="activity-copy">${escapeHtml(copy.confidence || "Confidence reflects rule alignment and setup quality. It is not a win probability.")}</p>
-    </div>
-  `;
-}
-
-async function loadAdminSignalSupply() {
-  if (!state.user?.isAdmin || !adminSignalSupplyPanel) return;
-  adminSignalSupplyPanel.innerHTML = `<div class="empty-state"><strong>Loading signal supply...</strong></div>`;
-  const result = await api.request("/api/admin/signals/supply");
-  state.adminSignalSupply = result.supply || null;
-  renderAdminSignalSupply();
-}
-
-function renderAdminSignalSupply() {
-  if (!adminSignalSupplyPanel) return;
-  const supply = state.adminSignalSupply || {};
-  const counts = supply.counts || {};
-  const telegram = supply.telegram || {};
-  const reasonRows = (supply.topBlockReasons || []).map((item) => `
-    <div class="analytics-list-row"><span>${escapeHtml(item.reason)}</span><strong>${Number(item.count || 0)}</strong></div>
-  `).join("");
-  const notSentRows = (supply.readySignalsNotSent || []).map((item) => `
-    <div class="analytics-list-row">
-      <span>${escapeHtml(item.pair || "Unknown")} · ${escapeHtml(item.timeframe || "")} · ${escapeHtml(item.direction || "")}<small>${escapeHtml(item.reason || item.telegramDecision || "Not sent")}</small></span>
-      <strong>${Math.round(Number(item.confidence || 0))}%</strong>
-    </div>
-  `).join("");
-  adminSignalSupplyPanel.innerHTML = `
-    ${supply.warning ? `<div class="signal-supply-warning">${escapeHtml(supply.warning)}</div>` : ""}
-    <div class="admin-signal-stats">
-      ${[
-        ["Candidates", counts.candidates || 0],
-        ["Quality Gate passed", counts.qualityGatePassed || 0],
-        ["Promoted ready", counts.promotedReadySignals || 0],
-        ["Telegram sent/queued", telegram.readyAlerts || 0],
-        ["Blocked from ready", counts.blocked || 0],
-        ["15m ready", counts.ready15m || 0],
-        ["1h ready", counts.ready1h || 0],
-        ["4h ready", counts.ready4h || 0],
-        ["5m blocked", counts.blocked5m || 0]
-      ].map(([label, value]) => `<article><span>${label}</span><strong>${value}</strong></article>`).join("")}
-    </div>
-    <div class="admin-signal-supply-grid">
-      <section>
-        <h4>Ready trade delivery</h4>
-        <div class="analytics-list-row"><span>Ready alerts sent/queued</span><strong>${telegram.readyAlerts || 0}</strong></div>
-        <div class="analytics-list-row"><span>Blocked</span><strong>${telegram.blocked || 0}</strong></div>
-        <div class="analytics-list-row"><span>Ready threshold</span><strong>${telegram.readyThreshold || 65}%</strong></div>
-        <div class="analytics-list-row"><span>Main supply blocker</span><strong>${escapeHtml(supply.topReasonReadySignalsNotProduced || "None")}</strong></div>
-      </section>
-      <section>
-        <h4>Seven-day supply</h4>
-        <div class="analytics-list-row"><span>Candidates</span><strong>${counts.candidates7d || 0}</strong></div>
-        <div class="analytics-list-row"><span>Quality Gate passed</span><strong>${counts.qualityGatePassed7d || 0}</strong></div>
-        <div class="analytics-list-row"><span>Promoted ready</span><strong>${counts.promotedReadySignals7d || 0}</strong></div>
-      </section>
-      <section>
-        <h4>Top block reasons</h4>
-        ${reasonRows || `<p class="reasoning">No Telegram block diagnostics in the last 24 hours.</p>`}
-      </section>
-      <section>
-        <h4>Ready signals not sent</h4>
-        ${notSentRows || `<p class="reasoning">Every recent ready signal has a queued, sent, failed, or specific blocked decision.</p>`}
-      </section>
-    </div>
-  `;
 }
 
 function renderMarketBrief() {
@@ -5194,8 +4541,9 @@ function refreshSignalValidityTimers() {
 }
 
 function navigateTo(routeOrView, params = {}, options = {}) {
-  const route = normalizeAppRoute(routeOrView) || "scanner";
-  const hash = buildRouteHash(route, params);
+  const route = normalizeAppRoute(routeOrView);
+  const allowedRoute = isRouteAllowed(route) ? route : "scanner";
+  const hash = buildRouteHash(allowedRoute, params);
   const destination = `${location.pathname}${location.search}${hash}`;
 
   if (location.hash !== hash) {
@@ -5211,20 +4559,12 @@ function syncRouteFromLocation({ force = false, replaceInvalid = false, viewOpti
   let route = parsed.route;
   let params = parsed.params;
 
-  logRouteForDebug(route);
-
-  if (!parsed.valid && !route) {
+  if (!parsed.valid || !isRouteAllowed(route)) {
     route = "scanner";
     params = new URLSearchParams();
     if (replaceInvalid || location.hash) {
       history.replaceState({}, "", `${location.pathname}${location.search}#scanner`);
     }
-  } else if (!parsed.valid) {
-    showRouteNotFound(route, params);
-    return;
-  } else if (!isRouteAllowed(route)) {
-    showAdminAccessDenied(route, params);
-    return;
   } else if (!parsed.canonical) {
     const canonicalHash = buildRouteHash(route, params);
     history.replaceState({}, "", `${location.pathname}${location.search}${canonicalHash}`);
@@ -5279,49 +4619,7 @@ function handleBrowserRouteChange() {
 
 function isRouteAllowed(route) {
   if (!Object.hasOwn(ROUTE_TO_VIEW, route)) return false;
-  return !isAdminRoute(route) || Boolean(state.user?.isAdmin);
-}
-
-function isAdminRoute(route) {
-  return [
-    "admin",
-    "admin-signals",
-    "admin-signal-quality-gate",
-    "admin-strategy-lab",
-    "admin-crypto-markets",
-    "admin-support",
-    "affiliate-admin",
-    "webhook-events"
-  ].includes(route);
-}
-
-function showRouteNotFound(route, params = new URLSearchParams()) {
-  const label = route ? `#${String(route).replace(/^#/, "")}` : String(location.hash || "(empty route)");
-  logUnknownRoute(label);
-  const currentHash = buildRouteHash(route || "unknown", params);
-  state.lastAppliedRouteHash = currentHash;
-  state.activeRoute = route || "unknown";
-  applyViewState("route-not-found", { routeName: label });
-}
-
-function showAdminAccessDenied(route, params = new URLSearchParams()) {
-  const label = route ? `#${String(route).replace(/^#/, "")}` : String(location.hash || "(admin route)");
-  const currentHash = buildRouteHash(route || "admin", params);
-  state.lastAppliedRouteHash = currentHash;
-  state.activeRoute = route || "admin";
-  applyViewState("admin-access-denied", { routeName: label });
-}
-
-function isDevelopmentRouteLoggingEnabled() {
-  return ["", "localhost", "127.0.0.1"].includes(location.hostname);
-}
-
-function logRouteForDebug(route) {
-  if (isDevelopmentRouteLoggingEnabled()) console.log("[router] route:", route || "(empty)");
-}
-
-function logUnknownRoute(route) {
-  if (isDevelopmentRouteLoggingEnabled()) console.warn(`[router] unknown route: ${route || "(empty)"}`);
+  return !["admin", "admin-signals", "admin-crypto-markets", "admin-support", "affiliate-admin", "webhook-events"].includes(route) || Boolean(state.user?.isAdmin);
 }
 
 function resolvePaperTradingRouteSymbol(value) {
@@ -5378,11 +4676,11 @@ function removeHashParams(names) {
 }
 
 function applyViewState(view, options = {}) {
-  const allowedViews = ["scanner", "watchlist", "alerts", "notifications", "signals", "paper-portfolio", "journal", "backtesting", "performance", "signal-activity", "how-it-works", "affiliate", "leaderboard", "profile", "settings", "support", "billing", "route-not-found", "admin-access-denied"];
+  const allowedViews = ["scanner", "watchlist", "alerts", "notifications", "signals", "paper-portfolio", "journal", "backtesting", "performance", "how-it-works", "affiliate", "leaderboard", "profile", "settings", "support", "billing"];
   if (state.user?.isAdmin) {
-    allowedViews.push("admin", "admin-signals", "admin-signal-quality-gate", "admin-strategy-lab", "admin-crypto-markets", "admin-support", "affiliate-admin", "webhook-events");
+    allowedViews.push("admin", "admin-signals", "admin-crypto-markets", "admin-support", "affiliate-admin", "webhook-events");
   }
-  const normalizedView = allowedViews.includes(view) ? view : "route-not-found";
+  const normalizedView = allowedViews.includes(view) ? view : "scanner";
   if (normalizedView !== "admin-signals") closeAdminSignalModal();
   state.activeView = normalizedView;
 
@@ -5411,7 +4709,6 @@ function applyViewState(view, options = {}) {
     journal: ["Review and discipline", "Trade Journal"],
     backtesting: ["Historical strategy research", "Backtesting Lab"],
     performance: ["Outcome analytics", "Performance"],
-    "signal-activity": ["Scanner activity", "Signal Activity"],
     "how-it-works": ["Product guide", "How SignalForge Works"],
     affiliate: ["Recurring commissions", "Affiliate Program"],
     leaderboard: ["Community rankings", "Leaderboard"],
@@ -5420,27 +4717,15 @@ function applyViewState(view, options = {}) {
     support: ["Account support", "Support"],
     admin: ["Administration", "Tester access requests"],
     "admin-signals": ["ADMIN SIGNALS", "All generated signals"],
-    "admin-signal-quality-gate": ["ADMIN", "Signal Quality Gate"],
-    "admin-strategy-lab": ["ADMIN", "Strategy Lab"],
     "admin-crypto-markets": ["ADMIN", "Crypto Markets"],
     "admin-support": ["Administration", "Support Tickets"],
     "affiliate-admin": ["Administration", "Affiliate Program"],
     "webhook-events": ["Stripe operations", "Webhook Events"],
-    "admin-access-denied": ["Protected route", "Admin access required"],
-    "route-not-found": ["Routing", "Page not found"],
     billing: ["Subscription", "Billing"]
   };
   const [eyebrow, title] = titles[normalizedView];
   document.querySelector(".topbar .eyebrow").textContent = eyebrow;
   document.querySelector(".topbar h2").textContent = title;
-
-  if (normalizedView === "route-not-found" && routeNotFoundName) {
-    routeNotFoundName.textContent = options.routeName || state.activeRoute || "(unknown)";
-  }
-
-  if (normalizedView === "admin-access-denied" && routeAccessDeniedName) {
-    routeAccessDeniedName.textContent = options.routeName || state.activeRoute || "(admin route)";
-  }
 
   if (normalizedView === "signals") {
     renderSignalsHistory();
@@ -5458,23 +4743,6 @@ function applyViewState(view, options = {}) {
   if (normalizedView === "admin-signals") {
     loadAdminSignals().catch((error) => {
       adminSignalsTable.innerHTML = `<div class="empty-state"><strong>Generated signals unavailable</strong><p class="reasoning">${escapeHtml(error.message)}</p></div>`;
-    });
-  }
-
-  if (normalizedView === "admin-signal-quality-gate") {
-    loadAdminSignalSupply().catch((error) => {
-      if (adminSignalSupplyPanel) {
-        adminSignalSupplyPanel.innerHTML = `<div class="empty-state"><strong>Signal Supply unavailable</strong><p class="reasoning">${escapeHtml(error.message)}</p></div>`;
-      }
-    });
-    loadAdminSignalQualityGate().catch((error) => {
-      if (adminSignalQualityGatePanel) adminSignalQualityGatePanel.innerHTML = `<div class="empty-state"><strong>Signal Quality Gate unavailable</strong><p class="reasoning">${escapeHtml(error.message)}</p></div>`;
-    });
-  }
-
-  if (normalizedView === "admin-strategy-lab") {
-    loadAdminStrategyLab().catch((error) => {
-      document.querySelector("#admin-strategy-performance").innerHTML = `<div class="empty-state"><strong>Strategy Lab unavailable</strong><p class="reasoning">${escapeHtml(error.message)}</p></div>`;
     });
   }
 
@@ -5538,14 +4806,6 @@ function applyViewState(view, options = {}) {
     });
   }
 
-  if (normalizedView === "signal-activity") {
-    loadSignalActivity().catch((error) => {
-      if (activityWhyNoSignal) {
-        activityWhyNoSignal.innerHTML = `<div class="empty-state"><strong>Signal Activity unavailable</strong><p class="reasoning">${escapeHtml(error.message)}</p></div>`;
-      }
-    });
-  }
-
   if (normalizedView === "paper-portfolio" && !options.skipPaperLoad) {
     loadPaperTradingTerminal().catch((error) => {
       paperPortfolioGrid.innerHTML = `
@@ -5568,13 +4828,6 @@ function applyViewState(view, options = {}) {
     });
   }
 }
-
-document.addEventListener("click", (event) => {
-  const button = event.target?.closest?.("[data-activity-nav]");
-  if (!button) return;
-  event.preventDefault();
-  navigateTo(button.dataset.activityNav || "scanner");
-});
 
 function setMobileNavigationOpen(open) {
   if (!dashboard || !mobileMenuToggle) return;
@@ -6102,20 +5355,7 @@ function renderSignalsHistory() {
 
 function renderTelegramExpiredNotice() {
   const notice = state.telegramExpiredNotice;
-  const unlockError = state.telegramUnlockError;
-  if (!notice && !unlockError) return "";
-  if (unlockError) {
-    return `
-      <section class="expired-signal-notice" role="alert">
-        <div>
-          <span class="status-pill status-expired">Signal unavailable</span>
-          <strong>${escapeHtml(unlockError)}</strong>
-          <p>No credit was charged. Open a newer Telegram alert or return to Scanner.</p>
-        </div>
-        <button class="secondary-action" type="button" data-nav="scanner">Open Scanner</button>
-      </section>
-    `;
-  }
+  if (!notice) return "";
   const signal = notice.signal || {};
   return `
     <section class="expired-signal-notice" role="status">
@@ -7332,13 +6572,7 @@ function renderSignalValidity(signal, { compact = false } = {}) {
 function renderNoSetup(analysis) {
   state.avoidTrades = analysis?.avoidTrade ? [analysis.avoidTrade] : [];
   state.showAllAvoidTrades = false;
-  state.whyNoSignal = analysis?.whyNoSignal || null;
-  state.missedSetupAnalysis = state.whyNoSignal ? { whyNoSignal: state.whyNoSignal } : null;
   renderAvoidTrades();
-  renderWhyNoSignalPanel(state.whyNoSignal, {
-    fallbackSummary: analysis?.rejectionSummary || analysis?.message,
-    fallbackReasons: analysis?.rejectionReasons || []
-  });
   const rejectionSummary = analysis?.rejectionSummary ||
     (analysis?.rejectionReasons?.length
       ? `No setup found because: ${analysis.rejectionReasons.slice(0, 3).join(", ")}.`
@@ -7370,85 +6604,6 @@ function renderNoSetup(analysis) {
     </article>
     ${state.signals.map((signal) => renderSignalCard(signal)).join("")}
   `;
-}
-
-function renderWhyNoSignalPanel(report = null, fallback = {}) {
-  if (!whyNoSignalPanel) return;
-  const hasReport = Boolean(report?.available || fallback.fallbackSummary || fallback.fallbackReasons?.length);
-  whyNoSignalPanel.classList.toggle("hidden", !hasReport);
-  missedSetupAdminActions?.classList.toggle("hidden", !state.user?.isAdmin);
-  whyNoSignalAdminDetails?.classList.toggle("hidden", !state.user?.isAdmin || !report?.admin);
-  if (!hasReport) return;
-
-  const possibleSetups = report?.possibleSetups || [];
-  whyNoSignalStatus.textContent = possibleSetups[0]?.status
-    ? titleCase(possibleSetups[0].status)
-    : "No ready signal";
-  whyNoSignalSummary.textContent = report?.summary ||
-    fallback.fallbackSummary ||
-    "SignalForge did not find a clean rule-based setup right now.";
-  const reasons = report?.reasons?.length
-    ? report.reasons.map((item) => item.label || item.reason || item.code)
-    : fallback.fallbackReasons || [];
-  whyNoSignalReasons.innerHTML = renderRejectionReasons(reasons);
-  missedSetupList.innerHTML = possibleSetups.length
-    ? possibleSetups.map(renderMissedSetupRow).join("")
-    : `<div class="empty-state"><strong>No near setup detected</strong><p class="reasoning">SignalForge did not find a close strategy match for this market and timeframe.</p></div>`;
-  if (state.user?.isAdmin && report?.admin) {
-    whyNoSignalAdminContent.innerHTML = renderMissedSetupAdminDebug(report.admin);
-  }
-}
-
-function renderMissedSetupRow(setup) {
-  const improvements = (setup.whatToImprove || []).filter(Boolean).slice(0, 3);
-  const failed = (setup.failedRules || []).filter(Boolean).slice(0, 4);
-  return `
-    <article class="missed-setup-row" data-missed-status="${escapeHtml(setup.status || "no_setup")}">
-      <header>
-        <div>
-          <strong>${escapeHtml(setup.attemptedStrategy || "Possible setup")}</strong>
-          <span>${escapeHtml(String(setup.direction || "Either").toUpperCase())} · ${escapeHtml(titleCase(setup.resultType || "no_setup"))}</span>
-        </div>
-        <span class="status-pill">${escapeHtml(titleCase(setup.status || "not ready"))}</span>
-      </header>
-      <p>${escapeHtml(setup.reason || "SignalForge is waiting for clearer confirmation.")}</p>
-      <div class="missed-setup-metrics">
-        <div><span>Raw score</span><strong>${formatMaybePercent(setup.rawScore)}</strong></div>
-        <div><span>Calibrated</span><strong>${formatMaybePercent(setup.calibratedConfidence)}</strong></div>
-        <div><span>Estimate</span><strong>${formatMaybePercent(setup.confidenceEstimate)}</strong></div>
-      </div>
-      ${improvements.length ? `<section><strong>What would improve it</strong><ul>${improvements.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></section>` : ""}
-      ${state.scannerMode === "advanced" && failed.length ? `<section><strong>Failed checks</strong><ul>${failed.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></section>` : ""}
-    </article>
-  `;
-}
-
-function renderMissedSetupAdminDebug(debug = {}) {
-  const rows = [
-    ["Candidate source", debug.candidateSource],
-    ["Candidate ID", debug.candidateId],
-    ["Attempted strategies", (debug.attemptedStrategies || []).join(", ")],
-    ["Raw score", debug.rawScore],
-    ["Calibrated confidence", debug.calibratedConfidence],
-    ["Setup quality", debug.setupQualityScore],
-    ["Entry readiness", debug.entryReadinessScore],
-    ["Final decision", debug.finalDecision],
-    ["Telegram decision", debug.telegramDecision],
-    ["Timeframe policy", debug.timeframePolicy?.reason],
-    ["Quality gate", debug.qualityGate?.reason || (debug.qualityGate?.passed ? "Passed" : null)],
-    ["Strictness", debug.strictness?.reason],
-    ["Validation", (debug.validation?.rejectedReasons || []).map((item) => item.reason).join(", ")]
-  ].filter(([, value]) => value !== null && value !== undefined && value !== "");
-  return `
-    <div class="missed-admin-grid">
-      ${rows.map(([label, value]) => `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value))}</strong></div>`).join("")}
-    </div>
-  `;
-}
-
-function formatMaybePercent(value) {
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? `${Math.round(numeric)}%` : "--";
 }
 
 function updateScanProgress(done, total, message) {
@@ -7526,51 +6681,6 @@ function formatMarketTypeLabel(marketType = "all") {
   }[String(marketType || "all").toLowerCase()] || "All active";
 }
 
-function buildScanWhyNoSignalReport(diagnostics = null, summary = null, scanUniverse = null) {
-  const topReasons = (diagnostics?.topReasons || []).slice(0, 6).map((item) => ({
-    code: normalizeFrontendText(item.reason),
-    label: `${item.reason} (${item.count})`,
-    source: "scan_summary"
-  }));
-  const samples = (diagnostics?.samples || []).slice(0, 4).map((sample) => ({
-    resultType: "no_setup",
-    direction: null,
-    attemptedStrategy: "Scanner diagnostics",
-    status: "not_ready",
-    rawScore: null,
-    calibratedConfidence: null,
-    confidenceEstimate: null,
-    reason: `${getDisplaySymbol(sample.symbol)} ${sample.timeframe}: ${sample.message}`,
-    whatToImprove: sample.reasons || [],
-    failedRules: sample.reasons || []
-  }));
-  return {
-    available: true,
-    symbol: state.selectedPair?.symbol || null,
-    timeframe: state.timeframe,
-    summary: diagnostics?.summary ||
-      `No ready signals across ${formatInteger(scanUniverse?.scannedMarkets || scanUniverse?.selectedMarkets || 0)} scanned markets.`,
-    reasons: topReasons.length
-      ? topReasons
-      : [{ code: "strategy_not_matched", label: "No approved strategy matched cleanly.", source: "scan_summary" }],
-    possibleSetups: samples,
-    whatToImprove: [
-      summary?.watching ? `${summary.watching} setup${summary.watching === 1 ? " is" : "s are"} still watching for confirmation.` : null,
-      summary?.avoidTrade ? `${summary.avoidTrade} market${summary.avoidTrade === 1 ? " is" : "s are"} currently in avoid-trade conditions.` : null,
-      "Run a fresh scan later after candles, volume, and structure change."
-    ].filter(Boolean),
-    educationalCopy: "No signal can be a useful result. SignalForge filters out weak setups instead of forcing trades.",
-    admin: state.user?.isAdmin ? {
-      candidateSource: "scan_summary",
-      attemptedStrategies: ["manual_scan"],
-      finalDecision: "no_ready_signal",
-      telegramDecision: "telegram_blocked_not_ready",
-      qualityGate: null,
-      timeframePolicy: null
-    } : null
-  };
-}
-
 function renderScanSummary(opportunitiesFound, marketsScanned, timeframesScanned, errors = [], diagnostics = null, summary = null, scanUniverse = null, skippedMarkets = []) {
   const counts = summary || { ready: opportunitiesFound, watching: 0, avoidTrade: 0, rejected: 0, expired: 0 };
   const skippedCount = counts.skipped ?? skippedMarkets.length ?? 0;
@@ -7640,18 +6750,6 @@ function renderScanResults(setups, errors, diagnostics = null, scanSummary = nul
   state.avoidTrades = avoidTrades || [];
   state.showAllAvoidTrades = false;
   renderAvoidTrades();
-  if (setups.length === 0) {
-    const scanWhyNoSignal = buildScanWhyNoSignalReport(diagnostics, scanSummary, scanUniverse);
-    state.whyNoSignal = scanWhyNoSignal;
-    renderWhyNoSignalPanel(scanWhyNoSignal, {
-      fallbackSummary: diagnostics?.summary,
-      fallbackReasons: (diagnostics?.topReasons || []).map((item) => item.reason)
-    });
-  } else {
-    state.whyNoSignal = null;
-    state.missedSetupAnalysis = null;
-    renderWhyNoSignalPanel(null);
-  }
   document.querySelector("#signal-count").textContent = `${setups.length} scan results`;
   const activePairs = state.pairs
     .concat(state.marketCatalog)
