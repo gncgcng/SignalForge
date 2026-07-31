@@ -4245,6 +4245,12 @@ function renderBestSignalQualityActions(group) {
 }
 
 function renderWorstSignalQualityActions(group) {
+  if (group.groupType === "direction") {
+    return `
+      <button class="secondary-action" data-signal-quality-status="active" data-penalty-override="0" data-group-key="${escapeHtml(group.groupKey)}" type="button">Restore</button>
+      <button class="secondary-action" data-signal-quality-status="diagnostic_only" data-penalty-override="-3" data-group-key="${escapeHtml(group.groupKey)}" type="button">Reduce confidence</button>
+      <small>Diagnostic only &mdash; direction-level performance is too broad to hard quarantine.</small>`;
+  }
   return `
     <button class="secondary-action" data-signal-quality-status="active" data-group-key="${escapeHtml(group.groupKey)}" type="button">Restore</button>
     <button class="secondary-action" data-signal-quality-status="reduced_confidence" data-group-key="${escapeHtml(group.groupKey)}" type="button">Reduce</button>

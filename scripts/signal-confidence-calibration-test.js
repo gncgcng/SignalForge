@@ -9,6 +9,9 @@ import {
   calculateGroupStatus,
   calculateQualityAdjustedScore,
   calibrationStatusForGroup,
+  isSignalBlockedByCalibration,
+  normalizeCalibrationGroupScope,
+  normalizeSignalGroupStatusInput,
   sampleSizeStatusForGroup,
   underconfidentWinners
 } from "../src/modules/signals/signalConfidenceCalibrationService.js";
@@ -22,6 +25,7 @@ const app = readFileSync("public/app.js", "utf8");
 const html = readFileSync("public/index.html", "utf8");
 const migration = readFileSync("migrations/050_signal_confidence_calibration.sql", "utf8");
 const calibratedMigration = readFileSync("migrations/053_generated_signal_calibrated_confidence.sql", "utf8");
+const directionScopeMigration = readFileSync("migrations/058_broad_direction_quarantine_scope.sql", "utf8");
 const quality = readFileSync("src/modules/signals/signalQualityService.js", "utf8");
 
 assert.equal(breakEvenWinRate(2.42), 29.2, "break-even win rate should use 1 / (1 + average RR)");
@@ -104,7 +108,7 @@ const broadWeaknessDoesNotCollapse = applyCalibrationContext({
 });
 assert.equal(broadWeaknessDoesNotCollapse.confidenceScore, 62, "broad historical weakness should cap/penalize without collapsing a valid setup to 50");
 assert.equal(broadWeaknessDoesNotCollapse.confidenceCalibration.totalPenalty, -18);
-assert.equal(broadWeaknessDoesNotCollapse.confidenceCalibration.unboundedPenalty, -30);
+assert.equal(broadWeaknessDoesNotCollapse.confidenceCalibration.unboundedPenalty, -23, "direction contributes at most a three-point diagnostic penalty");
 
 const blocked = applyCalibrationContext({ ...baseSignal, confidenceScore: 90, riskRewardRatio: 2.4, indicators: { readinessScore: 95 }, alignmentBadge: "Full Alignment", confirmations: [{ name: "Volume", passed: true }] }, {
   noHistory: false,
@@ -126,6 +130,73 @@ const exactBlocked = applyCalibrationContext({ ...baseSignal, confidenceScore: 9
   }]
 });
 assert.equal(exactBlocked.indicators.confidenceCalibration.blocked, true, "exact underperforming contexts with enough closed signals can block promotion/alerts");
+assert.equal(isSignalBlockedByCalibration(exactBlocked), true, "specific exact-context quarantine remains a hard block");
+
+for (const direction of ["long", "short"]) {
+  const directionOnly = applyCalibrationContext({
+    ...baseSignal,
+    direction,
+    confidenceScore: 80,
+    riskRewardRatio: 2.4,
+    alignmentBadge: "Full Alignment",
+    indicators: { regime: "Trend Up", readinessScore: 95, entryQuality: "excellent" },
+    confirmations: [{ name: "Volume", passed: true }]
+  }, {
+    noHistory: false,
+    groups: [{
+      groupKey: `direction:${direction}`,
+      groupType: "direction",
+      groupValue: direction,
+      closedSignals: 37,
+      winRate: 20,
+      breakEvenWinRate: 29,
+      estimatedExpectancy: -0.38,
+      status: "quarantined",
+      penalty: -15,
+      confidenceCap: 68
+    }]
+  });
+  assert.equal(directionOnly.confidenceScore, 77, `${direction} weakness should apply no more than a three-point penalty`);
+  assert.equal(directionOnly.confidenceCalibration.status, "watchlist", `${direction} weakness may warn but must not quarantine the signal`);
+  assert.equal(directionOnly.confidenceCalibration.blocked, false, `${direction} direction must not hard-block promotion`);
+  assert.equal(isSignalBlockedByCalibration(directionOnly), false, `${direction} direction must not hard-block alerts`);
+  assert.equal(directionOnly.confidenceCalibration.groups[0].diagnosticOnly, true);
+  assert.equal(directionOnly.confidenceCalibration.groups[0].hardBlockEligible, false);
+}
+
+const staleDirectionOverride = normalizeCalibrationGroupScope({
+  groupKey: "direction:short",
+  groupType: "direction",
+  groupValue: "short",
+  status: "disabled_by_admin",
+  penalty: -15,
+  confidenceCap: 68
+});
+assert.equal(staleDirectionOverride.status, "diagnostic_only");
+assert.equal(staleDirectionOverride.penalty, -3);
+assert.equal(staleDirectionOverride.confidenceCap, null);
+const directionAdminWrite = normalizeSignalGroupStatusInput({
+  groupKey: "direction:long",
+  status: "quarantined",
+  penaltyOverride: -15,
+  confidenceCapOverride: 68
+});
+assert.equal(directionAdminWrite.status, "diagnostic_only", "admin API cannot hard-quarantine a broad direction");
+assert.equal(directionAdminWrite.penaltyOverride, -3, "admin direction penalty is capped at three points");
+assert.equal(directionAdminWrite.confidenceCapOverride, null, "broad direction cannot impose a confidence cap");
+assert.match(directionAdminWrite.adminNote, /too broad to hard quarantine/i);
+assert.equal(isSignalBlockedByCalibration({
+  confidenceCalibration: {
+    status: "quarantined",
+    blockingEvidence: { groupType: "direction", groupValue: "long", hardBlockEligible: true }
+  }
+}), false, "stale direction quarantine evidence must not block");
+assert.equal(isSignalBlockedByCalibration({
+  confidenceCalibration: {
+    status: "disabled_by_admin",
+    groups: [{ groupKey: "direction:short", groupType: "direction", status: "disabled_by_admin" }]
+  }
+}), false, "legacy calibration JSON without blocking evidence must not block when direction is the only broad group");
 
 const sampleGroups = [
   { groupKey: "strategy:tiny", groupType: "strategy", groupValue: "Tiny Winner", closedSignals: 3, winRate: 100, breakEvenWinRate: 30, estimatedExpectancy: 2.1, expiredRate: 0, confidenceGap: -10 },
@@ -218,6 +289,11 @@ assert.match(migration, /ADD COLUMN IF NOT EXISTS confidence_calibration/);
 assert.match(calibratedMigration, /ADD COLUMN IF NOT EXISTS calibrated_confidence/);
 assert.match(calibratedMigration, /ADD COLUMN IF NOT EXISTS confidence_version/);
 assert.match(calibratedMigration, /ADD COLUMN IF NOT EXISTS calibration_reason/);
+assert.match(directionScopeMigration, /UPDATE signal_strategy_statuses/);
+assert.match(directionScopeMigration, /status = 'diagnostic_only'/);
+assert.match(directionScopeMigration, /group_type = 'direction'/);
+assert.match(directionScopeMigration, /penalty_override = -3/);
+assert.match(directionScopeMigration, /confidence_cap_override = NULL/);
 
 assert.match(service, /status = 'Hit TP' THEN risk_reward WHEN status = 'Hit SL' THEN -1 WHEN status = 'Expired' THEN -0\.35/);
 assert.match(service, /Confidence reflects setup alignment after historical calibration/);
@@ -245,6 +321,9 @@ assert.match(app, /Underconfident winners/);
 assert.match(app, /Trust more/);
 assert.match(app, /Increase confidence carefully/);
 assert.match(app, /data-signal-quality-status="quarantined"/);
+assert.match(app, /group\.groupType === "direction"/);
+assert.match(app, /Diagnostic only &mdash; direction-level performance is too broad to hard quarantine/);
+assert.match(app, /data-signal-quality-status="diagnostic_only" data-penalty-override="-3"/);
 assert.match(app, /Original confidence/);
 assert.match(app, /Raw setup score/);
 assert.match(app, /Calibrated confidence/);

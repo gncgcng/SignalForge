@@ -6,6 +6,7 @@ import {
   recordGeneratedSignalTelegramDiagnostic
 } from "../admin-signals/generatedSignalRepository.js";
 import { getTimeframeQualityPolicy } from "../signals/generatedSignalQualityGate.js";
+import { isSignalBlockedByCalibration } from "../signals/signalConfidenceCalibrationService.js";
 import { sendTelegramMessage } from "./telegramClient.js";
 import {
   buildTelegramUnlockUrl,
@@ -91,10 +92,16 @@ export function evaluateTelegramAlertEligibility({ user = null, settings = null,
       : `Calibrated confidence ${Number.isFinite(confidence) ? Math.round(confidence) : 0} was below global threshold ${globalThreshold}.`;
     return block(status, reason, { ...audit, confidence });
   }
-  const calibrationStatus = setup.indicators?.confidenceCalibration?.status || setup.confidenceCalibration?.status;
-  if (["quarantined", "disabled_by_admin"].includes(calibrationStatus)) {
-    return block("blocked_quarantined_timeframe", `Calibration status is ${calibrationStatus}.`, audit);
+  const calibration = setup.indicators?.confidenceCalibration || setup.confidenceCalibration || {};
+  if (isSignalBlockedByCalibration({ confidenceCalibration: calibration })) {
+    return block("blocked_historical_underperformance", `Calibration hard block: ${calibration.blockingEvidence?.groupValue || calibration.status}.`, {
+      ...audit,
+      blockingEvidence: calibration.blockingEvidence || null
+    });
   }
+  const directionWarning = (calibration.groups || []).find((group) =>
+    group.groupType === "direction" && group.status !== "active"
+  );
 
   return {
     allowed: true,
@@ -105,7 +112,10 @@ export function evaluateTelegramAlertEligibility({ user = null, settings = null,
       confidence,
       userId: user?.id || null,
       timeframe: setup.timeframe,
-      direction: setup.direction
+      direction: setup.direction,
+      directionCalibrationWarning: directionWarning
+        ? `Confidence reduced because ${setup.direction} direction is underperforming overall.`
+        : null
     }
   };
 }
@@ -113,6 +123,7 @@ export function evaluateTelegramAlertEligibility({ user = null, settings = null,
 export function evaluateGeneratedSignalTelegramDecision(setup = {}) {
   const threshold = Number(appConfig.telegram.readyAlertMinConfidence);
   if (!setup) return telegramBlock("telegram_blocked_no_generated_setup", "No generated setup was available for Telegram.");
+  const calibration = setup.indicators?.confidenceCalibration || setup.confidenceCalibration || {};
 
   const finalDecision = getFinalDecision(setup);
   const blockedStatus = getBlockedStatusDecision(setup);
@@ -139,6 +150,11 @@ export function evaluateGeneratedSignalTelegramDecision(setup = {}) {
   if (getTimeframeQualityPolicy(setup.timeframe).status === "quarantined") {
     return telegramBlock("telegram_blocked_quarantined_timeframe", `${setup.timeframe} is quarantined for ready alerts.`, {
       timeframe: setup.timeframe
+    });
+  }
+  if (isSignalBlockedByCalibration({ confidenceCalibration: calibration })) {
+    return telegramBlock("telegram_blocked_historical_underperformance", `Calibration hard block: ${calibration.blockingEvidence?.groupValue || calibration.status}.`, {
+      blockingEvidence: calibration.blockingEvidence || null
     });
   }
 
@@ -185,7 +201,10 @@ export function evaluateGeneratedSignalTelegramDecision(setup = {}) {
       confidence,
       finalDecision: "ready_signal",
       timeframe: setup.timeframe,
-      direction: setup.direction
+      direction: setup.direction,
+      directionCalibrationWarning: (calibration.groups || []).some((group) =>
+        group.groupType === "direction" && group.status !== "active"
+      ) ? `Confidence reduced because ${setup.direction} direction is underperforming overall.` : null
     }
   };
 }

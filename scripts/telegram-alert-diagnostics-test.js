@@ -64,6 +64,32 @@ assert.equal(evaluateTelegramAlertEligibility({ settings, setup: { ...readySigna
 assert.equal(evaluateTelegramAlertEligibility({ settings, setup: { ...readySignal, status: "Duplicate blocked" } }).status, "blocked_duplicate");
 assert.equal(evaluateTelegramAlertEligibility({ settings, setup: { ...readySignal, readinessScore: 0 } }).status, "blocked_not_ready");
 assert.equal(evaluateTelegramAlertEligibility({ settings, setup: { ...readySignal, source: "legacy_unlocked_signal" } }).status, "blocked_legacy");
+const broadDirectionCalibration = {
+  status: "quarantined",
+  blockingEvidence: {
+    groupType: "direction",
+    groupValue: "long",
+    hardBlockEligible: true
+  },
+  groups: [{
+    groupType: "direction",
+    groupValue: "long",
+    status: "diagnostic_only",
+    diagnosticOnly: true,
+    hardBlockEligible: false
+  }]
+};
+const directionWeakSignal = {
+  ...readySignal,
+  indicators: {
+    ...readySignal.indicators,
+    confidenceCalibration: broadDirectionCalibration
+  }
+};
+const directionWeakEligibility = evaluateTelegramAlertEligibility({ settings, setup: directionWeakSignal });
+assert.equal(directionWeakEligibility.allowed, true, "broad long/short performance must not block Telegram");
+assert.match(directionWeakEligibility.details.directionCalibrationWarning, /underperforming overall/);
+assert.notEqual(evaluateGeneratedSignalTelegramDecision(directionWeakSignal).status, "telegram_blocked_historical_underperformance");
 assert.equal(evaluateTelegramAlertEligibility({ settings, setup: { ...readySignal, indicators: { qualityGatePassed: false, qualityGateV2: { status: "poor_entry_quality" } } } }).status, "blocked_failed_quality_gate");
 assert.match(evaluateTelegramAlertEligibility({ settings, setup: { ...readySignal, indicators: { qualityGatePassed: false, qualityGateV2: { status: "poor_entry_quality" } } } }).reason, /failed Quality Gate/);
 assert.equal(evaluateTelegramAlertEligibility({ settings, setup: { ...readySignal, indicators: {} } }).status, "blocked_failed_quality_gate");
