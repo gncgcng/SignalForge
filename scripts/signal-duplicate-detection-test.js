@@ -163,7 +163,7 @@ assert.match(gateSource, /duplicate_match_method/);
 assert.match(repositorySource, /ON CONFLICT DO NOTHING/);
 assert.match(repositorySource, /signal_id/);
 assert.match(migration, /UNIQUE INDEX[\s\S]*user_id, chat_id, setup_key, alert_type/i);
-assert.match(adminClientSource, /Duplicate decision[\s\S]*Matched signal[\s\S]*Entry difference[\s\S]*Time difference/, "admin details should expose duplicate evidence");
+assert.match(adminClientSource, /Duplicate details[\s\S]*Matched signal[\s\S]*Entry distance[\s\S]*Time difference/, "admin details should expose duplicate evidence");
 
 const oldPairNewSignal = {
   first: { userId: "u1", chatId: "chat1", setupKey: "BTC-USD:15m:long:100", alertType: "ready_trade_signal" },

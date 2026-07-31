@@ -182,6 +182,6 @@ assert.ok(
 );
 assert.match(telegramSource, /hasRecentDetectedAlert\(user\.id, telegramSetup, appConfig\.autoScan\.duplicateCooldownMs\)/);
 assert.doesNotMatch(gateSource, /duplicateCooldownMs.*findRecentGeneratedSignalFailure/s);
-assert.match(adminSource, /Cooldown decision[\s\S]*Previous signal[\s\S]*Cooldown expires[\s\S]*Early release allowed/);
+assert.match(adminSource, /Cooldown details[\s\S]*Prior signal[\s\S]*Cooldown expires[\s\S]*Early release allowed/);
 
 console.log("signal cooldown logic tests passed");

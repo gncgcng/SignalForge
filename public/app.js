@@ -1986,6 +1986,18 @@ adminSignalsTable?.addEventListener("click", async (event) => {
   if (!button) return;
   try { const { signal } = await api.request(`/api/admin/signals/${encodeURIComponent(button.dataset.adminSignalView)}`); renderAdminSignalDetail(signal); adminSignalModal.classList.remove("hidden"); document.body.classList.add("modal-open"); } catch (error) { showToast(error.message); }
 });
+adminSignalModal?.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-admin-related-signal]");
+  if (!button) return;
+  button.disabled = true;
+  try {
+    const { signal } = await api.request(`/api/admin/signals/${encodeURIComponent(button.dataset.adminRelatedSignal)}`);
+    renderAdminSignalDetail(signal);
+  } catch (error) {
+    showToast(error.message);
+    button.disabled = false;
+  }
+});
 document.querySelector("#admin-signal-quality-panel")?.addEventListener("click", async (event) => {
   const button = event.target.closest("[data-signal-quality-status]");
   if (!button) return;
@@ -4277,7 +4289,7 @@ function renderAdminSignalRow(signal) {
     <span data-label="Pair"><strong>${escapeHtml(signal.displayPair || signal.pair)}</strong><small>${escapeHtml(signal.provider)} &middot; ${escapeHtml(signal.pair)}</small></span>
     <span data-label="Setup"><strong class="direction ${escapeHtml(signal.direction)}">${escapeHtml(String(signal.direction).toUpperCase())} &middot; ${escapeHtml(signal.timeframe)}</strong><small>${escapeHtml(signal.strategy)}${signal.pattern ? ` &middot; ${escapeHtml(titleCase(signal.pattern))}` : ""}</small></span>
     <span data-label="Levels"><small>Entry ${formatCurrency(signal.entry)}</small><small>SL ${formatCurrency(signal.stopLoss)} &middot; TP ${formatCurrency(signal.takeProfit)}</small><strong>${Number(signal.riskReward).toFixed(2)}R</strong></span>
-    <span data-label="Scores"><small>Confidence ${Number(signal.confidence).toFixed(0)}%</small><small>Raw ${Number(signal.rawSetupScore ?? signal.originalConfidence ?? signal.confidence).toFixed(0)} &middot; Calibrated ${Number(signal.calibratedConfidence ?? signal.confidence).toFixed(0)}</small><small>Quality ${Number(signal.setupQualityScore).toFixed(0)} &middot; Readiness ${Number(signal.entryReadinessScore).toFixed(0)}</small></span>
+    <span data-label="Scores"><small>Confidence ${Number(signal.confidence).toFixed(0)}%</small><small>Raw ${formatAdminPercent(signal.diagnosticAvailability?.rawConfidenceRecorded ? signal.rawSetupScore : null)} &middot; Calibrated ${formatAdminPercent(signal.diagnosticAvailability?.calibratedConfidenceRecorded ? signal.calibratedConfidence : null)}</small><small>Quality ${Number(signal.setupQualityScore).toFixed(0)} &middot; Readiness ${Number(signal.entryReadinessScore).toFixed(0)}</small></span>
     <span data-label="Status"><em class="status-pill ${adminSignalStatusClass(effectiveStatus)}">${escapeHtml(effectiveStatus)}</em><small>Final decision: ${escapeHtml(signal.finalDecisionLabel || "Admin-only")}</small><small>${escapeHtml(signal.userVisibility || "Admin-only")}</small><small>${escapeHtml(signal.resultReason || "Tracking")}</small></span>
     <span data-label="Source"><strong>${escapeHtml(titleCase(signal.source))}</strong><small>${escapeHtml(engineMarker)} &middot; ${escapeHtml(titleCase(calibrationStatus))}</small><small>Quality Gate ${escapeHtml(signal.qualityGateDisplayStatus || titleCase(signal.qualityGateStatus || "not evaluated"))}</small><small>Telegram ${escapeHtml(signal.telegramDecisionLabel || titleCase(signal.telegramStatus || "not evaluated"))}</small><small>${formatDateTime(signal.createdAt)}</small><small>Valid until ${formatDateTime(signal.validUntil)}</small></span>
     <span data-label="Actions" class="admin-signal-row-actions"><button data-admin-signal-view="${escapeHtml(signal.id)}" type="button">Show details</button><button class="secondary-action" data-admin-signal-copy="${escapeHtml(signal.signalId)}" type="button">Copy ID</button>${signal.promotedFromCandidateId ? `<button class="secondary-action" data-admin-signal-view="${escapeHtml(signal.id)}" type="button">Candidate source</button>` : ""}${signal.status !== "Active" ? `<button class="secondary-action" data-admin-signal-view="${escapeHtml(signal.id)}" type="button">Post-mortem</button>` : ""}</span>
@@ -4289,146 +4301,160 @@ function renderAdminSignalDetail(signal) {
   const analysis = signal.fullAnalysis || {};
   const pattern = signal.patternContext || {};
   const candidate = signal.candidateOrigin;
-  const calibration = signal.confidenceCalibration || {};
-  const stopValidation = analysis.stopValidation || analysis.indicators?.stopRepairDiagnostics || null;
-  const takeProfitValidation = analysis.takeProfitValidation || analysis.indicators?.takeProfitRepairDiagnostics || null;
-  const generatedGate = analysis.indicators?.generatedQualityGate || {};
-  const duplicateDecision = ["duplicate", "correlated"].includes(generatedGate.type)
-    ? generatedGate.details
-    : analysis.indicators?.duplicateSelection || null;
-  const cooldownDecision = generatedGate.type === "cooldown"
-    ? generatedGate.details
-    : analysis.indicators?.cooldownDecision || null;
-  const calibrationRows = [
-    `Raw setup score: ${Number(signal.rawSetupScore ?? signal.originalConfidence ?? calibration.rawSetupScore ?? calibration.originalConfidence ?? signal.confidence).toFixed(0)}%`,
-    `Original confidence: ${Number(signal.originalConfidence ?? calibration.originalConfidence ?? signal.confidence).toFixed(0)}%`,
-    `Calibrated confidence: ${Number(signal.calibratedConfidence ?? signal.finalConfidence ?? calibration.calibratedConfidence ?? calibration.finalConfidence ?? signal.confidence).toFixed(0)}%`,
-    `Confidence version: ${signal.confidenceVersion || calibration.version || "calibration_v1"}`,
-    signal.calibrationReason || calibration.calibrationReason ? `Calibration reason: ${signal.calibrationReason || calibration.calibrationReason}` : null,
-    calibration.confidenceCap ? `Cap applied: ${Number(calibration.confidenceCap).toFixed(0)}%` : null,
-    calibration.totalPenalty ? `Total penalty: ${Number(calibration.totalPenalty)} points` : null,
-    calibration.status ? `Calibration status: ${titleCase(calibration.status)}` : null,
-    ...(calibration.caps || []).map((item) => `Cap ${item.cap}: ${item.reason}`),
-    ...(calibration.penalties || []).map((item) => `Penalty ${item.points}: ${item.reason}`),
-    ...(calibration.groups || []).map((group) => `${titleCase(group.groupType)} ${group.groupValue}: ${Number(group.winRate || 0).toFixed(1)}% win vs ${Number(group.breakEvenWinRate || 0).toFixed(1)}% break-even`)
-  ];
-  const historicalRows = [
-    signal.finalDecisionLabel ? `Final decision: ${signal.finalDecisionLabel}` : null,
-    signal.userVisibility ? `User visibility: ${signal.userVisibility}` : null,
-    signal.telegramDecisionLabel ? `Telegram decision: ${signal.telegramDecisionLabel}` : null,
-    signal.historicalStrategyStatus ? `Historical status: ${titleCase(signal.historicalStrategyStatus)}` : null,
-    signal.historicalStrategyReason ? `Historical reason: ${signal.historicalStrategyReason}` : null,
-    analysis.indicators?.historicalStrategyCalibration?.copy,
-    ...(analysis.indicators?.historicalStrategyCalibration?.reasons || []).map((reason) => `Historical calibration: ${reason}`)
-  ];
-  const strategyRows = [
-    signal.strategyValidationStatus ? `Strategy validation: ${titleCase(signal.strategyValidationStatus)}` : null,
-    signal.strategyValidationReason,
-    analysis.indicators?.strategyStrictness?.reason ? `Strictness: ${analysis.indicators.strategyStrictness.reason}` : null
-  ];
-  const telegramRows = [
-    `Signal decision: ${titleCase(signal.finalDecision || "admin_only")}`,
-    signal.primaryDecisionReason ? `Primary reason: ${titleCase(signal.primaryDecisionReason)}` : null,
-    signal.decisionVersion ? `Decision version: ${signal.decisionVersion}` : null,
-    signal.decisionCreatedAt ? `Decision created: ${formatDateTime(signal.decisionCreatedAt)}` : null,
-    signal.telegramStatus
-      ? `Telegram status: ${titleCase(signal.telegramStatus)}`
-      : signal.decisionVersion
-        ? "Telegram status: Reconciliation pending"
-        : "Telegram status: Legacy record - no decision captured",
-    signal.telegramBlockReason,
-    signal.telegramLastCheckedAt ? `Last checked: ${formatDateTime(signal.telegramLastCheckedAt)}` : null,
-    signal.telegramBlockDetails?.finalCalibratedConfidence == null ? null : `Final confidence: ${Number(signal.telegramBlockDetails.finalCalibratedConfidence).toFixed(0)}%`,
-    signal.telegramBlockDetails?.globalAlertThreshold == null ? null : `Global threshold: ${signal.telegramBlockDetails.globalAlertThreshold}%`,
-    signal.telegramBlockDetails?.userAlertThreshold == null ? null : `User threshold: ${signal.telegramBlockDetails.userAlertThreshold}%`,
-    signal.telegramBlockDetails?.effectiveAlertThreshold == null ? null : `Effective threshold: ${signal.telegramBlockDetails.effectiveAlertThreshold}%`,
-    signal.telegramBlockDetails?.preferenceCheckPassed == null ? null : `Preference passed: ${signal.telegramBlockDetails.preferenceCheckPassed ? "Yes" : "No"}`,
-    signal.telegramBlockDetails?.queueId ? `Queue ID: ${signal.telegramBlockDetails.queueId}` : null,
-    signal.telegramBlockDetails?.telegramApiResponse?.messageId ? `Telegram message ID: ${signal.telegramBlockDetails.telegramApiResponse.messageId}` : null,
-    signal.telegramBlockDetails?.deepLinkUrl ? `Deep link: ${signal.telegramBlockDetails.deepLinkUrl}` : null,
-    ...(signal.telegramDecisions || []).slice(0, 12).map((item) =>
-      `${item.userId || "System"}: ${titleCase(item.status)}${item.reason ? ` - ${item.reason}` : ""}` +
-      `${item.queueId ? ` | Queue ${item.queueId}` : ""}` +
-      `${item.telegramMessageId ? ` | Message ${item.telegramMessageId}` : ""}`
-    )
-  ];
+  const diagnostics = signal.adminDiagnostics || {};
+  const summary = diagnostics.summary || {};
+  const confidence = diagnostics.confidence || {};
+  const stop = diagnostics.stopLoss || {};
+  const target = diagnostics.takeProfit || {};
+  const duplicate = diagnostics.duplicate || {};
+  const cooldown = diagnostics.cooldown || {};
+  const gate = diagnostics.qualityGate || {};
+  const quarantine = diagnostics.quarantine || {};
+  const telegram = diagnostics.telegram || {};
+  const historical = confidence.historicalGroup;
   document.querySelector("#admin-signal-modal-title").textContent = `${signal.displayPair} / ${signal.timeframe} / ${String(signal.direction).toUpperCase()}`;
   adminSignalDetail.innerHTML = `
     <section class="admin-detail-levels"><div><span>Entry</span><strong>${formatCurrency(signal.entry)}</strong></div><div><span>Stop loss</span><strong>${formatCurrency(signal.stopLoss)}</strong></div><div><span>Take profit</span><strong>${formatCurrency(signal.takeProfit)}</strong></div><div><span>Risk/reward</span><strong>${Number(signal.riskReward).toFixed(2)}R</strong></div></section>
-    <section class="admin-detail-meta"><span class="status-pill ${adminSignalStatusClass(signal.status)}">${escapeHtml(signal.status)}</span><span>${escapeHtml(signal.strategy)}</span><span>${Number(signal.confidence).toFixed(0)}% confidence</span><span>${Number(signal.setupQualityScore).toFixed(0)} quality</span><span>${Number(signal.entryReadinessScore).toFixed(0)} readiness</span></section>
-    ${renderAdminDetailSection("Telegram alert diagnostics", telegramRows)}
-    ${renderAdminDetailSection("Historical strategy calibration", historicalRows)}
-    ${renderAdminDetailSection("Strategy strictness", strategyRows)}
-    ${renderAdminDetailSection("Confidence calibration", calibrationRows)}
-    ${renderAdminDetailSection("Stop validation", stopValidation ? [
-      `Original stop: ${stopValidation.originalStopLoss == null ? "Unavailable" : formatCurrency(stopValidation.originalStopLoss)}`,
-      stopValidation.originalFailureReason ? `Original failure: ${titleCase(stopValidation.originalFailureReason)}` : "Original stop passed validation",
-      `Repair attempted: ${stopValidation.repairAttempted ? "Yes" : "No"}`,
-      stopValidation.repairSource ? `Repair source: ${titleCase(stopValidation.repairSource)}` : null,
-      stopValidation.repairedStopLoss == null ? null : `Repaired stop: ${formatCurrency(stopValidation.repairedStopLoss)}`,
-      stopValidation.atrBufferUsed == null ? null : `ATR buffer used: ${formatCurrency(stopValidation.atrBufferUsed)}`,
-      stopValidation.repairedRiskReward == null ? null : `Repaired R/R: ${Number(stopValidation.repairedRiskReward).toFixed(2)}R`,
-      `Result: ${titleCase(stopValidation.finalResult || "failed")}`,
-      stopValidation.repairFailureReason ? `Reason: ${titleCase(stopValidation.repairFailureReason)}` : null
-    ] : [])}
-    ${renderAdminDetailSection("Take-profit validation", takeProfitValidation ? [
-      `Original target: ${takeProfitValidation.originalTakeProfit == null ? "Unavailable" : formatCurrency(takeProfitValidation.originalTakeProfit)}`,
-      takeProfitValidation.originalFailureReason ? `Original failure: ${titleCase(takeProfitValidation.originalFailureReason)}` : "Original target passed validation",
-      `Repair attempted: ${takeProfitValidation.repairAttempted ? "Yes" : "No"}`,
-      takeProfitValidation.repairSource ? `Repair source: ${titleCase(takeProfitValidation.repairSource)}` : null,
-      takeProfitValidation.repairedTakeProfit == null ? null : `Repaired target: ${formatCurrency(takeProfitValidation.repairedTakeProfit)}`,
-      takeProfitValidation.originalRiskReward == null ? null : `Original R/R: ${Number(takeProfitValidation.originalRiskReward).toFixed(2)}R`,
-      takeProfitValidation.repairedRiskReward == null ? null : `Repaired R/R: ${Number(takeProfitValidation.repairedRiskReward).toFixed(2)}R`,
-      takeProfitValidation.atrMoveRequired == null ? null : `ATR move required: ${Number(takeProfitValidation.atrMoveRequired).toFixed(2)} ATR`,
-      takeProfitValidation.nearestOpposingStructure == null ? null : `Nearest opposing structure: ${formatCurrency(takeProfitValidation.nearestOpposingStructure)}`,
-      `Result: ${titleCase(takeProfitValidation.finalResult || "failed")}`,
-      takeProfitValidation.repairFailureReason ? `Reason: ${titleCase(takeProfitValidation.repairFailureReason)}` : null
-    ] : [])}
-    ${renderAdminDetailSection("Signal Quality Gate", [
-      signal.qualityGateDisplayStatus ? `Gate decision: ${signal.qualityGateDisplayStatus}` : null,
-      signal.userVisibility ? `User visibility: ${signal.userVisibility}` : null,
-      signal.qualityGateStatus ? `Gate status: ${titleCase(signal.qualityGateStatus)}` : null,
-      signal.qualityGateReason ? `Reason: ${titleCase(signal.qualityGateReason)}` : null,
-      signal.qualityGateDetails?.explanation,
-      ...(signal.qualityGateDetails?.checks || []).filter((item) => item.passed === false).map((item) => `${titleCase(item.stage)}: ${item.explanation}`)
+    <section class="admin-detail-meta"><span class="status-pill ${adminSignalStatusClass(signal.status)}">${escapeHtml(signal.status)}</span><span>${escapeHtml(signal.strategy)}</span><span>Raw ${formatAdminPercent(confidence.rawConfidence)}</span><span>Final ${formatAdminPercent(confidence.finalCalibratedConfidence)}</span><span>${Number(signal.setupQualityScore).toFixed(0)} quality</span><span>${Number(signal.entryReadinessScore).toFixed(0)} readiness</span></section>
+    <section class="admin-decision-summary">
+      <header><div><span class="eyebrow">Final decision</span><h4>${escapeHtml(summary.finalDecisionLabel || "Unavailable")}</h4></div><span class="status-pill ${adminSignalStatusClass(summary.finalDecisionLabel)}">${escapeHtml(summary.userVisibility || "Unavailable")}</span></header>
+      <p>${escapeHtml(summary.primaryReason || "No primary decision reason was recorded.")}</p>
+      ${summary.primaryReasonCode ? `<code>${escapeHtml(summary.primaryReasonCode)}</code>` : ""}
+      <div class="admin-decision-facts">
+        ${renderAdminDecisionFact("Credit eligible", formatAdminBoolean(summary.creditEligible))}
+        ${renderAdminDecisionFact("Telegram eligible", formatAdminBoolean(summary.telegramEligible))}
+        ${renderAdminDecisionFact("Signal source", titleCase(summary.signalSource || "Unavailable"))}
+        ${renderAdminDecisionFact("Decision version", summary.decisionVersion || "Legacy / unavailable")}
+        ${renderAdminDecisionFact("Created", summary.createdAt ? formatDateTime(summary.createdAt) : "Unavailable")}
+      </div>
+    </section>
+    <section class="admin-decision-verdicts">
+      ${renderAdminDecisionFact("Quality Gate", gate.available ? titleCase(gate.status || "Not recorded") : gate.unavailableReason || "Unavailable")}
+      ${renderAdminDecisionFact("Telegram", telegram.statusLabel || "Unavailable")}
+    </section>
+    ${renderAdminDecisionTimeline(diagnostics.timeline || [])}
+    ${renderAdminAuditSection("Confidence calibration", [
+      ["Raw confidence", formatAdminPercent(confidence.rawConfidence)],
+      ["Strategy match score", formatAdminScore(confidence.strategyMatchScore)],
+      ["Calibration status", titleCase(confidence.calibrationStatus || "Unavailable")],
+      ["Historical penalty", confidence.historicalPenalty == null ? "Unavailable" : `${Number(confidence.historicalPenalty)} points`],
+      ["Confidence cap", formatAdminPercent(confidence.confidenceCap)],
+      ["Final calibrated confidence", formatAdminPercent(confidence.finalCalibratedConfidence)],
+      ["Ready-promotion threshold", formatAdminPercent(confidence.readyPromotionThreshold)],
+      ["User Telegram threshold", formatAdminPercent(confidence.userTelegramThreshold)],
+      ["Effective Telegram threshold", formatAdminPercent(confidence.effectiveTelegramThreshold)],
+      ["Historical group", historical ? [historical.pair, historical.timeframe, historical.strategy, historical.direction, historical.marketRegime].filter(Boolean).join(" · ") || historical.value : confidence.unavailableReason || "Unavailable"],
+      ["Closed sample", historical?.sampleSize == null ? "Unavailable" : String(historical.sampleSize)],
+      ["Group win rate", formatAdminPercent(historical?.winRate)],
+      ["Group expectancy", historical?.expectancy == null ? "Unavailable" : `${Number(historical.expectancy).toFixed(2)}R`],
+      ["Reason", confidence.reason || "Not recorded"],
+      ["Technical error", confidence.technicalError]
     ])}
-    ${renderAdminDetailSection("Cooldown decision", cooldownDecision ? [
-      `Decision: ${titleCase(cooldownDecision.finalCooldownDecision || "not applied")}`,
-      cooldownDecision.matchedSignalId ? `Previous signal: ${cooldownDecision.matchedSignalId}` : null,
-      cooldownDecision.previousPair ? `Pair: ${cooldownDecision.previousPair}` : null,
-      cooldownDecision.previousTimeframe ? `Timeframe: ${cooldownDecision.previousTimeframe}` : null,
-      cooldownDecision.previousDirection ? `Direction: ${titleCase(cooldownDecision.previousDirection)}` : null,
-      cooldownDecision.previousStrategy ? `Strategy: ${cooldownDecision.previousStrategy}` : null,
-      cooldownDecision.previousOutcome ? `Outcome: ${cooldownDecision.previousOutcome}` : null,
-      `Previous signal promoted: ${cooldownDecision.previousSignalPromoted ? "Yes" : "No"}`,
-      `Previous Telegram sent: ${cooldownDecision.previousTelegramSent ? "Yes" : "No"}`,
-      cooldownDecision.cooldownStartedAt ? `Cooldown started: ${formatDateTime(cooldownDecision.cooldownStartedAt)}` : null,
-      cooldownDecision.cooldownExpiresAt ? `Cooldown expires: ${formatDateTime(cooldownDecision.cooldownExpiresAt)}` : null,
-      cooldownDecision.remainingDurationLabel ? `Remaining: ${cooldownDecision.remainingDurationLabel}` : null,
-      cooldownDecision.structureSimilarity ? `Structure match: ${titleCase(cooldownDecision.structureSimilarity)}` : null,
-      cooldownDecision.exactMatchingRule ? `Rule: ${titleCase(cooldownDecision.exactMatchingRule)}` : null,
-      `Early release allowed: ${cooldownDecision.earlyReleaseAllowed ? "Yes" : "No"}`,
-      cooldownDecision.cooldownReleaseReason ? `Release reason: ${titleCase(cooldownDecision.cooldownReleaseReason)}` : null,
-      cooldownDecision.previousStructureId ? `Previous structure: ${cooldownDecision.previousStructureId}` : null,
-      cooldownDecision.currentStructureId ? `Current structure: ${cooldownDecision.currentStructureId}` : null
-    ] : [])}
-    ${renderAdminDetailSection("Duplicate decision", duplicateDecision?.matchType ? [
-      `Decision: ${duplicateDecision.selectedSignal === "candidate" ? "Current candidate selected" : "Duplicate blocked"}`,
-      duplicateDecision.matchedSignalId ? `Matched signal: ${duplicateDecision.matchedSignalId}` : null,
-      duplicateDecision.matchedCandidateId ? `Matched candidate: ${duplicateDecision.matchedCandidateId}` : null,
-      duplicateDecision.matchedPair ? `Pair: ${duplicateDecision.matchedPair}` : null,
-      duplicateDecision.matchedTimeframe ? `Timeframe: ${duplicateDecision.matchedTimeframe}` : null,
-      duplicateDecision.matchedDirection ? `Direction: ${titleCase(duplicateDecision.matchedDirection)}` : null,
-      duplicateDecision.matchedStrategy ? `Strategy: ${duplicateDecision.matchedStrategy}` : null,
-      duplicateDecision.priorSignalStatus ? `Previous status: ${duplicateDecision.priorSignalStatus}` : null,
-      duplicateDecision.priorSignalOutcome ? `Previous outcome: ${duplicateDecision.priorSignalOutcome}` : null,
-      duplicateDecision.entryDistancePercent == null ? null : `Entry difference: ${Number(duplicateDecision.entryDistancePercent).toFixed(3)}%`,
-      duplicateDecision.entryDistanceAtr == null ? null : `Entry difference: ${Number(duplicateDecision.entryDistanceAtr).toFixed(3)} ATR`,
-      duplicateDecision.timeDifferenceMinutes == null ? null : `Time difference: ${Number(duplicateDecision.timeDifferenceMinutes).toFixed(1)} minutes`,
-      `Match type: ${titleCase(duplicateDecision.matchType)}`,
-      duplicateDecision.duplicateMatchMethod ? `Rule: ${titleCase(duplicateDecision.duplicateMatchMethod)}` : null,
-      duplicateDecision.selectionReason
-    ] : [])}
+    ${renderAdminAuditSection("Stop validation", stop.available ? [
+      ["Original stop", formatAdminPrice(stop.originalStop)],
+      ["Validation", titleCase(stop.validationResult)],
+      ["Original failure", stop.originalFailureReason ? titleCase(stop.originalFailureReason) : "None"],
+      ["Repair attempted", formatAdminBoolean(stop.repairAttempted)],
+      ["Repair source", stop.repairSource ? titleCase(stop.repairSource) : stop.repairNotAttemptedReason || "Not applicable"],
+      ["Repaired stop", formatAdminPrice(stop.repairedStop)],
+      ["ATR buffer", formatAdminPrice(stop.atrBuffer)],
+      ["Original distance", formatAdminPrice(stop.originalDistance)],
+      ["Repaired distance", formatAdminPrice(stop.repairedDistance)],
+      ["Stop distance", stop.distanceAtr == null ? "Unavailable" : `${Number(stop.distanceAtr).toFixed(2)} ATR`],
+      ["R/R after repair", stop.riskRewardAfterRepair == null ? "Unavailable" : `${Number(stop.riskRewardAfterRepair).toFixed(2)}R`],
+      ["Final result", titleCase(stop.finalResult)],
+      ["Final reason", stop.finalReason ? titleCase(stop.finalReason) : null]
+    ] : [["Status", stop.unavailableReason || "Not recorded"]])}
+    ${renderAdminAuditSection("Take-profit validation", target.available ? [
+      ["Original target", formatAdminPrice(target.originalTarget)],
+      ["Validation", titleCase(target.validationResult)],
+      ["Original failure", target.originalFailureReason ? titleCase(target.originalFailureReason) : "None"],
+      ["Repair attempted", formatAdminBoolean(target.repairAttempted)],
+      ["Repair source", target.repairSource ? titleCase(target.repairSource) : target.repairNotAttemptedReason || "Not applicable"],
+      ["Repaired target", formatAdminPrice(target.repairedTarget)],
+      ["Nearest opposing structure", formatAdminPrice(target.nearestOpposingStructure)],
+      ["Required ATR move", target.requiredAtrMove == null ? "Unavailable" : `${Number(target.requiredAtrMove).toFixed(2)} ATR`],
+      ["Original R/R", target.originalRiskReward == null ? "Unavailable" : `${Number(target.originalRiskReward).toFixed(2)}R`],
+      ["Repaired R/R", target.repairedRiskReward == null ? "Unavailable" : `${Number(target.repairedRiskReward).toFixed(2)}R`],
+      ["Final result", titleCase(target.finalResult)],
+      ["Final reason", target.finalReason ? titleCase(target.finalReason) : null]
+    ] : [["Status", target.unavailableReason || "Not recorded"]])}
+    ${renderAdminAuditSection("Duplicate details", duplicate.result === "blocked" ? [
+      ["Result", "Duplicate blocked"],
+      ["Matched signal", duplicate.matchedSignalId || "Unavailable", renderRelatedAdminSignalButton(duplicate)],
+      ["Matched status", duplicate.matchedStatus || "Unavailable"],
+      ["Matched outcome", duplicate.matchedOutcome || "Unavailable"],
+      ["Same pair", formatAdminBoolean(duplicate.samePair)],
+      ["Same timeframe", formatAdminBoolean(duplicate.sameTimeframe)],
+      ["Same direction", formatAdminBoolean(duplicate.sameDirection)],
+      ["Same strategy family", formatAdminBoolean(duplicate.sameStrategyFamily)],
+      ["Entry distance", duplicate.entryDistancePercent == null ? "Unavailable" : `${Number(duplicate.entryDistancePercent).toFixed(3)}%`],
+      ["Entry distance ATR", duplicate.entryDistanceAtr == null ? "Unavailable" : `${Number(duplicate.entryDistanceAtr).toFixed(3)} ATR`],
+      ["Time difference", duplicate.timeDifferenceMinutes == null ? "Unavailable" : `${Number(duplicate.timeDifferenceMinutes).toFixed(1)} minutes`],
+      ["Match type", titleCase(duplicate.matchType || "Unavailable")],
+      ["Rule", titleCase(duplicate.rule || "Unavailable")]
+    ] : [["Duplicate check", duplicate.result === "passed" ? "Passed" : duplicate.unavailableReason || "Unavailable"]])}
+    ${renderAdminAuditSection("Cooldown details", cooldown.result === "blocked" ? [
+      ["Result", "Cooldown blocked"],
+      ["Prior signal", cooldown.priorSignalId || "Unavailable", renderRelatedAdminSignalButton(cooldown)],
+      ["Prior outcome", cooldown.priorOutcome || "Unavailable"],
+      ["Prior signal user-ready", formatAdminBoolean(cooldown.priorUserReady)],
+      ["Prior Telegram sent", formatAdminBoolean(cooldown.priorTelegramSent)],
+      ["Pair / timeframe / direction / strategy", [cooldown.pairSimilarity, cooldown.timeframeSimilarity, cooldown.directionSimilarity, cooldown.strategySimilarity].map(formatAdminBoolean).join(" / ")],
+      ["Cooldown started", cooldown.startedAt ? formatDateTime(cooldown.startedAt) : "Unavailable"],
+      ["Cooldown expires", cooldown.expiresAt ? formatDateTime(cooldown.expiresAt) : "Unavailable"],
+      ["Time remaining", cooldown.remainingDuration || "Unavailable"],
+      ["Structure similarity", titleCase(cooldown.structureSimilarity || "Unavailable")],
+      ["Early release allowed", formatAdminBoolean(cooldown.earlyReleaseAllowed)],
+      ["Rule", titleCase(cooldown.rule || "Unavailable")]
+    ] : [["Cooldown check", cooldown.result === "passed" ? "Passed" : cooldown.result === "released" ? `Released early: ${cooldown.releaseReason || "new structure"}` : cooldown.unavailableReason || "Unavailable"]])}
+    ${renderAdminAuditSection("Quality Gate checks", [
+      ["Result", gate.available ? titleCase(gate.status || "Unavailable") : gate.unavailableReason],
+      ["Gate version", gate.version || "Unavailable"],
+      ["Primary gate reason", gate.primaryReason ? titleCase(gate.primaryReason) : "None recorded"],
+      ["Checks passed", gate.checksPassed?.length ? gate.checksPassed.map(formatGateCheck).join("; ") : "None recorded"],
+      ["Checks failed", gate.checksFailed?.length ? gate.checksFailed.map(formatGateCheck).join("; ") : "None"],
+      ["Needed to pass", Array.isArray(gate.neededToPass) ? gate.neededToPass.join("; ") : gate.neededToPass || "Not applicable"],
+      ["Later protection", gate.laterBlockExplanation]
+    ])}
+    ${renderAdminAuditSection("Quarantine details", [
+      ["Result", quarantine.result === "blocked" ? "Blocked" : quarantine.result === "passed" ? "Passed" : quarantine.unavailableReason || "Unavailable"],
+      ["Scope", quarantine.scope ? titleCase(quarantine.scope) : "None"],
+      ["Group", quarantine.group || "None"],
+      ["Admin manual quarantine", formatAdminBoolean(quarantine.manual)],
+      ["Explanation", quarantine.explanation]
+    ])}
+    ${renderAdminAuditSection("Telegram audit", [
+      ["Final status", telegram.statusLabel || "Unavailable"],
+      ["Dispatch considered", formatAdminBoolean(telegram.dispatchConsidered)],
+      ["Signal final decision", titleCase(telegram.signalFinalDecision || "Unavailable")],
+      ["Final confidence", formatAdminPercent(telegram.finalCalibratedConfidence)],
+      ["Global threshold", formatAdminPercent(telegram.globalThreshold)],
+      ["User threshold", formatAdminPercent(telegram.userThreshold)],
+      ["Effective threshold", formatAdminPercent(telegram.effectiveThreshold)],
+      ["Preference passed", formatAdminBoolean(telegram.preferencePassed)],
+      ["Signal ID", telegram.signalId || "Unavailable"],
+      ["Queue ID", telegram.queueId || "Not queued"],
+      ["Attempt count", telegram.attemptCount == null ? "Unavailable" : String(telegram.attemptCount)],
+      ["Last attempt", telegram.lastAttemptAt ? formatDateTime(telegram.lastAttemptAt) : "Not attempted"],
+      ["Telegram message ID", telegram.telegramMessageId || "Not sent"],
+      ["Deep link", telegram.deepLinkUrl || "Not created"],
+      ["Reason", telegram.reason || "None"],
+      ["Final error", telegram.finalErrorMessage || telegram.finalErrorCode]
+    ])}
+    ${renderAdminAuditSection("Raw diagnostic data", [
+      ["Generated record ID", signal.id],
+      ["Signal ID", signal.signalId],
+      ["Setup key", signal.setupKey || "Not recorded"],
+      ["Final decision code", summary.finalDecision || "Not recorded"],
+      ["Primary reason code", summary.primaryReasonCode || "Not recorded"],
+      ["Secondary decision notes", summary.secondaryNotes?.length ? summary.secondaryNotes.join("; ") : "None recorded"],
+      ["Quality Gate reason code", gate.primaryReason || "Not recorded"],
+      ["Telegram reason code", telegram.reasonCode || "Not recorded"],
+      ["Raw confidence recorded", formatAdminBoolean(signal.diagnosticAvailability?.rawConfidenceRecorded)],
+      ["Calibrated confidence recorded", formatAdminBoolean(signal.diagnosticAvailability?.calibratedConfidenceRecorded)],
+      ["Updated", signal.updatedAt ? formatDateTime(signal.updatedAt) : "Unavailable"]
+    ])}
     ${renderAdminDetailSection("Signal quality breakdown", Object.values(quality).map((item) => `${item.label}: ${titleCase(item.status)} - ${item.reason}`))}
     ${renderAdminDetailSection("Why it was generated", [analysis.reasoning, ...(analysis.confirmations || []).map((item) => `${item.passed ? "Passed" : "Failed"}: ${item.name} - ${item.detail}`), ...(signal.warningReasons || []).map((item) => `Warning: ${typeof item === "string" ? item : item.reason}`)])}
     ${signal.pattern ? renderAdminDetailSection("Pattern context", [`${pattern.label || titleCase(signal.pattern)} - ${titleCase(pattern.bias)} ${pattern.category || "pattern"}`, `Pattern confidence: ${Math.round(Number(pattern.confidence || 0) * 100)}%`, ...(pattern.reasons || []), ...(pattern.warnings || []).map((item) => `Warning: ${item}`)]) : ""}
@@ -4440,8 +4466,35 @@ function renderAdminSignalDetail(signal) {
 function renderAdminDetailSection(title, rows) {
   const visible = (rows || []).filter(Boolean);
   if (!visible.length) return "";
-  return `<section class="admin-detail-section"><h4>${escapeHtml(title)}</h4><ul>${visible.map((row) => `<li>${escapeHtml(String(row))}</li>`).join("")}</ul></section>`;
+  return `<details class="admin-detail-section admin-audit-section"><summary>${escapeHtml(title)}</summary><ul>${visible.map((row) => `<li>${escapeHtml(String(row))}</li>`).join("")}</ul></details>`;
 }
+
+function renderAdminAuditSection(title, rows) {
+  const visible = (rows || []).filter((row) => row && row[1] !== null && row[1] !== undefined && row[1] !== "");
+  if (!visible.length) return "";
+  return `<details class="admin-detail-section admin-audit-section"><summary>${escapeHtml(title)}</summary><dl>${visible.map(([label, value, action]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(String(value))}${action || ""}</dd></div>`).join("")}</dl></details>`;
+}
+
+function renderAdminDecisionTimeline(steps) {
+  if (!steps.length) return "";
+  return `<details class="admin-detail-section admin-audit-section admin-decision-timeline"><summary>Decision timeline</summary><ol>${steps.map((step) => `<li class="audit-${escapeHtml(step.status)}"><span>${escapeHtml(titleCase(step.status))}</span><strong>${escapeHtml(step.label)}</strong><small>${escapeHtml(step.summary || "No detail recorded")}</small></li>`).join("")}</ol></details>`;
+}
+
+function renderAdminDecisionFact(label, value) {
+  return `<span><small>${escapeHtml(label)}</small><strong>${escapeHtml(String(value ?? "Unavailable"))}</strong></span>`;
+}
+
+function renderRelatedAdminSignalButton(value) {
+  return value?.relatedGeneratedSignalId
+    ? ` <button class="secondary-action admin-related-signal" data-admin-related-signal="${escapeHtml(value.relatedGeneratedSignalId)}" type="button">Open signal</button>`
+    : "";
+}
+
+function formatAdminBoolean(value) { return value === true ? "Yes" : value === false ? "No" : "Unavailable"; }
+function formatAdminPercent(value) { return value == null ? "Unavailable" : `${Number(value).toFixed(Number(value) % 1 ? 1 : 0)}%`; }
+function formatAdminScore(value) { return value == null ? "Unavailable" : Number(value).toFixed(Number(value) % 1 ? 1 : 0); }
+function formatAdminPrice(value) { return value == null ? "Unavailable" : formatCurrency(value); }
+function formatGateCheck(check) { return [check.stage ? titleCase(check.stage) : null, check.explanation || check.reason].filter(Boolean).join(": "); }
 
 function closeAdminSignalModal() { adminSignalModal?.classList.add("hidden"); document.body.classList.remove("modal-open"); }
 function adminSignalStatusClass(status) { const value = String(status || "").toLowerCase(); if (value.includes("tp")) return "status-hit-tp"; if (value.includes("sl")) return "status-hit-sl"; if (value.includes("expir")) return "status-expired"; return "status-active"; }

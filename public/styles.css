@@ -4130,6 +4130,144 @@ polyline {
   margin: 0 0 8px;
 }
 
+.admin-decision-summary {
+  margin-top: 14px;
+  padding: 15px;
+  border: 1px solid rgba(58, 207, 255, 0.3);
+  border-radius: 8px;
+  background: rgba(6, 25, 37, 0.88);
+}
+
+.admin-decision-summary > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.admin-decision-summary h4,
+.admin-decision-summary p {
+  margin: 4px 0 0;
+}
+
+.admin-decision-summary p {
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.admin-decision-summary code {
+  display: inline-block;
+  margin-top: 9px;
+  color: #9de8ff;
+  overflow-wrap: anywhere;
+}
+
+.admin-decision-facts,
+.admin-decision-verdicts {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 9px;
+  margin-top: 13px;
+}
+
+.admin-decision-verdicts {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.admin-decision-facts > span,
+.admin-decision-verdicts > span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(11, 27, 40, 0.72);
+}
+
+.admin-decision-facts small,
+.admin-decision-verdicts small {
+  color: var(--muted);
+}
+
+.admin-decision-facts strong,
+.admin-decision-verdicts strong {
+  overflow-wrap: anywhere;
+}
+
+.admin-audit-section > summary {
+  cursor: pointer;
+  color: var(--text);
+  font-weight: 700;
+  list-style-position: outside;
+}
+
+.admin-audit-section[open] > summary {
+  margin-bottom: 11px;
+}
+
+.admin-audit-section dl {
+  margin: 0;
+}
+
+.admin-audit-section dl > div {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.42fr) minmax(0, 1fr);
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.admin-audit-section dt {
+  color: var(--muted);
+}
+
+.admin-audit-section dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.admin-related-signal {
+  width: auto;
+  min-height: 30px;
+  margin-left: 8px;
+  padding: 5px 9px;
+}
+
+.admin-decision-timeline ol {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.admin-decision-timeline li {
+  display: grid;
+  grid-template-columns: 110px minmax(150px, 0.6fr) minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 9px 0;
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.admin-decision-timeline li > span {
+  color: var(--muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+}
+
+.admin-decision-timeline li > small {
+  color: var(--muted);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.admin-decision-timeline .audit-failed > span { color: #ff9d9d; }
+.admin-decision-timeline .audit-passed > span,
+.admin-decision-timeline .audit-repaired > span { color: #71e4c3; }
+
 .admin-detail-section ul {
   margin: 0;
   padding-left: 18px;
@@ -4155,6 +4293,10 @@ polyline {
 @media (max-width: 767px) {
   .admin-signal-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .admin-signal-filters { grid-template-columns: 1fr; }
+  .admin-decision-facts,
+  .admin-decision-verdicts { grid-template-columns: minmax(0, 1fr); }
+  .admin-audit-section dl > div,
+  .admin-decision-timeline li { grid-template-columns: minmax(0, 1fr); gap: 4px; }
   .signal-quality-groups,
   .signal-quality-summary {
     grid-template-columns: minmax(0, 1fr);

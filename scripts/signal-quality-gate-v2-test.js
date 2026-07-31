@@ -183,7 +183,7 @@ assert.match(publicApp, /loadAdminSignalQualityGate/);
 assert.match(publicApp, /Recent rejected setups/);
 assert.match(publicApp, /Blocked before users see them/);
 assert.match(publicApp, /Quality Gate/);
-assert.match(publicApp, /Telegram status: Reconciliation pending/);
+assert.match(publicApp, /Telegram audit/);
 assert.match(publicApp, /admin-detail-section/);
 assert.match(migration, /signal_quality_gate_results/);
 assert.match(migration, /quality_gate_reason_stats/);

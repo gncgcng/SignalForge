@@ -16,6 +16,7 @@ import {
 } from "../notifications/telegramAlertDiagnosticsService.js";
 import { applyFinalSignalDecision } from "../signals/signalDecisionService.js";
 import {
+  findGeneratedSignalReferences,
   getGeneratedSignalById,
   getGeneratedSignalStats,
   listActiveGeneratedSignals,
@@ -23,6 +24,10 @@ import {
   updateGeneratedSignalStatus,
   upsertGeneratedSignal
 } from "./generatedSignalRepository.js";
+import {
+  attachAdminSignalReferences,
+  buildAdminSignalDiagnostics
+} from "./adminSignalDiagnosticService.js";
 
 export async function saveGeneratedSignal(signal, context = {}) {
   if (!signal || signal.validationPassed === false) return null;
@@ -101,7 +106,17 @@ export async function getAdminGeneratedSignals(filters) {
 }
 
 export async function getAdminGeneratedSignal(id) {
-  return getGeneratedSignalById(id);
+  const signal = await getGeneratedSignalById(id);
+  if (!signal) return null;
+  const diagnostics = buildAdminSignalDiagnostics(signal);
+  const references = await findGeneratedSignalReferences([
+    diagnostics.duplicate?.matchedSignalId,
+    diagnostics.cooldown?.priorSignalId
+  ]);
+  return {
+    ...signal,
+    adminDiagnostics: attachAdminSignalReferences(diagnostics, references)
+  };
 }
 
 export async function updateAdminSignalGroupStatus(input, user) {

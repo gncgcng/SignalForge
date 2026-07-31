@@ -86,7 +86,7 @@ const checks = {
     css.includes("grid-template-columns: repeat(2, minmax(0, 1fr))") &&
     css.includes("word-break: normal") &&
     app.includes("Show details") &&
-    app.includes("Raw ${Number(signal.rawSetupScore")
+    app.includes("formatAdminPercent(confidence.rawConfidence)")
 };
 
 for (const [name, passed] of Object.entries(checks)) {
