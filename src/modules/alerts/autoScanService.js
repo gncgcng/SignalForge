@@ -106,7 +106,7 @@ export async function runAutoCryptoAlertScan() {
         } else {
           telegramAlertsQueued += queuedTelegramAlerts.length;
           await saveGeneratedSignal(telegramSetup, { source: "telegram_alert", generatedBy: "auto_crypto_watcher" });
-          console.log(`[auto-scan] telegram alert sent user=${user.id} symbol=${telegramSetup.symbol} timeframe=${telegramSetup.timeframe}`);
+          console.log(`[auto-scan] telegram alert queued user=${user.id} symbol=${telegramSetup.symbol} timeframe=${telegramSetup.timeframe}`);
         }
       } catch (error) {
         console.warn(`[auto-scan] ${preference.symbol} ${preference.timeframe} skipped: ${error.message}`);
@@ -154,7 +154,7 @@ export async function runAutoCryptoAlertScan() {
               telegramAlertsQueued += queuedTelegramAlerts.length;
               await saveGeneratedSignal(telegramSetup, { source: "telegram_alert", generatedBy: "auto_crypto_watcher" });
               console.log(`[auto-scan] matched alert user=${user.id} symbol=${telegramSetup.symbol} timeframe=${telegramSetup.timeframe} direction=${telegramSetup.direction}`);
-              console.log(`[auto-scan] telegram alert sent user=${user.id} symbol=${telegramSetup.symbol} timeframe=${telegramSetup.timeframe}`);
+              console.log(`[auto-scan] telegram alert queued user=${user.id} symbol=${telegramSetup.symbol} timeframe=${telegramSetup.timeframe}`);
             } else {
               skippedDuplicates += 1;
             }

@@ -283,6 +283,17 @@ await staticCheck("one raw setup has no manual, candidate-promotion, and telegra
   ].filter(Boolean).length;
   assert.ok(stages <= 1, `observed ${stages} calibration stages`);
 });
+await staticCheck("accepted scanner signal construction supplies Telegram-ready state", () => {
+  const construction = signalServiceSource.match(
+    /const signal = cappedSignal && !calibrationBlocked && !qualityBlocked[\s\S]*?: null;/
+  )?.[0] || "";
+  assert.match(construction, /\.\.\.cappedSignal/, "accepted signal does not retain setupKey, validation, and validity fields");
+  assert.match(construction, /resultType:\s*SCANNER_RESULT_TYPES\.READY/);
+  assert.match(construction, /status:\s*"Active"/);
+  assert.match(construction, /confidenceScore:\s*Math\.min\(/);
+  assert.match(signalServiceSource, /const valid = Boolean\(readySignal && validation\?\.passed\)/);
+  assert.match(signalServiceSource, /const learnedSignal = valid[\s\S]*?withSignalValidity\(/);
+});
 
 const blockedByGate = qualityGateModule.applyGeneratedSignalQualityBlock({
   ...traceSignal,

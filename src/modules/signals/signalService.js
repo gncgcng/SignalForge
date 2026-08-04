@@ -346,7 +346,12 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
     : { passed: !cappedSignal || calibrationBlocked };
   const qualityBlocked = Boolean(cappedSignal && !qualityGate.passed);
   const signal = cappedSignal && !calibrationBlocked && !qualityBlocked
-    ? withSignalQuality({ ...cappedSignal, confidenceScore: Math.min(cappedSignal.confidenceScore, candidate?.confidenceEstimate || 99) })
+    ? withSignalQuality({
+      ...cappedSignal,
+      resultType: SCANNER_RESULT_TYPES.READY,
+      status: "Active",
+      confidenceScore: Math.min(cappedSignal.confidenceScore, candidate?.confidenceEstimate || 99)
+    })
     : null;
   const blockedSignal = qualityBlocked
     ? withSignalQuality(applyGeneratedSignalQualityBlock(cappedSignal, qualityGate))

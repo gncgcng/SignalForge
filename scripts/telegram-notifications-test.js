@@ -4,6 +4,7 @@ process.env.TELEGRAM_BOT_USERNAME = "signalforge_test_bot";
 import { readFileSync } from "node:fs";
 
 const {
+  evaluateTelegramSignalEligibility,
   formatTelegramSignalReplyMarkup,
   formatTelegramSignalMessage,
   telegramPreferenceMatchesSetup
@@ -41,6 +42,12 @@ const setup = {
   takeProfit: 70000,
   riskRewardRatio: 2,
   confidenceScore: 86,
+  resultType: "ready_signal",
+  validationPassed: true,
+  status: "Active",
+  generatedQualityBlocked: false,
+  confidenceCalibration: { blocked: false, technicalError: false },
+  validUntil: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
   setupType: "Pullback bounce",
   confirmations: [
     { name: "Trend", passed: true },
@@ -92,6 +99,38 @@ const result = {
     ...setup,
     confidenceScore: 79
   }),
+  nonReadyRejected: evaluateTelegramSignalEligibility(settings, favorites, {
+    ...setup,
+    resultType: "watching_setup"
+  }).reason === "non_ready_result",
+  failedValidationRejected: evaluateTelegramSignalEligibility(settings, favorites, {
+    ...setup,
+    validationPassed: false
+  }).reason === "validation_failed",
+  inactiveRejected: evaluateTelegramSignalEligibility(settings, favorites, {
+    ...setup,
+    status: "Blocked"
+  }).reason === "inactive_status",
+  expiredStatusRejected: evaluateTelegramSignalEligibility(settings, favorites, {
+    ...setup,
+    status: "Expired"
+  }).reason === "expired",
+  qualityGateRejected: evaluateTelegramSignalEligibility(settings, favorites, {
+    ...setup,
+    indicators: { generatedQualityBlocked: true }
+  }).reason === "quality_gate_blocked",
+  calibrationErrorRejected: evaluateTelegramSignalEligibility(settings, favorites, {
+    ...setup,
+    confidenceCalibration: { blocked: false, technicalError: true }
+  }).reason === "calibration_error",
+  expiredRejected: evaluateTelegramSignalEligibility(settings, favorites, {
+    ...setup,
+    validUntil: new Date(Date.now() - 60 * 1000).toISOString()
+  }).reason === "expired",
+  invalidExpirationRejected: evaluateTelegramSignalEligibility(settings, favorites, {
+    ...setup,
+    validUntil: "not-a-date"
+  }).reason === "invalid_expiration",
   messageIsPreviewOnly: ["Market: BTCUSD", "Provider: Coinbase · BTC-USD", "Timeframe: 1h",
     "Direction: LONG", "Confidence: 86% (Strong)", "Setup: Pullback bounce",
     "Preview only. Unlock to view full levels."]
@@ -112,6 +151,10 @@ const result = {
     queue.includes("[telegram] sending alert") &&
     queue.includes("[telegram] sent") &&
     queue.includes("[telegram] failed"),
+  autoScanLogsQueueNotDelivery:
+    (autoScan.match(/telegram alert queued/g) || []).length === 2 &&
+    !autoScan.includes("telegram alert sent") &&
+    queue.includes("[telegram] sent"),
   scanQueuesPrivately: signalController.includes("scanMarketSetupDetailed") &&
     signalController.includes("enqueueMatchingTelegramNotifications") &&
     !signalController.includes("entryPrice: result.fullSetup"),

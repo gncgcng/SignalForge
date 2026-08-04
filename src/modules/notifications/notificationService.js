@@ -11,6 +11,7 @@ import { formatSignalValidityWindow } from "../signals/signalValidityService.js"
 
 const directions = new Set(["long", "short", "both"]);
 const timeframes = new Set(["5m", "15m", "1h", "4h"]);
+const TELEGRAM_GLOBAL_MINIMUM_CONFIDENCE = 80;
 
 export async function getNotificationSettings(user) {
   const settings = await getTelegramSettingsByUser(user.id);
@@ -96,7 +97,8 @@ export async function enqueueMatchingTelegramNotifications(user, setups) {
   const queued = [];
 
   for (const setup of setups) {
-    if (!telegramPreferenceMatchesSetup(settings, favoriteSymbols, setup)) {
+    const eligibility = evaluateTelegramSignalEligibility(settings, favoriteSymbols, setup);
+    if (!eligibility.eligible) {
       continue;
     }
 
@@ -114,14 +116,67 @@ export async function enqueueMatchingTelegramNotifications(user, setups) {
 }
 
 export function telegramPreferenceMatchesSetup(settings, favoriteSymbols, setup) {
-  return Boolean(
-    setup?.setupKey &&
-    (!settings.favoriteMarketsOnly || favoriteSymbols.has(setup.symbol)) &&
-    settings.timeframes.includes(setup.timeframe) &&
-    (settings.direction === "both" || settings.direction === setup.direction) &&
-    Number(setup.confidenceScore) >= Number(settings.minimumConfidence) &&
-    Number(setup.confidenceScore) >= 80
-  );
+  return evaluateTelegramSignalEligibility(settings, favoriteSymbols, setup).eligible;
+}
+
+export function evaluateTelegramSignalEligibility(settings, favoriteSymbols, setup, now = Date.now()) {
+  if (!setup?.setupKey) return telegramIneligible("missing_setup_key");
+  if (setup.resultType !== "ready_signal") return telegramIneligible("non_ready_result");
+  if (setup.validationPassed === false) return telegramIneligible("validation_failed");
+  if (setup.status === "Expired") return telegramIneligible("expired", { field: "status" });
+  if (setup.status !== "Active") return telegramIneligible("inactive_status");
+  if (setup.generatedQualityBlocked === true || setup.indicators?.generatedQualityBlocked === true) {
+    return telegramIneligible("quality_gate_blocked");
+  }
+
+  const calibrations = [setup.confidenceCalibration, setup.indicators?.confidenceCalibration].filter(Boolean);
+  if (calibrations.some((calibration) => calibration.blocked === true)) {
+    return telegramIneligible("calibration_blocked");
+  }
+  if (calibrations.some((calibration) => calibration.technicalError === true)) {
+    return telegramIneligible("calibration_error");
+  }
+
+  const confidence = finiteConfidence(setup.confidenceScore);
+  if (confidence == null) return telegramIneligible("invalid_confidence");
+
+  const expiration = evaluateTelegramExpiration(setup, now);
+  if (expiration.invalid) return telegramIneligible("invalid_expiration", expiration);
+  if (expiration.expired) return telegramIneligible("expired", expiration);
+
+  const favorites = favoriteSymbols instanceof Set ? favoriteSymbols : new Set();
+  if (settings?.favoriteMarketsOnly && !favorites.has(setup.symbol)) {
+    return telegramIneligible("preference_mismatch", { preference: "market" });
+  }
+  if (!Array.isArray(settings?.timeframes) || !settings.timeframes.includes(setup.timeframe)) {
+    return telegramIneligible("preference_mismatch", { preference: "timeframe" });
+  }
+  if (settings?.direction !== "both" && settings?.direction !== setup.direction) {
+    return telegramIneligible("preference_mismatch", { preference: "direction" });
+  }
+
+  const userThreshold = Number(settings?.minimumConfidence);
+  if (!Number.isFinite(userThreshold)) {
+    return telegramIneligible("preference_mismatch", { preference: "minimum_confidence" });
+  }
+  const effectiveThreshold = Math.max(TELEGRAM_GLOBAL_MINIMUM_CONFIDENCE, userThreshold);
+  if (confidence < effectiveThreshold) {
+    return telegramIneligible("below_user_threshold", {
+      confidence,
+      globalThreshold: TELEGRAM_GLOBAL_MINIMUM_CONFIDENCE,
+      userThreshold,
+      effectiveThreshold
+    });
+  }
+
+  return {
+    eligible: true,
+    reason: "eligible",
+    confidence,
+    globalThreshold: TELEGRAM_GLOBAL_MINIMUM_CONFIDENCE,
+    userThreshold,
+    effectiveThreshold
+  };
 }
 
 export function formatTelegramSignalMessage(setup) {
@@ -257,6 +312,46 @@ function buildTelegramUnlockUrl(setup) {
   url.searchParams.set("telegramUnlock", setupKey);
   url.hash = "signals";
   return url.toString();
+}
+
+function evaluateTelegramExpiration(setup, now) {
+  const expiredAt = firstPresentValue(setup.expiredAt, setup.expired_at);
+  if (expiredAt != null) {
+    const timestamp = parseTelegramTimestamp(expiredAt);
+    if (timestamp == null) return { invalid: true, field: "expiredAt" };
+    return { expired: true, field: "expiredAt", timestamp };
+  }
+
+  for (const [field, value] of [
+    ["validUntil", firstPresentValue(setup.validUntil, setup.valid_until)],
+    ["expiresAt", firstPresentValue(setup.expiresAt, setup.expires_at)]
+  ]) {
+    if (value == null) continue;
+    const timestamp = parseTelegramTimestamp(value);
+    if (timestamp == null) return { invalid: true, field };
+    if (timestamp <= Number(now)) return { expired: true, field, timestamp };
+  }
+
+  return { expired: false, invalid: false };
+}
+
+function firstPresentValue(...values) {
+  return values.find((value) => value != null && String(value).trim() !== "") ?? null;
+}
+
+function parseTelegramTimestamp(value) {
+  const timestamp = new Date(value).getTime();
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function finiteConfidence(value) {
+  if (value == null || (typeof value === "string" && !value.trim())) return null;
+  const confidence = Number(value);
+  return Number.isFinite(confidence) ? confidence : null;
+}
+
+function telegramIneligible(reason, details = {}) {
+  return { eligible: false, reason, ...details };
 }
 
 function assertTelegramConfigured() {
