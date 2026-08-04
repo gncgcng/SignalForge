@@ -72,8 +72,13 @@ export function buildSignalQuality(signal = {}) {
   const calibration = signal.confidenceCalibration || indicators.confidenceCalibration || {};
   const calibratedConfidence = finiteScore(calibration.calibratedConfidence ?? calibration.finalConfidence ?? signal.calibratedConfidence ?? signal.confidenceScore);
   const rawSetupScore = finiteScore(calibration.rawSetupScore ?? calibration.originalConfidence ?? signal.rawSetupScore ?? signal.qualityScore);
-  const overall = statusFromCalibratedConfidence(calibratedConfidence, calibration.status);
-  const label = labelFromCalibratedConfidence(calibratedConfidence, calibration.status);
+  const diagnosticOnly = calibration.mode === "diagnostic_only";
+  const liveCalibrationStatus = diagnosticOnly && calibration.status !== "calibration_error"
+    ? "active"
+    : calibration.status || "active";
+  const historicalCalibrationStatus = calibration.diagnosticStatus || calibration.historicalStatus || null;
+  const overall = statusFromCalibratedConfidence(calibratedConfidence, liveCalibrationStatus);
+  const label = labelFromCalibratedConfidence(calibratedConfidence, liveCalibrationStatus);
   const positiveLabels = list.filter((item) => ["strong", "good"].includes(item.status)).map((item) => item.label);
   const mainReason = positiveLabels.length
     ? `${joinLabels(positiveLabels.slice(0, 2))} passed validation.`
@@ -86,12 +91,13 @@ export function buildSignalQuality(signal = {}) {
     score: calibratedConfidence,
     rawSetupScore,
     calibratedConfidence,
-    calibrationStatus: calibration.status || "active",
+    calibrationStatus: liveCalibrationStatus,
+    historicalCalibrationStatus,
     mainReason,
     categories,
     strengths,
     risks,
-    confidenceExplanation: "Confidence reflects setup alignment after historical calibration. It is not a guaranteed win rate.",
+    confidenceExplanation: "Confidence reflects current setup alignment. Historical performance is diagnostic only and is not a guaranteed win rate.",
     debug: buildDebug(signal, list, indicators)
   };
 }

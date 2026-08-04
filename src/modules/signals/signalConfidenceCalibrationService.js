@@ -7,7 +7,7 @@ const EXACT_SOURCE_STRATEGY_TIMEFRAME_MIN_CLOSED = 20;
 const CONFIDENCE_CALIBRATION_VERSION = "calibration_v2";
 const SAMPLE_SMALL = "Small sample size. Do not trust this result yet.";
 const SAMPLE_EARLY = "Early data. Calibration may change.";
-const CONFIDENCE_COPY = "Confidence reflects setup alignment after historical calibration. It is not a guaranteed win rate.";
+const CONFIDENCE_COPY = "Confidence reflects current setup alignment. Historical performance is diagnostic only and is not a guaranteed win rate.";
 const CONFIDENCE_WARNING_COPY = "Confidence calibration warning: higher confidence buckets are not outperforming lower buckets. Confidence should be tightened before promotion.";
 
 export function breakEvenWinRate(averageRiskReward) {
@@ -36,19 +36,14 @@ export function buildConfidenceBucket(confidence) {
 }
 
 export function calculateGroupStatus(metrics = {}, override = null) {
-  if (
-    override?.status &&
-    (override.status !== "active" ||
-      override.penaltyOverride !== undefined ||
-      override.penalty_override !== null ||
-      override.confidenceCapOverride !== undefined ||
-      override.confidence_cap_override !== null)
-  ) {
+  if (override?.status && adminStatuses.has(override.status)) {
+    const penaltyOverride = override.penaltyOverride ?? override.penalty_override;
+    const confidenceCapOverride = override.confidenceCapOverride ?? override.confidence_cap_override;
     return {
       status: override.status,
       suggestedStatus: override.status,
-      penalty: Number(override.penaltyOverride ?? override.penalty_override ?? metrics.penalty ?? 0),
-      confidenceCap: override.confidenceCapOverride ?? override.confidence_cap_override ?? metrics.confidenceCap ?? null,
+      penalty: penaltyOverride == null ? 0 : Number(penaltyOverride),
+      confidenceCap: confidenceCapOverride == null ? null : Number(confidenceCapOverride),
       confidenceCapLift: 0,
       performanceLabel: override.status === "active" ? "Above break-even" : titleCase(override.status),
       recommendedAction: override.status === "active" ? "Keep active" : "Admin override",
@@ -166,17 +161,59 @@ export function calculateGroupMetrics(row = {}) {
 
 export async function applyConfidenceCalibration(signal) {
   if (!signal) return signal;
+  if (signal.confidenceCalibration || signal.indicators?.confidenceCalibrationApplied) return signal;
   const context = await getSignalCalibrationContext(signal);
   return applyCalibrationContext(signal, context);
 }
 
+export function preserveDownstreamConfidence(signal, warning = "Calibration metadata was missing downstream; existing finite confidence was preserved without recalibration.") {
+  if (!signal || signal.confidenceCalibration || signal.indicators?.confidenceCalibrationApplied) return signal;
+  const confidence = finiteConfidence(signal.confidenceScore);
+  if (confidence == null) return applyInvalidConfidenceCalibration(signal);
+  const calibrationPayload = {
+    version: CONFIDENCE_CALIBRATION_VERSION,
+    rawSetupScore: confidence,
+    originalConfidence: confidence,
+    calibratedConfidence: confidence,
+    finalConfidence: confidence,
+    confidenceCap: null,
+    totalPenalty: 0,
+    caps: [],
+    capRecovery: [],
+    penalties: [],
+    status: "metadata_missing",
+    mode: "diagnostic_only",
+    label: "Unchanged",
+    blocked: false,
+    calibrationReason: warning,
+    message: warning,
+    groups: []
+  };
+  return {
+    ...signal,
+    confidenceScore: confidence,
+    calibratedConfidence: confidence,
+    rawSetupScore: confidence,
+    confidenceVersion: CONFIDENCE_CALIBRATION_VERSION,
+    calibrationReason: warning,
+    confidenceCalibration: calibrationPayload,
+    indicators: {
+      ...(signal.indicators || {}),
+      confidenceCalibration: calibrationPayload,
+      confidenceCalibrationMessage: warning,
+      confidenceCalibrationApplied: true
+    }
+  };
+}
+
 export function isSignalBlockedByCalibration(signal) {
-  const status = signal?.indicators?.confidenceCalibration?.status;
-  return ["quarantined", "disabled_by_admin"].includes(status);
+  const calibration = signal?.confidenceCalibration || signal?.indicators?.confidenceCalibration;
+  return calibration?.status === "calibration_error" || calibration?.technicalError === true;
 }
 
 export function applyCalibrationContext(signal, context = {}) {
-  const originalConfidence = Number(signal.confidenceScore || 0);
+  const originalConfidence = finiteConfidence(signal.confidenceScore);
+  if (originalConfidence == null) return applyInvalidConfidenceCalibration(signal);
   const rawSetupScore = originalConfidence;
   let ruleCap = 99;
   let historicalCap = context.noHistory ? 85 : 99;
@@ -201,8 +238,6 @@ export function applyCalibrationContext(signal, context = {}) {
   };
 
   if (context.noHistory) caps.push({ cap: 85, reason: "No generated-signal history yet for this strategy or pair/timeframe.", type: "historical" });
-  const timeframePolicy = getStaticTimeframePolicy(signal.timeframe);
-  if (timeframePolicy.confidenceCap) addCap(timeframePolicy.confidenceCap, timeframePolicy.reason, "historical");
   if (hasMissingHigherTimeframe(signal)) addCap(82, "Missing or partial higher-timeframe confirmation.");
   if (hasWeakVolume(signal)) addCap(80, "Weak volume confirmation.");
   if (isChoppy(signal)) addCap(72, "Choppy or ranging market conditions.");
@@ -281,11 +316,12 @@ export function applyCalibrationContext(signal, context = {}) {
   }
 
   const confidenceCap = Math.min(ruleCap, historicalCap, expectancyCap);
-  const finalConfidence = Math.max(50, Math.min(confidenceCap, originalConfidence + penalty));
-  const status = quarantined?.status || (severeStrategy || severePairTimeframe ? "reduced_confidence" : poorGroups.length ? "watchlist" : "active");
-  const calibrationReason = status === "active"
+  const suggestedConfidence = Math.max(0, Math.min(100, Math.min(confidenceCap, originalConfidence + penalty)));
+  const finalConfidence = Math.max(0, Math.min(100, originalConfidence));
+  const diagnosticStatus = quarantined?.status || (severeStrategy || severePairTimeframe ? "reduced_confidence" : poorGroups.length ? "watchlist" : "active");
+  const calibrationReason = diagnosticStatus === "active"
     ? CONFIDENCE_COPY
-    : "Confidence was reduced because generated-signal outcomes for similar setups are below calibration thresholds.";
+    : "Historical diagnostics suggest caution for similar setups; live confidence was not changed.";
   const roundedFinalConfidence = Math.round(finalConfidence);
   const calibrationPayload = {
     version: CONFIDENCE_CALIBRATION_VERSION,
@@ -295,12 +331,17 @@ export function applyCalibrationContext(signal, context = {}) {
     finalConfidence: roundedFinalConfidence,
     confidenceCap,
     totalPenalty: penalty,
+    suggestedConfidenceCap: confidenceCap,
+    suggestedPenalty: penalty,
+    suggestedCalibratedConfidence: Math.round(suggestedConfidence),
     caps,
     capRecovery,
     penalties,
-    status,
-    label: confidenceQualityLabel(roundedFinalConfidence, status),
-    blocked: ["quarantined", "disabled_by_admin"].includes(status),
+    status: "active",
+    diagnosticStatus,
+    mode: "diagnostic_only",
+    label: confidenceQualityLabel(roundedFinalConfidence, "active"),
+    blocked: false,
     calibrationReason,
     message: CONFIDENCE_COPY,
     groups: (context.groups || []).map(summarizeGroupForSignal)
@@ -318,6 +359,47 @@ export function applyCalibrationContext(signal, context = {}) {
       ...(signal.indicators || {}),
       confidenceCalibration: calibrationPayload,
       confidenceCalibrationMessage: CONFIDENCE_COPY,
+      confidenceCalibrationApplied: true
+    }
+  };
+}
+
+function applyInvalidConfidenceCalibration(signal) {
+  const calibrationReason = "Confidence calibration failed because the raw confidence is not a finite number.";
+  const calibrationPayload = {
+    version: CONFIDENCE_CALIBRATION_VERSION,
+    rawSetupScore: null,
+    originalConfidence: null,
+    calibratedConfidence: null,
+    finalConfidence: null,
+    confidenceCap: null,
+    totalPenalty: 0,
+    suggestedCalibratedConfidence: null,
+    caps: [],
+    capRecovery: [],
+    penalties: [],
+    status: "calibration_error",
+    mode: "diagnostic_only",
+    label: "Calibration error",
+    blocked: true,
+    technicalError: true,
+    errorCode: "invalid_raw_confidence",
+    calibrationReason,
+    message: calibrationReason,
+    groups: []
+  };
+  return {
+    ...signal,
+    confidenceScore: null,
+    calibratedConfidence: null,
+    rawSetupScore: null,
+    confidenceVersion: CONFIDENCE_CALIBRATION_VERSION,
+    calibrationReason,
+    confidenceCalibration: calibrationPayload,
+    indicators: {
+      ...(signal.indicators || {}),
+      confidenceCalibration: calibrationPayload,
+      confidenceCalibrationMessage: calibrationReason,
       confidenceCalibrationApplied: true
     }
   };
@@ -663,19 +745,6 @@ function canAllowEliteConfidence(signal, groups = [], exactPositiveGroup = null)
   return !groups.some((group) => ["quarantined", "disabled_by_admin", "reduced_confidence"].includes(group.status));
 }
 
-function getStaticTimeframePolicy(timeframe) {
-  if (timeframe === "5m" || timeframe === "1h") {
-    return { confidenceCap: 72, reason: `${timeframe} generated signals are quarantined and capped at 72%.` };
-  }
-  if (timeframe === "15m") {
-    return { confidenceCap: 88, reason: "15m confidence is capped below 90 until stronger current-engine performance develops." };
-  }
-  if (timeframe === "4h") {
-    return { confidenceCap: 88, reason: "4h confidence is capped while it remains watchlist/promising." };
-  }
-  return { confidenceCap: null, reason: "" };
-}
-
 function groupStatsSql(where) {
   return `
     SELECT COUNT(*)::integer AS total_signals,
@@ -846,6 +915,12 @@ function titleCase(value) {
 }
 
 function finiteOrNull(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function finiteConfidence(value) {
+  if (value == null || (typeof value === "string" && !value.trim())) return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }

@@ -43,11 +43,31 @@ assert.match(quality.categories.marketStructure.reason, /Not enough data/);
 assert.equal(quality.categories.patternContext.status, "missing");
 assert.ok(quality.strengths.some((reason) => reason.includes("EMA")));
 assert.ok(quality.risks.some((reason) => reason.includes("Volume")));
-assert.match(quality.confidenceExplanation, /setup alignment after historical calibration/i);
+assert.match(quality.confidenceExplanation, /current setup alignment/i);
+assert.match(quality.confidenceExplanation, /historical performance is diagnostic only/i);
 assert.match(quality.confidenceExplanation, /not a guaranteed win rate/i);
 assert.ok(quality.debug.categories.every((item) => Object.hasOwn(item, "ruleSource") && Object.hasOwn(item, "confidenceImpact")));
 assert.ok(quality.debug.penaltiesApplied.length > 0);
 assert.ok(quality.debug.confidenceCapsApplied.length > 0);
+
+const diagnosticOnlyQuality = buildSignalQuality({
+  ...signal,
+  confidenceScore: 88,
+  calibratedConfidence: 88,
+  confidenceCalibration: {
+    status: "active",
+    diagnosticStatus: "quarantined",
+    mode: "diagnostic_only",
+    blocked: false,
+    rawSetupScore: 88,
+    calibratedConfidence: 88,
+    finalConfidence: 88
+  }
+});
+assert.equal(diagnosticOnlyQuality.overall, "strong");
+assert.notEqual(diagnosticOnlyQuality.label, "Quarantined");
+assert.equal(diagnosticOnlyQuality.calibrationStatus, "active");
+assert.equal(diagnosticOnlyQuality.historicalCalibrationStatus, "quarantined");
 
 const enriched = withSignalQuality(signal);
 assert.deepEqual(enriched.signalQuality, enriched.indicators.signalQuality);

@@ -8,10 +8,7 @@ import {
   saveDetectedAlert
 } from "../../db/repositories.js";
 import { getPair, listAutoScannerPairs } from "../market-data/marketDataService.js";
-import {
-  applyConfidenceCalibration,
-  isSignalBlockedByCalibration
-} from "../signals/signalConfidenceCalibrationService.js";
+import { preserveDownstreamConfidence } from "../signals/signalConfidenceCalibrationService.js";
 import {
   enqueueMatchingTelegramNotifications,
   telegramPreferenceMatchesSetup
@@ -188,17 +185,10 @@ export async function runAutoCryptoAlertScan() {
 }
 
 async function calibrateTelegramAlertSetup(setup) {
-  const calibrated = await applyConfidenceCalibration({
-    ...setup,
-    generationSource: "telegram_alert",
-    indicators: {
-      ...(setup.indicators || {}),
-      generationSource: "telegram_alert",
-      confidenceCalibration: undefined,
-      confidenceCalibrationApplied: undefined
-    }
-  });
-  return isSignalBlockedByCalibration(calibrated) ? null : calibrated;
+  const preserved = preserveDownstreamConfidence(setup);
+  return Number.isFinite(preserved?.confidenceScore) && !preserved?.confidenceCalibration?.technicalError
+    ? preserved
+    : null;
 }
 
 async function getPreferenceUser(userId, cache) {

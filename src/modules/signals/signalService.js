@@ -41,7 +41,8 @@ import {
 import { toLockedSignalQuality, withSignalQuality } from "./signalQualityService.js";
 import {
   applyConfidenceCalibration,
-  isSignalBlockedByCalibration
+  isSignalBlockedByCalibration,
+  preserveDownstreamConfidence
 } from "./signalConfidenceCalibrationService.js";
 import {
   applyGeneratedSignalQualityBlock,
@@ -315,7 +316,7 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
     ? {
       ...result.signal,
       generationSource,
-      confidenceScore: Math.min(Number(result.signal.confidenceScore || 0), Number(candidate?.confidenceEstimate || 99)),
+      confidenceScore: capFiniteConfidence(result.signal.confidenceScore, candidate?.confidenceEstimate),
       entryQuality: readiness.entryQuality,
       readinessScore: readiness.readinessScore,
       indicators: {
@@ -360,17 +361,7 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
       candidateId: candidate?.id || null
     });
     if (candidate?.id) {
-      const candidatePromotionSignal = await applyConfidenceCalibration({
-        ...signal,
-        generationSource: "candidate_promotion",
-        indicators: {
-          ...(signal.indicators || {}),
-          generationSource: "candidate_promotion",
-          confidenceCalibration: undefined,
-          confidenceCalibrationApplied: undefined
-        }
-      });
-      await saveGeneratedSignal(candidatePromotionSignal, {
+      await saveGeneratedSignal(preserveDownstreamConfidence(signal), {
         source: "candidate_promotion",
         generatedBy: generationContext.generatedBy || user?.id || "system",
         candidateId: candidate.id
@@ -386,7 +377,7 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
   }
   if (readySignal && validation && (!validation.passed || calibrationBlocked || qualityBlocked) && candidate) {
     const rejectionReason = calibrationBlocked
-      ? "Performance calibration quarantined or disabled this group."
+      ? "Confidence calibration failed because the raw confidence is invalid."
       : qualityBlocked
         ? qualityGate.reason
         : validation.reasons?.[0]?.reason || "Final signal validation failed.";
@@ -409,7 +400,7 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
       ? validationNoSetupAnalysis(readySignal, qualityBlocked
         ? qualityGateToValidation(readySignal, qualityGate)
         : calibrationBlocked
-          ? qualityGateToValidation(readySignal, { stage: "generated_quality_calibration", reason: "Performance calibration quarantined or disabled this group." })
+          ? qualityGateToValidation(readySignal, { stage: "generated_quality_calibration", reason: "Confidence calibration failed because the raw confidence is invalid." })
           : validation)
       : result.analysis;
   const publishable = Boolean(valid && signal);
@@ -1051,6 +1042,14 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function capFiniteConfidence(value, cap) {
+  if (value == null || (typeof value === "string" && !value.trim())) return null;
+  const confidence = Number(value);
+  if (!Number.isFinite(confidence)) return value;
+  const finiteCap = Number(cap);
+  return Number.isFinite(finiteCap) ? Math.min(confidence, finiteCap) : confidence;
+}
+
 function slugDiagnostic(value) {
   return String(value || "unknown").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
 }
@@ -1234,8 +1233,12 @@ async function applyLearningToValidatedSignal(signal, options = {}) {
       generationSource: source
     }
   };
+  if (sourcedSignal.confidenceCalibration || sourcedSignal.indicators?.confidenceCalibrationApplied) return sourcedSignal;
+  if (source === "telegram_alert" || source === "candidate_promotion") {
+    return preserveDownstreamConfidence(sourcedSignal);
+  }
   if (sourcedSignal.indicators?.learningApplied) {
-    return sourcedSignal.indicators?.confidenceCalibrationApplied ? sourcedSignal : applyConfidenceCalibration(sourcedSignal);
+    return applyConfidenceCalibration(sourcedSignal);
   }
   const learning = await getLearningContextForSignal(sourcedSignal);
   return applyConfidenceCalibration(applyLearningAdjustment(sourcedSignal, learning));

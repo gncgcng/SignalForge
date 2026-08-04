@@ -98,6 +98,14 @@ const belowFloor = calibrationModule.applyCalibrationContext(calibrationSignal(8
     penalizedGroup("recent_strategy:breakout-retest", "recent_strategy", -20, 12)
   ]
 });
+const diagnosticQuarantine = calibrationModule.applyCalibrationContext(calibrationSignal(88), {
+  noHistory: false,
+  groups: [{
+    ...penalizedGroup("strategy:quarantined", "strategy", -15, 35),
+    status: "quarantined",
+    confidenceCap: 68
+  }]
+});
 characterize("no-history confidence cap", {
   rawSetupScore: raw88.confidenceCalibration.rawSetupScore,
   finalConfidence: raw88.confidenceScore,
@@ -144,9 +152,28 @@ for (const malformed of [null, undefined, Number.NaN]) {
       noHistory: true,
       groups: []
     });
-    assert.ok(Number.isFinite(calibrated.confidenceScore));
+    assert.equal(calibrated.confidenceScore, null);
+    assert.equal(calibrated.calibratedConfidence, null);
     assert.notEqual(calibrated.confidenceScore, 0);
     assert.notEqual(calibrated.confidenceScore, 50);
+    assert.equal(calibrated.confidenceCalibration.status, "calibration_error");
+    assert.equal(calibrated.confidenceCalibration.blocked, true);
+    assert.equal(calibrated.confidenceCalibration.technicalError, true);
+    assert.equal(calibrated.confidenceCalibration.errorCode, "invalid_raw_confidence");
+    assert.equal(calibrationModule.isSignalBlockedByCalibration(calibrated), true);
+    assert.equal(notificationModule.telegramPreferenceMatchesSetup({
+      enabled: true,
+      favoriteMarketsOnly: false,
+      timeframes: ["15m"],
+      direction: "both",
+      minimumConfidence: 0
+    }, new Set(), {
+      ...telegramSignal(90, "ready_signal"),
+      ...calibrated,
+      resultType: "ready_signal",
+      validationPassed: true,
+      status: "Active"
+    }), false);
   });
 }
 await runtime("no-history payload explicitly records unavailable history", () => {
@@ -168,6 +195,24 @@ await runtime("historical penalties do not invent a fixed confidence floor of 50
     50,
     `raw 88 with ${belowFloor.confidenceCalibration.totalPenalty} points was forced to 50`
   );
+});
+await runtime("historical quarantine remains diagnostic while live calibration stays active", () => {
+  assert.equal(diagnosticQuarantine.confidenceScore, 88);
+  assert.equal(diagnosticQuarantine.confidenceCalibration.finalConfidence, 88);
+  assert.equal(diagnosticQuarantine.confidenceCalibration.status, "active");
+  assert.equal(diagnosticQuarantine.confidenceCalibration.diagnosticStatus, "quarantined");
+  assert.equal(diagnosticQuarantine.confidenceCalibration.mode, "diagnostic_only");
+  assert.equal(diagnosticQuarantine.confidenceCalibration.blocked, false);
+});
+await runtime("signal quality does not downgrade a diagnostic-only historical quarantine", () => {
+  const qualitySignal = signalQualityModule.withSignalQuality(diagnosticQuarantine);
+  assert.equal(qualitySignal.signalQuality.score, 88);
+  assert.equal(qualitySignal.signalQuality.overall, "strong");
+  assert.notEqual(qualitySignal.signalQuality.label, "Quarantined");
+  assert.notEqual(qualitySignal.signalQuality.label, "Reduced confidence");
+  assert.notEqual(qualitySignal.signalQuality.label, "Under calibration");
+  assert.equal(qualitySignal.signalQuality.calibrationStatus, "active");
+  assert.equal(qualitySignal.signalQuality.historicalCalibrationStatus, "quarantined");
 });
 
 resetDatabaseTransport();

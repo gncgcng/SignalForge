@@ -1,4 +1,5 @@
 import { query } from "../../db/client.js";
+import { calculateGroupStatus } from "./signalConfidenceCalibrationService.js";
 
 export const blockedGeneratedSignalStatuses = Object.freeze({
   duplicate: "Duplicate blocked",
@@ -10,26 +11,17 @@ export const blockedGeneratedSignalStatuses = Object.freeze({
 
 const currentEngineSourceSql = "source NOT IN ('legacy_saved_signal','legacy_unlocked_signal')";
 const timeframeOrder = ["5m", "15m", "1h", "4h"];
-const timeframePolicies = Object.freeze({
-  "5m": { status: "quarantined", confidenceCap: 72, reason: "5m generated signals are quarantined after weak realized performance." },
-  "1h": { status: "quarantined", confidenceCap: 72, reason: "1h generated signals are quarantined after weak realized performance." },
-  "15m": { status: "active", confidenceCap: 88, reason: "15m can remain active, but confidence is capped below 90 until stronger evidence develops." },
-  "4h": { status: "watchlist", confidenceCap: 88, reason: "4h remains watchlist/promising until enough current-engine closed outcomes exist." }
-});
+const defaultTimeframePolicy = Object.freeze({ status: "active", confidenceCap: null, reason: "" });
 
 export async function evaluateGeneratedSignalQualityGate(signal, context = {}) {
   if (!signal) return passGate();
-  const source = context.source || signal.generationSource || signal.source || signal.indicators?.generationSource || "manual_scan";
   const readiness = Number(signal.readinessScore ?? signal.entryReadinessScore ?? signal.indicators?.readinessScore ?? signal.indicators?.entryReadinessScore ?? 0);
   if (!Number.isFinite(readiness) || readiness <= 0) {
     return blockGate("readiness", "Readiness score is 0, so this setup cannot be promoted as a ready signal.", { readinessScore: readiness });
   }
 
-  const timeframePolicy = getTimeframeQualityPolicy(signal.timeframe);
-  if (timeframePolicy.status === "quarantined") {
-    return blockGate("timeframe", timeframePolicy.reason, { timeframe: signal.timeframe, confidenceCap: timeframePolicy.confidenceCap });
-  }
-  if (timeframePolicy.status === "watchlist" && !(await hasProvenSourceStrategyTimeframe(signal, source))) {
+  const timeframePolicy = await getEffectiveTimeframeQualityPolicy(signal.timeframe);
+  if (["quarantined", "disabled_by_admin", "watchlist"].includes(timeframePolicy.status)) {
     return blockGate("timeframe", timeframePolicy.reason, { timeframe: signal.timeframe, confidenceCap: timeframePolicy.confidenceCap });
   }
 
@@ -76,23 +68,11 @@ export function applyGeneratedSignalQualityBlock(signal, gate) {
 }
 
 export function applyTimeframeConfidencePolicy(signal) {
-  if (!signal) return signal;
-  const policy = getTimeframeQualityPolicy(signal.timeframe);
-  if (!policy.confidenceCap) return signal;
-  const confidenceScore = Math.min(Number(signal.confidenceScore || 0), policy.confidenceCap);
-  return {
-    ...signal,
-    confidenceScore,
-    indicators: {
-      ...(signal.indicators || {}),
-      timeframeConfidenceCap: policy.confidenceCap,
-      timeframeConfidenceCapReason: policy.reason
-    }
-  };
+  return signal;
 }
 
-export function getTimeframeQualityPolicy(timeframe) {
-  return timeframePolicies[timeframe] || { status: "active", confidenceCap: null, reason: "" };
+export function getTimeframeQualityPolicy() {
+  return { ...defaultTimeframePolicy };
 }
 
 export function getFailureCooldownMs(timeframe, status = "Hit SL") {
@@ -168,27 +148,20 @@ async function findRecentGeneratedSignalFailure(signal) {
   }) || null;
 }
 
-async function hasProvenSourceStrategyTimeframe(signal, source) {
-  const result = await query(`
-    SELECT COUNT(*) FILTER (WHERE status IN ('Hit TP','Hit SL'))::integer AS closed,
-      COUNT(*) FILTER (WHERE status = 'Hit TP')::integer AS hit_tp,
-      COUNT(*) FILTER (WHERE status = 'Hit SL')::integer AS hit_sl,
-      COALESCE(AVG(risk_reward), 0) AS average_rr
-    FROM generated_signals
-    WHERE source = $1
-      AND strategy = $2
-      AND timeframe = $3
-      AND ${currentEngineSourceSql}
-  `, [source, signal.setupType || signal.strategy || "Qualified setup", signal.timeframe]);
-  const row = result.rows[0] || {};
-  const closed = Number(row.closed || 0);
-  if (closed < 20) return false;
-  const hitTp = Number(row.hit_tp || 0);
-  const hitSl = Number(row.hit_sl || 0);
-  const winRate = closed ? hitTp / closed : 0;
-  const averageRr = Number(row.average_rr || 0);
-  const expectancy = winRate * averageRr - (1 - winRate);
-  return expectancy > 0;
+async function getEffectiveTimeframeQualityPolicy(timeframe) {
+  const result = await query(
+    "SELECT * FROM signal_strategy_statuses WHERE group_key = $1 LIMIT 1",
+    [`timeframe:${String(timeframe || "unknown").toLowerCase()}`]
+  );
+  const override = result.rows[0] || null;
+  if (!override) return getTimeframeQualityPolicy(timeframe);
+  const policy = calculateGroupStatus({}, override);
+  return {
+    status: policy.status,
+    confidenceCap: policy.confidenceCap,
+    reason: override.admin_note || `The ${timeframe} timeframe is ${policy.status.replaceAll("_", " ")} by explicit admin setting.`,
+    adminControlled: policy.adminControlled
+  };
 }
 
 function passGate() {

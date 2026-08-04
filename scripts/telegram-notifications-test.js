@@ -75,9 +75,10 @@ const result = {
     migration.includes("telegram_notification_queue"),
   duplicateQueueConstraint: migration.includes("UNIQUE (user_id, setup_key)") &&
     repositories.includes("ON CONFLICT (user_id, setup_key) DO NOTHING"),
-  queueIsUserScoped: repositories.includes("user_id text NOT NULL") === false &&
-    repositories.includes("const setupKey = setup.setupKey || setup.id") &&
-    repositories.includes("userId,\n    setupKey"),
+  queueIsUserScoped: /export async function enqueueTelegramNotification\(userId,/.test(repositories) &&
+    /INSERT INTO telegram_notification_queue\s*\([\s\S]*?user_id, setup_key/.test(repositories) &&
+    /ON CONFLICT \(user_id, setup_key\) DO NOTHING/.test(repositories) &&
+    repositories.includes("const setupKey = setup.setupKey || setup.id"),
   allCryptoMatchesWithoutFavorite: telegramPreferenceMatchesSetup(settings, new Set(), setup),
   favoriteMarketMatches: telegramPreferenceMatchesSetup(watchlistSettings, favorites, setup),
   nonFavoriteRejected: !telegramPreferenceMatchesSetup(watchlistSettings, new Set(["XAU/USD"]), setup),

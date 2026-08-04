@@ -147,16 +147,22 @@ export function applyLearningAdjustment(signal, learning = null) {
   }
 
   const adjustment = calculateLearningAdjustment(learning);
-  const nextConfidence = Math.min(99, Math.max(0, Number(signal.confidenceScore || 0) + adjustment));
+  const confidence = finiteConfidence(signal.confidenceScore);
+  const suggestedConfidence = confidence == null
+    ? null
+    : Math.min(100, Math.max(0, confidence + adjustment));
   const insight = buildLearningInsight(learning, adjustment);
 
   return {
     ...signal,
-    confidenceScore: nextConfidence,
+    confidenceScore: signal.confidenceScore,
     indicators: {
       ...(signal.indicators || {}),
       learningApplied: true,
-      learningAdjustment: adjustment,
+      learningAdjustment: 0,
+      suggestedLearningAdjustment: adjustment,
+      suggestedLearningConfidence: suggestedConfidence,
+      learningDiagnosticOnly: true,
       learningInsight: insight.message,
       learningMode: insight.mode,
       learningSampleSize: insight.sampleSize
@@ -196,14 +202,14 @@ export function buildLearningInsight(learning = {}, adjustment = 0) {
     return {
       mode: "positive",
       sampleSize,
-      message: "Similar completed setups have shown constructive historical outcomes, so learning adds a small confidence calibration. This is not a prediction."
+      message: "Similar completed setups have shown constructive historical outcomes. This diagnostic does not change live confidence and is not a prediction."
     };
   }
   if (adjustment < 0) {
     return {
       mode: "negative",
       sampleSize,
-      message: "Similar completed setups have recently underperformed or expired often, so learning adds a small caution penalty."
+      message: "Similar completed setups have recently underperformed or expired often. This diagnostic does not change live confidence."
     };
   }
 
@@ -236,6 +242,12 @@ function neutralInsight() {
     sampleSize: 0,
     message: "This market/timeframe has limited completed-signal history, so learning adjustment is neutral."
   };
+}
+
+function finiteConfidence(value) {
+  if (value == null || (typeof value === "string" && !value.trim())) return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
 }
 
 function getEmaRelationship(indicators) {

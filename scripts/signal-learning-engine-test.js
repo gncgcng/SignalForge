@@ -112,7 +112,10 @@ const result = {
   expiredPostMortemCreatesExpirationTags: expiredTags.includes("low_volatility") &&
     expiredTags.includes("no_momentum_follow_through"),
   minimumSampleSizesEnforced: belowSampleAdjustment === 0 && eligibleAdjustment > 0,
-  learningCannotPushConfidenceAbove99: capped.confidenceScore === 99,
+  learningIsDiagnosticOnly: capped.confidenceScore === 98 &&
+    capped.indicators.learningAdjustment === 0 &&
+    capped.indicators.suggestedLearningAdjustment > 0 &&
+    capped.indicators.suggestedLearningConfidence === 100,
   learningCannotOverrideValidation: signalService.indexOf("validateSignalForPublication") <
     signalService.indexOf("applyLearningToValidatedSignal"),
   postMortemHookedToOutcomeTracker: outcomeService.includes("runSignalPostMortem") &&
