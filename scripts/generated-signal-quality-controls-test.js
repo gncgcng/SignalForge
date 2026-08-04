@@ -53,7 +53,11 @@ const blocked = applyGeneratedSignalQualityBlock({
   reason: "Blocked by cooldown because the last similar signal hit SL."
 });
 assert.equal(blocked.status, "Cooldown blocked");
-assert.equal(blocked.validationPassed, true, "blocked generated records remain admin diagnostics, not validation failures");
+assert.equal(blocked.resultType, "blocked_signal", "blocked generated records must not retain a ready result type");
+assert.equal(blocked.validationPassed, false, "a final Quality Gate block must fail final validation coherently");
+assert.equal(blocked.structuralValidationPassed, true, "pre-gate structural validation remains available for diagnostics");
+assert.equal(blocked.generatedQualityGatePassed, false);
+assert.equal(blocked.generatedQualityBlocked, true);
 assert.match(blocked.resultReason, /last similar signal hit SL/);
 
 assert.match(gateService, /findRecentGeneratedSignalDuplicate/);
@@ -81,7 +85,12 @@ assert.match(generatedRepository, /Correlated duplicate/);
 assert.match(generatedRepository, /Quarantined timeframe/);
 assert.match(generatedRepository, /Readiness failed/);
 assert.match(generatedRepository, /Invalid legacy ready signal/);
-assert.match(generatedRepository, /result_reason = COALESCE\(EXCLUDED\.result_reason, generated_signals\.result_reason\)/);
+assert.match(generatedRepository, /source_history = \(/);
+assert.match(generatedRepository, /promoted_from_candidate_id = COALESCE\(/);
+assert.doesNotMatch(generatedRepository, /confidence = EXCLUDED\.confidence/);
+assert.doesNotMatch(generatedRepository, /confidence_calibration = EXCLUDED\.confidence_calibration/);
+assert.doesNotMatch(generatedRepository, /full_analysis = EXCLUDED\.full_analysis/);
+assert.doesNotMatch(generatedRepository, /result_reason = COALESCE\(EXCLUDED\.result_reason/);
 
 assert.match(generatedService, /performanceScope \|\| "current"/);
 assert.match(generatedController, /performanceScope/);

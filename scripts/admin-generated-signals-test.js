@@ -34,7 +34,7 @@ const checks = {
     autoScan.includes('source: "telegram_alert"') &&
     autoScan.includes("calibrateTelegramAlertSetup") &&
     signalService.includes('source: "candidate_promotion"') &&
-    signalService.includes("candidatePromotionSignal") &&
+    signalService.includes("saveGeneratedSignal(preserveDownstreamConfidence(signal)") &&
     signalService.includes("if (signal) {") &&
     signalService.includes("validation?.passed"),
   backtestShadowStored:

@@ -51,9 +51,13 @@ export function applyGeneratedSignalQualityBlock(signal, gate) {
   return {
     ...signal,
     status,
+    resultType: "blocked_signal",
     resultReason: reason,
     generatedQualityGate: gate,
-    validationPassed: true,
+    structuralValidationPassed: signal.validationPassed !== false,
+    generatedQualityGatePassed: false,
+    generatedQualityBlocked: true,
+    validationPassed: false,
     rejectedReasons: [
       ...(signal.rejectedReasons || []),
       { stage: gate.stage || "generated_quality", reason, timestamp: new Date().toISOString(), market: signal.symbol, strategy: signal.setupType }
@@ -61,6 +65,8 @@ export function applyGeneratedSignalQualityBlock(signal, gate) {
     indicators: {
       ...(signal.indicators || {}),
       generatedQualityGate: gate,
+      structuralValidationPassed: signal.validationPassed !== false,
+      generatedQualityGatePassed: false,
       generatedQualityBlocked: true,
       generatedQualityBlockReason: reason
     }
