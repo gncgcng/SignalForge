@@ -31,7 +31,7 @@ const confirmedFailures = [];
 const passingProtections = [];
 const characterizationFindings = [];
 const limitations = [
-  "scanMarketSetupDetailed and runAutoCryptoAlertScan could not be executed end-to-end without replacing internal candidate/repository modules. The production modules were imported unchanged; repeated private orchestration stages are checked statically and their real calibration function is characterized at runtime."
+  "This regression command does not execute scanMarketSetupDetailed end to end. The separate test:ready-signal-end-to-end command now covers it with the real generator, readiness, validation, calibration, Quality Gate, and final construction while replacing Coinbase HTTP and PostgreSQL transport. runAutoCryptoAlertScan is still not executed end to end."
 ];
 
 const riskCharacterization = characterizeRiskEngine();
@@ -39,7 +39,7 @@ const generatorCharacterization = characterizeGeneratorFixture();
 const generatedFixture = generatorCharacterization.validResult;
 const traceSignal = generatedFixture?.signal || buildRiskDerivedSignal(riskCharacterization.plans[0]);
 if (!generatedFixture) {
-  limitations.push("The real generator executed against 80 deterministic candle fixtures but produced no ready setup. This is generator execution only, not end-to-end production-pipeline coverage; downstream calibration characterization uses levels returned by the real Dynamic Risk Engine.");
+  limitations.push("This regression harness's 80-fixture generator search still produces no ready setup and remains characterization only. A fixed known-good ready path is covered separately by test:ready-signal-end-to-end; this harness continues using real Dynamic Risk Engine levels for its downstream characterization.");
 }
 characterize("real generator execution", {
   attempts: generatorCharacterization.attempts,
