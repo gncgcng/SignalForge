@@ -2,6 +2,43 @@ import { query } from "../../db/client.js";
 import { createId } from "../../shared/ids.js";
 
 const terminalPriority = Object.freeze({ "Hit TP": 6, "Hit SL": 5, "Manually closed": 4, Expired: 3, Active: 2 });
+const terminalOutcomeStatuses = new Set(["Hit TP", "Hit SL", "Expired"]);
+const forwardOutcomeSources = new Set(["manual_scan", "auto_crypto_watcher", "telegram_alert", "candidate_promotion"]);
+const excludedForwardOutcomeSources = new Set(["backtest_shadow", "admin_test"]);
+
+export const FORWARD_OUTCOME_R_VERSION = "terminal_v1_tp_rr_sl_minus1_expired_zero";
+
+export function buildForwardOutcomeMetrics(status, riskReward, evaluatedAt = new Date()) {
+  if (!terminalOutcomeStatuses.has(status)) return null;
+  const timestamp = new Date(evaluatedAt);
+  if (!Number.isFinite(timestamp.getTime())) {
+    const error = new Error("Generated-signal outcome evaluation timestamp is invalid.");
+    error.code = "INVALID_OUTCOME_EVALUATED_AT";
+    throw error;
+  }
+  if (status === "Hit TP") {
+    const storedRiskReward = Number(riskReward);
+    if (!Number.isFinite(storedRiskReward) || storedRiskReward <= 0) {
+      const error = new Error("Cannot record a Hit TP outcome without a finite positive stored risk/reward value.");
+      error.code = "INVALID_GENERATED_SIGNAL_RISK_REWARD";
+      throw error;
+    }
+    return { realizedR: storedRiskReward, outcomeEvaluatedAt: timestamp, outcomeRVersion: FORWARD_OUTCOME_R_VERSION };
+  }
+  return {
+    realizedR: status === "Hit SL" ? -1 : 0,
+    outcomeEvaluatedAt: timestamp,
+    outcomeRVersion: FORWARD_OUTCOME_R_VERSION
+  };
+}
+
+export function isForwardOutcomeEligibleSignal(signal = {}) {
+  const source = String(signal.source || signal.generationSource || "").trim();
+  const sourceHistory = Array.isArray(signal.sourceHistory)
+    ? signal.sourceHistory
+    : Array.isArray(signal.source_history) ? signal.source_history : [];
+  return forwardOutcomeSources.has(source) && !sourceHistory.some((item) => excludedForwardOutcomeSources.has(String(item)));
+}
 
 export async function upsertGeneratedSignal(signal, context = {}) {
   const dedupeKey = buildGeneratedSignalKey(signal);
@@ -140,6 +177,9 @@ export async function listActiveGeneratedSignals(limit = 500) {
 }
 
 export async function updateGeneratedSignalStatus(id, status, details = {}) {
+  const outcomeMetrics = details.recordForwardOutcomeMetrics === true
+    ? buildForwardOutcomeMetrics(status, details.riskReward, details.evaluatedAt || new Date())
+    : null;
   const result = await query(`
     UPDATE generated_signals SET
       status = CASE WHEN (CASE status WHEN 'Hit TP' THEN 6 WHEN 'Hit SL' THEN 5 WHEN 'Manually closed' THEN 4 WHEN 'Expired' THEN 3 ELSE 2 END) > $3 THEN status ELSE $2 END,
@@ -147,17 +187,39 @@ export async function updateGeneratedSignalStatus(id, status, details = {}) {
       hit_sl_at = CASE WHEN $2 = 'Hit SL' THEN COALESCE(hit_sl_at,$4) ELSE hit_sl_at END,
       manually_closed_at = CASE WHEN $2 = 'Manually closed' THEN COALESCE(manually_closed_at,$4) ELSE manually_closed_at END,
       expired_at = CASE WHEN $2 = 'Expired' AND status NOT IN ('Hit TP','Hit SL','Manually closed') THEN COALESCE(expired_at,$4) ELSE expired_at END,
+      realized_r = COALESCE(realized_r, CASE
+        WHEN status = 'Active' AND $6::numeric IS NOT NULL THEN $6::numeric
+        ELSE NULL
+      END),
+      outcome_evaluated_at = COALESCE(outcome_evaluated_at, CASE
+        WHEN status = 'Active' AND $6::numeric IS NOT NULL THEN $7::timestamptz
+        ELSE NULL
+      END),
+      outcome_r_version = COALESCE(outcome_r_version, CASE
+        WHEN status = 'Active' AND $6::numeric IS NOT NULL THEN $8::text
+        ELSE NULL
+      END),
       result_reason = COALESCE($5,result_reason), updated_at = now()
     WHERE id = $1 RETURNING *
-  `, [id, status, terminalPriority[status] || 2, details.resolvedAt || new Date(), details.reason || null]);
+  `, [
+    id,
+    status,
+    terminalPriority[status] || 2,
+    details.resolvedAt || new Date(),
+    details.reason || null,
+    outcomeMetrics?.realizedR ?? null,
+    outcomeMetrics?.outcomeEvaluatedAt || null,
+    outcomeMetrics?.outcomeRVersion || null
+  ]);
   return mapGeneratedSignal(result.rows[0]);
 }
 
 export async function syncGeneratedSignalOutcome(signal) {
   if (!signal?.id || !signal.status) return null;
-  const result = await query("SELECT id FROM generated_signals WHERE signal_id = $1 OR setup_key = $2 LIMIT 1", [signal.id, signal.setupKey || null]);
+  const result = await query("SELECT id, source, source_history, risk_reward FROM generated_signals WHERE signal_id = $1 OR setup_key = $2 LIMIT 1", [signal.id, signal.setupKey || null]);
   if (!result.rows[0]) return null;
-  const id = result.rows[0].id;
+  const stored = result.rows[0];
+  const id = stored.id;
   await query(`UPDATE generated_signals SET
     post_mortem_tags = CASE WHEN $2::jsonb = '[]'::jsonb THEN post_mortem_tags ELSE $2::jsonb END,
     max_favorable_excursion = COALESCE($3, max_favorable_excursion),
@@ -170,7 +232,13 @@ export async function syncGeneratedSignalOutcome(signal) {
     finiteOrNull(signal.maxAdverseExcursion ?? signal.postMortem?.maxAdverseExcursion),
     signal.statusReason || signal.postMortem?.summary || null
   ]);
-  return updateGeneratedSignalStatus(id, signal.status, { resolvedAt: signal.resolvedAt, reason: signal.statusReason });
+  return updateGeneratedSignalStatus(id, signal.status, {
+    resolvedAt: signal.resolvedAt,
+    evaluatedAt: new Date(),
+    reason: signal.statusReason,
+    riskReward: stored.risk_reward,
+    recordForwardOutcomeMetrics: isForwardOutcomeEligibleSignal(stored)
+  });
 }
 
 export function buildGeneratedSignalKey(signal) {
@@ -184,7 +252,7 @@ function toFullAnalysis(signal) { return { reasoning: signal.reasoning, confirma
 function normalizeSource(source) { return ["manual_scan","auto_crypto_watcher","telegram_alert","candidate_promotion","backtest_shadow","admin_test","legacy_saved_signal","legacy_unlocked_signal"].includes(source) ? source : "manual_scan"; }
 function finiteOrNull(value) { const number = Number(value); return Number.isFinite(number) ? number : null; }
 function displayPair(symbol) { return String(symbol || "").toUpperCase().replace(/[-/]/g, ""); }
-function mapGeneratedSignal(row) { if (!row) return null; return { id: row.id, signalId: row.signal_id, setupKey: row.setup_key, pair: row.pair, displayPair: row.display_pair, provider: row.provider, timeframe: row.timeframe, direction: row.direction, strategy: row.strategy, pattern: row.pattern, patternContext: row.pattern_context || {}, entry: Number(row.entry), stopLoss: Number(row.stop_loss), takeProfit: Number(row.take_profit), riskReward: Number(row.risk_reward), confidence: Number(row.confidence), originalConfidence: row.original_confidence == null ? Number(row.confidence) : Number(row.original_confidence), rawSetupScore: row.original_confidence == null ? Number(row.confidence) : Number(row.original_confidence), calibratedConfidence: row.calibrated_confidence == null ? Number(row.confidence) : Number(row.calibrated_confidence), finalConfidence: row.calibrated_confidence == null ? Number(row.confidence) : Number(row.calibrated_confidence), confidenceVersion: row.confidence_version || row.confidence_calibration?.version || "calibration_v1", calibrationReason: row.calibration_reason || row.confidence_calibration?.calibrationReason || row.confidence_calibration?.message || null, confidenceCalibration: row.confidence_calibration || {}, setupQualityScore: Number(row.setup_quality_score || 0), entryReadinessScore: Number(row.entry_readiness_score || 0), status: row.status, expiringSoon: Boolean(row.expiring_soon), validUntil: row.valid_until, expiredAt: row.expired_at, hitTpAt: row.hit_tp_at, hitSlAt: row.hit_sl_at, source: row.source, sourceHistory: row.source_history || [], generatedBy: row.generated_by, promotedFromCandidateId: row.promoted_from_candidate_id, validationSummary: row.validation_summary || {}, warningReasons: row.warning_reasons || [], qualityBreakdown: row.quality_breakdown || {}, fullAnalysis: row.full_analysis || {}, postMortemTags: row.resolved_post_mortem_tags || row.post_mortem_tags || [], maxFavorableExcursion: row.max_favorable_excursion == null ? null : Number(row.max_favorable_excursion), maxAdverseExcursion: row.max_adverse_excursion == null ? null : Number(row.max_adverse_excursion), resultReason: row.result_reason, candidateOrigin: row.candidate_status ? { status: row.candidate_status, setupQualityScore: Number(row.candidate_score || 0), entryReadinessScore: Number(row.readiness_score || 0), missingConfirmations: row.missing_confirmations || [], firstDetectedAt: row.first_detected_at, lastCheckedAt: row.last_checked_at } : null, createdAt: row.created_at, updatedAt: row.updated_at }; }
+function mapGeneratedSignal(row) { if (!row) return null; return { id: row.id, signalId: row.signal_id, setupKey: row.setup_key, pair: row.pair, displayPair: row.display_pair, provider: row.provider, timeframe: row.timeframe, direction: row.direction, strategy: row.strategy, pattern: row.pattern, patternContext: row.pattern_context || {}, entry: Number(row.entry), stopLoss: Number(row.stop_loss), takeProfit: Number(row.take_profit), riskReward: Number(row.risk_reward), confidence: Number(row.confidence), originalConfidence: row.original_confidence == null ? Number(row.confidence) : Number(row.original_confidence), rawSetupScore: row.original_confidence == null ? Number(row.confidence) : Number(row.original_confidence), calibratedConfidence: row.calibrated_confidence == null ? Number(row.confidence) : Number(row.calibrated_confidence), finalConfidence: row.calibrated_confidence == null ? Number(row.confidence) : Number(row.calibrated_confidence), confidenceVersion: row.confidence_version || row.confidence_calibration?.version || "calibration_v1", calibrationReason: row.calibration_reason || row.confidence_calibration?.calibrationReason || row.confidence_calibration?.message || null, confidenceCalibration: row.confidence_calibration || {}, setupQualityScore: Number(row.setup_quality_score || 0), entryReadinessScore: Number(row.entry_readiness_score || 0), status: row.status, expiringSoon: Boolean(row.expiring_soon), validUntil: row.valid_until, expiredAt: row.expired_at, hitTpAt: row.hit_tp_at, hitSlAt: row.hit_sl_at, source: row.source, sourceHistory: row.source_history || [], generatedBy: row.generated_by, promotedFromCandidateId: row.promoted_from_candidate_id, validationSummary: row.validation_summary || {}, warningReasons: row.warning_reasons || [], qualityBreakdown: row.quality_breakdown || {}, fullAnalysis: row.full_analysis || {}, postMortemTags: row.resolved_post_mortem_tags || row.post_mortem_tags || [], maxFavorableExcursion: row.max_favorable_excursion == null ? null : Number(row.max_favorable_excursion), maxAdverseExcursion: row.max_adverse_excursion == null ? null : Number(row.max_adverse_excursion), resultReason: row.result_reason, realizedR: row.realized_r == null ? null : Number(row.realized_r), outcomeEvaluatedAt: row.outcome_evaluated_at || null, outcomeRVersion: row.outcome_r_version || null, candidateOrigin: row.candidate_status ? { status: row.candidate_status, setupQualityScore: Number(row.candidate_score || 0), entryReadinessScore: Number(row.readiness_score || 0), missingConfirmations: row.missing_confirmations || [], firstDetectedAt: row.first_detected_at, lastCheckedAt: row.last_checked_at } : null, createdAt: row.created_at, updatedAt: row.updated_at }; }
 
 async function recordGeneratedSignalConfidenceAdjustment(row) {
   const calibration = row.confidence_calibration || {};
