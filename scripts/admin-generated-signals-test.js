@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import vm from "node:vm";
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 const migration = read("migrations/043_admin_generated_signals.sql");
@@ -70,17 +71,17 @@ const checks = {
     repository.includes("filters.strategy") && repository.includes("LIMIT") &&
     repository.includes("OFFSET") && repository.includes("totalPages"),
   dashboardAndFullDetails:
-    html.includes('id="admin-signals-view"') && html.includes("Generated signal quality") &&
+    html.includes('id="admin-signals-view"') && html.includes("All generated signals") &&
     html.includes('id="admin-signal-modal"') && app.includes("renderAdminSignalDetail") &&
     app.includes("Entry") && app.includes("Stop loss") && app.includes("Take profit") &&
     app.includes("Signal quality breakdown") && app.includes("Candidate origin") &&
     app.includes("Outcome and post-mortem"),
-  generatedHistoryHiddenFromVisibleView:
-    html.includes('class="admin-signal-filters hidden"') &&
-    html.includes('class="admin-signals-table-wrap hidden"') &&
-    html.includes('class="admin-signals-pagination hidden"') &&
-    app.includes("adminSignalsTable.replaceChildren()") &&
-    !app.slice(app.indexOf("function renderAdminSignals()"), app.indexOf("function renderAdminSignalQualityPanel"))
+  generatedHistoryVisibleInAdminView:
+    html.includes('class="admin-signal-filters" id="admin-signal-filters"') &&
+    html.includes('class="admin-signals-table-wrap" id="admin-signals-table"') &&
+    html.includes('class="admin-signals-pagination"') &&
+    html.includes("Loading generated signals...") &&
+    app.slice(app.indexOf("function renderAdminSignals()"), app.indexOf("function renderAdminSignalQualityPanel"))
       .includes("data.signals.map(renderAdminSignalRow)"),
   userSignalsRemainSeparate:
     controller.includes("/api/admin/signals") &&
@@ -93,8 +94,28 @@ const checks = {
     css.includes("grid-template-columns: repeat(2, minmax(0, 1fr))") &&
     css.includes("word-break: normal") &&
     app.includes("Show details") &&
-    app.includes("Raw ${Number(signal.rawSetupScore")
+    app.includes("Raw ${Number(signal.rawSetupScore"),
+  scannerAdminSourceSeparation:
+    !extractNamedFunction(app, "renderSignals").match(/state\.signals|state\.adminSignals|renderAdminSignalRow/) &&
+    !extractNamedFunction(app, "renderAdminSignals").match(/state\.scanResults|signalsGrid|renderScanCard/) &&
+    !extractNamedFunction(app, "loadAdminSignals").match(/state\.scanResults|signalsGrid|renderSignals\(/) &&
+    !extractNamedFunction(app, "renderScanResults").match(/state\.adminSignals|adminSignalsTable|renderAdminSignalRow/)
 };
+
+const historicalSignals = [
+  ...Array.from({ length: 20 }, (_, index) => adminSignal(`history-sl-${index}`, "Hit SL")),
+  ...Array.from({ length: 15 }, (_, index) => adminSignal(`history-expired-${index}`, "Expired")),
+  ...Array.from({ length: 14 }, (_, index) => adminSignal(`history-active-${index}`, "Active"))
+];
+const adminRender = renderActualAdminSignals(historicalSignals);
+assert.equal(adminRender.renderedRows, 49);
+assert.equal(adminRender.detailButtons, 49);
+assert.match(adminRender.html, /Hit SL/);
+assert.match(adminRender.html, /Expired/);
+assert.match(adminRender.html, /Active/);
+assert.equal(adminRender.totalLabel, "49 records");
+assert.deepEqual(adminRender.scanResults, ["TRUMP-USD", "PLUME-USD"]);
+assert.equal(adminRender.scannerHtml, "scanner-current-session");
 
 for (const [name, passed] of Object.entries(checks)) {
   assert.equal(Boolean(passed), true, `Admin generated signals check failed: ${name}`);
@@ -140,4 +161,116 @@ if (testDatabaseUrl) {
   }
 }
 
-console.log(JSON.stringify({ ...checks, liveMigration }, null, 2));
+console.log(JSON.stringify({
+  ...checks,
+  adminHistoryRendering: {
+    availableRecords: historicalSignals.length,
+    renderedRows: adminRender.renderedRows,
+    detailButtons: adminRender.detailButtons,
+    scannerResultsPreserved: adminRender.scanResults.length
+  },
+  liveMigration
+}, null, 2));
+
+function renderActualAdminSignals(signals) {
+  const elements = new Map([
+    ["#admin-signals-total-label", { textContent: "" }],
+    ["#admin-signal-stats", { innerHTML: "" }],
+    ["#admin-signals-page-label", { textContent: "" }],
+    ["#admin-signals-prev", { disabled: false }],
+    ["#admin-signals-next", { disabled: false }]
+  ]);
+  const adminSignalsTable = { innerHTML: "" };
+  const signalsGrid = { innerHTML: "scanner-current-session" };
+  const state = {
+    scanResults: ["TRUMP-USD", "PLUME-USD"],
+    adminSignals: {
+      signals,
+      total: signals.length,
+      page: 1,
+      totalPages: 2,
+      stats: { total: signals.length, active: 14, hitSl: 20, expired: 15 },
+      qualityBreakdown: {}
+    }
+  };
+  const context = {
+    state,
+    signalsGrid,
+    adminSignalsTable,
+    document: { querySelector: (selector) => elements.get(selector) },
+    renderAdminSignalQualityPanel: () => {},
+    formatInteger: (value) => String(Number(value || 0)),
+    formatCurrency: (value) => String(value),
+    formatDateTime: (value) => String(value),
+    escapeHtml: (value) => String(value ?? ""),
+    titleCase: (value) => String(value ?? ""),
+    adminSignalStatusClass: () => "status-fixture"
+  };
+  vm.createContext(context);
+  vm.runInContext([
+    extractNamedFunction(app, "renderAdminSignalRow"),
+    extractNamedFunction(app, "renderAdminSignals")
+  ].join("\n\n"), context);
+  context.renderAdminSignals();
+  return {
+    html: adminSignalsTable.innerHTML,
+    renderedRows: (adminSignalsTable.innerHTML.match(/<article class="admin-generated-row">/g) || []).length,
+    detailButtons: (adminSignalsTable.innerHTML.match(/>Show details<\/button>/g) || []).length,
+    totalLabel: elements.get("#admin-signals-total-label").textContent,
+    scanResults: state.scanResults,
+    scannerHtml: signalsGrid.innerHTML
+  };
+}
+
+function adminSignal(id, status) {
+  return {
+    id,
+    signalId: id,
+    displayPair: "BTCUSD",
+    pair: "BTC-USD",
+    provider: "coinbase",
+    direction: "long",
+    timeframe: "15m",
+    strategy: "Breakout retest",
+    entry: 100,
+    stopLoss: 98,
+    takeProfit: 104,
+    riskReward: 2,
+    confidence: 82,
+    setupQualityScore: 84,
+    entryReadinessScore: 90,
+    status,
+    resultReason: status,
+    source: "manual_scan",
+    createdAt: "2026-08-07T12:00:00.000Z",
+    validUntil: "2026-08-07T18:00:00.000Z"
+  };
+}
+
+function extractNamedFunction(source, name) {
+  const start = source.indexOf(`function ${name}(`);
+  assert.notEqual(start, -1, `Missing function ${name}`);
+  const brace = source.indexOf("{", start);
+  let depth = 0;
+  let quote = null;
+  let escaped = false;
+  for (let index = brace; index < source.length; index += 1) {
+    const character = source[index];
+    if (quote) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === quote) quote = null;
+      continue;
+    }
+    if (["\"", "'", "`"].includes(character)) {
+      quote = character;
+      continue;
+    }
+    if (character === "{") depth += 1;
+    if (character === "}") {
+      depth -= 1;
+      if (depth === 0) return source.slice(start, index + 1);
+    }
+  }
+  throw new Error(`Unterminated function ${name}`);
+}

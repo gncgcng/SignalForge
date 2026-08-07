@@ -3776,6 +3776,7 @@ async function loadAdminSignals() {
   for (const [key, value] of Object.entries(state.adminSignals.filters || {})) {
     if (String(value || "").trim()) params.set(key, String(value).trim());
   }
+  adminSignalsTable.innerHTML = `<div class="empty-state"><strong>Loading generated signals...</strong></div>`;
   const result = await api.request(`/api/admin/signals?${params}`);
   state.adminSignals = { ...state.adminSignals, ...result, signals: result.signals || [], stats: result.stats || {} };
   renderAdminSignals();
@@ -3905,7 +3906,7 @@ function cryptoSettingToggle(market, key, label, disabled = false) {
 function renderAdminSignals() {
   const data = state.adminSignals;
   const stats = data.stats || {};
-  document.querySelector("#admin-signals-total-label").textContent = `${formatInteger(stats.active || 0)} active`;
+  document.querySelector("#admin-signals-total-label").textContent = `${formatInteger(data.total || 0)} records`;
   document.querySelector("#admin-signal-stats").innerHTML = [
     ["Total generated", stats.total], ["Active", stats.active], ["Expiring soon", stats.expiringSoon],
     ["Hit TP", stats.hitTp], ["Hit SL", stats.hitSl], ["Expired", stats.expired],
@@ -3916,7 +3917,11 @@ function renderAdminSignals() {
     ["Average confidence", `${Number(stats.averageConfidence || 0).toFixed(1)}%`], ["Today", stats.today], ["This week", stats.week]
   ].map(([label, value]) => `<article><span>${label}</span><strong>${value ?? 0}</strong></article>`).join("");
   renderAdminSignalQualityPanel(data.qualityBreakdown || {});
-  adminSignalsTable.replaceChildren();
+  adminSignalsTable.innerHTML = data.signals.length ? `
+    <div class="admin-generated-table">
+      <div class="admin-generated-row admin-generated-head"><span>Pair</span><span>Setup</span><span>Levels</span><span>Scores</span><span>Status</span><span>Source / created</span><span>Actions</span></div>
+      ${data.signals.map(renderAdminSignalRow).join("")}
+    </div>` : `<div class="empty-state"><strong>No generated signals match these filters.</strong><p class="reasoning">Clear filters or wait for the scanner to promote a validated setup.</p></div>`;
   document.querySelector("#admin-signals-page-label").textContent = `Page ${data.page || 1} of ${data.totalPages || 1}`;
   document.querySelector("#admin-signals-prev").disabled = Number(data.page || 1) <= 1;
   document.querySelector("#admin-signals-next").disabled = Number(data.page || 1) >= Number(data.totalPages || 1);

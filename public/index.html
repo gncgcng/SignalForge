@@ -2035,12 +2035,12 @@
 
           <section class="page-view hidden admin-signals-page" id="admin-signals-view" data-view="admin-signals">
             <div class="section-title admin-signals-heading">
-              <div><span class="eyebrow">ADMIN SIGNAL QUALITY</span><h3>Generated signal quality</h3><p>Current engine performance, calibration, and outcome summaries.</p></div>
+              <div><span class="eyebrow">ADMIN SIGNALS</span><h3>All generated signals</h3><p>Validated setups found by SignalForge, independent of unlocks or credits.</p></div>
               <span id="admin-signals-total-label">0 records</span>
             </div>
             <div class="admin-signal-stats" id="admin-signal-stats"></div>
             <div class="admin-signal-quality-panel" id="admin-signal-quality-panel"></div>
-            <form class="admin-signal-filters hidden" id="admin-signal-filters">
+            <form class="admin-signal-filters" id="admin-signal-filters">
               <input class="sf-input" name="search" type="search" placeholder="Search pair, strategy, pattern, notes, or signal ID">
               <select class="sf-select" name="status"><option value="all">All statuses</option><option>Active</option><option value="expiring-soon">Expiring Soon</option><option>Hit TP</option><option>Hit SL</option><option>Expired</option><option value="closed">Closed</option><option>Duplicate blocked</option><option>Cooldown blocked</option><option>Correlated duplicate</option><option>Quarantined timeframe</option><option>Readiness failed</option><option>Invalid legacy ready signal</option></select>
               <select class="sf-select" name="performanceScope"><option value="current">Current engine only</option><option value="legacy">Legacy only</option><option value="all">All signals</option></select>
@@ -2059,8 +2059,8 @@
               <select class="sf-select" name="sort"><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="confidence">Highest confidence</option><option value="rr">Highest R/R</option></select>
               <button type="submit">Apply filters</button><button class="secondary-action" id="admin-signal-filters-clear" type="button">Clear</button>
             </form>
-            <div class="admin-signals-table-wrap hidden" id="admin-signals-table"></div>
-            <div class="admin-signals-pagination hidden"><button class="secondary-action" id="admin-signals-prev" type="button">Previous</button><span id="admin-signals-page-label">Page 1</span><button class="secondary-action" id="admin-signals-next" type="button">Next</button></div>
+            <div class="admin-signals-table-wrap" id="admin-signals-table"><div class="empty-state"><strong>Loading generated signals...</strong></div></div>
+            <div class="admin-signals-pagination"><button class="secondary-action" id="admin-signals-prev" type="button">Previous</button><span id="admin-signals-page-label">Page 1</span><button class="secondary-action" id="admin-signals-next" type="button">Next</button></div>
             <div class="admin-signal-modal hidden" id="admin-signal-modal" role="dialog" aria-modal="true" aria-labelledby="admin-signal-modal-title">
               <button class="admin-signal-modal-backdrop" data-admin-signal-close type="button" aria-label="Close signal details"></button>
               <article class="admin-signal-detail-card"><header><div><span class="eyebrow">Full internal record</span><h3 id="admin-signal-modal-title">Generated signal</h3></div><button class="secondary-action" data-admin-signal-close type="button">Close</button></header><div id="admin-signal-detail"></div></article>
