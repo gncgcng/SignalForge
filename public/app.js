@@ -1435,8 +1435,28 @@ scanAllButton.addEventListener("click", async () => {
     applyScanJobSnapshot(started, total);
     await pollScanAllJob(started.jobId, total);
   } catch (error) {
-    updateScanProgress(0, total, "Scan All failed");
-    renderScanResults([], [{ symbol: "Scan All", timeframe: "", message: error.message }], null, null, []);
+    const snapshot = error.scanJobSnapshot;
+    if (snapshot?.jobId && snapshot.jobId === state.activeScanJob) {
+      const retained = Number(snapshot.scanSummary?.ready || snapshot.setups?.length || 0);
+      renderTerminalScanJobSnapshot(
+        snapshot,
+        total,
+        `Scan All failed. ${error.message}${retained ? ` ${retained} ready setup${retained === 1 ? " was" : "s were"} retained.` : ""}`
+      );
+    } else {
+      updateScanProgress(0, total, `Scan All failed. ${error.message}`);
+      renderScanResults([], [], null, {
+        ready: 0,
+        watching: 0,
+        avoidTrade: 0,
+        rejected: 0,
+        expired: 0,
+        skipped: 0,
+        providerErrors: 0,
+        noData: 0
+      }, []);
+      statusLine.textContent = `Scan All failed. ${error.message}`;
+    }
   } finally {
     scanAllButton.disabled = false;
     generateButton.disabled = false;
@@ -1493,12 +1513,25 @@ async function pollScanAllJob(jobId, fallbackTotal) {
   }
 
   if (latest?.status === "cancelled") {
-    statusLine.textContent = "Scan cancelled. Partial results are still shown below.";
-    applyScanJobSnapshot(latest, fallbackTotal, true);
+    renderTerminalScanJobSnapshot(
+      latest,
+      fallbackTotal,
+      "Scan cancelled. Partial results are still shown below."
+    );
     return;
   }
 
-  throw new Error(latest?.error || "Scan All failed");
+  const error = new Error(latest?.error || "Scan All failed");
+  error.scanJobSnapshot = latest;
+  throw error;
+}
+
+function renderTerminalScanJobSnapshot(result, fallbackTotal, message) {
+  applyScanJobSnapshot(result, fallbackTotal, true);
+  const progress = result.progress || {};
+  const done = Number(progress.scannedMarkets || 0);
+  const total = Math.max(1, Number(progress.totalMarkets || fallbackTotal || 1));
+  updateScanProgress(done, total, message);
 }
 
 function applyScanJobSnapshot(result, fallbackTotal = 1, final = false) {
