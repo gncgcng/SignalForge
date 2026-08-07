@@ -75,6 +75,26 @@ const emptyFailedRun = await runFrontendScanAllHarness("failed", {
   initialScanResults: [setupA]
 });
 const completedRun = await runFrontendScanAllHarness("completed");
+const historicalSignals = [
+  ...Array.from({ length: 20 }, (_, index) => ({ id: `history-sl-${index}`, status: "Hit SL" })),
+  ...Array.from({ length: 15 }, (_, index) => ({ id: `history-expired-${index}`, status: "Expired" })),
+  ...Array.from({ length: 14 }, (_, index) => ({ id: `history-tp-${index}`, status: "Hit TP" }))
+];
+const currentSignalDesk = renderActualSignalDesk(setups, historicalSignals);
+const emptySignalDesk = renderActualSignalDesk([], historicalSignals);
+
+assert.equal(historicalSignals.length, 49);
+assert.equal(currentSignalDesk.count, "2 scan results");
+assert.equal(currentSignalDesk.currentCardsRendered, 2);
+assert.equal(currentSignalDesk.historicalCardsRendered, 0);
+assert.match(currentSignalDesk.html, /sig-trump/);
+assert.match(currentSignalDesk.html, /sig-plume/);
+assert.doesNotMatch(currentSignalDesk.html, /history-/);
+assert.equal(emptySignalDesk.count, "0 scan results");
+assert.equal(emptySignalDesk.currentCardsRendered, 0);
+assert.equal(emptySignalDesk.historicalCardsRendered, 0);
+assert.match(emptySignalDesk.html, /Current Scan All setups will appear here/);
+assert.doesNotMatch(emptySignalDesk.html, /history-/);
 
 const failedReadySnapshot = failedRun.renderCalls.find((call) =>
   call.responseStatus === "failed" && call.setups.length === 2
@@ -155,6 +175,8 @@ const cancelClickSource = extractBetween(
 );
 const pollSource = extractNamedFunction(appSource, "pollScanAllJob");
 const applySnapshotSource = extractNamedFunction(appSource, "applyScanJobSnapshot");
+const renderSignalsSource = extractNamedFunction(appSource, "renderSignals");
+const loadSignalsSource = extractNamedFunction(appSource, "loadSignals");
 const scanCardSource = extractNamedFunction(appSource, "renderScanCard");
 const unlockClickSource = extractBetween(
   appSource,
@@ -171,6 +193,10 @@ assert.match(pollSource, /while \(state\.scanResultJobId === jobId\)/);
 assert.match(pollSource, /if \(state\.scanResultJobId !== jobId\) return/);
 assert.match(applySnapshotSource, /done < state\.scanResultProgress/);
 assert.match(applySnapshotSource, /state\.scanResultTerminalStatus && !isTerminal/);
+assert.match(renderSignalsSource, /currentScanResults/);
+assert.doesNotMatch(renderSignalsSource, /state\.signals|renderSignalCard/);
+assert.match(loadSignalsSource, /api\.request\("\/api\/signals"\)/);
+assert.match(loadSignalsSource, /renderSignalsHistory\(\)/);
 assert.match(scanCardSource, /getSignalValidityState\(setup\)\.status === "expired" \? "disabled" : ""/);
 assert.doesNotMatch(scanCardSource, /activeScanJob|scanInProgress/);
 assert.doesNotMatch(unlockClickSource, /activeScanJob|scanInProgress/);
@@ -242,6 +268,12 @@ console.log(JSON.stringify({
   staleResponseProtection: {
     failedTerminal: failedStaleProtection,
     completedTerminal: completedStaleProtection
+  },
+  signalDeskSource: {
+    historicalSignalsAvailable: historicalSignals.length,
+    currentSetupsVisible: currentSignalDesk.currentCardsRendered,
+    historicalCardsVisible: currentSignalDesk.historicalCardsRendered,
+    emptyDeskHistoricalCardsVisible: emptySignalDesk.historicalCardsRendered
   },
   rootCauseRepaired: "Terminal failed and cancelled snapshots retain their canonical setups, summaries, and backend progress while showing the job failure separately."
 }, null, 2));
@@ -439,6 +471,40 @@ function renderActualScanCard(setup, validityStatus) {
   vm.createContext(context);
   vm.runInContext(extractNamedFunction(appSource, "renderScanCard"), context);
   return context.renderScanCard(setup);
+}
+
+function renderActualSignalDesk(currentScanResults, signals) {
+  const signalCount = { textContent: "" };
+  const grid = { innerHTML: "" };
+  let currentCardsRendered = 0;
+  let historicalCardsRendered = 0;
+  const context = {
+    state: { scanResults: currentScanResults, signals },
+    signalsGrid: grid,
+    document: {
+      querySelector: (selector) => {
+        assert.equal(selector, "#signal-count");
+        return signalCount;
+      }
+    },
+    renderScanCard: (setup) => {
+      currentCardsRendered += 1;
+      return `<article data-current-setup="${setup.id}"></article>`;
+    },
+    renderSignalCard: (signal) => {
+      historicalCardsRendered += 1;
+      return `<article data-historical-signal="${signal.id}"></article>`;
+    }
+  };
+  vm.createContext(context);
+  vm.runInContext(extractNamedFunction(appSource, "renderSignals"), context);
+  context.renderSignals();
+  return {
+    count: signalCount.textContent,
+    html: grid.innerHTML,
+    currentCardsRendered,
+    historicalCardsRendered
+  };
 }
 
 function elementWithListener(onListener) {

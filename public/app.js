@@ -5322,20 +5322,15 @@ async function startCheckout(button, payload) {
 }
 
 function renderSignals() {
-  if (state.scanResults.length > 0) {
-    document.querySelector("#signal-count").textContent = `${state.scanResults.length} scan results`;
-    signalsGrid.innerHTML = state.scanResults.map((setup) => renderScanCard(setup)).join("");
+  const currentScanResults = Array.isArray(state.scanResults) ? state.scanResults : [];
+  document.querySelector("#signal-count").textContent = `${currentScanResults.length} scan results`;
+
+  if (currentScanResults.length === 0) {
+    signalsGrid.innerHTML = `<article class="signal-card"><p class="reasoning">Current Scan All setups will appear here when they are found.</p></article>`;
     return;
   }
 
-  document.querySelector("#signal-count").textContent = `${state.signals.length} setups`;
-
-  if (state.signals.length === 0) {
-    signalsGrid.innerHTML = `<article class="signal-card"><p class="reasoning">Generated setups will appear here with entry, stop, target, confidence, and concise reasoning.</p></article>`;
-    return;
-  }
-
-  signalsGrid.innerHTML = state.signals.map((signal) => renderSignalCard(signal)).join("");
+  signalsGrid.innerHTML = currentScanResults.map((setup) => renderScanCard(setup)).join("");
 }
 
 function renderSignalsHistory() {
