@@ -148,6 +148,13 @@ const scanClickSource = extractBetween(
   'scanAllButton.addEventListener("click", async () => {',
   'cancelScanButton?.addEventListener("click"'
 );
+const cancelClickSource = extractBetween(
+  appSource,
+  'cancelScanButton?.addEventListener("click", async () => {',
+  "async function pollScanAllJob"
+);
+const pollSource = extractNamedFunction(appSource, "pollScanAllJob");
+const applySnapshotSource = extractNamedFunction(appSource, "applyScanJobSnapshot");
 const scanCardSource = extractNamedFunction(appSource, "renderScanCard");
 const unlockClickSource = extractBetween(
   appSource,
@@ -156,14 +163,22 @@ const unlockClickSource = extractBetween(
 );
 
 assert.match(scanClickSource, /generateButton\.disabled = true/);
-assert.match(scanClickSource, /snapshot\.jobId === state\.activeScanJob/);
+assert.match(scanClickSource, /snapshot\.jobId === state\.scanResultJobId/);
 assert.match(scanClickSource, /renderTerminalScanJobSnapshot/);
 assert.doesNotMatch(scanClickSource, /renderScanResults\(\[\], \[\{ symbol: "Scan All"/);
+assert.match(cancelClickSource, /result\.jobId !== state\.scanResultJobId/);
+assert.match(pollSource, /while \(state\.scanResultJobId === jobId\)/);
+assert.match(pollSource, /if \(state\.scanResultJobId !== jobId\) return/);
+assert.match(applySnapshotSource, /done < state\.scanResultProgress/);
+assert.match(applySnapshotSource, /state\.scanResultTerminalStatus && !isTerminal/);
 assert.match(scanCardSource, /getSignalValidityState\(setup\)\.status === "expired" \? "disabled" : ""/);
 assert.doesNotMatch(scanCardSource, /activeScanJob|scanInProgress/);
 assert.doesNotMatch(unlockClickSource, /activeScanJob|scanInProgress/);
 assert.equal(failedRun.generateDisabledDuringPolling, true);
 assert.equal(failedRun.state.activeScanJob, null);
+assert.equal(failedRun.state.scanResultJobId, "scanjob-fixture");
+assert.equal(failedRun.state.scanResultProgress, 353);
+assert.equal(failedRun.state.scanResultTerminalStatus, "failed");
 
 const unlockRender = renderActualScanCard(setupA, "active");
 assert.match(unlockRender, /data-unlock-symbol="TRUMP-USD"/);
@@ -171,6 +186,9 @@ assert.doesNotMatch(unlockRender.match(/<button data-unlock-symbol[^>]+>/)?.[0] 
 
 assert.equal(emptyFailedRun.initialResultsClearedAtStart, true);
 assert.equal(emptyFailedRun.renderCalls.some((call) => call.setups.some((setup) => setup.id === setupA.id)), false);
+
+const failedStaleProtection = assertStaleResponseRejected(failedRun);
+const completedStaleProtection = assertStaleResponseRejected(completedRun);
 
 const failedJobCatch = extractBetween(
   signalServiceSource,
@@ -221,8 +239,38 @@ console.log(JSON.stringify({
     cardUnlockDisabledByActiveScan: false,
     cardUnlockDisabledOnlyWhenExpired: true
   },
+  staleResponseProtection: {
+    failedTerminal: failedStaleProtection,
+    completedTerminal: completedStaleProtection
+  },
   rootCauseRepaired: "Terminal failed and cancelled snapshots retain their canonical setups, summaries, and backend progress while showing the job failure separately."
 }, null, 2));
+
+function assertStaleResponseRejected(run) {
+  const renderCount = run.renderCalls.length;
+  const sameJobApplied = run.applyScanJobSnapshot(
+    buildSnapshot("running", 200, [setupA], []),
+    353
+  );
+  assert.equal(sameJobApplied, false);
+  assert.equal(run.renderCalls.length, renderCount);
+  assert.deepEqual(run.state.scanResults.map((setup) => setup.id), setups.map((setup) => setup.id));
+
+  run.state.scanResultJobId = "scanjob-newer";
+  const priorJobApplied = run.applyScanJobSnapshot(
+    buildSnapshot("failed", 353, [setupA], []),
+    353,
+    true
+  );
+  assert.equal(priorJobApplied, false);
+  assert.equal(run.renderCalls.length, renderCount);
+  assert.deepEqual(run.state.scanResults.map((setup) => setup.id), setups.map((setup) => setup.id));
+  return {
+    sameJobStaleApplied: sameJobApplied,
+    priorJobStaleApplied: priorJobApplied,
+    retainedSetups: run.state.scanResults.map((setup) => setup.symbol)
+  };
+}
 
 async function runFrontendScanAllHarness(terminalStatus, options = {}) {
   let clickHandler = null;
@@ -234,6 +282,9 @@ async function runFrontendScanAllHarness(terminalStatus, options = {}) {
   const state = {
     scanResults: [...(options.initialScanResults || [])],
     activeScanJob: null,
+    scanResultJobId: null,
+    scanResultProgress: 0,
+    scanResultTerminalStatus: null,
     subscription: null
   };
   const markets = Array.from({ length: 353 }, (_, index) => ({
@@ -330,6 +381,7 @@ async function runFrontendScanAllHarness(terminalStatus, options = {}) {
     progressCalls,
     generateDisabledDuringPolling,
     initialResultsClearedAtStart,
+    applyScanJobSnapshot: context.applyScanJobSnapshot,
     statusLine: context.statusLine.textContent
   };
 }

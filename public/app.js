@@ -76,6 +76,9 @@ const state = {
   riskCalculations: new Map(),
   lastScanSummary: null,
   activeScanJob: null,
+  scanResultJobId: null,
+  scanResultProgress: 0,
+  scanResultTerminalStatus: null,
   activeView: "scanner",
   activeRoute: "scanner",
   lastAppliedRouteHash: "",
@@ -1420,6 +1423,9 @@ scanAllButton.addEventListener("click", async () => {
   scanSummaryPanel.classList.add("hidden");
   state.scanResults = [];
   state.activeScanJob = null;
+  state.scanResultJobId = null;
+  state.scanResultProgress = 0;
+  state.scanResultTerminalStatus = null;
   signalsGrid.innerHTML = "";
   updateScanProgress(
     0,
@@ -1432,11 +1438,12 @@ scanAllButton.addEventListener("click", async () => {
       body: JSON.stringify({ marketType })
     });
     state.activeScanJob = started.jobId;
+    state.scanResultJobId = started.jobId;
     applyScanJobSnapshot(started, total);
     await pollScanAllJob(started.jobId, total);
   } catch (error) {
     const snapshot = error.scanJobSnapshot;
-    if (snapshot?.jobId && snapshot.jobId === state.activeScanJob) {
+    if (snapshot?.jobId && snapshot.jobId === state.scanResultJobId) {
       const retained = Number(snapshot.scanSummary?.ready || snapshot.setups?.length || 0);
       renderTerminalScanJobSnapshot(
         snapshot,
@@ -1468,14 +1475,22 @@ scanAllButton.addEventListener("click", async () => {
 
 cancelScanButton?.addEventListener("click", async () => {
   if (!state.activeScanJob) return;
+  const requestedJobId = state.activeScanJob;
   cancelScanButton.disabled = true;
   statusLine.textContent = "Cancelling scan...";
   try {
     const result = await api.request("/api/signals/scan-all/cancel", {
       method: "POST",
-      body: JSON.stringify({ jobId: state.activeScanJob })
+      body: JSON.stringify({ jobId: requestedJobId })
     });
-    applyScanJobSnapshot(result);
+    if (result.jobId !== state.scanResultJobId) {
+      cancelScanButton.disabled = false;
+      return;
+    }
+    if (!applyScanJobSnapshot(result)) {
+      cancelScanButton.disabled = false;
+      return;
+    }
     updateScanProgress(
       result.progress?.scannedMarkets || 0,
       result.progress?.totalMarkets || 1,
@@ -1489,9 +1504,10 @@ cancelScanButton?.addEventListener("click", async () => {
 
 async function pollScanAllJob(jobId, fallbackTotal) {
   let latest = null;
-  while (true) {
+  while (state.scanResultJobId === jobId) {
     await wait(1200);
     latest = await api.request(`/api/signals/scan-all/status?jobId=${encodeURIComponent(jobId)}`);
+    if (state.scanResultJobId !== jobId) return;
     applyScanJobSnapshot(latest, fallbackTotal);
 
     if (["completed", "failed", "cancelled"].includes(latest.status)) break;
@@ -1535,8 +1551,16 @@ function renderTerminalScanJobSnapshot(result, fallbackTotal, message) {
 }
 
 function applyScanJobSnapshot(result, fallbackTotal = 1, final = false) {
+  if (!result?.jobId || result.jobId !== state.scanResultJobId) return false;
   const progress = result.progress || {};
   const done = Number(progress.scannedMarkets || 0);
+  const terminalStatuses = new Set(["completed", "failed", "cancelled"]);
+  const isTerminal = terminalStatuses.has(result.status);
+  const setupCount = Array.isArray(result.setups) ? result.setups.length : 0;
+  if (done < state.scanResultProgress) return false;
+  if (state.scanResultTerminalStatus && !isTerminal) return false;
+  if (state.scanResultTerminalStatus && result.status !== state.scanResultTerminalStatus) return false;
+  if (done <= state.scanResultProgress && setupCount < state.scanResults.length) return false;
   const total = Math.max(1, Number(progress.totalMarkets || fallbackTotal || 1));
   const current = progress.currentMarket
     ? `Scanning ${progress.currentMarket}${progress.currentTimeframe ? ` ${progress.currentTimeframe}` : ""}`
@@ -1558,10 +1582,13 @@ function applyScanJobSnapshot(result, fallbackTotal = 1, final = false) {
     result.skippedMarkets || [],
     { scroll: final }
   );
+  state.scanResultProgress = Math.max(state.scanResultProgress, done);
+  if (isTerminal) state.scanResultTerminalStatus = result.status;
   if (!final && scanSummaryPanel) {
     scanSummaryPanel.classList.remove("hidden");
     statusLine.textContent = `${current}. Partial results update as each batch finishes.`;
   }
+  return true;
 }
 
 function wait(ms) {
@@ -3749,7 +3776,6 @@ async function loadAdminSignals() {
   for (const [key, value] of Object.entries(state.adminSignals.filters || {})) {
     if (String(value || "").trim()) params.set(key, String(value).trim());
   }
-  adminSignalsTable.innerHTML = `<div class="empty-state"><strong>Loading generated signals...</strong></div>`;
   const result = await api.request(`/api/admin/signals?${params}`);
   state.adminSignals = { ...state.adminSignals, ...result, signals: result.signals || [], stats: result.stats || {} };
   renderAdminSignals();
@@ -3879,7 +3905,7 @@ function cryptoSettingToggle(market, key, label, disabled = false) {
 function renderAdminSignals() {
   const data = state.adminSignals;
   const stats = data.stats || {};
-  document.querySelector("#admin-signals-total-label").textContent = `${formatInteger(data.total || 0)} records`;
+  document.querySelector("#admin-signals-total-label").textContent = `${formatInteger(stats.active || 0)} active`;
   document.querySelector("#admin-signal-stats").innerHTML = [
     ["Total generated", stats.total], ["Active", stats.active], ["Expiring soon", stats.expiringSoon],
     ["Hit TP", stats.hitTp], ["Hit SL", stats.hitSl], ["Expired", stats.expired],
@@ -3890,11 +3916,7 @@ function renderAdminSignals() {
     ["Average confidence", `${Number(stats.averageConfidence || 0).toFixed(1)}%`], ["Today", stats.today], ["This week", stats.week]
   ].map(([label, value]) => `<article><span>${label}</span><strong>${value ?? 0}</strong></article>`).join("");
   renderAdminSignalQualityPanel(data.qualityBreakdown || {});
-  adminSignalsTable.innerHTML = data.signals.length ? `
-    <div class="admin-generated-table">
-      <div class="admin-generated-row admin-generated-head"><span>Pair</span><span>Setup</span><span>Levels</span><span>Scores</span><span>Status</span><span>Source / created</span><span>Actions</span></div>
-      ${data.signals.map(renderAdminSignalRow).join("")}
-    </div>` : `<div class="empty-state"><strong>No generated signals match these filters.</strong><p class="reasoning">Clear filters or wait for the scanner to promote a validated setup.</p></div>`;
+  adminSignalsTable.replaceChildren();
   document.querySelector("#admin-signals-page-label").textContent = `Page ${data.page || 1} of ${data.totalPages || 1}`;
   document.querySelector("#admin-signals-prev").disabled = Number(data.page || 1) <= 1;
   document.querySelector("#admin-signals-next").disabled = Number(data.page || 1) >= Number(data.totalPages || 1);

@@ -70,11 +70,18 @@ const checks = {
     repository.includes("filters.strategy") && repository.includes("LIMIT") &&
     repository.includes("OFFSET") && repository.includes("totalPages"),
   dashboardAndFullDetails:
-    html.includes('id="admin-signals-view"') && html.includes("All generated signals") &&
+    html.includes('id="admin-signals-view"') && html.includes("Generated signal quality") &&
     html.includes('id="admin-signal-modal"') && app.includes("renderAdminSignalDetail") &&
     app.includes("Entry") && app.includes("Stop loss") && app.includes("Take profit") &&
     app.includes("Signal quality breakdown") && app.includes("Candidate origin") &&
     app.includes("Outcome and post-mortem"),
+  generatedHistoryHiddenFromVisibleView:
+    html.includes('class="admin-signal-filters hidden"') &&
+    html.includes('class="admin-signals-table-wrap hidden"') &&
+    html.includes('class="admin-signals-pagination hidden"') &&
+    app.includes("adminSignalsTable.replaceChildren()") &&
+    !app.slice(app.indexOf("function renderAdminSignals()"), app.indexOf("function renderAdminSignalQualityPanel"))
+      .includes("data.signals.map(renderAdminSignalRow)"),
   userSignalsRemainSeparate:
     controller.includes("/api/admin/signals") &&
     !controller.includes("listUserSignals") &&
