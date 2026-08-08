@@ -74,6 +74,7 @@
     "test:signal-confidence-calibration": "node scripts/signal-confidence-calibration-test.js",
     "test:signal-pipeline-regression": "node --import ./scripts/register-signal-pipeline-regression-loader.js ./scripts/signal-pipeline-regression-test.js",
     "test:ready-signal-end-to-end": "node --import ./scripts/register-ready-signal-end-to-end-loader.js ./scripts/ready-signal-end-to-end-test.js",
+    "test:auto-crypto-watcher-e2e": "node --import ./scripts/register-auto-crypto-watcher-e2e-loader.js ./scripts/auto-crypto-watcher-e2e-test.js",
     "test:generated-signal-quality": "node scripts/generated-signal-quality-controls-test.js",
     "test:signal-transparency": "node scripts/signal-transparency-test.js",
     "test:watchlist-alerts": "node scripts/watchlist-alerts-test.js",
