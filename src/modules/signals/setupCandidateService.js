@@ -130,8 +130,10 @@ export async function markCandidateRejected(candidate, reason) {
   return rejectCandidate(candidate.id, reason || "Final signal validation failed.");
 }
 
-export async function refreshCandidateLearningOutcomes() {
-  const candidates = await listCandidatesNeedingOutcome();
+export async function refreshCandidateLearningOutcomes(scope = undefined) {
+  const candidates = (await listCandidatesNeedingOutcome()).filter((candidate) =>
+    !scope || (candidate.symbol === scope.symbol && candidate.timeframe === scope.timeframe)
+  );
   let learned = 0;
   for (const candidate of candidates) {
     if (getPair(candidate.symbol)?.category !== "Crypto") continue;
@@ -149,16 +151,25 @@ export async function refreshCandidateLearningOutcomes() {
   return learned;
 }
 
-export async function runCandidateMarketWatch() {
-  const markets = listAutoScannerPairs().filter((pair) => pair.category === "Crypto");
+export async function runCandidateMarketWatch(scope = undefined) {
+  const markets = listAutoScannerPairs().filter((pair) =>
+    pair.category === "Crypto" && (!scope || pair.symbol === scope.symbol)
+  );
   if (!markets.length) return { scanned: 0, createdOrUpdated: 0 };
-  const batchSize = Math.min(markets.length, Math.max(1, appConfig.candidates.marketsPerCycle));
-  const selected = Array.from({ length: batchSize }, (_, index) => markets[(marketCursor + index) % markets.length]);
-  marketCursor = (marketCursor + batchSize) % markets.length;
+  const batchSize = scope
+    ? 1
+    : Math.min(markets.length, Math.max(1, appConfig.candidates.marketsPerCycle));
+  const selected = scope
+    ? markets.slice(0, 1)
+    : Array.from({ length: batchSize }, (_, index) => markets[(marketCursor + index) % markets.length]);
+  if (!scope) marketCursor = (marketCursor + batchSize) % markets.length;
   let scanned = 0; let createdOrUpdated = 0;
   const briefObservations = [];
   for (const pair of selected) {
-    for (const timeframe of watcherTimeframes.filter((item) => pair.supportedTimeframes.includes(item))) {
+    const selectedTimeframes = watcherTimeframes.filter((item) =>
+      pair.supportedTimeframes.includes(item) && (!scope || item === scope.timeframe)
+    );
+    for (const timeframe of selectedTimeframes) {
       try {
         const marketData = await getMultiTimeframeMarketData(pair.symbol, timeframe);
         scanned += 1;

@@ -46,7 +46,12 @@ export function startAutoCryptoAlertScanner() {
   }, intervalMs);
 }
 
-export async function runAutoCryptoAlertScan() {
+export async function runAutoCryptoAlertScan(scope = undefined) {
+  const normalizedScope = normalizeAutoScanScope(scope);
+  const scopedContext = normalizedScope
+    ? await resolveAutoScanScope(normalizedScope)
+    : null;
+
   if (autoScanRunning) {
     console.log("[auto-scan] skipped duplicates running_cycle=true");
     return { scanned: 0, alertsCreated: 0, skippedDuplicates: 1 };
@@ -61,12 +66,16 @@ export async function runAutoCryptoAlertScan() {
 
   try {
     const before = await getCandidateQualitySummary();
-    const expiredThisCycle = await expireStaleCandidates();
-    const watched = await runCandidateMarketWatch();
+    const expiredThisCycle = await expireStaleCandidates(normalizedScope);
+    const watched = await runCandidateMarketWatch(normalizedScope);
     const preferences = (await listAllEnabledAlertPreferences()).filter((preference) => {
       const pair = getPair(preference.symbol);
       return pair?.category === "Crypto" && pair.effectiveScannerEnabled && pair.supportedTimeframes.includes(preference.timeframe);
-    });
+    }).filter((preference) => !normalizedScope || (
+      String(preference.user_id) === normalizedScope.userId &&
+      preference.symbol === normalizedScope.symbol &&
+      preference.timeframe === normalizedScope.timeframe
+    ));
 
     for (const preference of preferences) {
       const user = await getPreferenceUser(preference.user_id, users);
@@ -113,8 +122,12 @@ export async function runAutoCryptoAlertScan() {
       }
     }
 
-    const telegramSettings = await listAllEnabledTelegramSettings();
-    const cryptoMarkets = listAutoScannerPairs().filter((pair) => pair.category === "Crypto");
+    const telegramSettings = scopedContext
+      ? [scopedContext.settings]
+      : await listAllEnabledTelegramSettings();
+    const cryptoMarkets = scopedContext
+      ? [scopedContext.market]
+      : listAutoScannerPairs().filter((pair) => pair.category === "Crypto");
     const cryptoSymbols = cryptoMarkets.map((pair) => pair.symbol);
 
     for (const settings of telegramSettings) {
@@ -125,9 +138,12 @@ export async function runAutoCryptoAlertScan() {
         ? await listWatchlistByUser(user.id)
         : [];
       const favoriteSymbols = new Set(watchlist.map((item) => item.symbol));
-      const selectedSymbols = settings.favoriteMarketsOnly
+      const availableSymbols = settings.favoriteMarketsOnly
         ? cryptoSymbols.filter((symbol) => favoriteSymbols.has(symbol))
         : cryptoSymbols;
+      const selectedSymbols = normalizedScope
+        ? availableSymbols.filter((symbol) => symbol === normalizedScope.symbol)
+        : availableSymbols;
       const scope = settings.favoriteMarketsOnly ? "watchlist" : "all_crypto";
 
       console.log(`[auto-scan] scope=${scope} user=${user.id}`);
@@ -135,7 +151,11 @@ export async function runAutoCryptoAlertScan() {
 
       for (const symbol of selectedSymbols) {
         const market = cryptoMarkets.find((item) => item.symbol === symbol);
-        for (const timeframe of settings.timeframes.filter((item) => market?.supportedTimeframes.includes(item))) {
+        const selectedTimeframes = settings.timeframes.filter((item) =>
+          market?.supportedTimeframes.includes(item) &&
+          (!normalizedScope || item === normalizedScope.timeframe)
+        );
+        for (const timeframe of selectedTimeframes) {
           scanned += 1;
 
           try {
@@ -170,7 +190,7 @@ export async function runAutoCryptoAlertScan() {
     console.log(`[auto-scan] telegram alerts queued ${telegramAlertsQueued}`);
     console.log(`[auto-scan] skipped duplicates ${skippedDuplicates}`);
     const after = await getCandidateQualitySummary();
-    await refreshCandidateLearningOutcomes();
+    await refreshCandidateLearningOutcomes(normalizedScope);
     console.log(
       `[crypto-watch] scanned=${watched.scanned} ` +
       `candidates_created=${Math.max(0, after.candidatesCreatedToday - before.candidatesCreatedToday)} ` +
@@ -182,6 +202,54 @@ export async function runAutoCryptoAlertScan() {
   } finally {
     autoScanRunning = false;
   }
+}
+
+function normalizeAutoScanScope(scope) {
+  if (scope === undefined) return null;
+  if (!scope || typeof scope !== "object" || Array.isArray(scope)) {
+    throw autoScanScopeError("Scoped auto scan requires symbol, timeframe, and userId.", "AUTO_SCAN_SCOPE_INCOMPLETE");
+  }
+
+  const symbol = String(scope.symbol || "").trim().toUpperCase();
+  const timeframe = String(scope.timeframe || "").trim().toLowerCase();
+  const userId = String(scope.userId || "").trim();
+  if (!symbol || !timeframe || !userId) {
+    throw autoScanScopeError("Scoped auto scan requires symbol, timeframe, and userId.", "AUTO_SCAN_SCOPE_INCOMPLETE");
+  }
+  if (!appConfig.supportedTimeframes.includes(timeframe)) {
+    throw autoScanScopeError(`Unsupported scoped auto-scan timeframe: ${timeframe}.`, "AUTO_SCAN_SCOPE_UNSUPPORTED_TIMEFRAME");
+  }
+  return { symbol, timeframe, userId };
+}
+
+async function resolveAutoScanScope(scope) {
+  const markets = listAutoScannerPairs().filter((pair) => pair.category === "Crypto");
+  const market = markets.find((pair) => pair.symbol === scope.symbol);
+  if (!market) {
+    throw autoScanScopeError(`${scope.symbol} is not an eligible auto-scanner market.`, "AUTO_SCAN_SCOPE_INELIGIBLE_MARKET");
+  }
+  if (!market.supportedTimeframes.includes(scope.timeframe)) {
+    throw autoScanScopeError(
+      `${scope.symbol} does not support ${scope.timeframe} for auto scanning.`,
+      "AUTO_SCAN_SCOPE_UNSUPPORTED_TIMEFRAME"
+    );
+  }
+
+  const settings = (await listAllEnabledTelegramSettings())
+    .find((item) => String(item.userId) === scope.userId);
+  if (!settings) {
+    throw autoScanScopeError(
+      `User ${scope.userId} does not have enabled Telegram settings.`,
+      "AUTO_SCAN_SCOPE_TELEGRAM_DISABLED"
+    );
+  }
+  return { market, settings };
+}
+
+function autoScanScopeError(message, code) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
 }
 
 async function calibrateTelegramAlertSetup(setup) {

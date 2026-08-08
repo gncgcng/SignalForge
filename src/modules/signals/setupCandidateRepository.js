@@ -75,14 +75,25 @@ export async function listVisibleSetupCandidates(limit = 40) {
   return result.rows.map(mapCandidate);
 }
 
-export async function expireStaleCandidates() {
+export async function expireStaleCandidates(scope = undefined) {
+  const values = [];
+  const scopedWhere = [];
+  if (scope?.symbol) {
+    values.push(scope.symbol);
+    scopedWhere.push(`symbol = $${values.length}`);
+  }
+  if (scope?.timeframe) {
+    values.push(scope.timeframe);
+    scopedWhere.push(`timeframe = $${values.length}`);
+  }
   const result = await query(`
     UPDATE setup_candidates
     SET status = 'expired', rejection_reason = COALESCE(rejection_reason, 'Setup did not become ready before expiry.'),
       last_checked_at = now(), updated_at = now()
     WHERE status IN ('watching', 'almost_ready', 'ready') AND expires_at <= now()
+      ${scopedWhere.length ? `AND ${scopedWhere.join(" AND ")}` : ""}
     RETURNING *
-  `);
+  `, values);
   for (const row of result.rows) await recordCandidateLearningEvent(mapCandidate(row));
   return result.rows.length;
 }

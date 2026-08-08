@@ -1,4 +1,5 @@
 import {
+  getReadySignalPersistence,
   query as readyQuery,
   resetReadySignalTransport,
   transaction as readyTransaction
@@ -11,18 +12,25 @@ import {
 
 const users = new Map();
 const watchlists = new Map();
+const alertPreferences = [];
+const detectedAlerts = [];
 
 export function resetAutoCryptoWatcherTransport() {
   resetReadySignalTransport();
   users.clear();
   watchlists.clear();
+  alertPreferences.length = 0;
+  detectedAlerts.length = 0;
 }
 
 export function configureWatcherUser({
   userId = "watcher-user",
   minimumConfidence = 90,
   symbols = [],
-  timeframes = ["15m"]
+  timeframes = ["15m"],
+  chatId = "10001",
+  enabled = true,
+  favoriteMarketsOnly = true
 } = {}) {
   users.set(userId, {
     id: userId,
@@ -41,14 +49,34 @@ export function configureWatcherUser({
   });
   watchlists.set(userId, [...symbols]);
   setTelegramSettings(userId, {
-    chat_id: "10001",
-    enabled: true,
-    favorite_markets_only: true,
+    chat_id: chatId,
+    enabled,
+    favorite_markets_only: favoriteMarketsOnly,
     timeframes: [...timeframes],
     direction: "both",
     minimum_confidence: minimumConfidence
   });
   return userId;
+}
+
+export function configureAlertPreference({
+  id,
+  userId,
+  symbol,
+  timeframe,
+  enabled = true,
+  direction = "both",
+  minimumConfidence = 0
+}) {
+  alertPreferences.push({
+    id: id || `pref-${alertPreferences.length + 1}`,
+    user_id: userId,
+    symbol,
+    timeframe,
+    enabled,
+    direction,
+    minimum_confidence: minimumConfidence
+  });
 }
 
 export function getAutoCryptoWatcherState() {
@@ -57,7 +85,9 @@ export function getAutoCryptoWatcherState() {
     generatedRows: structuredClone([...transportState.generatedSignals.values()]),
     queueRows: getTelegramQueueRows(),
     settings: structuredClone([...transportState.telegramSettings.values()]),
-    watchlists: structuredClone([...watchlists.entries()])
+    watchlists: structuredClone([...watchlists.entries()]),
+    candidates: getReadySignalPersistence().candidates,
+    detectedAlerts: structuredClone(detectedAlerts)
   };
 }
 
@@ -66,7 +96,40 @@ export async function query(sql, params = []) {
 
   if (normalized.includes("from alert_preferences p") && normalized.includes("join users u")) {
     transportState.calls.push({ sql: normalized, params: structuredClone(params) });
-    return { rows: [] };
+    return {
+      rows: alertPreferences
+        .filter((preference) => preference.enabled)
+        .map((preference) => ({
+          ...structuredClone(preference),
+          role: users.get(preference.user_id)?.role || "user",
+          email_verified_at: users.get(preference.user_id)?.email_verified_at || null
+        }))
+    };
+  }
+
+  if (normalized.includes("from detected_alerts") && normalized.includes("setup_id = $2")) {
+    transportState.calls.push({ sql: normalized, params: structuredClone(params) });
+    const row = detectedAlerts.find((alert) => alert.user_id === params[0] && alert.setup_id === params[1]);
+    return { rows: row ? [{ id: row.id }] : [] };
+  }
+
+  if (normalized.includes("insert into detected_alerts")) {
+    transportState.calls.push({ sql: normalized, params: structuredClone(params) });
+    const duplicate = detectedAlerts.find((alert) =>
+      alert.user_id === params[1] && alert.preference_id === params[2] && alert.setup_id === params[3]
+    );
+    if (duplicate) return { rows: [] };
+    const row = {
+      id: params[0],
+      user_id: params[1],
+      preference_id: params[2],
+      setup_id: params[3],
+      symbol: params[4],
+      timeframe: params[5],
+      direction: params[6]
+    };
+    detectedAlerts.push(row);
+    return { rows: [structuredClone(row)] };
   }
 
   if (normalized.includes("from telegram_notification_settings s") && normalized.includes("join users u")) {
