@@ -91,6 +91,7 @@ try {
   assert.equal(warnings.some((message) => message.includes("XRP-USD 15m skipped")), true);
   assert.equal(logs.some((message) => message.includes("telegram alert queued")), true);
   assert.equal(logs.some((message) => message.includes("telegram alert sent")), false);
+  assertMarketBriefRefresh(firstState.calls, true);
   assertNoCreditWrites(firstState.calls);
   assertCanonicalSnapshot(firstState, btc);
   passed += 1;
@@ -222,11 +223,11 @@ try {
   });
   const scopedState = db.getAutoCryptoWatcherState();
   assert.equal(scopedRun.scanned, 2, "scoped alert and Telegram paths were not both exercised");
-    assert.equal(
-      marketRequests.some((request) => request.symbol !== "BTC-USD"),
-      false,
-      "scoped smoke run must not fetch candles for unrelated markets"
-    );
+  assert.equal(
+    marketRequests.some((request) => request.symbol !== "BTC-USD"),
+    false,
+    "scoped smoke run must not fetch candles for unrelated markets"
+  );
   assert.ok(scopedState.generatedRows.length >= 1);
   assert.equal(scopedState.generatedRows.every((row) => row.pair === "BTC-USD" && row.timeframe === "15m"), true);
   assert.ok(scopedState.candidates.length >= 1);
@@ -239,6 +240,7 @@ try {
   assert.equal(scopedState.queueRows[0].user_id, "user-a");
   assert.equal(scopedState.queueRows[0].payload.symbol, "BTC-USD");
   assert.equal(scopedState.queueRows[0].payload.timeframe, "15m");
+  assertMarketBriefRefresh(scopedState.calls, false);
   assertNoCreditWrites(scopedState.calls);
   passed += 1;
   results.scopedRun = {
@@ -246,7 +248,43 @@ try {
     symbols: [...new Set(scopedState.generatedRows.map((row) => row.pair))],
     timeframes: [...new Set(scopedState.generatedRows.map((row) => row.timeframe))],
     usersQueued: [...new Set(scopedState.queueRows.map((row) => row.user_id))],
-    candidateMarkets: [...new Set(scopedState.candidates.map((row) => `${row.symbol}:${row.timeframe}`))]
+    candidateMarkets: [...new Set(scopedState.candidates.map((row) => `${row.symbol}:${row.timeframe}`))],
+    broadMarketBriefWrites: 0
+  };
+
+  db.resetAutoCryptoWatcherTransport();
+  db.configureWatcherUser({
+    userId: "cleanup-user",
+    minimumConfidence: 90,
+    symbols: ["BTC-USD"],
+    timeframes: ["15m"],
+    chatId: "10003"
+  });
+  currentNowMs = LONDON_NOW_MS + 2 * 24 * 60 * 60 * 1000;
+  activeFixtures = new Map([["BTC-USD", noSetupFixture()]]);
+  const cleanupBarrier = db.holdNextAvoidLearningCleanup();
+  let scopedCleanupResolved = false;
+  const scopedCleanupRun = runAutoCryptoAlertScan({
+    symbol: "BTC-USD",
+    timeframe: "15m",
+    userId: "cleanup-user"
+  });
+  scopedCleanupRun.then(
+    () => { scopedCleanupResolved = true; },
+    () => { scopedCleanupResolved = true; }
+  );
+  await cleanupBarrier.started;
+  await Promise.resolve();
+  assert.equal(scopedCleanupResolved, false, "scoped run resolved while avoid-learning cleanup was pending");
+  cleanupBarrier.release();
+  await scopedCleanupRun;
+  assert.equal(scopedCleanupResolved, true);
+  const cleanupState = db.getAutoCryptoWatcherState();
+  assertMarketBriefRefresh(cleanupState.calls, false);
+  results.scopedCleanup = {
+    waitedBeforeResolve: true,
+    broadMarketBriefWrites: 0,
+    pendingDatabaseWorkAfterResolve: false
   };
 
   db.resetAutoCryptoWatcherTransport();
@@ -282,14 +320,20 @@ try {
 
   let cliInvocations = 0;
   let cliCloses = 0;
+  let cliWatcherWorkComplete = false;
   const cliOutput = [];
   const cliRuntime = async () => ({
     runAutoCryptoAlertScan: async (scope) => {
       cliInvocations += 1;
       assert.deepEqual(scope, { symbol: "BTC-USD", timeframe: "15m", userId: "user-a" });
+      await Promise.resolve();
+      cliWatcherWorkComplete = true;
       return { scanned: 1, alertsCreated: 0, telegramAlertsQueued: 0, skippedDuplicates: 0 };
     },
-    close: async () => { cliCloses += 1; }
+    close: async () => {
+      assert.equal(cliWatcherWorkComplete, true, "CLI closed PostgreSQL before watcher work completed");
+      cliCloses += 1;
+    }
   });
   await assert.rejects(
     runAutoCryptoWatcherSmokeCli({
@@ -318,7 +362,13 @@ try {
     singleRun: true
   });
   passed += 1;
-  results.smokeCli = { enabledRefused: true, disabledPermitted: true, invocations: cliInvocations, closes: cliCloses };
+  results.smokeCli = {
+    enabledRefused: true,
+    disabledPermitted: true,
+    invocations: cliInvocations,
+    closes: cliCloses,
+    watcherWorkCompleteBeforeClose: cliWatcherWorkComplete
+  };
 
   assert.equal(passed, 12);
   console.log(JSON.stringify({
@@ -462,4 +512,11 @@ function snapshotGenerated(row) {
 function assertNoCreditWrites(calls) {
   const writes = calls.filter((call) => /(?:insert into|update|delete from) (?:credit_balances|setup_discovery_usage|unlocked_signals)/.test(call.sql));
   assert.deepEqual(writes, [], "watcher or Telegram rejection consumed credits");
+}
+
+function assertMarketBriefRefresh(calls, expected) {
+  const refreshed = calls.some((call) => call.sql.includes("insert into daily_market_brief_observations"));
+  assert.equal(refreshed, expected, expected
+    ? "unscoped watcher no longer refreshes its existing market brief"
+    : "scoped watcher performed broad market-brief maintenance");
 }

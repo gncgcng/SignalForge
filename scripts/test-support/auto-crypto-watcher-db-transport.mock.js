@@ -14,13 +14,25 @@ const users = new Map();
 const watchlists = new Map();
 const alertPreferences = [];
 const detectedAlerts = [];
+let avoidLearningCleanupBarrier = null;
 
 export function resetAutoCryptoWatcherTransport() {
+  avoidLearningCleanupBarrier?.release();
+  avoidLearningCleanupBarrier = null;
   resetReadySignalTransport();
   users.clear();
   watchlists.clear();
   alertPreferences.length = 0;
   detectedAlerts.length = 0;
+}
+
+export function holdNextAvoidLearningCleanup() {
+  let markStarted;
+  let release;
+  const started = new Promise((resolve) => { markStarted = resolve; });
+  const released = new Promise((resolve) => { release = resolve; });
+  avoidLearningCleanupBarrier = { markStarted, released, release };
+  return { started, release };
 }
 
 export function configureWatcherUser({
@@ -93,6 +105,13 @@ export function getAutoCryptoWatcherState() {
 
 export async function query(sql, params = []) {
   const normalized = normalizeSql(sql);
+
+  if (normalized.includes("delete from avoid_trade_learning_events") && avoidLearningCleanupBarrier) {
+    const barrier = avoidLearningCleanupBarrier;
+    avoidLearningCleanupBarrier = null;
+    barrier.markStarted();
+    await barrier.released;
+  }
 
   if (normalized.includes("from alert_preferences p") && normalized.includes("join users u")) {
     transportState.calls.push({ sql: normalized, params: structuredClone(params) });

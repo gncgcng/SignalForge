@@ -195,7 +195,7 @@ export async function runCandidateMarketWatch(scope = undefined) {
     }
   }
   let marketBrief = null;
-  if (briefObservations.length) {
+  if (!scope && briefObservations.length) {
     try {
       marketBrief = await refreshDailyMarketBrief({ observations: briefObservations });
     } catch (error) {

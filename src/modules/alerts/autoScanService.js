@@ -16,6 +16,7 @@ import {
 import { scanMarketSetupDetailed } from "../signals/signalService.js";
 import { saveGeneratedSignal } from "../admin-signals/generatedSignalService.js";
 import { expireStaleCandidates, getCandidateQualitySummary, refreshCandidateLearningOutcomes, runCandidateMarketWatch } from "../signals/setupCandidateService.js";
+import { waitForPendingAvoidTradeLearningCleanup } from "../signals/setupCandidateRepository.js";
 import { preferenceMatchesSetup } from "./alertService.js";
 
 let autoScanTimer = null;
@@ -200,7 +201,11 @@ export async function runAutoCryptoAlertScan(scope = undefined) {
 
     return { scanned, alertsCreated, telegramAlertsQueued, skippedDuplicates };
   } finally {
-    autoScanRunning = false;
+    try {
+      if (normalizedScope) await waitForPendingAvoidTradeLearningCleanup();
+    } finally {
+      autoScanRunning = false;
+    }
   }
 }
 

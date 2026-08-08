@@ -5,6 +5,7 @@ import { createId } from "../../shared/ids.js";
 const AVOID_TRADE_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 let avoidTradeLearningCleanupTimer = null;
 let nextAvoidTradeLearningCleanupAt = 0;
+let pendingAvoidTradeLearningCleanup = null;
 
 export async function upsertSetupCandidate(candidate) {
   const result = await query(`
@@ -393,10 +394,20 @@ export async function recordAvoidTradeLearningEvent(avoidTrade) {
   const now = Date.now();
   if (now >= nextAvoidTradeLearningCleanupAt) {
     nextAvoidTradeLearningCleanupAt = now + AVOID_TRADE_CLEANUP_INTERVAL_MS;
-    cleanupAvoidTradeLearningEvents().catch((error) => {
+    let cleanupPromise;
+    cleanupPromise = cleanupAvoidTradeLearningEvents().catch((error) => {
       console.warn(`[avoid-learning] cleanup failed reason=${safeCleanupReason(error)}`);
+    }).finally(() => {
+      if (pendingAvoidTradeLearningCleanup === cleanupPromise) {
+        pendingAvoidTradeLearningCleanup = null;
+      }
     });
+    pendingAvoidTradeLearningCleanup = cleanupPromise;
   }
+}
+
+export async function waitForPendingAvoidTradeLearningCleanup() {
+  if (pendingAvoidTradeLearningCleanup) await pendingAvoidTradeLearningCleanup;
 }
 
 export async function markRelatedAvoidTradesPromoted(symbol, timeframe) {
