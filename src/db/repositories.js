@@ -1412,6 +1412,23 @@ export async function getCachedScanResult(userId, scanKey) {
   return result.rows[0]?.result_json || null;
 }
 
+export async function findCachedScanAllSetup(userId, setupKey) {
+  const result = await query(`
+      SELECT stored.setup
+      FROM scan_result_cache cache
+      CROSS JOIN LATERAL jsonb_array_elements(
+        COALESCE(cache.result_json->'fullSetups', '[]'::jsonb)
+      ) AS stored(setup)
+      WHERE cache.user_id = $1
+        AND cache.scan_key LIKE 'scan-all:%'
+        AND cache.expires_at > now()
+        AND stored.setup->>'setupKey' = $2
+    ORDER BY cache.created_at DESC
+    LIMIT 1
+  `, [userId, setupKey]);
+  return result.rows[0]?.setup || null;
+}
+
 export async function cacheScanResult(userId, scanKey, result, ttlSeconds = 300) {
   await query(`
     INSERT INTO scan_result_cache (user_id, scan_key, result_json, expires_at)

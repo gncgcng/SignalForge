@@ -1,5 +1,6 @@
 import {
   cacheScanResult,
+  findCachedScanAllSetup,
   findActiveDuplicateSignal,
   findSignalBySetupKey,
   findTelegramNotificationPayload,
@@ -67,6 +68,15 @@ const scanAllJobs = new Map();
 const SCAN_JOB_TTL_MS = 60 * 60 * 1000;
 
 export async function createSignal(user, { symbol, timeframe, setupKey }) {
+  const requestedSetupKey = String(setupKey || "").trim();
+  if (requestedSetupKey) {
+    return unlockPreviouslyDiscoveredSetup(user, {
+      symbol,
+      timeframe,
+      setupKey: requestedSetupKey
+    });
+  }
+
   const scanKey = `single:${symbol}:${timeframe}`;
   const cached = await getCachedScanResult(user.id, scanKey);
   let result = cached;
@@ -89,25 +99,6 @@ export async function createSignal(user, { symbol, timeframe, setupKey }) {
       },
       subscription: getSubscriptionSummary(user)
     };
-  }
-
-  const requestedSetupKey = String(setupKey || "").trim();
-  if (requestedSetupKey) {
-    const existing = await findSignalBySetupKey(user.id, requestedSetupKey);
-    if (existing) {
-      existing.alreadyUnlocked = true;
-      return {
-        signal: toUserSignal(existing),
-        alreadyUnlocked: true,
-        analysis: result.analysis,
-        subscription: getSubscriptionSummary(user)
-      };
-    }
-    if (result.fullSetup?.setupKey !== requestedSetupKey) {
-      const error = new Error("This setup is no longer the current scanner result. Run a fresh scan.");
-      error.statusCode = 409;
-      throw error;
-    }
   }
 
   const fullSetup = withSignalValidity(result.fullSetup);
@@ -169,6 +160,125 @@ export async function createSignal(user, { symbol, timeframe, setupKey }) {
     analysis: result.analysis,
     subscription: getSubscriptionSummary(user)
   };
+}
+
+async function unlockPreviouslyDiscoveredSetup(user, { symbol, timeframe, setupKey }) {
+  const existing = await findSignalBySetupKey(user.id, setupKey);
+  if (existing) {
+    existing.alreadyUnlocked = true;
+    return {
+      signal: toUserSignal(existing),
+      alreadyUnlocked: true,
+      subscription: getSubscriptionSummary(user)
+    };
+  }
+
+  const jobSetup = findSetupInUserScanAllJobs(user.id, setupKey);
+  const cachedScanAllSetup = jobSetup ? null : await findCachedScanAllSetup(user.id, setupKey);
+  const singleCache = jobSetup || cachedScanAllSetup
+    ? null
+    : await getCachedScanResult(user.id, `single:${symbol}:${timeframe}`);
+  const singleSetup = singleCache?.fullSetup?.setupKey === setupKey
+    ? singleCache.fullSetup
+    : null;
+  const storedSetup = jobSetup || cachedScanAllSetup || singleSetup;
+
+  if (!storedSetup) {
+    const error = new Error("This setup is not available for this account. Run a fresh scan.");
+    error.code = "SCAN_SETUP_NOT_FOUND";
+    error.statusCode = 404;
+    throw error;
+  }
+
+  assertExactReadySetup(storedSetup, { symbol, timeframe, setupKey });
+  const signal = {
+    ...storedSetup,
+    userId: user.id,
+    status: "Active",
+    statusUpdatedAt: new Date().toISOString()
+  };
+  const savedSignal = await saveUnlockedSignal(user.id, signal);
+
+  if (!savedSignal?.alreadyUnlocked) {
+    await trackProductEvent({
+      eventType: "unlock",
+      userId: user.id,
+      symbol: signal.symbol,
+      timeframe: signal.timeframe,
+      metadata: { source: "scan_all_snapshot" }
+    });
+  }
+  if (user.role !== "tester" && !savedSignal?.alreadyUnlocked) {
+    user.unlockCreditsBalance = Math.max(0, Number(user.unlockCreditsBalance || 0) - 1);
+    user.lifetimeUnlocksUsed = Number(user.lifetimeUnlocksUsed || 0) + 1;
+    user.trialSignalsUsed = Number(user.trialSignalsUsed || 0) +
+      (user.plan === "free" || user.plan === "trial" ? 1 : 0);
+  }
+
+  return {
+    signal: toUserSignal({
+      ...storedSetup,
+      ...savedSignal,
+      resultType: storedSetup.resultType,
+      readinessScore: storedSetup.readinessScore,
+      entryReadinessScore: storedSetup.entryReadinessScore
+    }),
+    alreadyUnlocked: Boolean(savedSignal?.alreadyUnlocked),
+    subscription: getSubscriptionSummary(user)
+  };
+}
+
+function findSetupInUserScanAllJobs(userId, setupKey) {
+  cleanupScanAllJobs();
+  return [...scanAllJobs.values()]
+    .reverse()
+    .filter((job) => job.userId === userId)
+    .flatMap((job) => job.privateFullSetups || [])
+    .find((setup) => setup?.setupKey === setupKey) || null;
+}
+
+function assertExactReadySetup(setup, request) {
+  if (String(setup.setupKey || "") !== request.setupKey ||
+      String(setup.symbol || "").toUpperCase() !== String(request.symbol || "").toUpperCase() ||
+      String(setup.timeframe || "").toLowerCase() !== String(request.timeframe || "").toLowerCase()) {
+    const error = new Error("The requested market does not match this scanner setup.");
+    error.code = "SCAN_SETUP_MISMATCH";
+    error.statusCode = 409;
+    throw error;
+  }
+
+  const current = withSignalValidity(setup);
+  if (isSignalExpired(current)) {
+    const error = new Error("This signal has expired and is no longer valid as a fresh setup.");
+    error.code = "SIGNAL_EXPIRED";
+    error.statusCode = 410;
+    throw error;
+  }
+
+  const readiness = Number(
+    current.readinessScore ?? current.entryReadinessScore ?? current.indicators?.readinessScore
+  );
+  const levels = [
+    current.entryPrice,
+    current.stopLoss,
+    current.takeProfit,
+    current.riskRewardRatio,
+    current.confidenceScore
+  ];
+  const ready = current.resultType === SCANNER_RESULT_TYPES.READY &&
+    current.status === "Active" &&
+    current.validationPassed !== false &&
+    Number.isFinite(readiness) && readiness > 0 &&
+    levels.every((value) => Number.isFinite(Number(value))) &&
+    current.generatedQualityBlocked !== true &&
+    current.indicators?.generatedQualityBlocked !== true &&
+    !isSignalBlockedByCalibration(current);
+  if (!ready) {
+    const error = new Error("This scanner setup is no longer eligible to unlock.");
+    error.code = "SCAN_SETUP_NOT_READY";
+    error.statusCode = 409;
+    throw error;
+  }
 }
 
 export async function unlockTelegramSignal(user, { setupKey }) {
