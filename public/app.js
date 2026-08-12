@@ -1618,20 +1618,14 @@ generateButton.addEventListener("click", async () => {
 
     if (!signal) {
       markFirstScanCompleted();
-      renderNoSetup(analysis);
+      if (state.scanResults.length) renderSignals();
+      else renderNoSetup(analysis);
       statusLine.textContent = "No valid setup found. No unlock credit was used.";
       return;
     }
 
-    state.scanResults = [];
-    state.signals = [signal, ...state.signals];
     markFirstScanCompleted();
-    await loadSignals();
-    renderSignals();
-    renderSignalsHistory();
-    statusLine.textContent = alreadyUnlocked
-      ? "Already unlocked. No additional credit was used."
-      : "Setup generated from live OHLCV data. Rule-based only; not financial advice.";
+    await completeSignalUnlock({ signal, subscription, alreadyUnlocked, source: "scanner" });
   } catch (error) {
     statusLine.textContent = error.message;
   } finally {
@@ -2386,8 +2380,9 @@ signalsGrid.addEventListener("click", async (event) => {
     renderSubscription();
 
     if (!signal) {
-      renderNoSetup(analysis);
+      renderSignals();
       statusLine.textContent = "Setup no longer qualifies. No unlock credit was used.";
+      showToast("Unlock failed. Current Scan All results were preserved.");
       return;
     }
 
@@ -2490,8 +2485,9 @@ async function unlockSignal(button, symbol, timeframe) {
     renderSubscription();
 
     if (!signal) {
-      renderNoSetup(analysis);
+      renderSignals();
       statusLine.textContent = "Setup no longer qualifies. No unlock credit was used.";
+      showToast("Unlock failed. Current Scan All results were preserved.");
       return;
     }
 
@@ -6894,6 +6890,8 @@ function renderDiagnosticSamples(samples = []) {
 }
 
 function renderScanCard(setup) {
+  if (setup.scanDeskUnlocked) return renderSignalCard(setup);
+
   const key = getSignalKey(setup);
   const expanded = state.expandedSignalKeys.has(key);
   const passed = (setup.confirmations || []).filter((item) => item.passed).map((item) => item.name).join(", ");
@@ -9661,18 +9659,21 @@ function scrollToSignalDesk() {
 async function completeSignalUnlock({ signal, subscription, alreadyUnlocked, source }) {
   state.subscription = subscription || state.subscription;
   renderSubscription();
-  state.scanResults = [];
+  if (mergeUnlockedSignalIntoScanResults(signal)) renderSignals();
   await Promise.all([loadSignals(), loadPaperPortfolio()]);
 
   const unlockedSignal = state.signals.find((item) => item.id === signal.id) ||
     state.signals.find((item) => item.setupKey && item.setupKey === signal.setupKey) ||
     signal;
+  mergeUnlockedSignalIntoScanResults(unlockedSignal);
   const unlockedKey = getSignalKey(unlockedSignal);
   state.expandedSignalKeys = new Set([unlockedKey]);
   state.unlockedRevealSignalId = unlockedSignal.id;
   sessionStorage.setItem(UNLOCK_REVEAL_KEY, unlockedSignal.id);
 
-  navigateTo("signals", {}, { replace: source === "telegram" });
+  if (source !== "scanner") {
+    navigateTo("signals", {}, { replace: source === "telegram" });
+  }
   renderSignals();
   renderSignalsHistory();
   renderUnlockReveal();
@@ -9682,6 +9683,35 @@ async function completeSignalUnlock({ signal, subscription, alreadyUnlocked, sou
     ? "Already unlocked. No additional credit was used."
     : `Signal unlocked${sourceLabel}. One unlock credit deducted.`;
   showToast(alreadyUnlocked ? "Already unlocked" : "Signal unlocked");
+}
+
+function mergeUnlockedSignalIntoScanResults(signal) {
+  const scanResults = Array.isArray(state.scanResults) ? state.scanResults : [];
+  const signalId = String(signal?.id || "");
+  const setupKey = String(signal?.setupKey || "");
+  const symbol = String(signal?.symbol || "").toUpperCase();
+  const timeframe = String(signal?.timeframe || "").toLowerCase();
+  const direction = String(signal?.direction || "").toLowerCase();
+  const index = scanResults.findIndex((setup) => {
+    if (setupKey && String(setup?.setupKey || "") === setupKey) return true;
+    if (signalId && String(setup?.id || "") === signalId) return true;
+    return symbol && timeframe &&
+      String(setup?.symbol || "").toUpperCase() === symbol &&
+      String(setup?.timeframe || "").toLowerCase() === timeframe &&
+      (!direction || String(setup?.direction || "").toLowerCase() === direction);
+  });
+  if (index < 0) return false;
+
+  const current = scanResults[index];
+  state.scanResults = scanResults.map((setup, setupIndex) => setupIndex === index
+    ? {
+        ...current,
+        ...signal,
+        setupKey: signal.setupKey || current.setupKey,
+        scanDeskUnlocked: true
+      }
+    : setup);
+  return true;
 }
 
 async function restoreUnlockReveal() {
