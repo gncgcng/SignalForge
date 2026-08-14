@@ -82,6 +82,7 @@
     "test:watchlist-alerts": "node scripts/watchlist-alerts-test.js",
     "test:automation-navigation": "node scripts/automation-duplicates-navigation-test.js",
     "test:telegram-notifications": "node scripts/telegram-notifications-test.js",
+    "test:telegram-queue-conflict": "node scripts/telegram-queue-conflict-test.js",
     "test:telegram-onboarding": "node scripts/telegram-onboarding-test.js",
     "test:tester-access": "node scripts/tester-access-test.js",
     "test:performance": "node scripts/performance-test.js",

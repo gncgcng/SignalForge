@@ -3100,7 +3100,7 @@ export async function enqueueTelegramNotification(userId, settings, setup) {
       id, user_id, setup_key, chat_id, payload
     )
     VALUES ($1,$2,$3,$4,$5)
-    ON CONFLICT (user_id, setup_key) DO NOTHING
+    ON CONFLICT DO NOTHING
     RETURNING id
   `, [
     createId("tgq"),
