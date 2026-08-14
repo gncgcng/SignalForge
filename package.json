@@ -54,6 +54,8 @@
     "test:manual-scanner-coverage": "node scripts/manual-scanner-market-coverage-test.js",
     "test:manual-scan-result-retention": "node scripts/manual-scan-result-retention-test.js",
     "test:scanner-unlock-state": "node scripts/scanner-unlock-state-test.js",
+    "test:scan-all-ready-unlock": "node --import ./scripts/register-scan-all-ready-unlock-loader.js ./scripts/scan-all-ready-unlock-test.js",
+    "test:scan-all-active-unlock": "node --import ./scripts/register-scan-all-active-unlock-loader.js ./scripts/scan-all-active-unlock-test.js",
     "market:test": "node scripts/test-coinbase-market.js",
     "market:rebuild-active": "node scripts/rebuild-active-crypto-markets.js",
     "market:verify-pending": "node scripts/verify-pending-crypto-markets.js",

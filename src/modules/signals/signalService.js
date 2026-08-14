@@ -1001,6 +1001,7 @@ function updateScanJobSnapshot(job, context) {
     context.avoidTrades,
     context.universe.skipped
   );
+  job.privateFullSetups = [...context.fullSetups];
   job.result = {
     setups: rankSetups([...context.setups]),
     candidates,
