@@ -176,7 +176,17 @@ export const appConfig = {
     cryptoWatcherEnabled: process.env.CRYPTO_WATCHER_ENABLED !== "false",
     cryptoOnly: process.env.AUTO_SCAN_CRYPTO_ONLY !== "false",
     intervalMs: Number(process.env.AUTO_SCAN_INTERVAL_MS || 300000),
-    duplicateCooldownMs: Number(process.env.AUTO_SCAN_DUPLICATE_COOLDOWN_MS || process.env.AUTO_SCAN_INTERVAL_MS || 900000)
+    duplicateCooldownMs: Number(process.env.AUTO_SCAN_DUPLICATE_COOLDOWN_MS || process.env.AUTO_SCAN_INTERVAL_MS || 900000),
+    canary: {
+      userId: String(process.env.AUTO_SCAN_CANARY_USER_ID || "").trim(),
+      symbol: String(process.env.AUTO_SCAN_CANARY_SYMBOL || "").trim().toUpperCase(),
+      timeframe: String(process.env.AUTO_SCAN_CANARY_TIMEFRAME || "").trim().toLowerCase(),
+      configured: {
+        userId: process.env.AUTO_SCAN_CANARY_USER_ID !== undefined,
+        symbol: process.env.AUTO_SCAN_CANARY_SYMBOL !== undefined,
+        timeframe: process.env.AUTO_SCAN_CANARY_TIMEFRAME !== undefined
+      }
+    }
   },
   candidates: {
     candidateThreshold: Number(process.env.CANDIDATE_SCORE_THRESHOLD || 65),

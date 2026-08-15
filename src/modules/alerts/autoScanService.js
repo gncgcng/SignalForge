@@ -31,20 +31,59 @@ export function startAutoCryptoAlertScanner() {
     return;
   }
 
+  const scheduledScope = resolveScheduledAutoScanScope();
+  if (scheduledScope.error) {
+    console.warn(scheduledScope.error);
+    return;
+  }
+
   const intervalMs = Math.max(60_000, Number(appConfig.autoScan.intervalMs || 900_000));
   console.log(`[auto-scan] started interval_ms=${intervalMs}`);
+  if (scheduledScope.scope) {
+    console.log(
+      `[crypto-watch] canary scheduler enabled user=${scheduledScope.scope.userId} ` +
+      `symbol=${scheduledScope.scope.symbol} timeframe=${scheduledScope.scope.timeframe}`
+    );
+  }
 
   setTimeout(() => {
-    runAutoCryptoAlertScan().catch((error) => {
+    runAutoCryptoAlertScan(scheduledScope.scope).catch((error) => {
       console.warn(`[auto-scan] failed ${error.message}`);
     });
   }, 1000);
 
   autoScanTimer = setInterval(() => {
-    runAutoCryptoAlertScan().catch((error) => {
+    runAutoCryptoAlertScan(scheduledScope.scope).catch((error) => {
       console.warn(`[auto-scan] failed ${error.message}`);
     });
   }, intervalMs);
+}
+
+function resolveScheduledAutoScanScope() {
+  const canary = appConfig.autoScan.canary || {};
+  const values = [canary.userId, canary.symbol, canary.timeframe];
+  const configured = Object.values(canary.configured || {}).filter(Boolean).length;
+  if (configured === 0) return { scope: undefined, error: null };
+  if (configured !== values.length || values.some((value) => !value)) {
+    return {
+      scope: null,
+      error: "[crypto-watch] canary configuration incomplete; scheduler disabled"
+    };
+  }
+  if (!appConfig.supportedTimeframes.includes(canary.timeframe)) {
+    return {
+      scope: null,
+      error: `[crypto-watch] canary timeframe invalid (${canary.timeframe}); scheduler disabled`
+    };
+  }
+  return {
+    scope: {
+      userId: canary.userId,
+      symbol: canary.symbol,
+      timeframe: canary.timeframe
+    },
+    error: null
+  };
 }
 
 export async function runAutoCryptoAlertScan(scope = undefined) {
