@@ -10,7 +10,7 @@ import {
   recordCandidateLearningEvent,
   upsertSetupCandidate
 } from "./setupCandidateRepository.js";
-import { getOhlcv, getPair, listAutoScannerPairs } from "../market-data/marketDataService.js";
+import { getOhlcv, getPair, listAutoScannerPairs, listEligibleAutoScannerCryptoPairs } from "../market-data/marketDataService.js";
 import { getMultiTimeframeMarketData } from "../market-data/multiTimeframeService.js";
 import { generateMarketDataSetup } from "./signalGenerator.js";
 import { buildMarketBriefObservation, refreshDailyMarketBrief } from "./dailyMarketBriefService.js";
@@ -152,7 +152,8 @@ export async function refreshCandidateLearningOutcomes(scope = undefined) {
 }
 
 export async function runCandidateMarketWatch(scope = undefined) {
-  const markets = listAutoScannerPairs().filter((pair) =>
+  const scannerMarkets = scope ? listEligibleAutoScannerCryptoPairs() : listAutoScannerPairs();
+  const markets = scannerMarkets.filter((pair) =>
     pair.category === "Crypto" && (!scope || pair.symbol === scope.symbol)
   );
   if (!markets.length) return { scanned: 0, createdOrUpdated: 0 };

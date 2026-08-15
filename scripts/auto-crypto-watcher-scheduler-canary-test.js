@@ -16,7 +16,8 @@ const cases = [
       AUTO_SCAN_ENABLED: "true",
       AUTO_SCAN_CANARY_USER_ID: "user-a",
       AUTO_SCAN_CANARY_SYMBOL: " btc-usd ",
-      AUTO_SCAN_CANARY_TIMEFRAME: "15M"
+      AUTO_SCAN_CANARY_TIMEFRAME: "15M",
+      CRYPTO_MAX_ACTIVE_SCANNER_PAIRS: "1"
     }
   },
   {

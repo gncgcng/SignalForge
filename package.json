@@ -79,6 +79,7 @@
     "test:ready-signal-end-to-end": "node --import ./scripts/register-ready-signal-end-to-end-loader.js ./scripts/ready-signal-end-to-end-test.js",
     "test:auto-crypto-watcher-e2e": "node --import ./scripts/register-auto-crypto-watcher-e2e-loader.js ./scripts/auto-crypto-watcher-e2e-test.js",
     "test:auto-crypto-watcher-scheduler-canary": "node scripts/auto-crypto-watcher-scheduler-canary-test.js",
+    "test:scoped-watcher-market-cap": "node --import ./scripts/register-auto-crypto-watcher-e2e-loader.js ./scripts/scoped-watcher-market-cap-test.js",
     "smoke:auto-crypto-watcher": "node scripts/run-auto-crypto-watcher-smoke.js",
     "test:generated-signal-quality": "node scripts/generated-signal-quality-controls-test.js",
     "test:signal-transparency": "node scripts/signal-transparency-test.js",

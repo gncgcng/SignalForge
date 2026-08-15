@@ -66,9 +66,13 @@ export function listCryptoMarketSettings() {
     .sort((a, b) => tierOrder(a.liquidityTier) - tierOrder(b.liquidityTier) || a.symbol.localeCompare(b.symbol));
 }
 
-export function listScannerCryptoMarkets() {
+export function listEligibleScannerCryptoMarkets() {
   return listCryptoMarketSettings()
-    .filter((market) => isReadyStatus(market.status || market.marketStatus) && market.enabled && market.scannerEnabled && !isBlockingCooldown(market))
+    .filter((market) => isReadyStatus(market.status || market.marketStatus) && market.enabled && market.scannerEnabled && !isBlockingCooldown(market));
+}
+
+export function listScannerCryptoMarkets() {
+  return listEligibleScannerCryptoMarkets()
     .slice(0, appConfig.cryptoMarkets.maxActiveScannerPairs);
 }
 

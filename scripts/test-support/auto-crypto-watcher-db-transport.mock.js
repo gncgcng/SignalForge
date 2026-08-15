@@ -15,6 +15,7 @@ const watchlists = new Map();
 const alertPreferences = [];
 const detectedAlerts = [];
 let avoidLearningCleanupBarrier = null;
+let cryptoMarketRows = null;
 
 export function resetAutoCryptoWatcherTransport() {
   avoidLearningCleanupBarrier?.release();
@@ -24,6 +25,11 @@ export function resetAutoCryptoWatcherTransport() {
   watchlists.clear();
   alertPreferences.length = 0;
   detectedAlerts.length = 0;
+  cryptoMarketRows = null;
+}
+
+export function configureCryptoMarketRows(rows) {
+  cryptoMarketRows = structuredClone(rows);
 }
 
 export function holdNextAvoidLearningCleanup() {
@@ -105,6 +111,10 @@ export function getAutoCryptoWatcherState() {
 
 export async function query(sql, params = []) {
   const normalized = normalizeSql(sql);
+
+  if (normalized === "select * from crypto_markets order by liquidity_tier, symbol" && cryptoMarketRows) {
+    return { rows: structuredClone(cryptoMarketRows) };
+  }
 
   if (normalized.includes("delete from avoid_trade_learning_events") && avoidLearningCleanupBarrier) {
     const barrier = avoidLearningCleanupBarrier;

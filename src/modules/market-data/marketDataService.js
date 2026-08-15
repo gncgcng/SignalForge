@@ -8,6 +8,7 @@ import {
   getCryptoMarketState,
   isCryptoMarketCoolingDown,
   listCryptoMarketSettings,
+  listEligibleScannerCryptoMarkets,
   listPaperCryptoMarkets,
   listScannerCryptoMarkets,
   recordCryptoMarketFailure,
@@ -122,6 +123,12 @@ export function listAutoScannerPairs() {
     return crypto;
   }
   return listManualScannerPairs();
+}
+
+export function listEligibleAutoScannerCryptoPairs() {
+  return listEligibleScannerCryptoMarkets()
+    .map(withAvailability)
+    .filter((pair) => pair.category === "Crypto" && isReadyStatus(pair.status));
 }
 
 export function listManualScannerPairs(options = {}) {

@@ -7,7 +7,7 @@ import {
   listWatchlistByUser,
   saveDetectedAlert
 } from "../../db/repositories.js";
-import { getPair, listAutoScannerPairs } from "../market-data/marketDataService.js";
+import { getPair, listAutoScannerPairs, listEligibleAutoScannerCryptoPairs } from "../market-data/marketDataService.js";
 import { preserveDownstreamConfidence } from "../signals/signalConfidenceCalibrationService.js";
 import {
   enqueueMatchingTelegramNotifications,
@@ -267,7 +267,7 @@ function normalizeAutoScanScope(scope) {
 }
 
 async function resolveAutoScanScope(scope) {
-  const markets = listAutoScannerPairs().filter((pair) => pair.category === "Crypto");
+  const markets = listEligibleAutoScannerCryptoPairs();
   const market = markets.find((pair) => pair.symbol === scope.symbol);
   if (!market) {
     throw autoScanScopeError(`${scope.symbol} is not an eligible auto-scanner market.`, "AUTO_SCAN_SCOPE_INELIGIBLE_MARKET");
