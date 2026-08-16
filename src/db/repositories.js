@@ -2600,6 +2600,11 @@ export async function getPaperAccount(userId) {
   return mapPaperAccount(result.rows[0]);
 }
 
+export async function findPaperAccount(userId) {
+  const result = await query("SELECT * FROM paper_accounts WHERE user_id = $1", [userId]);
+  return mapPaperAccount(result.rows[0]);
+}
+
 export async function listPaperOrders(userId) {
   const result = await query(`
     SELECT *

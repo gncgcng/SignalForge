@@ -93,6 +93,7 @@
     "test:performance": "node scripts/performance-test.js",
     "test:paper-trading": "node scripts/paper-trading-test.js",
     "test:paper-terminal": "node scripts/paper-trading-terminal-test.js",
+    "test:signal-review": "node scripts/signal-review-test.js",
     "test:trade-journal": "node scripts/trade-journal-test.js",
     "test:support": "node scripts/support-system-test.js",
     "test:account-recovery": "node scripts/public-account-recovery-test.js",

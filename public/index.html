@@ -1184,11 +1184,20 @@
               <section class="paper-chart-panel terminal-panel">
                 <div class="paper-chart-toolbar">
                   <div class="paper-timeframes" id="paper-timeframes"><button type="button" disabled title="1m is not supported by current providers">1m</button><button type="button" data-paper-timeframe="5m">5m</button><button type="button" data-paper-timeframe="15m" class="active">15m</button><button type="button" data-paper-timeframe="1h">1h</button><button type="button" data-paper-timeframe="4h">4h</button></div>
+                  <div class="paper-chart-tools" id="paper-chart-tools" aria-label="Chart tools">
+                    <button type="button" data-paper-drawing-tool="horizontal" title="Add horizontal line">Horizontal</button>
+                    <button type="button" data-paper-drawing-tool="trend" title="Add trend line">Trend</button>
+                    <button type="button" data-paper-delete-drawing title="Delete selected drawing" disabled>Delete</button>
+                    <button type="button" data-paper-clear-drawings title="Clear drawings">Clear</button>
+                    <button type="button" data-paper-auto-scale title="Reset price scale">Auto scale</button>
+                    <button type="button" data-paper-latest title="Return to latest candles">Latest</button>
+                  </div>
                   <details class="paper-indicator-menu"><summary>Indicators</summary><div id="paper-indicator-controls">
                     <label><input type="checkbox" value="ema20" checked /> EMA 20</label><label><input type="checkbox" value="ema50" checked /> EMA 50</label><label><input type="checkbox" value="ema200" /> EMA 200</label><label><input type="checkbox" value="vwap" /> VWAP</label><label><input type="checkbox" value="bollinger" /> Bollinger Bands</label><label><input type="checkbox" value="macd" /> MACD</label><label><input type="checkbox" value="rsi" /> RSI</label><label><input type="checkbox" value="volume" checked /> Volume</label><label><input type="checkbox" value="atr" /> ATR</label>
                   </div></details>
                 </div>
-                <div class="paper-chart-stage" id="paper-chart-stage"><div class="paper-chart-loading" id="paper-chart-loading">Loading live candles...</div><svg id="paper-candle-chart" viewBox="0 0 920 480" preserveAspectRatio="none" aria-label="Interactive paper trading candlestick chart"></svg><div class="paper-chart-tooltip hidden" id="paper-chart-tooltip"></div></div>
+                <section class="paper-signal-review hidden" id="paper-signal-review" aria-live="polite"></section>
+                <div class="paper-chart-stage" id="paper-chart-stage"><div class="paper-chart-loading" id="paper-chart-loading">Loading live candles...</div><svg id="paper-candle-chart" viewBox="0 0 920 480" preserveAspectRatio="none" aria-label="Interactive paper trading candlestick chart"></svg><div class="paper-chart-tooltip hidden" id="paper-chart-tooltip"></div><div class="paper-crosshair-axis-label price hidden" id="paper-crosshair-price-label"></div><div class="paper-crosshair-axis-label time hidden" id="paper-crosshair-time-label"></div></div>
                 <div class="paper-indicator-readout" id="paper-indicator-readout"></div><p class="paper-chart-status" id="paper-chart-status">Loading market data...</p>
               </section>
               <aside class="paper-order-panel terminal-panel">

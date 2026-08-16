@@ -341,6 +341,34 @@ export async function getOhlcv(symbol, timeframe) {
   };
 }
 
+export async function getReadOnlySignalReviewMarketData(symbol, timeframe, window = {}) {
+  const pair = getPair(symbol);
+  if (!pair) {
+    throw new MarketDataProviderError(`Unknown market symbol ${symbol}.`, {
+      statusCode: 404,
+      code: "MARKET_NOT_FOUND"
+    });
+  }
+  const provider = getMarketDataProvider(pair);
+  if (!provider.supports(pair.symbol, timeframe)) {
+    throw new MarketDataProviderError(`${provider.id} does not support ${pair.symbol} on ${timeframe}.`, {
+      statusCode: 400,
+      code: "PROVIDER_UNSUPPORTED_MARKET"
+    });
+  }
+  const marketData = provider.getHistoricalCandles && window.from && window.to
+    ? await provider.getHistoricalCandles(pair.symbol, timeframe, window)
+    : await provider.getCandles(pair.symbol, timeframe);
+  return {
+    pair,
+    candles: marketData.candles || [],
+    latestPrice: marketData.latestPrice,
+    change24h: marketData.change24h,
+    source: marketData.source,
+    receivedAt: marketData.receivedAt
+  };
+}
+
 export function getCachedOhlcv(symbol, timeframe) {
   const pair = getPair(symbol);
 
