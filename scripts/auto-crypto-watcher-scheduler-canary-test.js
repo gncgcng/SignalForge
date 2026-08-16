@@ -108,7 +108,7 @@ function runScenario(testCase) {
     TELEGRAM_BOT_TOKEN: "fixture-token",
     ...testCase.env
   };
-  for (const key of ["AUTO_SCAN_CANARY_USER_ID", "AUTO_SCAN_CANARY_SYMBOL", "AUTO_SCAN_CANARY_TIMEFRAME"]) {
+  for (const key of ["AUTO_SCAN_CANARY_USER_ID", "AUTO_SCAN_CANARY_SYMBOL", "AUTO_SCAN_CANARY_SYMBOLS", "AUTO_SCAN_CANARY_TIMEFRAME"]) {
     if (!(key in testCase.env)) delete env[key];
   }
   const child = spawnSync(process.execPath, ["--import", loader, scenarioScript, testCase.name], {

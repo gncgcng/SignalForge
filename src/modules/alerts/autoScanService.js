@@ -21,6 +21,7 @@ import { preferenceMatchesSetup } from "./alertService.js";
 
 let autoScanTimer = null;
 let autoScanRunning = false;
+const scheduledCanaryCycleToken = Symbol("scheduled-canary-cycle");
 
 export function startAutoCryptoAlertScanner() {
   if (!appConfig.autoScan.cryptoWatcherEnabled) {
@@ -31,29 +32,35 @@ export function startAutoCryptoAlertScanner() {
     return;
   }
 
-  const scheduledScope = resolveScheduledAutoScanScope();
-  if (scheduledScope.error) {
-    console.warn(scheduledScope.error);
+  const scheduledCanary = resolveScheduledAutoScanScope();
+  if (scheduledCanary.error) {
+    console.warn(scheduledCanary.error);
     return;
   }
 
   const intervalMs = Math.max(60_000, Number(appConfig.autoScan.intervalMs || 900_000));
   console.log(`[auto-scan] started interval_ms=${intervalMs}`);
-  if (scheduledScope.scope) {
+  if (scheduledCanary.scopes?.length === 1 && !scheduledCanary.listMode) {
     console.log(
-      `[crypto-watch] canary scheduler enabled user=${scheduledScope.scope.userId} ` +
-      `symbol=${scheduledScope.scope.symbol} timeframe=${scheduledScope.scope.timeframe}`
+      `[crypto-watch] canary scheduler enabled user=${scheduledCanary.scopes[0].userId} ` +
+      `symbol=${scheduledCanary.scopes[0].symbol} timeframe=${scheduledCanary.scopes[0].timeframe}`
+    );
+  } else if (scheduledCanary.scopes?.length) {
+    console.log(
+      `[crypto-watch] canary scheduler enabled user=${scheduledCanary.scopes[0].userId} ` +
+      `symbols=${scheduledCanary.scopes.map((scope) => scope.symbol).join(",")} ` +
+      `timeframe=${scheduledCanary.scopes[0].timeframe}`
     );
   }
 
   setTimeout(() => {
-    runAutoCryptoAlertScan(scheduledScope.scope).catch((error) => {
+    runScheduledAutoScanCycle(scheduledCanary).catch((error) => {
       console.warn(`[auto-scan] failed ${error.message}`);
     });
   }, 1000);
 
   autoScanTimer = setInterval(() => {
-    runAutoCryptoAlertScan(scheduledScope.scope).catch((error) => {
+    runScheduledAutoScanCycle(scheduledCanary).catch((error) => {
       console.warn(`[auto-scan] failed ${error.message}`);
     });
   }, intervalMs);
@@ -61,43 +68,118 @@ export function startAutoCryptoAlertScanner() {
 
 function resolveScheduledAutoScanScope() {
   const canary = appConfig.autoScan.canary || {};
-  const values = [canary.userId, canary.symbol, canary.timeframe];
-  const configured = Object.values(canary.configured || {}).filter(Boolean).length;
-  if (configured === 0) return { scope: undefined, error: null };
-  if (configured !== values.length || values.some((value) => !value)) {
+  const configured = canary.configured || {};
+  const configuredCount = Object.values(configured).filter(Boolean).length;
+  if (configuredCount === 0) return { scopes: undefined, listMode: false, error: null };
+  if (configured.symbol && configured.symbols) {
     return {
-      scope: null,
+      scopes: null,
+      listMode: false,
+      error: "[crypto-watch] canary symbol configuration conflicts; scheduler disabled"
+    };
+  }
+  const usesSingleSymbol = configured.symbol && !configured.symbols;
+  const usesSymbolList = configured.symbols && !configured.symbol;
+  if (!configured.userId || !configured.timeframe || (!usesSingleSymbol && !usesSymbolList) ||
+    !canary.userId || !canary.timeframe) {
+    return {
+      scopes: null,
+      listMode: usesSymbolList,
       error: "[crypto-watch] canary configuration incomplete; scheduler disabled"
     };
   }
   if (!appConfig.supportedTimeframes.includes(canary.timeframe)) {
     return {
-      scope: null,
+      scopes: null,
+      listMode: usesSymbolList,
       error: `[crypto-watch] canary timeframe invalid (${canary.timeframe}); scheduler disabled`
     };
   }
+
+  let symbols;
+  if (usesSingleSymbol) {
+    if (!canary.symbol) {
+      return {
+        scopes: null,
+        listMode: false,
+        error: "[crypto-watch] canary configuration incomplete; scheduler disabled"
+      };
+    }
+    symbols = [canary.symbol];
+  } else {
+    const entries = String(canary.symbols || "").split(",").map((symbol) => symbol.trim().toUpperCase());
+    if (!entries.length || entries.some((symbol) => !symbol)) {
+      return {
+        scopes: null,
+        listMode: true,
+        error: "[crypto-watch] canary symbol list empty or invalid; scheduler disabled"
+      };
+    }
+    symbols = [...new Set(entries)];
+    if (symbols.length > 10) {
+      return {
+        scopes: null,
+        listMode: true,
+        error: `[crypto-watch] canary symbol limit exceeded (${symbols.length}/10); scheduler disabled`
+      };
+    }
+  }
+
   return {
-    scope: {
+    scopes: symbols.map((symbol) => ({
       userId: canary.userId,
-      symbol: canary.symbol,
+      symbol,
       timeframe: canary.timeframe
-    },
+    })),
+    listMode: usesSymbolList,
     error: null
   };
 }
 
-export async function runAutoCryptoAlertScan(scope = undefined) {
+async function runScheduledAutoScanCycle({ scopes, listMode }) {
+  if (!scopes?.length) return runAutoCryptoAlertScan();
+  if (!listMode) return runAutoCryptoAlertScan(scopes[0]);
+  if (autoScanRunning) {
+    console.log("[auto-scan] skipped duplicates running_cycle=true");
+    return { scanned: 0, alertsCreated: 0, telegramAlertsQueued: 0, skippedDuplicates: 1 };
+  }
+
+  autoScanRunning = true;
+  const totals = { scanned: 0, alertsCreated: 0, telegramAlertsQueued: 0, skippedDuplicates: 0 };
+  let scannedSymbols = 0;
+  try {
+    for (const scope of scopes) {
+      try {
+        const result = await runAutoCryptoAlertScan(scope, scheduledCanaryCycleToken);
+        scannedSymbols += 1;
+        for (const key of Object.keys(totals)) totals[key] += Number(result?.[key] || 0);
+      } catch (error) {
+        console.warn(`[auto-scan] ${scope.symbol} ${scope.timeframe} skipped: ${error.message}`);
+      }
+    }
+  } finally {
+    autoScanRunning = false;
+  }
+  console.log(
+    `[crypto-watch] canary cycle requested_symbols=${scopes.length} ` +
+    `scanned=${scannedSymbols} failed=${scopes.length - scannedSymbols}`
+  );
+  return { ...totals, requestedSymbols: scopes.length, scannedSymbols };
+}
+
+export async function runAutoCryptoAlertScan(scope = undefined, cycleToken = null) {
+  const ownsAutoScanLock = cycleToken !== scheduledCanaryCycleToken;
   const normalizedScope = normalizeAutoScanScope(scope);
   const scopedContext = normalizedScope
     ? await resolveAutoScanScope(normalizedScope)
     : null;
 
-  if (autoScanRunning) {
+  if (ownsAutoScanLock && autoScanRunning) {
     console.log("[auto-scan] skipped duplicates running_cycle=true");
     return { scanned: 0, alertsCreated: 0, skippedDuplicates: 1 };
   }
 
-  autoScanRunning = true;
+  if (ownsAutoScanLock) autoScanRunning = true;
   let scanned = 0;
   let alertsCreated = 0;
   let telegramAlertsQueued = 0;
@@ -243,7 +325,7 @@ export async function runAutoCryptoAlertScan(scope = undefined) {
     try {
       if (normalizedScope) await waitForPendingAvoidTradeLearningCleanup();
     } finally {
-      autoScanRunning = false;
+      if (ownsAutoScanLock) autoScanRunning = false;
     }
   }
 }

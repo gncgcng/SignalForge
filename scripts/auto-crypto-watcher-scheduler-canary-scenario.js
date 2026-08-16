@@ -13,6 +13,12 @@ const warnings = [];
 const marketRequests = [];
 const scheduledTimeouts = [];
 const scheduledIntervals = [];
+const configurationFailureScenarios = new Set([
+  "partial", "empty", "invalid", "both-symbol-modes", "list-partial", "list-empty", "list-too-many"
+]);
+const knownEligibleSymbols = new Set([
+  "BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "DOGE-USD", "ADA-USD", "AVAX-USD", "LINK-USD", "LTC-USD"
+]);
 
 class FixedDate extends RealDate {
   constructor(...args) { super(...(args.length ? args : [FIXED_NOW_MS])); }
@@ -37,7 +43,7 @@ try {
   const { startAutoCryptoAlertScanner } = await import("../src/modules/alerts/autoScanService.js");
   db.resetAutoCryptoWatcherTransport();
 
-  if (!["disabled", "auto-disabled", "partial", "empty", "invalid"].includes(scenario)) {
+  if (!["disabled", "auto-disabled"].includes(scenario) && !configurationFailureScenarios.has(scenario)) {
     configureUsers(db);
   }
 
@@ -56,7 +62,7 @@ try {
     assert.equal(scheduledTimeouts.length, 0);
     assert.equal(scheduledIntervals.length, 0);
     result = { scheduled: false, scans: 0 };
-  } else if (["partial", "empty"].includes(scenario)) {
+  } else if (["partial", "empty", "list-partial"].includes(scenario)) {
     assert.equal(scheduledTimeouts.length, 0);
     assert.equal(scheduledIntervals.length, 0);
     assert.ok(warnings.some((message) => message.includes("canary configuration incomplete; scheduler disabled")));
@@ -66,23 +72,44 @@ try {
     assert.equal(scheduledIntervals.length, 0);
     assert.ok(warnings.some((message) => message.includes("canary timeframe invalid (2h); scheduler disabled")));
     result = { scheduled: false, scans: 0, failedClosed: "invalid_timeframe" };
+  } else if (scenario === "both-symbol-modes") {
+    assert.equal(scheduledTimeouts.length, 0);
+    assert.equal(scheduledIntervals.length, 0);
+    assert.ok(warnings.some((message) => message.includes("canary symbol configuration conflicts; scheduler disabled")));
+    result = { scheduled: false, scans: 0, failedClosed: "symbol_conflict" };
+  } else if (scenario === "list-empty") {
+    assert.equal(scheduledTimeouts.length, 0);
+    assert.equal(scheduledIntervals.length, 0);
+    assert.ok(warnings.some((message) => message.includes("canary symbol list empty or invalid; scheduler disabled")));
+    result = { scheduled: false, scans: 0, failedClosed: "empty_symbol_list" };
+  } else if (scenario === "list-too-many") {
+    assert.equal(scheduledTimeouts.length, 0);
+    assert.equal(scheduledIntervals.length, 0);
+    assert.ok(warnings.some((message) => message.includes("canary symbol limit exceeded (11/10); scheduler disabled")));
+    result = { scheduled: false, scans: 0, failedClosed: "symbol_limit" };
   } else {
     assert.equal(scheduledTimeouts.length, 1);
     assert.equal(scheduledTimeouts[0].delay, 1000);
     assert.equal(scheduledIntervals.length, 1);
     assert.ok(scheduledIntervals[0].delay >= 60_000);
 
-    if (scenario === "overlap") {
+    const listMode = Boolean(process.env.AUTO_SCAN_CANARY_SYMBOLS !== undefined);
+    const overlapScenario = scenario === "overlap" || scenario === "multi-overlap";
+    if (overlapScenario) {
       const cleanup = db.holdNextAvoidLearningCleanup();
       scheduledTimeouts[0].callback();
       await cleanup.started;
       scheduledIntervals[0].callback();
       await waitFor(() => logs.some((message) => message.includes("skipped duplicates running_cycle=true")));
       cleanup.release();
-      await waitFor(() => logs.some((message) => message.includes("[crypto-watch] scanned=")));
+      await waitFor(() => logs.some((message) => message.includes(
+        listMode ? "[crypto-watch] canary cycle requested_symbols=" : "[crypto-watch] scanned="
+      )));
     } else {
       scheduledTimeouts[0].callback();
-      await waitFor(() => logs.some((message) => message.includes("[crypto-watch] scanned=")));
+      await waitFor(() => logs.some((message) => message.includes(
+        listMode ? "[crypto-watch] canary cycle requested_symbols=" : "[crypto-watch] scanned="
+      )));
     }
 
     const state = db.getAutoCryptoWatcherState();
@@ -93,15 +120,35 @@ try {
       call.sql.includes("insert into daily_market_brief_observations")
     );
 
+    const requestedSymbols = listMode ? parseSymbolList(process.env.AUTO_SCAN_CANARY_SYMBOLS) : [];
+    const eligibleSymbols = requestedSymbols.filter((symbol) => knownEligibleSymbols.has(symbol));
+    const cycleSummary = parseCycleSummary(logs);
+
     if (scenario === "broad") {
       assert.ok(marketRequests.some((request) => request.symbol === "BTC-USD"));
       assert.ok(marketRequests.some((request) => request.symbol === "ETH-USD"));
       assert.ok(userLookups.includes("user-a"));
       assert.ok(userLookups.includes("user-b"));
       assert.equal(marketBriefRefreshed, true);
+    } else if (listMode) {
+      assert.deepEqual([...new Set(userLookups)], ["user-a"]);
+      if (!overlapScenario) {
+        assert.ok(state.generatedRows.length >= eligibleSymbols.length);
+        assert.ok(state.candidates.length >= eligibleSymbols.length);
+      }
+      assert.equal(state.generatedRows.every((row) => eligibleSymbols.includes(row.pair) && row.timeframe === "15m"), true);
+      assert.equal(state.candidates.every((row) => eligibleSymbols.includes(row.symbol) && row.timeframe === "15m"), true);
+      assert.equal(state.queueRows.every((row) => row.user_id === "user-a"), true);
+      assert.equal(marketBriefRefreshed, false);
+      assert.deepEqual(cycleSummary, { requested: requestedSymbols.length, scanned: eligibleSymbols.length });
+      assert.ok(logs.some((message) =>
+        message.includes(
+          `canary scheduler enabled user=user-a symbols=${requestedSymbols.join(",")} timeframe=15m`
+        )
+      ));
     } else {
       assert.deepEqual([...new Set(userLookups)], ["user-a"]);
-      if (scenario !== "overlap") {
+      if (!overlapScenario) {
         assert.ok(state.generatedRows.length >= 1);
         assert.ok(state.candidates.length >= 1);
       }
@@ -122,7 +169,13 @@ try {
       candidateScopes: [...new Set(state.candidates.map((row) => `${row.symbol}:${row.timeframe}`))],
       queuedUsers: [...new Set(state.queueRows.map((row) => row.user_id))],
       marketBriefRefreshed,
-      overlapSkipped: logs.some((message) => message.includes("skipped duplicates running_cycle=true"))
+      overlapSkipped: logs.some((message) => message.includes("skipped duplicates running_cycle=true")),
+      requestedSymbols: cycleSummary?.requested || null,
+      scannedSymbols: cycleSummary?.scanned || null,
+      skippedSymbols: warnings
+        .filter((message) => message.includes(" skipped: "))
+        .map((message) => message.match(/\[auto-scan\] ([^ ]+) /)?.[1])
+        .filter(Boolean)
     };
   }
 
@@ -137,10 +190,13 @@ try {
 }
 
 function configureUsers(db) {
+  const configuredSymbols = process.env.AUTO_SCAN_CANARY_SYMBOLS !== undefined
+    ? parseSymbolList(process.env.AUTO_SCAN_CANARY_SYMBOLS).filter((symbol) => knownEligibleSymbols.has(symbol))
+    : ["BTC-USD"];
   db.configureWatcherUser({
     userId: "user-a",
     minimumConfidence: 90,
-    symbols: ["BTC-USD"],
+    symbols: configuredSymbols,
     timeframes: ["15m"],
     chatId: "10001"
   });
@@ -151,7 +207,9 @@ function configureUsers(db) {
     timeframes: ["1h"],
     chatId: "10002"
   });
-  db.configureAlertPreference({ userId: "user-a", symbol: "BTC-USD", timeframe: "15m" });
+  for (const symbol of configuredSymbols) {
+    db.configureAlertPreference({ userId: "user-a", symbol, timeframe: "15m" });
+  }
   db.configureAlertPreference({ userId: "user-b", symbol: "ETH-USD", timeframe: "1h" });
 }
 
@@ -176,7 +234,7 @@ function buildCandles(granularity) {
   const interval = Number.isFinite(granularity) && granularity > 0 ? granularity : 900;
   const latestTime = Math.floor(FIXED_NOW_MS / 1000 / interval) * interval;
   const candles = [];
-  const noSetup = scenario === "overlap";
+  const noSetup = scenario === "overlap" || scenario === "multi-overlap";
   for (let index = 0; index < 120; index += 1) {
     const close = noSetup
       ? 100 + Math.sin(index * 0.38) * 0.02
@@ -201,4 +259,15 @@ async function waitFor(predicate, timeoutMs = 10_000) {
     if (RealDate.now() - started > timeoutMs) throw new Error(`Timed out waiting for ${scenario} watcher cycle.`);
     await new Promise((resolve) => realSetTimeout(resolve, 10));
   }
+}
+
+function parseSymbolList(value) {
+  return [...new Set(String(value || "").split(",").map((symbol) => symbol.trim().toUpperCase()).filter(Boolean))];
+}
+
+function parseCycleSummary(messages) {
+  const message = messages.find((entry) => entry.includes("[crypto-watch] canary cycle requested_symbols="));
+  if (!message) return null;
+  const match = message.match(/requested_symbols=(\d+) scanned=(\d+)/);
+  return match ? { requested: Number(match[1]), scanned: Number(match[2]) } : null;
 }

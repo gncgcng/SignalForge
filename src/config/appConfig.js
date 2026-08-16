@@ -180,10 +180,12 @@ export const appConfig = {
     canary: {
       userId: String(process.env.AUTO_SCAN_CANARY_USER_ID || "").trim(),
       symbol: String(process.env.AUTO_SCAN_CANARY_SYMBOL || "").trim().toUpperCase(),
+      symbols: String(process.env.AUTO_SCAN_CANARY_SYMBOLS || ""),
       timeframe: String(process.env.AUTO_SCAN_CANARY_TIMEFRAME || "").trim().toLowerCase(),
       configured: {
         userId: process.env.AUTO_SCAN_CANARY_USER_ID !== undefined,
         symbol: process.env.AUTO_SCAN_CANARY_SYMBOL !== undefined,
+        symbols: process.env.AUTO_SCAN_CANARY_SYMBOLS !== undefined,
         timeframe: process.env.AUTO_SCAN_CANARY_TIMEFRAME !== undefined
       }
     }
