@@ -1171,9 +1171,9 @@
               <span>Simulated educational execution using live provider candles. Available free to every logged-in user.</span>
             </div>
             <div class="paper-terminal-topbar" id="paper-terminal-topbar">
-              <div><span>Market</span><strong id="paper-top-market">BTCUSD</strong></div><div><span>Price</span><strong id="paper-top-price">--</strong></div>
-              <div><span>Change</span><strong id="paper-top-change">--</strong></div><div><span>Timeframe</span><strong id="paper-top-timeframe">15m</strong></div>
-              <div><span>Provider</span><strong id="paper-top-provider">Coinbase</strong></div><div><span>Status</span><strong id="paper-top-status">Loading</strong></div>
+              <div class="paper-top-market"><span>Market</span><strong id="paper-top-market">BTCUSD</strong></div><div class="paper-top-price"><span>Price</span><strong id="paper-top-price">--</strong></div>
+              <div class="paper-top-change"><span>Change</span><strong id="paper-top-change">--</strong></div><div class="paper-top-timeframe"><span>Timeframe</span><strong id="paper-top-timeframe">15m</strong></div>
+              <div class="paper-top-provider"><span>Provider</span><strong id="paper-top-provider">Coinbase</strong></div><div class="paper-top-status"><span>Status</span><strong id="paper-top-status">Loading</strong></div>
             </div>
             <div class="paper-terminal-layout" id="paper-terminal-layout">
               <aside class="paper-market-panel terminal-panel" id="paper-market-panel">
@@ -1185,10 +1185,11 @@
                 <div class="paper-chart-toolbar">
                   <div class="paper-timeframes" id="paper-timeframes"><button type="button" disabled title="1m is not supported by current providers">1m</button><button type="button" data-paper-timeframe="5m">5m</button><button type="button" data-paper-timeframe="15m" class="active">15m</button><button type="button" data-paper-timeframe="1h">1h</button><button type="button" data-paper-timeframe="4h">4h</button></div>
                   <div class="paper-chart-tools" id="paper-chart-tools" aria-label="Chart tools">
-                    <button type="button" data-paper-drawing-tool="horizontal" title="Add horizontal line">Horizontal</button>
+                    <button type="button" data-paper-pointer-tool title="Pan and inspect chart">Pan</button>
+                    <button type="button" data-paper-drawing-tool="horizontal" title="Add horizontal line">H Line</button>
                     <button type="button" data-paper-drawing-tool="trend" title="Add trend line">Trend</button>
-                    <button type="button" data-paper-drawing-tool="forecast-long" title="Place a local long risk/reward forecast">Long Forecast</button>
-                    <button type="button" data-paper-drawing-tool="forecast-short" title="Place a local short risk/reward forecast">Short Forecast</button>
+                    <button type="button" data-paper-drawing-tool="forecast-long" title="Place a local long risk/reward forecast">Long</button>
+                    <button type="button" data-paper-drawing-tool="forecast-short" title="Place a local short risk/reward forecast">Short</button>
                     <button type="button" data-paper-delete-drawing title="Delete selected drawing" disabled>Delete</button>
                     <button type="button" data-paper-clear-drawings title="Clear drawings">Clear</button>
                     <button type="button" data-paper-auto-scale title="Reset price scale">Auto scale</button>

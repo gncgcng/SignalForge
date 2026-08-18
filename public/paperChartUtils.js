@@ -6,6 +6,142 @@ export function getPaperChartWindow(total, visibleCount = 120, requestedEnd = nu
   return { start: Math.max(0, end - count), end, count };
 }
 
+export function getPaperTimelineWindow(totalCandles, visibleCount = 120, requestedEnd = null, options = {}) {
+  const total = Math.max(0, Math.round(Number(totalCandles || 0)));
+  const count = Math.max(1, Math.round(Number(visibleCount || 120)));
+  const rightOffsetRatio = Math.max(0, Math.min(0.45, Number(options.rightOffsetRatio ?? 0.2)));
+  const maxFutureRatio = Math.max(rightOffsetRatio, Math.min(0.9, Number(options.maxFutureRatio ?? 0.8)));
+  const futureSlots = Math.max(1, Math.round(count * rightOffsetRatio));
+  const maxFutureSlots = Math.max(futureSlots, Math.round(count * maxFutureRatio));
+  const latestEnd = Math.max(count, total + futureSlots);
+  const maxEnd = Math.max(latestEnd, total + maxFutureSlots);
+  const end = requestedEnd == null
+    ? latestEnd
+    : Math.max(count, Math.min(maxEnd, Math.round(Number(requestedEnd))));
+  const start = Math.max(0, end - count);
+  return {
+    start,
+    end,
+    count,
+    totalCandles: total,
+    candleStart: Math.max(0, Math.min(total, start)),
+    candleEnd: Math.max(0, Math.min(total, end)),
+    futureSlots,
+    maxFutureSlots,
+    latestEnd,
+    maxEnd,
+    atLatest: requestedEnd == null
+  };
+}
+
+export function getPaperTimeframeSeconds(timeframe) {
+  return ({ "5m": 300, "15m": 900, "1h": 3600, "4h": 14400 })[timeframe] || 900;
+}
+
+export function getPaperTimelineTime(candles, timeframe, absoluteIndex) {
+  const list = Array.isArray(candles) ? candles : [];
+  const index = Number(absoluteIndex);
+  if (!list.length || !Number.isFinite(index)) return null;
+  const exact = list[Math.round(index)];
+  if (Number.isInteger(index) && Number.isFinite(Number(exact?.time))) return Number(exact.time);
+  const interval = getPaperTimeframeSeconds(timeframe);
+  if (index >= list.length - 1) return Number(list.at(-1).time) + (index - (list.length - 1)) * interval;
+  if (index <= 0) return Number(list[0].time) + index * interval;
+  const lowerIndex = Math.floor(index);
+  const upperIndex = Math.min(list.length - 1, Math.ceil(index));
+  const lowerTime = Number(list[lowerIndex]?.time);
+  const upperTime = Number(list[upperIndex]?.time);
+  if (!(Number.isFinite(lowerTime) && Number.isFinite(upperTime))) return null;
+  return lowerTime + (upperTime - lowerTime) * (index - lowerIndex);
+}
+
+export function getPaperTimelinePosition(candles, timeframe, time) {
+  const list = Array.isArray(candles) ? candles : [];
+  const target = Number(time);
+  if (!list.length || !Number.isFinite(target)) return null;
+  const interval = getPaperTimeframeSeconds(timeframe);
+  const firstTime = Number(list[0].time);
+  const lastTime = Number(list.at(-1).time);
+  if (target <= firstTime) return (target - firstTime) / interval;
+  if (target >= lastTime) return list.length - 1 + (target - lastTime) / interval;
+  let low = 0;
+  let high = list.length - 1;
+  while (low + 1 < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (Number(list[middle].time) <= target) low = middle;
+    else high = middle;
+  }
+  const lowTime = Number(list[low].time);
+  const highTime = Number(list[high].time);
+  const ratio = highTime > lowTime ? (target - lowTime) / (highTime - lowTime) : 0;
+  return low + ratio;
+}
+
+export function getPaperTimelinePointAtCoordinate(x, candles, timeframe, timeline, dimensions) {
+  if (!timeline?.count || !candles?.length) return null;
+  const plotWidth = dimensions.width - dimensions.left - dimensions.right;
+  const ratio = Math.max(0, Math.min(0.999999, (Number(x) - dimensions.left) / plotWidth));
+  const absoluteIndex = timeline.start + Math.floor(ratio * timeline.count);
+  const candle = absoluteIndex >= 0 && absoluteIndex < candles.length ? candles[absoluteIndex] : null;
+  return {
+    candle,
+    index: candle ? absoluteIndex - timeline.candleStart : null,
+    absoluteIndex,
+    time: getPaperTimelineTime(candles, timeframe, absoluteIndex),
+    isFuture: absoluteIndex >= candles.length
+  };
+}
+
+export function getPaperChartDimensions(stageWidth, stageHeight, options = {}) {
+  const width = Math.max(320, Math.round(Number(stageWidth || 0)));
+  const height = Math.max(260, Math.round(Number(stageHeight || 0)));
+  const mobile = Boolean(options.mobile);
+  const labelLength = Math.max(7, ...(options.priceLabels || []).map((label) => String(label).length));
+  const right = Math.max(mobile ? 68 : 72, Math.min(112, labelLength * 6.4 + 20));
+  const left = mobile ? 6 : 10;
+  const top = mobile ? 10 : 14;
+  const timeAxisHeight = mobile ? 30 : 28;
+  const volumeHeight = options.volume
+    ? Math.max(42, Math.min(88, Math.round(height * 0.15)))
+    : 0;
+  const bottom = timeAxisHeight + volumeHeight;
+  return {
+    width,
+    height,
+    left,
+    right,
+    top,
+    bottom,
+    timeAxisHeight,
+    volumeHeight,
+    timeAxisTop: height - timeAxisHeight,
+    priceAxisHitWidth: mobile ? Math.max(92, right) : right,
+    timeAxisHitHeight: mobile ? 44 : timeAxisHeight,
+    plotWidth: width - left - right,
+    plotHeight: height - top - bottom
+  };
+}
+
+export function calculatePaperWorkspaceHeight(viewportWidth, viewportHeight, layoutTop = 0) {
+  const width = Math.max(0, Number(viewportWidth || 0));
+  const height = Math.max(0, Number(viewportHeight || 0));
+  if (!(width > 0 && height > 0)) return 0;
+  const top = Math.max(0, Number(layoutTop || 0));
+  const landscapeMobile = width <= 900 && width > height;
+  const minimum = width <= 900 ? (landscapeMobile ? 280 : 440) : 500;
+  return Math.round(Math.max(minimum, Math.min(height - 8, height - top - 8)));
+}
+
+export function getPaperTimeAxisTicks(timeline, candles, timeframe, plotWidth, minimumSpacing = 110) {
+  if (!timeline?.count || !candles?.length) return [];
+  const tickCount = Math.max(3, Math.min(10, Math.floor(Number(plotWidth || 0) / Math.max(70, Number(minimumSpacing || 110))) + 1));
+  return Array.from({ length: tickCount }, (_, tick) => {
+    const ratio = tickCount === 1 ? 0 : tick / (tickCount - 1);
+    const absoluteIndex = timeline.start + ratio * Math.max(0, timeline.count - 1);
+    return { ratio, absoluteIndex, time: getPaperTimelineTime(candles, timeframe, absoluteIndex) };
+  }).filter((tick) => Number.isFinite(tick.time));
+}
+
 export function calculatePaperPriceRange(candles, levels = [], manualRange = null, paddingRatio = 0.08) {
   if (isValidPriceRange(manualRange)) return { ...manualRange, auto: false };
   const candlePrices = (candles || []).flatMap((candle) => [Number(candle.low), Number(candle.high)]);
@@ -52,9 +188,11 @@ export function formatPaperChartPrice(value, visibleRange = null, options = {}) 
 export function getPaperChartRegion(x, y, dimensions) {
   const numericX = Number(x);
   const numericY = Number(y);
-  if (numericX >= dimensions.width - dimensions.right && numericX <= dimensions.width) return "price-axis";
+  const priceAxisHitWidth = Math.max(dimensions.right, Number(dimensions.priceAxisHitWidth || dimensions.right));
+  if (numericX >= dimensions.width - priceAxisHitWidth && numericX <= dimensions.width) return "price-axis";
   const timeAxisTop = dimensions.timeAxisTop ?? dimensions.height - 28;
-  if (numericY >= timeAxisTop && numericY <= dimensions.height && numericX >= dimensions.left) return "time-axis";
+  const timeAxisHitTop = Math.min(timeAxisTop, dimensions.height - Number(dimensions.timeAxisHitHeight || dimensions.height - timeAxisTop));
+  if (numericY >= timeAxisHitTop && numericY <= dimensions.height && numericX >= dimensions.left) return "time-axis";
   if (
     numericX >= dimensions.left && numericX < dimensions.width - dimensions.right &&
     numericY >= dimensions.top && numericY < timeAxisTop
@@ -343,6 +481,9 @@ export function deletePaperDrawing(drawings, selectedId) {
 
 export function getSignalReviewFrame(candles, review, outcomeCandleTime, padding = 12) {
   if (!candles.length || !review) return { visibleCount: 120, endIndex: candles.length };
+  if (review.status === "Active" && outcomeCandleTime == null) {
+    return { visibleCount: Math.max(30, Math.min(120, candles.length)), endIndex: null };
+  }
   const createdSeconds = new Date(review.createdAt || 0).getTime() / 1000;
   const createdIndex = nearestCandleIndex(candles, createdSeconds);
   const outcomeIndex = outcomeCandleTime == null
