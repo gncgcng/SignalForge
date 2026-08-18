@@ -83,6 +83,7 @@ const PAPER_INDICATORS_KEY = "signalforge-paper-indicators";
 const PAPER_PANEL_STATE_KEY = "signalforge-paper-panel-state";
 const PAPER_CHART_RIGHT_OFFSET_RATIO = 0.2;
 const PAPER_CHART_MAX_FUTURE_RATIO = 0.8;
+const PAPER_MARKET_LOAD_TIMEOUT_MS = 30_000;
 const RISK_ACCOUNT_SIZE_KEY = "signalforge-risk-account-size";
 const RISK_PERCENT_KEY = "signalforge-risk-percent";
 const MARKET_BRIEF_COLLAPSED_KEY = "signalforge_market_brief_collapsed";
@@ -199,6 +200,8 @@ const state = {
     account: null,
     marketData: null,
     marketError: null,
+    marketLoading: false,
+    marketLoadRequestId: 0,
     draftSignalId: null,
     signalReview: null,
     signalReviewChart: null,
@@ -4456,73 +4459,97 @@ async function loadPaperPortfolio() {
 }
 
 async function loadPaperTradingTerminal() {
+  const requestId = Number(state.paperTrading.marketLoadRequestId || 0) + 1;
+  state.paperTrading.marketLoadRequestId = requestId;
+  state.paperTrading.marketLoading = true;
+  state.paperTrading.marketError = null;
+  paperChartLoading.textContent = "Loading live candles...";
   paperChartLoading.classList.remove("hidden");
+  setText("#paper-chart-status", "Loading market data...");
   const route = parseAppHash(location.hash);
   const reviewSignalId = route.route === "paper-trading" ? route.params.get("signalId") : null;
-  const reviewPayload = reviewSignalId
-    ? await api.request(`/api/paper-trades/signal-review/${encodeURIComponent(reviewSignalId)}`)
-    : null;
-  if (reviewPayload?.review) {
-    state.paperTrading.signalReview = reviewPayload.review;
-    state.paperTrading.signalReviewChart = reviewPayload.chart;
-    state.paperTrading.selectedSymbol = reviewPayload.review.symbol;
-    state.paperTrading.timeframe = reviewPayload.review.timeframe;
-  }
-  const params = new URLSearchParams({
-    symbol: state.paperTrading.selectedSymbol,
-    timeframe: state.paperTrading.timeframe
-  });
-  if (reviewPayload) params.set("reviewOnly", "1");
-  const terminal = await api.request(`/api/paper-trades/terminal?${params}`);
-  const reviewMarket = reviewPayload?.chart?.available
-    ? {
-        pair: {
-          ...(terminal.markets || []).find((market) => market.symbol === reviewPayload.review.symbol),
-          symbol: reviewPayload.review.symbol,
-          lastPrice: reviewPayload.chart.currentPrice
-        },
-        candles: reviewPayload.chart.candles,
-        source: reviewPayload.chart.source,
-        lastCandleAt: reviewPayload.chart.candles.at(-1)?.time
-          ? new Date(Number(reviewPayload.chart.candles.at(-1).time) * 1000).toISOString()
-          : null,
-        marketStatus: { label: reviewPayload.review.status === "Active" ? "Live review" : "Historical review" }
-      }
-    : null;
-  state.paperTrading = {
-    ...state.paperTrading,
-    ...terminal,
-    markets: terminal.markets || [],
-    orders: terminal.orders || [],
-    account: terminal.account,
-    marketData: reviewPayload ? reviewMarket : terminal.marketData,
-    marketError: reviewPayload?.chart?.message || terminal.marketError,
-    signalReview: reviewPayload?.review || null,
-    signalReviewChart: reviewPayload?.chart || null
-  };
-  if (reviewPayload?.chart?.available) {
-    const frame = getSignalReviewFrame(
-      reviewPayload.chart.candles,
-      reviewPayload.review,
-      reviewPayload.chart.outcomeCandleTime
-    );
-    state.paperTrading.chartNavigation.visibleCount = frame.visibleCount;
-    state.paperTrading.chartNavigation.endIndex = frame.endIndex;
-    state.paperTrading.chartNavigation.autoPriceScale = true;
-    state.paperTrading.chartNavigation.manualPriceRange = null;
-  } else if (!reviewPayload) {
-    resetPaperChartViewport();
-  }
-  state.paperTrading.chartNavigation.oldestLoadedTime = state.paperTrading.marketData?.candles?.[0]?.time || null;
-  state.paperTrading.chartNavigation.loadingOlder = false;
-  state.paperTrading.chartNavigation.noMoreOlder = false;
-  state.paperTrading.chartNavigation.historyRequestKey = null;
-  paperChartLoading.classList.add("hidden");
-  renderPaperTradingTerminal();
-  renderSignals();
-  renderSignalsHistory();
-  if (route.route === "paper-trading" && route.params.has("pair") && !reviewSignalId) {
-    removeHashParams(["pair"]);
+  try {
+    const reviewPayload = reviewSignalId
+      ? await api.request(`/api/paper-trades/signal-review/${encodeURIComponent(reviewSignalId)}`, { timeoutMs: PAPER_MARKET_LOAD_TIMEOUT_MS })
+      : null;
+    if (requestId !== state.paperTrading.marketLoadRequestId) return { stale: true };
+
+    const selectedSymbol = reviewPayload?.review?.symbol || state.paperTrading.selectedSymbol;
+    const selectedTimeframe = reviewPayload?.review?.timeframe || state.paperTrading.timeframe;
+    const params = new URLSearchParams({ symbol: selectedSymbol, timeframe: selectedTimeframe });
+    if (reviewPayload) params.set("reviewOnly", "1");
+    const terminal = await api.request(`/api/paper-trades/terminal?${params}`, { timeoutMs: PAPER_MARKET_LOAD_TIMEOUT_MS });
+    if (requestId !== state.paperTrading.marketLoadRequestId) return { stale: true };
+
+    const reviewMarket = reviewPayload?.chart?.available
+      ? {
+          pair: {
+            ...(terminal.markets || []).find((market) => market.symbol === reviewPayload.review.symbol),
+            symbol: reviewPayload.review.symbol,
+            lastPrice: reviewPayload.chart.currentPrice
+          },
+          candles: reviewPayload.chart.candles,
+          source: reviewPayload.chart.source,
+          lastCandleAt: reviewPayload.chart.candles.at(-1)?.time
+            ? new Date(Number(reviewPayload.chart.candles.at(-1).time) * 1000).toISOString()
+            : null,
+          marketStatus: { label: reviewPayload.review.status === "Active" ? "Live review" : "Historical review" }
+        }
+      : null;
+    state.paperTrading = {
+      ...state.paperTrading,
+      ...terminal,
+      selectedSymbol,
+      timeframe: selectedTimeframe,
+      markets: terminal.markets || [],
+      orders: terminal.orders || [],
+      account: terminal.account,
+      marketData: reviewPayload ? reviewMarket : terminal.marketData,
+      marketError: reviewPayload?.chart?.message || terminal.marketError || null,
+      signalReview: reviewPayload?.review || null,
+      signalReviewChart: reviewPayload?.chart || null,
+      marketLoadRequestId: requestId,
+      marketLoading: true
+    };
+    if (reviewPayload?.chart?.available) {
+      const frame = getSignalReviewFrame(
+        reviewPayload.chart.candles,
+        reviewPayload.review,
+        reviewPayload.chart.outcomeCandleTime
+      );
+      state.paperTrading.chartNavigation.visibleCount = frame.visibleCount;
+      state.paperTrading.chartNavigation.endIndex = frame.endIndex;
+      state.paperTrading.chartNavigation.autoPriceScale = true;
+      state.paperTrading.chartNavigation.manualPriceRange = null;
+    } else if (!reviewPayload) {
+      resetPaperChartViewport();
+    }
+    state.paperTrading.chartNavigation.oldestLoadedTime = state.paperTrading.marketData?.candles?.[0]?.time || null;
+    state.paperTrading.chartNavigation.loadingOlder = false;
+    state.paperTrading.chartNavigation.noMoreOlder = false;
+    state.paperTrading.chartNavigation.historyRequestKey = null;
+    if (route.route === "paper-trading" && route.params.has("pair") && !reviewSignalId) {
+      removeHashParams(["pair"]);
+    }
+    return { ok: true, candles: state.paperTrading.marketData?.candles?.length || 0 };
+  } catch (error) {
+    if (requestId !== state.paperTrading.marketLoadRequestId) return { stale: true };
+    state.paperTrading.marketData = null;
+    state.paperTrading.marketError = error.message || "Market data could not be loaded.";
+    console.warn("[paper-market] load failed", {
+      symbol: state.paperTrading.selectedSymbol,
+      timeframe: state.paperTrading.timeframe,
+      message: state.paperTrading.marketError
+    });
+    return { ok: false, error: state.paperTrading.marketError };
+  } finally {
+    if (requestId === state.paperTrading.marketLoadRequestId) {
+      state.paperTrading.marketLoading = false;
+      paperChartLoading.classList.add("hidden");
+      renderPaperTradingTerminal();
+      renderSignals();
+      renderSignalsHistory();
+    }
   }
 }
 
@@ -5906,7 +5933,16 @@ function renderPaperAccount() {
 function renderPaperTradingChart() {
   const data = state.paperTrading.marketData;
   const candles = data?.candles || [];
+  if (state.paperTrading.marketLoading) {
+    paperChartLoading.textContent = "Loading live candles...";
+    paperChartLoading.classList.remove("hidden");
+    setText("#paper-chart-status", "Loading market data...");
+    return;
+  }
+  paperChartLoading.classList.add("hidden");
   if (!candles.length) {
+    const emptyMessage = state.paperTrading.marketError || "Market data unavailable.";
+    setText("#paper-chart-status", emptyMessage);
     const emptyDimensions = measurePaperChartDimensions();
     if (!emptyDimensions) {
       deferPaperChartRenderUntilMeasured();
@@ -5914,7 +5950,6 @@ function renderPaperTradingChart() {
     }
     paperChart.setAttribute("viewBox", `0 0 ${emptyDimensions.width} ${emptyDimensions.height}`);
     paperChart.innerHTML = `<text x="${emptyDimensions.width / 2}" y="${emptyDimensions.height / 2}" fill="#8e9bb0" text-anchor="middle">${escapeHtml(state.paperTrading.marketError || "Not enough candles")}</text>`;
-    setText("#paper-chart-status", state.paperTrading.marketError || "Market data unavailable.");
     return;
   }
   const chartState = state.paperTrading.chartNavigation;
@@ -5943,6 +5978,7 @@ function renderPaperTradingChart() {
   const priceLabels = Array.from({ length: 7 }, (_, index) => formatPaperChartPrice(max - range * index / 6, range));
   const measured = measurePaperChartDimensions(priceLabels);
   if (!measured) {
+    setText("#paper-chart-status", `${candles.length} candles loaded · Preparing chart...`);
     deferPaperChartRenderUntilMeasured();
     return;
   }
@@ -6171,8 +6207,6 @@ function measurePaperChartDimensions(priceLabels = []) {
 }
 
 function deferPaperChartRenderUntilMeasured() {
-  paperChartLoading.textContent = "Preparing chart...";
-  paperChartLoading.classList.remove("hidden");
   if (paperChartMeasurementRetryCount >= 3) return;
   paperChartMeasurementRetryCount += 1;
   schedulePaperChartRender();
