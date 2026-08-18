@@ -93,8 +93,13 @@ export function getPaperTimelinePointAtCoordinate(x, candles, timeframe, timelin
 }
 
 export function getPaperChartDimensions(stageWidth, stageHeight, options = {}) {
-  const width = Math.max(320, Math.round(Number(stageWidth || 0)));
-  const height = Math.max(260, Math.round(Number(stageHeight || 0)));
+  const measuredWidth = Number(stageWidth);
+  const measuredHeight = Number(stageHeight);
+  if (!(Number.isFinite(measuredWidth) && measuredWidth > 0 && Number.isFinite(measuredHeight) && measuredHeight > 0)) {
+    return null;
+  }
+  const width = Math.max(320, Math.round(measuredWidth));
+  const height = Math.max(260, Math.round(measuredHeight));
   const mobile = Boolean(options.mobile);
   const labelLength = Math.max(7, ...(options.priceLabels || []).map((label) => String(label).length));
   const right = Math.max(mobile ? 68 : 72, Math.min(112, labelLength * 6.4 + 20));
@@ -105,7 +110,7 @@ export function getPaperChartDimensions(stageWidth, stageHeight, options = {}) {
     ? Math.max(42, Math.min(88, Math.round(height * 0.15)))
     : 0;
   const bottom = timeAxisHeight + volumeHeight;
-  return {
+  const dimensions = {
     width,
     height,
     left,
@@ -119,6 +124,64 @@ export function getPaperChartDimensions(stageWidth, stageHeight, options = {}) {
     timeAxisHitHeight: mobile ? 44 : timeAxisHeight,
     plotWidth: width - left - right,
     plotHeight: height - top - bottom
+  };
+  return dimensions.plotWidth > 0 && dimensions.plotHeight > 0 ? dimensions : null;
+}
+
+export function calculatePaperCandleGeometry(candles, timeline, priceRange, dimensions) {
+  const list = Array.isArray(candles) ? candles : [];
+  const min = Number(priceRange?.min);
+  const max = Number(priceRange?.max);
+  const range = Number(priceRange?.range);
+  if (
+    !dimensions || !timeline?.count || !list.length ||
+    !(Number.isFinite(dimensions.plotWidth) && dimensions.plotWidth > 0) ||
+    !(Number.isFinite(dimensions.plotHeight) && dimensions.plotHeight > 0) ||
+    !(Number.isFinite(min) && Number.isFinite(max) && Number.isFinite(range) && min < max && range > 0)
+  ) {
+    return { valid: false, reason: "invalid_chart_geometry", items: [] };
+  }
+
+  const slot = dimensions.plotWidth / timeline.count;
+  const candleWidth = Math.max(2.5, Math.min(14, slot * 0.58));
+  const xForAbsoluteIndex = (absoluteIndex) => dimensions.left + (Number(absoluteIndex) - timeline.start) * slot + slot / 2;
+  const yForPrice = (price) => dimensions.top + ((max - Number(price)) / range) * dimensions.plotHeight;
+  const visible = list.slice(timeline.candleStart, timeline.candleEnd);
+  const items = visible.map((candle, index) => {
+    const absoluteIndex = timeline.candleStart + index;
+    return {
+      candle,
+      absoluteIndex,
+      x: xForAbsoluteIndex(absoluteIndex),
+      openY: yForPrice(candle.open),
+      highY: yForPrice(candle.high),
+      lowY: yForPrice(candle.low),
+      closeY: yForPrice(candle.close),
+      width: candleWidth
+    };
+  });
+  const coordinatesValid = items.length > 0 && items.every((item) =>
+    Number.isFinite(item.x) && Number.isFinite(item.openY) && Number.isFinite(item.highY) &&
+    Number.isFinite(item.lowY) && Number.isFinite(item.closeY) && Number.isFinite(item.width) && item.width > 0
+  );
+  const plotRight = dimensions.width - dimensions.right;
+  const hasVisibleCandle = items.some((item) => item.x >= dimensions.left && item.x <= plotRight);
+  if (!coordinatesValid || !hasVisibleCandle) {
+    return { valid: false, reason: coordinatesValid ? "candles_outside_plot" : "invalid_candle_coordinates", items };
+  }
+  return {
+    valid: true,
+    reason: null,
+    items,
+    visible,
+    slot,
+    candleWidth,
+    plotLeft: dimensions.left,
+    plotRight,
+    newestRealCandleX: xForAbsoluteIndex(list.length - 1),
+    xForAbsoluteIndex,
+    xForVisibleIndex: (visibleIndex) => xForAbsoluteIndex(timeline.candleStart + Number(visibleIndex)),
+    yForPrice
   };
 }
 

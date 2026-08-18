@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   addPaperDrawingPoint,
+  calculatePaperCandleGeometry,
   calculatePaperForecastMetrics,
+  calculatePaperPriceRange,
   calculatePaperWorkspaceLayout,
   calculatePaperWorkspaceHeight,
   createPaperForecastDrawing,
@@ -74,6 +76,64 @@ for (const target of [
 check(!/const width = 920;[\s\S]*const height = 480;/.test(sourceBetween(app, "function renderPaperTradingChart", "function renderPaperDrawings")), "renderer must not retain the old fixed 920x480 chart geometry");
 check(/paperChart\.setAttribute\("viewBox"/.test(app), "SVG viewBox should follow measured chart dimensions");
 check(/paper-top-market/.test(html) && /paper-top-provider/.test(html), "mobile quote header should retain market and provider information compactly");
+
+const btcCandles = Array.from({ length: 120 }, (_, index) => {
+  const open = 64000 + index * 4 + Math.sin(index / 4) * 35;
+  const close = open + (index % 2 ? -18 : 22);
+  return {
+    time: 1_700_000_000 + index * 900,
+    open,
+    high: Math.max(open, close) + 24,
+    low: Math.min(open, close) - 21,
+    close,
+    volume: 1000 + index * 8
+  };
+});
+const productionTimeline = getPaperTimelineWindow(btcCandles.length, 120, null, { rightOffsetRatio: 0.2, maxFutureRatio: 0.8 });
+equal(productionTimeline.futureSlots, 24, "120-candle Latest state should retain 24 future slots");
+const productionPriceRange = calculatePaperPriceRange(btcCandles.slice(productionTimeline.candleStart, productionTimeline.candleEnd));
+check(Number.isFinite(productionPriceRange.min) && Number.isFinite(productionPriceRange.max) && productionPriceRange.min < productionPriceRange.max, "120-candle price range should be finite and non-zero");
+equal(getPaperChartDimensions(0, 480), null, "zero-width first measurement must be deferred");
+equal(getPaperChartDimensions(920, 0), null, "zero-height first measurement must be deferred");
+const recoveredDimensions = getPaperChartDimensions(920, 560, { volume: true, priceLabels: ["64620.00"] });
+check(calculatePaperCandleGeometry(btcCandles, productionTimeline, productionPriceRange, recoveredDimensions).valid, "a valid follow-up measurement should recover candle rendering");
+
+for (const target of [
+  { label: "desktop", width: 920, height: 560, mobile: false },
+  { label: "markets collapsed", width: 1112, height: 560, mobile: false },
+  { label: "mobile portrait", width: 390, height: 620, mobile: true },
+  { label: "mobile landscape", width: 844, height: 300, mobile: true }
+]) {
+  const dimensions = getPaperChartDimensions(target.width, target.height, { mobile: target.mobile, volume: true, priceLabels: ["64620.00"] });
+  const geometry = calculatePaperCandleGeometry(btcCandles, productionTimeline, productionPriceRange, dimensions);
+  check(geometry.valid, `${target.label} should produce valid candle geometry`);
+  check(geometry.items.length > 0, `${target.label} should render real candles`);
+  check(geometry.items.every((item) => [item.x, item.openY, item.highY, item.lowY, item.closeY, item.width].every(Number.isFinite) && item.width > 0), `${target.label} candle coordinates should remain finite`);
+  check(geometry.items.some((item) => item.x >= geometry.plotLeft && item.x <= geometry.plotRight), `${target.label} should place candles inside the plot`);
+  check(geometry.newestRealCandleX >= geometry.plotLeft && geometry.newestRealCandleX < geometry.plotRight, `${target.label} newest candle should remain visible`);
+  const newestRatio = (geometry.newestRealCandleX - geometry.plotLeft) / (geometry.plotRight - geometry.plotLeft);
+  check(newestRatio > 0.75 && newestRatio < 0.85, `${target.label} newest candle should remain before future space`);
+  check(geometry.plotRight - geometry.newestRealCandleX > geometry.slot * 20, `${target.label} should retain future drawing room`);
+}
+
+const lowPriceCandles = btcCandles.map((candle) => ({
+  ...candle,
+  open: candle.open / 10_000_000_000,
+  high: candle.high / 10_000_000_000,
+  low: candle.low / 10_000_000_000,
+  close: candle.close / 10_000_000_000
+}));
+const lowPriceRange = calculatePaperPriceRange(lowPriceCandles.slice(productionTimeline.candleStart, productionTimeline.candleEnd));
+const lowPriceGeometry = calculatePaperCandleGeometry(lowPriceCandles, productionTimeline, lowPriceRange, getPaperChartDimensions(390, 620, { mobile: true, volume: true, priceLabels: ["0.00000640"] }));
+check(lowPriceGeometry.valid && lowPriceGeometry.items.every((item) => Number.isFinite(item.openY) && Number.isFinite(item.closeY)), "low-price candles should retain adaptive finite geometry");
+check(/if \(!measured\)[\s\S]*deferPaperChartRenderUntilMeasured/.test(app), "temporarily unavailable stage dimensions should defer rendering");
+check(/visibilitychange[\s\S]*schedulePaperChartRender/.test(app), "revealing Paper Trading should force a clean redraw");
+check(!/rect\.width \|\| 920|rect\.height \|\| 480/.test(app), "measurement must not revive stale 920x480 fallbacks");
+check(app.includes('width="${plotWidth}" height="${plotHeight}"'), "price clipPath should use current measured plot dimensions");
+check(app.includes('width="${plotWidth}" height="${volumeHeight}"'), "volume clipPath should use current measured volume dimensions");
+check(/paper-price-plot[\s\S]*candleMarkup/.test(app) && /paper-volume-plot[\s\S]*\$\{volume\}/.test(app), "candles and volume should render inside their current clip groups");
+check(/\$\{grid\}[\s\S]*\$\{timeGrid\}[\s\S]*\$\{candleMarkup\}/.test(app), "grid and candles should share the measured price-plot coordinate system");
+check(/const currentLine = renderPaperPriceLine/.test(app), "current-price marker should remain in the chart render");
 
 const timelineCandles = Array.from({ length: 300 }, (_, index) => ({ time: 1_700_000_000 + index * 900 }));
 const latestTimeline = getPaperTimelineWindow(timelineCandles.length, 120, null, { rightOffsetRatio: 0.2, maxFutureRatio: 0.8 });
@@ -183,6 +243,14 @@ console.log(JSON.stringify({
   tests: { passed, failed: 0 },
   layout: { expanded: expanded.chartWidth, marketsCollapsed: marketsCollapsed.chartWidth, orderCollapsed: orderCollapsed.chartWidth, bothCollapsed: bothCollapsed.chartWidth },
   movement: { twoDimensionalPan: true, horizontalPinch: true, verticalPinch: true, axisTouch: true },
+  rendering: {
+    inputCandles: btcCandles.length,
+    visibleCandles: productionTimeline.candleEnd - productionTimeline.candleStart,
+    futureSlots: productionTimeline.futureSlots,
+    zeroMeasurementDeferred: true,
+    recoveredAfterMeasurement: true,
+    currentMeasuredClipPaths: true
+  },
   forecast: { localOnly: true, longRiskReward: 2, shortRiskReward: 2, draggableHandles: ["entry", "target", "stop", "extent"] }
 }, null, 2));
 

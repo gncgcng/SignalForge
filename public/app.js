@@ -21,6 +21,7 @@ import { calculateRiskPosition } from "./riskCalculator.js";
 import { formatSignalCountdown, getSignalValidityState } from "./signalValidity.js";
 import {
   addPaperDrawingPoint,
+  calculatePaperCandleGeometry,
   calculatePaperForecastMetrics,
   calculatePaperPriceRange,
   calculatePaperWorkspaceHeight,
@@ -488,6 +489,7 @@ let paperChartDrag = null;
 let paperChartPinch = null;
 const paperChartPointers = new Map();
 let paperChartRenderFrame = null;
+let paperChartMeasurementRetryCount = 0;
 let loginInProgress = false;
 let authOperationVersion = 0;
 
@@ -2461,6 +2463,11 @@ window.visualViewport?.addEventListener("resize", () => {
   updatePaperWorkspaceHeight();
   schedulePaperChartRender();
 }, { passive: true });
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible" || state.activeView !== "paper-portfolio") return;
+  updatePaperWorkspaceHeight();
+  schedulePaperChartRender();
+});
 renderPaperPanelState();
 document.querySelector("#paper-direction-control").addEventListener("click", (event) => {
   const button = event.target.closest("[data-paper-direction]");
@@ -4978,6 +4985,12 @@ function applyViewState(view, options = {}) {
   document.querySelectorAll("[data-view]").forEach((section) => {
     section.classList.toggle("hidden", section.dataset.view !== normalizedView);
   });
+  if (normalizedView === "paper-portfolio") {
+    requestAnimationFrame(() => {
+      updatePaperWorkspaceHeight();
+      schedulePaperChartRender();
+    });
+  }
 
   document.querySelectorAll("[data-view-link]").forEach((link) => {
     link.classList.toggle("active", link.dataset.viewLink === normalizedView);
@@ -5895,6 +5908,10 @@ function renderPaperTradingChart() {
   const candles = data?.candles || [];
   if (!candles.length) {
     const emptyDimensions = measurePaperChartDimensions();
+    if (!emptyDimensions) {
+      deferPaperChartRenderUntilMeasured();
+      return;
+    }
     paperChart.setAttribute("viewBox", `0 0 ${emptyDimensions.width} ${emptyDimensions.height}`);
     paperChart.innerHTML = `<text x="${emptyDimensions.width / 2}" y="${emptyDimensions.height / 2}" fill="#8e9bb0" text-anchor="middle">${escapeHtml(state.paperTrading.marketError || "Not enough candles")}</text>`;
     setText("#paper-chart-status", state.paperTrading.marketError || "Market data unavailable.");
@@ -5925,25 +5942,37 @@ function renderPaperTradingChart() {
   const { min, max, range } = priceRange;
   const priceLabels = Array.from({ length: 7 }, (_, index) => formatPaperChartPrice(max - range * index / 6, range));
   const measured = measurePaperChartDimensions(priceLabels);
+  if (!measured) {
+    deferPaperChartRenderUntilMeasured();
+    return;
+  }
+  paperChartMeasurementRetryCount = 0;
+  paperChartLoading.classList.add("hidden");
   const { width, height, left, right, top, bottom, plotWidth, plotHeight, volumeHeight, timeAxisHeight } = measured;
   paperChart.setAttribute("viewBox", `0 0 ${width} ${height}`);
-  const slot = plotWidth / timeline.count;
-  const y = (price) => top + ((max - Number(price)) / range) * plotHeight;
-  const xAbsolute = (absoluteIndex) => left + (Number(absoluteIndex) - timeline.start) * slot + slot / 2;
-  const x = (visibleIndex) => xAbsolute(timeline.candleStart + Number(visibleIndex));
+  const geometry = calculatePaperCandleGeometry(candles, timeline, priceRange, measured);
+  if (!geometry.valid) {
+    console.warn("[paper-chart] render skipped", { reason: geometry.reason, candles: candles.length, width, height, plotWidth, plotHeight });
+    paperChart.innerHTML = `<text x="${width / 2}" y="${height / 2}" fill="#8e9bb0" text-anchor="middle">Chart coordinates are unavailable.</text>`;
+    setText("#paper-chart-status", "Chart coordinates are unavailable. Market data was not changed.");
+    return;
+  }
+  const { slot, xForAbsoluteIndex: xAbsolute, xForVisibleIndex: x, yForPrice: y } = geometry;
   const priceGridCount = Math.max(4, Math.min(8, Math.floor(plotHeight / 82) + 1));
-  const grid = Array.from({ length: priceGridCount }, (_, index) => {
+  const gridItems = Array.from({ length: priceGridCount }, (_, index) => {
     const price = max - (range * index / (priceGridCount - 1));
     const gridY = y(price);
-    return `<line class="paper-chart-grid" x1="${left}" x2="${width - right}" y1="${gridY}" y2="${gridY}"></line><text class="paper-price-label" x="${width - right + 8}" y="${gridY + 4}">${escapeHtml(formatPaperChartPrice(price, range))}</text>`;
-  }).join("");
-  const candleMarkup = visible.map((candle, index) => {
-    const candleX = x(index);
-    const openY = y(candle.open);
-    const closeY = y(candle.close);
+    return {
+      line: `<line class="paper-chart-grid" x1="${left}" x2="${width - right}" y1="${gridY}" y2="${gridY}"></line>`,
+      label: `<text class="paper-price-label" x="${width - right + 8}" y="${gridY + 4}">${escapeHtml(formatPaperChartPrice(price, range))}</text>`
+    };
+  });
+  const grid = gridItems.map((item) => item.line).join("");
+  const priceAxis = gridItems.map((item) => item.label).join("");
+  const candleMarkup = geometry.items.map((item) => {
+    const { candle, absoluteIndex, x: candleX, openY, highY, lowY, closeY, width: candleWidth } = item;
     const up = Number(candle.close) >= Number(candle.open);
-    const candleWidth = Math.max(2.5, Math.min(14, slot * 0.58));
-    return `<g class="paper-candle" data-paper-candle-index="${timeline.candleStart + index}"><line class="candle-wick ${up ? "candle-up" : "candle-down"}" x1="${candleX}" x2="${candleX}" y1="${y(candle.high)}" y2="${y(candle.low)}"></line><rect class="candle-body ${up ? "candle-up" : "candle-down"}" x="${candleX - candleWidth / 2}" y="${Math.min(openY, closeY)}" width="${candleWidth}" height="${Math.max(2, Math.abs(openY - closeY))}"></rect></g>`;
+    return `<g class="paper-candle" data-paper-candle-index="${absoluteIndex}"><line class="candle-wick ${up ? "candle-up" : "candle-down"}" x1="${candleX}" x2="${candleX}" y1="${highY}" y2="${lowY}"></line><rect class="candle-body ${up ? "candle-up" : "candle-down"}" x="${candleX - candleWidth / 2}" y="${Math.min(openY, closeY)}" width="${candleWidth}" height="${Math.max(2, Math.abs(openY - closeY))}"></rect></g>`;
   }).join("");
   const overlays = renderPaperChartOverlays(visible, x, y);
   const volume = state.paperTrading.indicators.has("volume") ? renderPaperVolume(visible, x, slot, height - timeAxisHeight - 4, volumeHeight - 8) : "";
@@ -5977,7 +6006,12 @@ function renderPaperTradingChart() {
   }).join("");
   const latest = Number(candles.at(-1).close);
   const currentLine = renderPaperPriceLine(y(latest), "current", `NOW ${formatPaperChartPrice(latest, range)}`, measured);
-  paperChart.innerHTML = `${grid}${timeGrid}${volume}${candleMarkup}${overlays}${tradeLines}${reviewLines}${drawings}${pendingDrawing}${currentLine}${markers}${positionMarkers}${outcomeMarker}${timeAxis}<line id="paper-crosshair-x" class="paper-crosshair hidden" x1="0" x2="0" y1="${top}" y2="${height - bottom}"></line><line id="paper-crosshair-y" class="paper-crosshair hidden" x1="${left}" x2="${width - right}" y1="0" y2="0"></line>`;
+  const priceClipId = "paper-chart-price-clip";
+  const volumeClipId = "paper-chart-volume-clip";
+  const clipPaths = `<defs><clipPath id="${priceClipId}"><rect x="${left}" y="${top}" width="${plotWidth}" height="${plotHeight}"></rect></clipPath><clipPath id="${volumeClipId}"><rect x="${left}" y="${top + plotHeight}" width="${plotWidth}" height="${volumeHeight}"></rect></clipPath></defs>`;
+  const pricePlot = `<g class="paper-price-plot" clip-path="url(#${priceClipId})">${grid}${timeGrid}${candleMarkup}${overlays}${tradeLines}${reviewLines}${drawings}${pendingDrawing}${currentLine}${markers}${positionMarkers}${outcomeMarker}</g>`;
+  const volumePlot = volumeHeight > 0 ? `<g class="paper-volume-plot" clip-path="url(#${volumeClipId})">${volume}</g>` : "";
+  paperChart.innerHTML = `${clipPaths}${pricePlot}${volumePlot}${priceAxis}${timeAxis}<line id="paper-crosshair-x" class="paper-crosshair hidden" x1="0" x2="0" y1="${top}" y2="${height - bottom}"></line><line id="paper-crosshair-y" class="paper-crosshair hidden" x1="${left}" x2="${width - right}" y1="0" y2="0"></line>`;
   bindPaperChartInteractions(candles, visible, timeline, { ...measured, min, max, range, x, xAbsolute, y });
   renderPaperIndicatorReadout(visible.length ? visible : candles.slice(-Math.min(candles.length, chartState.visibleCount)));
   const navigation = timeline.atLatest
@@ -6120,15 +6154,28 @@ function formatPaperTimeAxisLabel(timeSeconds, timeline) {
 
 function measurePaperChartDimensions(priceLabels = []) {
   const rect = paperChartStage?.getBoundingClientRect?.() || {};
+  const stageWidth = Number(paperChartStage?.clientWidth || rect.width || 0);
+  const stageHeight = Number(paperChartStage?.clientHeight || rect.height || 0);
+  if (!(Number.isFinite(stageWidth) && stageWidth > 0 && Number.isFinite(stageHeight) && stageHeight > 0)) {
+    return null;
+  }
   return getPaperChartDimensions(
-    paperChartStage?.clientWidth || rect.width || 920,
-    paperChartStage?.clientHeight || rect.height || 480,
+    stageWidth,
+    stageHeight,
     {
       mobile: Boolean(window.matchMedia?.("(max-width: 900px)").matches),
       volume: state.paperTrading.indicators.has("volume"),
       priceLabels
     }
   );
+}
+
+function deferPaperChartRenderUntilMeasured() {
+  paperChartLoading.textContent = "Preparing chart...";
+  paperChartLoading.classList.remove("hidden");
+  if (paperChartMeasurementRetryCount >= 3) return;
+  paperChartMeasurementRetryCount += 1;
+  schedulePaperChartRender();
 }
 
 function bindPaperChartInteractions(allCandles, candles, chartWindow, dimensions) {
