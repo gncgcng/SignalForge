@@ -4,6 +4,7 @@ import {
   closePaperPosition,
   enterPaperTrade,
   getPaperPortfolio,
+  getPaperTradingHistory,
   getPaperTradingTerminal,
   placePaperOrder,
   resetPaperTradingAccount
@@ -23,6 +24,20 @@ export async function handlePaperTradingRoutes(req, res, pathname, url) {
   if (reviewMatch && req.method === "GET") {
     try {
       return sendJson(res, 200, await getSignalReview(req.user, decodeURIComponent(reviewMatch[1])));
+    } catch (error) {
+      return sendError(res, error.statusCode || 400, error.message);
+    }
+  }
+
+  if (pathname === "/api/paper-trades/history" && req.method === "GET") {
+    try {
+      return sendJson(res, 200, await getPaperTradingHistory(req.user, {
+        symbol: url?.searchParams.get("symbol"),
+        timeframe: url?.searchParams.get("timeframe"),
+        before: url?.searchParams.get("before"),
+        limit: url?.searchParams.get("limit"),
+        latest: url?.searchParams.get("latest") === "1"
+      }));
     } catch (error) {
       return sendError(res, error.statusCode || 400, error.message);
     }

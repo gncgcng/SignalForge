@@ -1175,11 +1175,11 @@
               <div><span>Change</span><strong id="paper-top-change">--</strong></div><div><span>Timeframe</span><strong id="paper-top-timeframe">15m</strong></div>
               <div><span>Provider</span><strong id="paper-top-provider">Coinbase</strong></div><div><span>Status</span><strong id="paper-top-status">Loading</strong></div>
             </div>
-            <div class="paper-terminal-layout">
-              <aside class="paper-market-panel terminal-panel">
-                <div class="terminal-panel-heading"><span class="eyebrow">Markets</span><strong>Watchlist</strong></div>
-                <label class="paper-market-search">Search markets<input id="paper-market-search" type="search" placeholder="BTCUSD, Bitcoin..." autocomplete="off" /></label>
-                <div class="paper-market-list" id="paper-market-list"></div>
+            <div class="paper-terminal-layout" id="paper-terminal-layout">
+              <aside class="paper-market-panel terminal-panel" id="paper-market-panel">
+                <div class="terminal-panel-heading paper-panel-heading"><div><span class="eyebrow">Markets</span><strong>Watchlist</strong></div><button class="paper-panel-toggle" data-paper-panel-toggle="markets" type="button" aria-label="Collapse markets" aria-expanded="true">‹</button></div>
+                <div class="paper-panel-body"><label class="paper-market-search">Search markets<input id="paper-market-search" type="search" placeholder="BTCUSD, Bitcoin..." autocomplete="off" /></label>
+                <div class="paper-market-list" id="paper-market-list"></div></div>
               </aside>
               <section class="paper-chart-panel terminal-panel">
                 <div class="paper-chart-toolbar">
@@ -1187,6 +1187,8 @@
                   <div class="paper-chart-tools" id="paper-chart-tools" aria-label="Chart tools">
                     <button type="button" data-paper-drawing-tool="horizontal" title="Add horizontal line">Horizontal</button>
                     <button type="button" data-paper-drawing-tool="trend" title="Add trend line">Trend</button>
+                    <button type="button" data-paper-drawing-tool="forecast-long" title="Place a local long risk/reward forecast">Long Forecast</button>
+                    <button type="button" data-paper-drawing-tool="forecast-short" title="Place a local short risk/reward forecast">Short Forecast</button>
                     <button type="button" data-paper-delete-drawing title="Delete selected drawing" disabled>Delete</button>
                     <button type="button" data-paper-clear-drawings title="Clear drawings">Clear</button>
                     <button type="button" data-paper-auto-scale title="Reset price scale">Auto scale</button>
@@ -1200,8 +1202,9 @@
                 <div class="paper-chart-stage" id="paper-chart-stage"><div class="paper-chart-loading" id="paper-chart-loading">Loading live candles...</div><svg id="paper-candle-chart" viewBox="0 0 920 480" preserveAspectRatio="none" aria-label="Interactive paper trading candlestick chart"></svg><div class="paper-chart-tooltip hidden" id="paper-chart-tooltip"></div><div class="paper-crosshair-axis-label price hidden" id="paper-crosshair-price-label"></div><div class="paper-crosshair-axis-label time hidden" id="paper-crosshair-time-label"></div></div>
                 <div class="paper-indicator-readout" id="paper-indicator-readout"></div><p class="paper-chart-status" id="paper-chart-status">Loading market data...</p>
               </section>
-              <aside class="paper-order-panel terminal-panel">
-                <div class="terminal-panel-heading"><span class="eyebrow">Simulated order</span><strong>Order Ticket</strong></div>
+              <aside class="paper-order-panel terminal-panel" id="paper-order-panel">
+                <div class="terminal-panel-heading paper-panel-heading"><div><span class="eyebrow">Simulated order</span><strong>Order Ticket</strong></div><button class="paper-panel-toggle" data-paper-panel-toggle="order" type="button" aria-label="Collapse simulated order" aria-expanded="true">›</button></div>
+                <div class="paper-panel-body">
                 <form id="paper-order-form" class="paper-order-form">
                   <input id="paper-order-signal-id" type="hidden" /><label>Market<select id="paper-order-market"></select></label>
                   <div class="paper-segmented" id="paper-direction-control"><button type="button" class="active long" data-paper-direction="long">Long</button><button type="button" class="short" data-paper-direction="short">Short</button></div>
@@ -1211,7 +1214,7 @@
                 </form>
                 <section class="paper-account-summary" id="paper-account-summary"><div class="terminal-panel-heading"><span class="eyebrow">Simulated account</span><strong>$10,000 Account</strong></div><div class="paper-account-grid">
                   <div><span>Balance</span><strong id="paper-account-balance">$10,000</strong></div><div><span>Equity</span><strong id="paper-account-equity">$10,000</strong></div><div><span>Realized P/L</span><strong id="paper-account-realized">$0</strong></div><div><span>Unrealized P/L</span><strong id="paper-account-unrealized">$0</strong></div><div><span>Open positions</span><strong id="paper-account-open">0</strong></div><div><span>Win rate</span><strong id="paper-account-win-rate">0%</strong></div><div><span>Net R</span><strong id="paper-account-net-r">0R</strong></div><div><span>Average R</span><strong id="paper-account-average-r">0R</strong></div>
-                </div></section>
+                </div></section></div>
               </aside>
             </div>
             <section class="paper-orders-terminal terminal-panel">

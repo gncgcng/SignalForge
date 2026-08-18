@@ -15,10 +15,17 @@ import {
 } from "../../db/repositories.js";
 import { updateSignalsForUser } from "../signals/signalOutcomeService.js";
 import { calculatePositionSizing } from "../risk/riskEngineService.js";
-import { getCachedOhlcv, getOhlcv, getPair, listPaperTradingPairs } from "../market-data/marketDataService.js";
+import {
+  getCachedOhlcv,
+  getOhlcv,
+  getPair,
+  getReadOnlySignalReviewMarketData,
+  listPaperTradingPairs
+} from "../market-data/marketDataService.js";
 import { isSignalExpired } from "../signals/signalValidityService.js";
 
 const supportedPaperTimeframes = ["5m", "15m", "1h", "4h"];
+const paperTimeframeSeconds = Object.freeze({ "5m": 300, "15m": 900, "1h": 3600, "4h": 21600 });
 
 export async function getPaperPortfolio(user) {
   await updateSignalsForUser(user);
@@ -111,6 +118,53 @@ export async function getPaperTradingTerminal(user, input = {}) {
     markets: listPaperTradingPairs(),
     supportedTimeframes: supportedPaperTimeframes,
     disclaimer: "Paper trading only. No real orders are placed."
+  };
+}
+
+export async function getPaperTradingHistory(user, input = {}, dependencies = {}) {
+  const symbol = String(input.symbol || "").trim();
+  const timeframe = String(input.timeframe || "15m");
+  const limit = Math.max(60, Math.min(300, Math.round(Number(input.limit || 300))));
+  if (!symbol || !getPair(symbol)) throw validationError("Choose an available market.");
+  if (!supportedPaperTimeframes.includes(timeframe)) {
+    throw validationError(`${timeframe} is not supported by the selected market data provider.`);
+  }
+
+  const loadMarketData = dependencies.loadMarketData || getReadOnlySignalReviewMarketData;
+  try {
+    const marketData = input.latest
+      ? await loadMarketData(symbol, timeframe)
+      : await loadMarketData(symbol, timeframe, buildPaperHistoryWindow(timeframe, input.before, limit));
+    const beforeSeconds = input.latest ? Infinity : parseHistoryTime(input.before) / 1000;
+    const candles = normalizePaperHistoryCandles(marketData?.candles || [])
+      .filter((candle) => candle.time < beforeSeconds)
+      .slice(-limit);
+    return {
+      symbol,
+      timeframe,
+      candles,
+      source: marketData?.source || null,
+      oldestLoadedTime: candles[0]?.time || null,
+      newestLoadedTime: candles.at(-1)?.time || null,
+      hasMore: input.latest ? true : candles.length > 0,
+      readOnly: true
+    };
+  } catch (error) {
+    if (["EMPTY_HISTORICAL_CANDLES", "PROVIDER_UNSUPPORTED_MARKET"].includes(error.code)) {
+      return { symbol, timeframe, candles: [], source: null, oldestLoadedTime: null, newestLoadedTime: null, hasMore: false, readOnly: true };
+    }
+    throw error;
+  }
+}
+
+export function buildPaperHistoryWindow(timeframe, before, limit = 300) {
+  const beforeMs = parseHistoryTime(before);
+  const intervalMs = (paperTimeframeSeconds[timeframe] || 900) * 1000;
+  const to = beforeMs - intervalMs;
+  return {
+    from: new Date(to - intervalMs * Math.max(60, Math.min(300, Number(limit || 300)))).toISOString(),
+    to: new Date(to).toISOString(),
+    maxCandles: 300
   };
 }
 
@@ -410,6 +464,30 @@ function findBestGroup(trades, keyFn) {
 
 function round(value) {
   return Number(Number(value).toFixed(2));
+}
+
+function parseHistoryTime(value) {
+  const numeric = Number(value);
+  const time = Number.isFinite(numeric) && numeric > 0
+    ? numeric * (numeric < 1e12 ? 1000 : 1)
+    : new Date(value || 0).getTime();
+  if (!Number.isFinite(time) || time <= 0) throw validationError("A valid history boundary is required.");
+  return time;
+}
+
+function normalizePaperHistoryCandles(candles) {
+  return (candles || [])
+    .map((candle) => ({
+      time: Number(candle.time),
+      open: Number(candle.open),
+      high: Number(candle.high),
+      low: Number(candle.low),
+      close: Number(candle.close),
+      volume: Number(candle.volume || 0)
+    }))
+    .filter((candle) => [candle.time, candle.open, candle.high, candle.low, candle.close, candle.volume].every(Number.isFinite))
+    .sort((a, b) => a.time - b.time)
+    .filter((candle, index, list) => index === 0 || candle.time !== list[index - 1].time);
 }
 
 function validationError(message) {

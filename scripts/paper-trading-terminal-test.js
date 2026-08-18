@@ -58,7 +58,9 @@ const checks = {
   legacyTradesPreserved: migration.includes("Migrated from SignalForge Paper Portfolio") && migration.includes("FROM paper_trades p") && migration.includes("ON CONFLICT DO NOTHING"),
   manualClosePersisted: controller.includes("closePaperPosition") && repository.includes("realized_pnl = $6") && repository.includes("balance = balance + $2"),
   resetRequiresConfirmation: app.includes("window.confirm") && service.includes('confirmation !== "RESET"') && repository.includes("archived_at = now()"),
-  responsiveNoOverflow: css.includes(".paper-chart-panel { order: 1;") && css.includes(".paper-order-panel { order: 2;") && css.includes(".paper-order-table { overflow: visible;") && html.includes('id="paper-candle-chart"'),
+  responsiveNoOverflow: css.includes("grid-template-columns: minmax(0, 1fr);") &&
+    css.includes("position: absolute;") && css.includes("width: min(86vw, 340px);") &&
+    css.includes(".paper-order-table { overflow: visible;") && html.includes('id="paper-candle-chart"'),
   noBrokerOrCredits: ![migration, service, controller].join("\n").toLowerCase().includes("broker") && !service.includes("recordDiscoveryUsage")
 };
 

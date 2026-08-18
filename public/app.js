@@ -21,12 +21,24 @@ import { calculateRiskPosition } from "./riskCalculator.js";
 import { formatSignalCountdown, getSignalValidityState } from "./signalValidity.js";
 import {
   addPaperDrawingPoint,
+  calculatePaperForecastMetrics,
+  calculatePaperPriceRange,
   candleAtPaperChartCoordinate,
   deletePaperDrawing,
+  formatPaperChartPrice,
   getPaperChartWindow,
+  getPaperPinchTransform,
+  getPaperChartRegion,
   getSignalReviewFrame,
   getSignalReviewLevels,
-  priceAtPaperChartCoordinate
+  loadOlderPaperChartHistory,
+  mergePaperChartCandles,
+  panPaperTimeWindow,
+  priceAtPaperChartCoordinate,
+  translatePaperPriceRange,
+  updatePaperForecastDrawing,
+  zoomPaperPriceRange,
+  zoomPaperTimeWindow
 } from "./paperChartUtils.js";
 
 const RESTORE_TOKEN_KEY = "signalforge-restore-token";
@@ -61,6 +73,7 @@ const UNLOCK_REVEAL_KEY = "signalforge-unlock-reveal";
 const ONBOARDING_SKIP_KEY = "signalforge-onboarding-skipped";
 const FIRST_SCAN_KEY = "signalforge-first-scan-complete";
 const PAPER_INDICATORS_KEY = "signalforge-paper-indicators";
+const PAPER_PANEL_STATE_KEY = "signalforge-paper-panel-state";
 const RISK_ACCOUNT_SIZE_KEY = "signalforge-risk-account-size";
 const RISK_PERCENT_KEY = "signalforge-risk-percent";
 const MARKET_BRIEF_COLLAPSED_KEY = "signalforge_market_brief_collapsed";
@@ -180,13 +193,19 @@ const state = {
     draftSignalId: null,
     signalReview: null,
     signalReviewChart: null,
+    panels: getStoredPaperPanelState(),
     chartNavigation: {
       visibleCount: 120,
       endIndex: null,
-      priceScale: 1,
+      autoPriceScale: true,
+      manualPriceRange: null,
+      loadingOlder: false,
+      noMoreOlder: false,
+      oldestLoadedTime: null,
+      historyRequestKey: null,
       drawings: [],
       activeTool: null,
-      pendingTrend: null,
+      pendingDrawing: null,
       selectedDrawingId: null
     }
   },
@@ -289,12 +308,16 @@ const paperMarketList = document.querySelector("#paper-market-list");
 const paperTimeframes = document.querySelector("#paper-timeframes");
 const paperIndicatorControls = document.querySelector("#paper-indicator-controls");
 const paperChart = document.querySelector("#paper-candle-chart");
+const paperChartStage = document.querySelector("#paper-chart-stage");
 const paperChartLoading = document.querySelector("#paper-chart-loading");
 const paperChartTooltip = document.querySelector("#paper-chart-tooltip");
 const paperChartTools = document.querySelector("#paper-chart-tools");
 const paperSignalReview = document.querySelector("#paper-signal-review");
 const paperCrosshairPriceLabel = document.querySelector("#paper-crosshair-price-label");
 const paperCrosshairTimeLabel = document.querySelector("#paper-crosshair-time-label");
+const paperTerminalLayout = document.querySelector("#paper-terminal-layout");
+const paperMarketPanel = document.querySelector("#paper-market-panel");
+const paperOrderPanel = document.querySelector("#paper-order-panel");
 const paperOrderForm = document.querySelector("#paper-order-form");
 const paperOrderMarket = document.querySelector("#paper-order-market");
 const paperOrderType = document.querySelector("#paper-order-type");
@@ -452,6 +475,11 @@ let marketLoadTimer = null;
 let telegramConnectionTimer = null;
 let billingRefreshTimer = null;
 let deferredInstallPrompt = null;
+let paperChartInteractionController = null;
+let paperChartDrag = null;
+let paperChartPinch = null;
+const paperChartPointers = new Map();
+let paperChartRenderFrame = null;
 let loginInProgress = false;
 let authOperationVersion = 0;
 
@@ -2344,12 +2372,12 @@ paperOrderMarket.addEventListener("change", async () => {
   resetPaperChartViewport();
   await loadPaperTradingTerminal();
 });
-paperChartTools.addEventListener("click", (event) => {
+paperChartTools.addEventListener("click", async (event) => {
   const tool = event.target.closest("[data-paper-drawing-tool]");
   if (tool) {
     const selected = tool.dataset.paperDrawingTool;
     state.paperTrading.chartNavigation.activeTool = state.paperTrading.chartNavigation.activeTool === selected ? null : selected;
-    state.paperTrading.chartNavigation.pendingTrend = null;
+    state.paperTrading.chartNavigation.pendingDrawing = null;
     renderPaperChartToolState();
     return;
   }
@@ -2363,20 +2391,52 @@ paperChartTools.addEventListener("click", (event) => {
   if (event.target.closest("[data-paper-clear-drawings]")) {
     state.paperTrading.chartNavigation.drawings = [];
     state.paperTrading.chartNavigation.selectedDrawingId = null;
-    state.paperTrading.chartNavigation.pendingTrend = null;
+    state.paperTrading.chartNavigation.pendingDrawing = null;
     renderPaperTradingChart();
     return;
   }
   if (event.target.closest("[data-paper-auto-scale]")) {
-    state.paperTrading.chartNavigation.priceScale = 1;
+    state.paperTrading.chartNavigation.autoPriceScale = true;
+    state.paperTrading.chartNavigation.manualPriceRange = null;
     renderPaperTradingChart();
     return;
   }
   if (event.target.closest("[data-paper-latest]")) {
-    state.paperTrading.chartNavigation.endIndex = null;
+    await loadLatestPaperChartHistory();
     renderPaperTradingChart();
   }
 });
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  const chart = state.paperTrading.chartNavigation;
+  if (!chart.activeTool && !chart.pendingDrawing && !chart.selectedDrawingId) return;
+  chart.activeTool = null;
+  chart.pendingDrawing = null;
+  chart.selectedDrawingId = null;
+  renderPaperChartToolState();
+  renderPaperTradingChart();
+});
+paperTerminalLayout?.addEventListener("click", (event) => {
+  const toggle = event.target.closest("[data-paper-panel-toggle]");
+  if (!toggle) return;
+  const panel = toggle.dataset.paperPanelToggle;
+  if (!['markets', 'order'].includes(panel)) return;
+  const key = `${panel}Collapsed`;
+  state.paperTrading.panels[key] = !state.paperTrading.panels[key];
+  if (!state.paperTrading.panels[key] && window.matchMedia?.("(max-width: 900px)").matches) {
+    state.paperTrading.panels[panel === "markets" ? "orderCollapsed" : "marketsCollapsed"] = true;
+  }
+  persistPaperPanelState();
+  renderPaperPanelState();
+});
+paperTerminalLayout?.addEventListener("transitionend", (event) => {
+  if (event.target === paperTerminalLayout && event.propertyName === "grid-template-columns") schedulePaperChartRender();
+});
+if (typeof ResizeObserver === "function" && paperChartStage) {
+  const paperChartResizeObserver = new ResizeObserver(() => schedulePaperChartRender());
+  paperChartResizeObserver.observe(paperChartStage);
+}
+renderPaperPanelState();
 document.querySelector("#paper-direction-control").addEventListener("click", (event) => {
   const button = event.target.closest("[data-paper-direction]");
   if (!button) return;
@@ -4416,9 +4476,15 @@ async function loadPaperTradingTerminal() {
     );
     state.paperTrading.chartNavigation.visibleCount = frame.visibleCount;
     state.paperTrading.chartNavigation.endIndex = frame.endIndex;
+    state.paperTrading.chartNavigation.autoPriceScale = true;
+    state.paperTrading.chartNavigation.manualPriceRange = null;
   } else if (!reviewPayload) {
     resetPaperChartViewport();
   }
+  state.paperTrading.chartNavigation.oldestLoadedTime = state.paperTrading.marketData?.candles?.[0]?.time || null;
+  state.paperTrading.chartNavigation.loadingOlder = false;
+  state.paperTrading.chartNavigation.noMoreOlder = false;
+  state.paperTrading.chartNavigation.historyRequestKey = null;
   paperChartLoading.classList.add("hidden");
   renderPaperTradingTerminal();
   renderSignals();
@@ -4444,8 +4510,13 @@ function clearPaperSignalReview() {
 function resetPaperChartViewport() {
   state.paperTrading.chartNavigation.visibleCount = 120;
   state.paperTrading.chartNavigation.endIndex = null;
-  state.paperTrading.chartNavigation.priceScale = 1;
-  state.paperTrading.chartNavigation.pendingTrend = null;
+  state.paperTrading.chartNavigation.autoPriceScale = true;
+  state.paperTrading.chartNavigation.manualPriceRange = null;
+  state.paperTrading.chartNavigation.loadingOlder = false;
+  state.paperTrading.chartNavigation.noMoreOlder = false;
+  state.paperTrading.chartNavigation.oldestLoadedTime = null;
+  state.paperTrading.chartNavigation.historyRequestKey = null;
+  state.paperTrading.chartNavigation.pendingDrawing = null;
 }
 
 async function loadJournal() {
@@ -5693,7 +5764,7 @@ function renderPaperTerminalHeader() {
   const pair = data?.pair || state.paperTrading.markets.find((item) => item.symbol === state.paperTrading.selectedSymbol);
   const change = Number(pair?.change24h);
   setText("#paper-top-market", getDisplaySymbol(pair || state.paperTrading.selectedSymbol));
-  setText("#paper-top-price", Number.isFinite(Number(pair?.lastPrice)) ? formatCurrency(Number(pair.lastPrice)) : "--");
+  setText("#paper-top-price", Number.isFinite(Number(pair?.lastPrice)) ? formatPaperChartPrice(Number(pair.lastPrice), null, { currency: true }) : "--");
   setText("#paper-top-change", Number.isFinite(change) ? formatPercent(change) : "--");
   setText("#paper-top-timeframe", state.paperTrading.timeframe);
   setText("#paper-top-provider", getProviderLabel(pair));
@@ -5812,22 +5883,22 @@ function renderPaperTradingChart() {
   const volumeHeight = state.paperTrading.indicators.has("volume") ? 72 : 0;
   const bottom = 28 + volumeHeight;
   const orders = state.paperTrading.orders.filter((order) => order.symbol === state.paperTrading.selectedSymbol);
+  const activeOrders = orders.filter((order) => ["Open", "Pending"].includes(order.status));
   const reviewLevels = getSignalReviewLevels(state.paperTrading.signalReview);
   const currentDrawings = chartState.drawings.filter((drawing) =>
     drawing.symbol === state.paperTrading.selectedSymbol && drawing.timeframe === state.paperTrading.timeframe
   );
   const levelPrices = [
-    ...orders.flatMap((order) => [order.entryPrice, order.limitPrice, order.stopLoss, order.takeProfit]),
+    ...activeOrders.flatMap((order) => [order.entryPrice, order.limitPrice, order.stopLoss, order.takeProfit]),
     ...reviewLevels.map((level) => level.price),
-    ...currentDrawings.flatMap((drawing) => drawing.type === "horizontal" ? [drawing.price] : [drawing.start?.price, drawing.end?.price])
+    ...currentDrawings.filter((drawing) => drawing.type === "forecast").flatMap((drawing) => [drawing.entry, drawing.target, drawing.stop])
   ].filter(Number.isFinite);
-  const baseMin = Math.min(...visible.map((candle) => Number(candle.low)), ...levelPrices);
-  const baseMax = Math.max(...visible.map((candle) => Number(candle.high)), ...levelPrices);
-  const baseRange = Math.max(baseMax - baseMin, baseMax * 0.002, 0.000001);
-  const range = baseRange / Math.max(0.35, Math.min(4, Number(chartState.priceScale || 1)));
-  const center = (baseMin + baseMax) / 2;
-  const min = center - range / 2;
-  const max = center + range / 2;
+  const priceRange = calculatePaperPriceRange(
+    visible,
+    levelPrices,
+    chartState.autoPriceScale ? null : chartState.manualPriceRange
+  );
+  const { min, max, range } = priceRange;
   const plotWidth = width - left - right;
   const plotHeight = height - top - bottom;
   const slot = plotWidth / visible.length;
@@ -5836,7 +5907,7 @@ function renderPaperTradingChart() {
   const grid = Array.from({ length: 6 }, (_, index) => {
     const price = max - (range * index / 5);
     const gridY = y(price);
-    return `<line class="paper-chart-grid" x1="${left}" x2="${width - right}" y1="${gridY}" y2="${gridY}"></line><text class="paper-price-label" x="${width - right + 8}" y="${gridY + 4}">${escapeHtml(formatCompactPrice(price))}</text>`;
+    return `<line class="paper-chart-grid" x1="${left}" x2="${width - right}" y1="${gridY}" y2="${gridY}"></line><text class="paper-price-label" x="${width - right + 8}" y="${gridY + 4}">${escapeHtml(formatPaperChartPrice(price, range))}</text>`;
   }).join("");
   const candleMarkup = visible.map((candle, index) => {
     const candleX = x(index);
@@ -5847,16 +5918,18 @@ function renderPaperTradingChart() {
   }).join("");
   const overlays = renderPaperChartOverlays(visible, x, y);
   const volume = state.paperTrading.indicators.has("volume") ? renderPaperVolume(visible, x, slot, height - 22, volumeHeight - 8) : "";
-  const tradeLines = orders.filter((order) => ["Open", "Pending"].includes(order.status)).map((order) => {
+  const tradeLines = activeOrders.map((order) => {
     const entry = order.entryPrice || order.limitPrice;
-    return renderPaperPriceLine(y(entry), "entry", `ENTRY ${formatCompactPrice(entry)}`) +
-      renderPaperPriceLine(y(order.stopLoss), "stop", `SL ${formatCompactPrice(order.stopLoss)}`) +
-      renderPaperPriceLine(y(order.takeProfit), "target", `TP ${formatCompactPrice(order.takeProfit)}`);
+    return renderPaperPriceLine(y(entry), "entry", `ENTRY ${formatPaperChartPrice(entry, range)}`) +
+      renderPaperPriceLine(y(order.stopLoss), "stop", `SL ${formatPaperChartPrice(order.stopLoss, range)}`) +
+      renderPaperPriceLine(y(order.takeProfit), "target", `TP ${formatPaperChartPrice(order.takeProfit, range)}`);
   }).join("");
   const reviewLines = reviewLevels.map((level) =>
-    renderPaperPriceLine(y(level.price), level.type, `${level.label} ${formatCompactPrice(level.price)}`)
+    renderPaperPriceLine(y(level.price), level.type, `${level.label} ${formatPaperChartPrice(level.price, range)}`)
   ).join("");
-  const drawings = renderPaperDrawings(currentDrawings, visible, { left, right, width, x, y });
+  const drawingDimensions = { left, right, width, x, y, min, max, range };
+  const drawings = renderPaperDrawings(currentDrawings, visible, drawingDimensions);
+  const pendingDrawing = renderPaperPendingDrawing(chartState.pendingDrawing, visible, drawingDimensions);
   const outcomeMarker = renderPaperSignalOutcomeMarker(visible, { x, y });
   const markers = orders.filter((order) => order.closedAt && order.exitPrice).slice(0, 20).map((order) => {
     const markerX = width - right - 12;
@@ -5869,11 +5942,12 @@ function renderPaperTradingChart() {
     return `<text class="paper-time-label" x="${x(index)}" y="${height - 7}" text-anchor="middle">${escapeHtml(formatTime(Number(visible[index].time) * 1000))}</text>`;
   }).join("");
   const latest = Number(visible.at(-1).close);
-  paperChart.innerHTML = `${grid}${volume}${candleMarkup}${overlays}${tradeLines}${reviewLines}${drawings}${renderPaperPriceLine(y(latest), "current", `NOW ${formatCompactPrice(latest)}`)}${markers}${positionMarkers}${outcomeMarker}${timeAxis}<line id="paper-crosshair-x" class="paper-crosshair hidden" x1="0" x2="0" y1="${top}" y2="${height - bottom}"></line><line id="paper-crosshair-y" class="paper-crosshair hidden" x1="${left}" x2="${width - right}" y1="0" y2="0"></line>`;
-  bindPaperChartInteractions(candles, visible, chartWindow, { left, right, top, bottom, width, height, min, max, x, y });
+  paperChart.innerHTML = `${grid}${volume}${candleMarkup}${overlays}${tradeLines}${reviewLines}${drawings}${pendingDrawing}${renderPaperPriceLine(y(latest), "current", `NOW ${formatPaperChartPrice(latest, range)}`)}${markers}${positionMarkers}${outcomeMarker}${timeAxis}<line id="paper-crosshair-x" class="paper-crosshair hidden" x1="0" x2="0" y1="${top}" y2="${height - bottom}"></line><line id="paper-crosshair-y" class="paper-crosshair hidden" x1="${left}" x2="${width - right}" y1="0" y2="0"></line>`;
+  bindPaperChartInteractions(candles, visible, chartWindow, { left, right, top, bottom, timeAxisTop: height - 28, width, height, min, max, range, x, y });
   renderPaperIndicatorReadout(visible);
   const navigation = chartWindow.end < candles.length ? ` · Viewing ${chartWindow.start + 1}-${chartWindow.end}` : " · Latest";
-  setText("#paper-chart-status", `${candles.length} candles · Last ${formatDateTime(data.lastCandleAt)} · ${data.marketStatus?.label || "Ready"}${navigation}`);
+  const historyStatus = chartState.loadingOlder ? " · Loading older candles" : chartState.noMoreOlder ? " · Oldest available reached" : "";
+  setText("#paper-chart-status", `${candles.length} candles · Last ${formatDateTime(data.lastCandleAt)} · ${data.marketStatus?.label || "Ready"}${navigation}${historyStatus}`);
   renderPaperChartToolState();
 }
 
@@ -5891,12 +5965,61 @@ function renderPaperDrawings(drawings, candles, dimensions) {
       const lineY = dimensions.y(drawing.price);
       return `<g data-paper-drawing-id="${escapeHtml(drawing.id)}"><line class="paper-drawing-hit" x1="${dimensions.left}" x2="${dimensions.width - dimensions.right}" y1="${lineY}" y2="${lineY}"></line><line class="paper-drawing${selected}" x1="${dimensions.left}" x2="${dimensions.width - dimensions.right}" y1="${lineY}" y2="${lineY}"></line></g>`;
     }
+    if (drawing.type === "forecast") {
+      return renderPaperForecastDrawing(drawing, selected, timeX, dimensions);
+    }
     const x1 = timeX(drawing.start?.time);
     const x2 = timeX(drawing.end?.time);
     const y1 = dimensions.y(drawing.start?.price);
     const y2 = dimensions.y(drawing.end?.price);
     return `<g data-paper-drawing-id="${escapeHtml(drawing.id)}"><line class="paper-drawing-hit" x1="${x1}" x2="${x2}" y1="${y1}" y2="${y2}"></line><line class="paper-drawing${selected}" x1="${x1}" x2="${x2}" y1="${y1}" y2="${y2}"></line></g>`;
   }).join("");
+}
+
+function renderPaperForecastDrawing(drawing, selected, timeX, dimensions) {
+  const metrics = calculatePaperForecastMetrics(drawing);
+  if (!metrics) return "";
+  const plotRight = dimensions.width - dimensions.right;
+  const x1 = Math.max(dimensions.left, Math.min(plotRight, timeX(drawing.startTime)));
+  const x2 = Math.max(x1 + 6, Math.min(plotRight, timeX(drawing.endTime)));
+  const entryY = dimensions.y(drawing.entry);
+  const targetY = dimensions.y(drawing.target);
+  const stopY = dimensions.y(drawing.stop);
+  const targetTop = Math.min(entryY, targetY);
+  const riskTop = Math.min(entryY, stopY);
+  const directionClass = drawing.direction === "short" ? " short" : " long";
+  const labelX = Math.max(x1 + 64, x2 - 6);
+  const price = (value) => formatPaperChartPrice(value, dimensions.range);
+  const handles = selected ? `
+    <circle class="paper-forecast-handle target" data-paper-forecast-handle="target" cx="${x2}" cy="${targetY}" r="5"></circle>
+    <circle class="paper-forecast-handle entry" data-paper-forecast-handle="entry" cx="${x2}" cy="${entryY}" r="5"></circle>
+    <circle class="paper-forecast-handle stop" data-paper-forecast-handle="stop" cx="${x2}" cy="${stopY}" r="5"></circle>
+    <rect class="paper-forecast-handle extent" data-paper-forecast-handle="extent" x="${x2 - 4}" y="${Math.min(targetY, stopY)}" width="8" height="${Math.max(10, Math.abs(stopY - targetY))}" rx="2"></rect>` : "";
+  return `<g class="paper-forecast${directionClass}${selected}" data-paper-drawing-id="${escapeHtml(drawing.id)}">
+    <rect class="paper-forecast-zone target" x="${x1}" y="${targetTop}" width="${x2 - x1}" height="${Math.max(1, Math.abs(entryY - targetY))}"></rect>
+    <rect class="paper-forecast-zone risk" x="${x1}" y="${riskTop}" width="${x2 - x1}" height="${Math.max(1, Math.abs(entryY - stopY))}"></rect>
+    <rect class="paper-forecast-body-hit" data-paper-forecast-handle="body" x="${x1}" y="${Math.min(targetY, stopY)}" width="${x2 - x1}" height="${Math.max(8, Math.abs(stopY - targetY))}"></rect>
+    <line class="paper-forecast-line target" x1="${x1}" x2="${x2}" y1="${targetY}" y2="${targetY}"></line>
+    <line class="paper-forecast-line entry" x1="${x1}" x2="${x2}" y1="${entryY}" y2="${entryY}"></line>
+    <line class="paper-forecast-line stop" x1="${x1}" x2="${x2}" y1="${stopY}" y2="${stopY}"></line>
+    <text class="paper-forecast-label target" x="${labelX}" y="${targetY - 5}" text-anchor="end">Target ${escapeHtml(price(drawing.target))} (${metrics.targetPercent >= 0 ? "+" : ""}${metrics.targetPercent.toFixed(2)}%)</text>
+    <text class="paper-forecast-label entry" x="${labelX}" y="${entryY - 5}" text-anchor="end">Entry ${escapeHtml(price(drawing.entry))}</text>
+    <text class="paper-forecast-label stop" x="${labelX}" y="${stopY - 5}" text-anchor="end">Stop ${escapeHtml(price(drawing.stop))} (${metrics.stopPercent >= 0 ? "+" : ""}${metrics.stopPercent.toFixed(2)}%)</text>
+    <text class="paper-forecast-ratio" x="${x1 + 7}" y="${entryY + (drawing.direction === "long" ? -8 : 14)}">R:R ${metrics.riskRewardRatio.toFixed(2)}</text>
+    ${handles}
+  </g>`;
+}
+
+function renderPaperPendingDrawing(pending, candles, dimensions) {
+  if (!pending || !candles.length) return "";
+  if (pending.type === "trend") {
+    const lineY = dimensions.y(pending.price);
+    return `<line class="paper-drawing pending" x1="${dimensions.left}" x2="${dimensions.width - dimensions.right}" y1="${lineY}" y2="${lineY}"></line>`;
+  }
+  if (pending.type !== "forecast" || !pending.entry) return "";
+  const entryY = dimensions.y(pending.entry.price);
+  const targetY = pending.target ? dimensions.y(pending.target.price) : null;
+  return `<line class="paper-forecast-line entry pending" x1="${dimensions.left}" x2="${dimensions.width - dimensions.right}" y1="${entryY}" y2="${entryY}"></line>${Number.isFinite(targetY) ? `<line class="paper-forecast-line target pending" x1="${dimensions.left}" x2="${dimensions.width - dimensions.right}" y1="${targetY}" y2="${targetY}"></line>` : ""}`;
 }
 
 function renderPaperSignalOutcomeMarker(candles, dimensions) {
@@ -5948,7 +6071,11 @@ function renderPaperPriceLine(lineY, type, label) {
 }
 
 function bindPaperChartInteractions(allCandles, candles, chartWindow, dimensions) {
-  let drag = null;
+  paperChartInteractionController?.abort();
+  paperChartInteractionController = new AbortController();
+  const listenerOptions = { signal: paperChartInteractionController.signal };
+  const plotWidth = dimensions.width - dimensions.left - dimensions.right;
+  const plotHeight = dimensions.height - dimensions.top - dimensions.bottom;
   const coordinates = (event) => {
     const rect = paperChart.getBoundingClientRect();
     return {
@@ -5958,19 +6085,16 @@ function bindPaperChartInteractions(allCandles, candles, chartWindow, dimensions
     };
   };
 
-  paperChart.onpointerdown = (event) => {
-    const drawingTarget = event.target.closest?.("[data-paper-drawing-id]");
-    if (drawingTarget) {
-      state.paperTrading.chartNavigation.selectedDrawingId = drawingTarget.dataset.paperDrawingId;
-      renderPaperTradingChart();
-      return;
-    }
+  paperChart.addEventListener("pointerdown", (event) => {
     const point = coordinates(event);
+    const region = getPaperChartRegion(point.x, point.y, dimensions);
+    if (region === "outside") return;
     const chart = state.paperTrading.chartNavigation;
-    if (chart.activeTool && point.x >= dimensions.left && point.x <= dimensions.width - dimensions.right) {
+    event.preventDefault();
+    if (chart.activeTool && region === "plot") {
       const match = candleAtPaperChartCoordinate(point.x, candles, dimensions);
       const price = priceAtPaperChartCoordinate(point.y, dimensions);
-      const hadPendingTrend = Boolean(chart.pendingTrend);
+      const defaultEndIndex = Math.min(candles.length - 1, Number(match?.index || 0) + Math.max(8, Math.round(candles.length * 0.28)));
       const result = addPaperDrawingPoint(chart.drawings, {
         tool: chart.activeTool,
         id: `paper-drawing-${Date.now()}-${chart.drawings.length + 1}`,
@@ -5978,33 +6102,203 @@ function bindPaperChartInteractions(allCandles, candles, chartWindow, dimensions
         timeframe: state.paperTrading.timeframe,
         time: match?.candle?.time,
         price,
-        pending: chart.pendingTrend
+        pending: chart.pendingDrawing,
+        defaultEndTime: candles[defaultEndIndex]?.time
       });
       chart.drawings = result.drawings;
-      chart.pendingTrend = result.pending;
+      chart.pendingDrawing = result.pending;
       chart.selectedDrawingId = result.selectedId;
-      if (chart.activeTool === "horizontal" || hadPendingTrend) chart.activeTool = null;
+      if (result.error) showToast(result.error);
+      if (chart.activeTool === "horizontal" || result.selectedId) chart.activeTool = null;
       renderPaperTradingChart();
       return;
     }
-    drag = {
-      mode: point.x > dimensions.width - dimensions.right ? "scale" : "pan",
+    const drawingTarget = event.target.closest?.("[data-paper-drawing-id]");
+    const forecastHandle = event.target.closest?.("[data-paper-forecast-handle]");
+    const selectedDrawing = chart.drawings.find((drawing) => drawing.id === drawingTarget?.dataset.paperDrawingId);
+    paperChartPointers.set(event.pointerId, { x: point.x, y: point.y, region });
+    paperChart.setPointerCapture?.(event.pointerId);
+    if (paperChartPointers.size === 2 && [...paperChartPointers.values()].every((pointer) => pointer.region === "plot")) {
+      const entries = [...paperChartPointers.entries()];
+      paperChartPinch = {
+        pointerIds: entries.map(([id]) => id),
+        startPoints: entries.map(([, pointer]) => ({ x: pointer.x, y: pointer.y })),
+        startWindow: { ...chartWindow },
+        startRange: { min: dimensions.min, max: dimensions.max, range: dimensions.range },
+        priceAnchor: priceAtPaperChartCoordinate((entries[0][1].y + entries[1][1].y) / 2, dimensions)
+      };
+      paperChartDrag = null;
+      paperChart.classList.add("is-interacting");
+      return;
+    }
+    paperChartDrag = {
+      pointerId: event.pointerId,
+      mode: selectedDrawing?.type === "forecast" && forecastHandle
+        ? "forecast-edit"
+        : region === "price-axis" ? "price-scale" : region === "time-axis" ? "time-scale" : "pan",
+      drawingId: drawingTarget?.dataset.paperDrawingId || null,
+      forecastHandle: forecastHandle?.dataset.paperForecastHandle || null,
+      startDrawing: selectedDrawing?.type === "forecast" ? { ...selectedDrawing } : null,
       startX: point.x,
       currentX: point.x,
       startY: point.y,
       currentY: point.y,
-      startEnd: chartWindow.end,
-      startScale: chart.priceScale
+      moved: false,
+      startWindow: { ...chartWindow },
+      startRange: { min: dimensions.min, max: dimensions.max, range: dimensions.range },
+      priceAnchor: priceAtPaperChartCoordinate(point.y, dimensions)
     };
-    paperChart.setPointerCapture?.(event.pointerId);
-  };
+    paperChart.classList.add("is-interacting");
+  }, listenerOptions);
 
-  paperChart.onpointermove = (event) => {
+  paperChart.addEventListener("pointermove", (event) => {
     const point = coordinates(event);
-    if (drag) {
+    if (paperChartPointers.has(event.pointerId)) {
+      const previous = paperChartPointers.get(event.pointerId);
+      paperChartPointers.set(event.pointerId, { ...previous, x: point.x, y: point.y });
+    }
+    if (paperChartPinch?.pointerIds.includes(event.pointerId)) {
+      event.preventDefault();
+      const currentPoints = paperChartPinch.pointerIds.map((id) => paperChartPointers.get(id)).filter(Boolean);
+      const transform = getPaperPinchTransform(paperChartPinch.startPoints, currentPoints);
+      if (!transform) return;
+      const chart = state.paperTrading.chartNavigation;
+      const pinchMidpointX = (paperChartPinch.startPoints[0].x + paperChartPinch.startPoints[1].x) / 2;
+      const cursorRatio = Math.max(0, Math.min(1, (pinchMidpointX - dimensions.left) / plotWidth));
+      const zoomed = zoomPaperTimeWindow(allCandles.length, paperChartPinch.startWindow, transform.timeFactor, cursorRatio);
+      const zoomedWindow = getPaperChartWindow(allCandles.length, zoomed.visibleCount, zoomed.endIndex);
+      const panned = panPaperTimeWindow(allCandles.length, zoomedWindow, transform.deltaX, plotWidth);
+      chart.visibleCount = panned.visibleCount;
+      chart.endIndex = panned.endIndex;
+      if (Math.abs(transform.priceFactor - 1) > 0.001 || Math.abs(transform.deltaY) > 2) {
+        const zoomedRange = zoomPaperPriceRange(paperChartPinch.startRange, transform.priceFactor, paperChartPinch.priceAnchor);
+        chart.autoPriceScale = false;
+        chart.manualPriceRange = translatePaperPriceRange(zoomedRange, transform.deltaY, plotHeight);
+      }
+      schedulePaperChartRender();
+      return;
+    }
+    if (paperChartDrag?.pointerId === event.pointerId) {
+      event.preventDefault();
+      const drag = paperChartDrag;
       drag.currentX = point.x;
       drag.currentY = point.y;
+      const deltaX = drag.currentX - drag.startX;
+      const deltaY = drag.currentY - drag.startY;
+      drag.moved ||= Math.abs(deltaX) > 3 || Math.abs(deltaY) > 3;
+      const chart = state.paperTrading.chartNavigation;
+      if (drag.mode === "forecast-edit") {
+        chart.selectedDrawingId = drag.drawingId;
+        chart.drawings = chart.drawings.map((drawing) => {
+          if (drawing.id !== drag.drawingId) return drawing;
+          const update = drag.forecastHandle === "body"
+            ? { priceDelta: -(deltaY / plotHeight) * drag.startRange.range }
+            : drag.forecastHandle === "extent"
+              ? { time: candleAtPaperChartCoordinate(point.x, candles, dimensions)?.candle?.time }
+              : { price: priceAtPaperChartCoordinate(point.y, dimensions) };
+          return updatePaperForecastDrawing(drag.startDrawing, drag.forecastHandle, update);
+        });
+      } else if (drag.mode === "pan") {
+        const next = panPaperTimeWindow(
+          allCandles.length,
+          drag.startWindow,
+          deltaX,
+          plotWidth
+        );
+        chart.visibleCount = next.visibleCount;
+        chart.endIndex = next.endIndex;
+        if (Math.abs(deltaY) > 2) {
+          chart.autoPriceScale = false;
+          chart.manualPriceRange = translatePaperPriceRange(drag.startRange, deltaY, plotHeight);
+        }
+      } else if (drag.mode === "price-scale") {
+        chart.autoPriceScale = false;
+        chart.manualPriceRange = zoomPaperPriceRange(drag.startRange, Math.exp(deltaY * 0.012), drag.priceAnchor);
+      } else if (drag.mode === "time-scale") {
+        const next = zoomPaperTimeWindow(allCandles.length, drag.startWindow, Math.exp(-deltaX * 0.006), 0.5);
+        chart.visibleCount = next.visibleCount;
+        chart.endIndex = next.endIndex;
+      }
+      schedulePaperChartRender();
+      return;
     }
+    updatePaperChartCrosshair(event, point, candles, dimensions);
+  }, listenerOptions);
+
+  const finishPointerInteraction = (event, cancelled = false) => {
+    const wasPinch = paperChartPinch?.pointerIds.includes(event.pointerId);
+    paperChartPointers.delete(event.pointerId);
+    if (wasPinch) {
+      paperChartPinch = null;
+      paperChartDrag = null;
+      paperChartPointers.clear();
+      if (paperChart.hasPointerCapture?.(event.pointerId)) paperChart.releasePointerCapture(event.pointerId);
+      paperChart.classList.remove("is-interacting");
+      renderPaperTradingChart();
+      maybeLoadOlderPaperChartCandles();
+      return;
+    }
+    const drag = paperChartDrag;
+    if (!drag || drag.pointerId !== event.pointerId) {
+      if (!paperChartPointers.size) paperChart.classList.remove("is-interacting");
+      return;
+    }
+    if (!cancelled && !drag.moved && drag.drawingId) {
+      state.paperTrading.chartNavigation.selectedDrawingId = drag.drawingId;
+    }
+    if (paperChart.hasPointerCapture?.(event.pointerId)) paperChart.releasePointerCapture(event.pointerId);
+    paperChartDrag = null;
+    paperChart.classList.remove("is-interacting");
+    renderPaperTradingChart();
+    maybeLoadOlderPaperChartCandles();
+  };
+  paperChart.addEventListener("pointerup", (event) => finishPointerInteraction(event), listenerOptions);
+  paperChart.addEventListener("pointercancel", (event) => finishPointerInteraction(event, true), listenerOptions);
+  paperChart.addEventListener("dragstart", (event) => event.preventDefault(), listenerOptions);
+  paperChart.addEventListener("selectstart", (event) => event.preventDefault(), listenerOptions);
+  paperChart.addEventListener("pointerleave", () => {
+    if (paperChartDrag || paperChartPinch || paperChartPointers.size) return;
+    hidePaperChartCrosshair();
+  }, listenerOptions);
+  paperChart.addEventListener("dblclick", (event) => {
+    const point = coordinates(event);
+    if (getPaperChartRegion(point.x, point.y, dimensions) !== "price-axis") return;
+    event.preventDefault();
+    state.paperTrading.chartNavigation.autoPriceScale = true;
+    state.paperTrading.chartNavigation.manualPriceRange = null;
+    renderPaperTradingChart();
+  }, listenerOptions);
+  paperChart.addEventListener("wheel", (event) => {
+    const point = coordinates(event);
+    const region = getPaperChartRegion(point.x, point.y, dimensions);
+    if (!["plot", "price-axis", "time-axis"].includes(region)) return;
+    event.preventDefault();
+    const chart = state.paperTrading.chartNavigation;
+    const factor = event.deltaY > 0 ? 1.16 : 1 / 1.16;
+    if (region === "price-axis") {
+      chart.autoPriceScale = false;
+      chart.manualPriceRange = zoomPaperPriceRange(
+        { min: dimensions.min, max: dimensions.max, range: dimensions.range },
+        factor,
+        priceAtPaperChartCoordinate(point.y, dimensions)
+      );
+    } else {
+      const ratio = Math.max(0, Math.min(1, (point.x - dimensions.left) / (dimensions.width - dimensions.left - dimensions.right)));
+      const next = zoomPaperTimeWindow(allCandles.length, chartWindow, factor, ratio);
+      chart.visibleCount = next.visibleCount;
+      chart.endIndex = next.endIndex;
+    }
+    renderPaperTradingChart();
+    maybeLoadOlderPaperChartCandles();
+  }, { ...listenerOptions, passive: false });
+}
+
+function updatePaperChartCrosshair(event, point, candles, dimensions) {
+  const region = getPaperChartRegion(point.x, point.y, dimensions);
+  if (!["plot", "price-axis"].includes(region)) {
+    hidePaperChartCrosshair();
+    return;
+  }
     const match = candleAtPaperChartCoordinate(point.x, candles, dimensions);
     if (!match) return;
     const crossX = paperChart.querySelector("#paper-crosshair-x");
@@ -6019,46 +6313,110 @@ function bindPaperChartInteractions(allCandles, candles, chartWindow, dimensions
     paperChartTooltip.classList.remove("hidden");
     paperChartTooltip.style.left = `${Math.min(point.rect.width - 190, Math.max(8, event.clientX - point.rect.left + 12))}px`;
     paperChartTooltip.style.top = `${Math.max(8, event.clientY - point.rect.top - 68)}px`;
-    paperChartTooltip.textContent = `${formatDateTime(Number(match.candle.time) * 1000)} · O ${formatCompactPrice(match.candle.open)} H ${formatCompactPrice(match.candle.high)} L ${formatCompactPrice(match.candle.low)} C ${formatCompactPrice(match.candle.close)}`;
-    paperCrosshairPriceLabel.textContent = formatCurrency(priceAtPaperChartCoordinate(crossYValue, dimensions));
+    paperChartTooltip.textContent = `${formatDateTime(Number(match.candle.time) * 1000)} · O ${formatPaperChartPrice(match.candle.open, dimensions.range)} H ${formatPaperChartPrice(match.candle.high, dimensions.range)} L ${formatPaperChartPrice(match.candle.low, dimensions.range)} C ${formatPaperChartPrice(match.candle.close, dimensions.range)}`;
+    paperCrosshairPriceLabel.textContent = formatPaperChartPrice(priceAtPaperChartCoordinate(crossYValue, dimensions), dimensions.range, { currency: true });
     paperCrosshairPriceLabel.style.top = `${(crossYValue / dimensions.height) * point.rect.height}px`;
     paperCrosshairPriceLabel.classList.remove("hidden");
     paperCrosshairTimeLabel.textContent = formatDateTime(Number(match.candle.time) * 1000);
     const timeLabelLeft = (dimensions.x(match.index) / dimensions.width) * point.rect.width;
     paperCrosshairTimeLabel.style.left = `${Math.max(64, Math.min(point.rect.width - 64, timeLabelLeft))}px`;
     paperCrosshairTimeLabel.classList.remove("hidden");
-  };
+}
 
-  paperChart.onpointerup = () => {
-    if (!drag) return;
-    const chart = state.paperTrading.chartNavigation;
-    if (drag.mode === "pan") {
-      const slot = (dimensions.width - dimensions.left - dimensions.right) / Math.max(1, candles.length);
-      const delta = Math.round((drag.startX - drag.currentX) / slot);
-      const nextEnd = Math.max(chartWindow.count, Math.min(allCandles.length, drag.startEnd + delta));
-      chart.endIndex = nextEnd === allCandles.length ? null : nextEnd;
-    } else {
-      chart.priceScale = Math.max(0.35, Math.min(4, drag.startScale * Math.exp((drag.startY - drag.currentY) * 0.012)));
+function hidePaperChartCrosshair() {
+  paperChart.querySelectorAll(".paper-crosshair").forEach((line) => line.classList.add("hidden"));
+  paperChartTooltip.classList.add("hidden");
+  paperCrosshairPriceLabel.classList.add("hidden");
+  paperCrosshairTimeLabel.classList.add("hidden");
+}
+
+function schedulePaperChartRender() {
+  if (paperChartRenderFrame) return;
+  paperChartRenderFrame = requestAnimationFrame(() => {
+    paperChartRenderFrame = null;
+    renderPaperTradingChart();
+  });
+}
+
+async function maybeLoadOlderPaperChartCandles() {
+  const data = state.paperTrading.marketData;
+  const chart = state.paperTrading.chartNavigation;
+  const candles = data?.candles || [];
+  const window = getPaperChartWindow(candles.length, chart.visibleCount, chart.endIndex);
+  if (!candles.length || chart.loadingOlder || chart.noMoreOlder || window.start > Math.max(12, Math.round(window.count * 0.15))) return;
+
+  const symbol = state.paperTrading.selectedSymbol;
+  const timeframe = state.paperTrading.timeframe;
+  const requestKey = `${symbol}:${timeframe}:${candles[0].time}`;
+  const historyState = {
+    candles,
+    endIndex: chart.endIndex,
+    loadingOlder: false,
+    noMoreOlder: chart.noMoreOlder,
+    oldestLoadedTime: chart.oldestLoadedTime
+  };
+  chart.loadingOlder = true;
+  chart.historyRequestKey = requestKey;
+  const request = loadOlderPaperChartHistory(historyState, async (before) => {
+    const params = new URLSearchParams({
+      symbol,
+      timeframe,
+      before: String(before),
+      limit: "300"
+    });
+    return api.request(`/api/paper-trades/history?${params}`);
+  });
+  renderPaperTradingChart();
+  try {
+    const result = await request;
+    const stillCurrent = chart.historyRequestKey === requestKey &&
+      state.paperTrading.selectedSymbol === symbol && state.paperTrading.timeframe === timeframe;
+    if (stillCurrent) {
+      chart.noMoreOlder = historyState.noMoreOlder;
+      if (result.loaded) {
+        data.candles = historyState.candles;
+        chart.endIndex = result.endIndex;
+        chart.oldestLoadedTime = historyState.candles[0]?.time || null;
+      }
     }
-    drag = null;
+  } catch (error) {
+    showToast(error.message || "Older candles could not be loaded.");
+  } finally {
+    if (chart.historyRequestKey === requestKey) {
+      chart.loadingOlder = false;
+      chart.historyRequestKey = null;
+    }
     renderPaperTradingChart();
-  };
+  }
+}
 
-  paperChart.onpointercancel = () => { drag = null; };
-  paperChart.onpointerleave = () => {
-    paperChart.querySelectorAll(".paper-crosshair").forEach((line) => line.classList.add("hidden"));
-    paperChartTooltip.classList.add("hidden");
-    paperCrosshairPriceLabel.classList.add("hidden");
-    paperCrosshairTimeLabel.classList.add("hidden");
-  };
-  paperChart.onwheel = (event) => {
-    event.preventDefault();
+async function loadLatestPaperChartHistory() {
+  const data = state.paperTrading.marketData;
+  if (!data?.candles?.length) return;
+  const params = new URLSearchParams({
+    symbol: state.paperTrading.selectedSymbol,
+    timeframe: state.paperTrading.timeframe,
+    latest: "1",
+    limit: "300"
+  });
+  try {
+    const payload = await api.request(`/api/paper-trades/history?${params}`);
+    const merged = mergePaperChartCandles(data.candles, payload.candles || [], null);
+    data.candles = merged.candles;
+    data.lastCandleAt = merged.candles.at(-1)?.time
+      ? new Date(Number(merged.candles.at(-1).time) * 1000).toISOString()
+      : data.lastCandleAt;
+    if (data.pair && merged.candles.at(-1)?.close != null) data.pair.lastPrice = Number(merged.candles.at(-1).close);
+    if (state.paperTrading.signalReviewChart && merged.candles.at(-1)?.close != null) {
+      state.paperTrading.signalReviewChart.currentPrice = Number(merged.candles.at(-1).close);
+    }
     const chart = state.paperTrading.chartNavigation;
-    const factor = event.deltaY > 0 ? 1.2 : 1 / 1.2;
-    chart.visibleCount = Math.max(30, Math.min(Math.min(300, allCandles.length), Math.round(chartWindow.count * factor)));
-    if (chart.endIndex == null) chart.endIndex = null;
-    renderPaperTradingChart();
-  };
+    chart.endIndex = null;
+    chart.noMoreOlder = false;
+    chart.oldestLoadedTime = merged.candles[0]?.time || null;
+  } catch (error) {
+    showToast(error.message || "Latest candles could not be loaded.");
+  }
 }
 
 function renderPaperIndicatorReadout(candles) {
@@ -6220,8 +6578,7 @@ function calculateMacd(candles) {
 }
 
 function formatCompactPrice(value) {
-  const numeric = Number(value || 0);
-  return numeric >= 1000 ? numeric.toFixed(2) : numeric >= 1 ? numeric.toFixed(4) : numeric.toPrecision(5);
+  return formatPaperChartPrice(value);
 }
 
 function renderJournal() {
@@ -10003,14 +10360,53 @@ function renderPaperSignalReview() {
       <div class="paper-signal-review-outcome"><strong class="${outcome.className}">${escapeHtml(outcome.label)}</strong><span>${escapeHtml(outcome.value)}</span></div>
     </div>
     <div class="paper-signal-review-levels">
-      <div><span>Entry</span><strong>${formatCurrency(review.entry)}</strong></div>
-      <div><span>Stop Loss</span><strong>${formatCurrency(review.stopLoss)}</strong></div>
-      <div><span>Take Profit</span><strong>${formatCurrency(review.takeProfit)}</strong></div>
-      <div><span>Current price</span><strong>${hasCurrentPrice ? formatCurrency(currentPrice) : "--"}</strong></div>
+      <div><span>Entry</span><strong>${formatPaperChartPrice(review.entry, null, { currency: true })}</strong></div>
+      <div><span>Stop Loss</span><strong>${formatPaperChartPrice(review.stopLoss, null, { currency: true })}</strong></div>
+      <div><span>Take Profit</span><strong>${formatPaperChartPrice(review.takeProfit, null, { currency: true })}</strong></div>
+      <div><span>Current price</span><strong>${hasCurrentPrice ? formatPaperChartPrice(currentPrice, null, { currency: true }) : "--"}</strong></div>
     </div>
     <div class="paper-signal-review-meta"><span>Created ${formatDateTime(review.createdAt)}</span><span>Valid until ${formatDateTime(review.validUntil)}</span><span>Source ${escapeHtml(formatSignalReviewSource(review.source))}</span><span>Read-only review</span></div>
     ${chartMessage}`;
   paperSignalReview.classList.remove("hidden");
+}
+
+function getStoredPaperPanelState() {
+  const mobileDefault = Boolean(window.matchMedia?.("(max-width: 900px)").matches);
+  try {
+    const stored = JSON.parse(localStorage.getItem(PAPER_PANEL_STATE_KEY) || "{}");
+    return {
+      marketsCollapsed: typeof stored.marketsCollapsed === "boolean" ? stored.marketsCollapsed : mobileDefault,
+      orderCollapsed: typeof stored.orderCollapsed === "boolean" ? stored.orderCollapsed : mobileDefault
+    };
+  } catch {
+    return { marketsCollapsed: mobileDefault, orderCollapsed: mobileDefault };
+  }
+}
+
+function persistPaperPanelState() {
+  localStorage.setItem(PAPER_PANEL_STATE_KEY, JSON.stringify(state.paperTrading.panels));
+}
+
+function renderPaperPanelState() {
+  if (!paperTerminalLayout) return;
+  const panels = state.paperTrading.panels;
+  paperTerminalLayout.classList.toggle("markets-collapsed", panels.marketsCollapsed);
+  paperTerminalLayout.classList.toggle("order-collapsed", panels.orderCollapsed);
+  paperMarketPanel?.classList.toggle("collapsed", panels.marketsCollapsed);
+  paperOrderPanel?.classList.toggle("collapsed", panels.orderCollapsed);
+  const marketsToggle = paperMarketPanel?.querySelector("[data-paper-panel-toggle='markets']");
+  const orderToggle = paperOrderPanel?.querySelector("[data-paper-panel-toggle='order']");
+  if (marketsToggle) {
+    marketsToggle.textContent = panels.marketsCollapsed ? "›" : "‹";
+    marketsToggle.setAttribute("aria-expanded", String(!panels.marketsCollapsed));
+    marketsToggle.setAttribute("aria-label", panels.marketsCollapsed ? "Expand markets" : "Collapse markets");
+  }
+  if (orderToggle) {
+    orderToggle.textContent = panels.orderCollapsed ? "‹" : "›";
+    orderToggle.setAttribute("aria-expanded", String(!panels.orderCollapsed));
+    orderToggle.setAttribute("aria-label", panels.orderCollapsed ? "Expand simulated order" : "Collapse simulated order");
+  }
+  schedulePaperChartRender();
 }
 
 function getPaperSignalReviewOutcome(review) {
@@ -10048,6 +10444,11 @@ function renderPaperChartToolState() {
   });
   const deleteButton = paperChartTools.querySelector("[data-paper-delete-drawing]");
   if (deleteButton) deleteButton.disabled = !chart.selectedDrawingId;
+  const autoButton = paperChartTools.querySelector("[data-paper-auto-scale]");
+  if (autoButton) {
+    autoButton.classList.toggle("active", chart.autoPriceScale);
+    autoButton.setAttribute("aria-pressed", String(Boolean(chart.autoPriceScale)));
+  }
 }
 
 function mergeUnlockedSignalIntoScanResults(signal) {
