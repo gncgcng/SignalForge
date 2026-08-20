@@ -201,6 +201,7 @@ const state = {
     marketData: null,
     marketError: null,
     marketLoading: false,
+    marketRefreshing: false,
     marketLoadRequestId: 0,
     draftSignalId: null,
     signalReview: null,
@@ -4458,14 +4459,23 @@ async function loadPaperPortfolio() {
   renderSignalsHistory();
 }
 
-async function loadPaperTradingTerminal() {
+async function loadPaperTradingTerminal(options = {}) {
+  if (options.background === true && state.paperTrading.marketLoading) {
+    return { skipped: true, reason: "initial_load_in_progress" };
+  }
+  const backgroundRefresh = options.background === true && Boolean(state.paperTrading.marketData?.candles?.length);
+  const previousMarketData = state.paperTrading.marketData;
+  const chartNavigation = state.paperTrading.chartNavigation;
   const requestId = Number(state.paperTrading.marketLoadRequestId || 0) + 1;
   state.paperTrading.marketLoadRequestId = requestId;
-  state.paperTrading.marketLoading = true;
-  state.paperTrading.marketError = null;
-  paperChartLoading.textContent = "Loading live candles...";
-  paperChartLoading.classList.remove("hidden");
-  setText("#paper-chart-status", "Loading market data...");
+  state.paperTrading.marketRefreshing = backgroundRefresh;
+  if (!backgroundRefresh) {
+    state.paperTrading.marketLoading = true;
+    state.paperTrading.marketError = null;
+    paperChartLoading.textContent = "Loading live candles...";
+    paperChartLoading.classList.remove("hidden");
+    setText("#paper-chart-status", "Loading market data...");
+  }
   const route = parseAppHash(location.hash);
   const reviewSignalId = route.route === "paper-trading" ? route.params.get("signalId") : null;
   try {
@@ -4496,6 +4506,27 @@ async function loadPaperTradingTerminal() {
           marketStatus: { label: reviewPayload.review.status === "Active" ? "Live review" : "Historical review" }
         }
       : null;
+    const incomingMarketData = reviewPayload ? reviewMarket : terminal.marketData;
+    let marketData = incomingMarketData;
+    if (backgroundRefresh) {
+      if (incomingMarketData?.candles?.length) {
+        const merged = mergePaperChartCandles(
+          previousMarketData?.candles || [],
+          incomingMarketData.candles,
+          chartNavigation.endIndex,
+          { preferIncoming: true }
+        );
+        chartNavigation.endIndex = merged.endIndex;
+        marketData = {
+          ...previousMarketData,
+          ...incomingMarketData,
+          pair: { ...previousMarketData?.pair, ...incomingMarketData.pair },
+          candles: merged.candles
+        };
+      } else {
+        marketData = previousMarketData;
+      }
+    }
     state.paperTrading = {
       ...state.paperTrading,
       ...terminal,
@@ -4504,14 +4535,16 @@ async function loadPaperTradingTerminal() {
       markets: terminal.markets || [],
       orders: terminal.orders || [],
       account: terminal.account,
-      marketData: reviewPayload ? reviewMarket : terminal.marketData,
+      marketData,
       marketError: reviewPayload?.chart?.message || terminal.marketError || null,
       signalReview: reviewPayload?.review || null,
       signalReviewChart: reviewPayload?.chart || null,
+      chartNavigation,
       marketLoadRequestId: requestId,
-      marketLoading: true
+      marketLoading: backgroundRefresh ? false : true,
+      marketRefreshing: backgroundRefresh
     };
-    if (reviewPayload?.chart?.available) {
+    if (!backgroundRefresh && reviewPayload?.chart?.available) {
       const frame = getSignalReviewFrame(
         reviewPayload.chart.candles,
         reviewPayload.review,
@@ -4521,20 +4554,23 @@ async function loadPaperTradingTerminal() {
       state.paperTrading.chartNavigation.endIndex = frame.endIndex;
       state.paperTrading.chartNavigation.autoPriceScale = true;
       state.paperTrading.chartNavigation.manualPriceRange = null;
-    } else if (!reviewPayload) {
+    } else if (!backgroundRefresh && !reviewPayload) {
       resetPaperChartViewport();
     }
     state.paperTrading.chartNavigation.oldestLoadedTime = state.paperTrading.marketData?.candles?.[0]?.time || null;
-    state.paperTrading.chartNavigation.loadingOlder = false;
-    state.paperTrading.chartNavigation.noMoreOlder = false;
-    state.paperTrading.chartNavigation.historyRequestKey = null;
+    if (!backgroundRefresh) {
+      state.paperTrading.chartNavigation.loadingOlder = false;
+      state.paperTrading.chartNavigation.noMoreOlder = false;
+      state.paperTrading.chartNavigation.historyRequestKey = null;
+    }
     if (route.route === "paper-trading" && route.params.has("pair") && !reviewSignalId) {
       removeHashParams(["pair"]);
     }
-    return { ok: true, candles: state.paperTrading.marketData?.candles?.length || 0 };
+    const result = { ok: true, candles: state.paperTrading.marketData?.candles?.length || 0 };
+    return backgroundRefresh ? { ...result, background: true } : result;
   } catch (error) {
     if (requestId !== state.paperTrading.marketLoadRequestId) return { stale: true };
-    state.paperTrading.marketData = null;
+    if (!backgroundRefresh) state.paperTrading.marketData = null;
     state.paperTrading.marketError = error.message || "Market data could not be loaded.";
     console.warn("[paper-market] load failed", {
       symbol: state.paperTrading.selectedSymbol,
@@ -4544,9 +4580,12 @@ async function loadPaperTradingTerminal() {
     return { ok: false, error: state.paperTrading.marketError };
   } finally {
     if (requestId === state.paperTrading.marketLoadRequestId) {
-      state.paperTrading.marketLoading = false;
-      paperChartLoading.classList.add("hidden");
-      renderPaperTradingTerminal();
+      state.paperTrading.marketRefreshing = false;
+      if (!backgroundRefresh) {
+        state.paperTrading.marketLoading = false;
+        paperChartLoading.classList.add("hidden");
+      }
+      renderPaperTradingTerminal({ preserveChartInteraction: backgroundRefresh });
       renderSignals();
       renderSignalsHistory();
     }
@@ -4824,7 +4863,7 @@ function startSignalHistoryRefresh() {
 
     try {
       if (state.activeView === "paper-portfolio") {
-        await loadPaperTradingTerminal();
+        await loadPaperTradingTerminal({ background: true });
       } else {
         await loadSignals();
       }
@@ -5787,7 +5826,7 @@ function renderPaperPortfolio() {
   if (state.paperTrading.account) renderPaperTradingTerminal();
 }
 
-function renderPaperTradingTerminal() {
+function renderPaperTradingTerminal(options = {}) {
   updatePaperWorkspaceHeight();
   renderPaperMarketList();
   renderPaperTerminalHeader();
@@ -5795,7 +5834,8 @@ function renderPaperTradingTerminal() {
   renderPaperChartToolState();
   renderPaperOrderTicket();
   renderPaperAccount();
-  renderPaperTradingChart();
+  const chartInteractionActive = Boolean(paperChartDrag || paperChartPinch || paperChartPointers.size);
+  if (!(options.preserveChartInteraction && chartInteractionActive)) renderPaperTradingChart();
   renderPaperOrders();
 }
 
@@ -6556,7 +6596,7 @@ async function loadLatestPaperChartHistory() {
   });
   try {
     const payload = await api.request(`/api/paper-trades/history?${params}`);
-    const merged = mergePaperChartCandles(data.candles, payload.candles || [], null);
+    const merged = mergePaperChartCandles(data.candles, payload.candles || [], null, { preferIncoming: true });
     data.candles = merged.candles;
     data.lastCandleAt = merged.candles.at(-1)?.time
       ? new Date(Number(merged.candles.at(-1).time) * 1000).toISOString()

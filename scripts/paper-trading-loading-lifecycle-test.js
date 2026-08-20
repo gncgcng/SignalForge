@@ -4,11 +4,12 @@ import {
   calculatePaperCandleGeometry,
   calculatePaperPriceRange,
   getPaperChartDimensions,
-  getPaperTimelineWindow
+  getPaperTimelineWindow,
+  mergePaperChartCandles
 } from "../public/paperChartUtils.js";
 
 const appSource = readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
-const loaderStart = appSource.indexOf("async function loadPaperTradingTerminal()");
+const loaderStart = appSource.indexOf("async function loadPaperTradingTerminal(");
 const loaderEnd = appSource.indexOf("function openSignalReview", loaderStart);
 assert.ok(loaderStart >= 0 && loaderEnd > loaderStart, "production Paper Trading loader must be extractable");
 const loaderSource = appSource.slice(loaderStart, loaderEnd);
@@ -122,6 +123,7 @@ function makeHarness(request) {
 
   const dependencies = {
     PAPER_MARKET_LOAD_TIMEOUT_MS: 30_000,
+    mergePaperChartCandles,
     state,
     paperChartLoading,
     setText: (selector, value) => status.set(selector, value),

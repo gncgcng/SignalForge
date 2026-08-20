@@ -344,12 +344,14 @@ export function calculatePaperWorkspaceLayout(containerWidth, options = {}) {
   };
 }
 
-export function mergePaperChartCandles(existingCandles, incomingCandles, endIndex = null) {
+export function mergePaperChartCandles(existingCandles, incomingCandles, endIndex = null, options = {}) {
   const existing = normalizeCandles(existingCandles);
   const incoming = normalizeCandles(incomingCandles);
   const oldFirstTime = existing[0]?.time;
-  const candleMap = new Map(incoming.map((candle) => [candle.time, candle]));
-  for (const candle of existing) candleMap.set(candle.time, candle);
+  const preferIncoming = Boolean(options.preferIncoming);
+  const candleMap = new Map();
+  for (const candle of preferIncoming ? existing : incoming) candleMap.set(candle.time, candle);
+  for (const candle of preferIncoming ? incoming : existing) candleMap.set(candle.time, candle);
   const candles = [...candleMap.values()].sort((a, b) => a.time - b.time);
   const prepended = oldFirstTime == null ? 0 : Math.max(0, candles.findIndex((candle) => candle.time === oldFirstTime));
   return {
