@@ -118,6 +118,7 @@
     "test:market-brief": "node scripts/daily-market-brief-test.js",
     "test:advanced-structure": "node scripts/advanced-market-structure-test.js",
     "test:chart-patterns": "node scripts/chart-pattern-detection-test.js",
+    "test:pattern-association": "node scripts/chart-pattern-association-test.js",
     "report:forward-shadow-cohort": "node scripts/forward-shadow-cohort-report.js",
     "test:forward-shadow-cohort": "node scripts/forward-shadow-cohort-report-test.js"
   },

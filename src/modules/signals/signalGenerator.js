@@ -21,6 +21,8 @@ import { detectChartPatterns } from "../patterns/patternDetector.js";
 
 const minimumCandles = 60;
 const minimumQualityScore = 70;
+// User-facing pattern labels may describe only the trigger candle or two immediately preceding candles.
+export const PATTERN_ASSOCIATION_MAX_AGE_CANDLES = 2;
 
 const diagnosticLabels = {
   trend_conflict: "trend conflict",
@@ -62,7 +64,7 @@ export function generateMarketDataSetup(marketData, timeframe, options = {}) {
   const rawShortCase = isCommodity
     ? evaluateCommodityShort(latest, indicators, levels)
     : evaluateCryptoShort(latest, indicators, levels, marketData.volumeAvailable !== false);
-  const longCase = withPatternContext(validateCandidate(
+  const longCase = attachRelevantPatternContext(validateCandidate(
     adjustCandidateForVolatility(rawLongCase, regime),
     candles,
     indicators,
@@ -74,8 +76,8 @@ export function generateMarketDataSetup(marketData, timeframe, options = {}) {
     marketData.advancedStructure,
     marketData.correlation,
     options.analystProfile
-  ), detectedPatterns, "long");
-  const shortCase = withPatternContext(validateCandidate(
+  ), detectedPatterns, "long", { candles, indicators, smcState: smc });
+  const shortCase = attachRelevantPatternContext(validateCandidate(
     adjustCandidateForVolatility(rawShortCase, regime),
     candles,
     indicators,
@@ -87,7 +89,7 @@ export function generateMarketDataSetup(marketData, timeframe, options = {}) {
     marketData.advancedStructure,
     marketData.correlation,
     options.analystProfile
-  ), detectedPatterns, "short");
+  ), detectedPatterns, "short", { candles, indicators, smcState: smc });
   const bestCase = [longCase, shortCase]
     .filter((candidate) => candidate.valid)
     .sort((a, b) => b.qualityScore - a.qualityScore || b.confidenceScore - a.confidenceScore)[0];
@@ -1273,12 +1275,59 @@ function serializeIndicators(
   };
 }
 
-function withPatternContext(candidate, detectedPatterns, direction) {
+export function attachRelevantPatternContext(candidate, detectedPatterns, direction, context = {}) {
   const wantedBias = direction === "long" ? "bullish" : "bearish";
-  const patternContext = detectedPatterns.find((pattern) => pattern.bias === wantedBias) ||
-    detectedPatterns.find((pattern) => pattern.category === "uncertain") ||
-    null;
+  const patternContext = detectedPatterns.find((pattern) => (
+    pattern.bias === wantedBias &&
+    pattern.confirmed === true &&
+    isPatternAssociatedWithSetup(pattern, candidate, direction, context)
+  )) || null;
   return { ...candidate, patternContext };
+}
+
+function isPatternAssociatedWithSetup(pattern, candidate, direction, context) {
+  const ageCandles = Number(pattern.ageCandles ?? pattern.evidence?.ageCandles);
+  if (!Number.isInteger(ageCandles) || ageCandles < 0 || ageCandles > PATTERN_ASSOCIATION_MAX_AGE_CANDLES) return false;
+  const setupType = candidate?.setupType;
+  if (["Momentum breakout", "Breakout retest"].includes(setupType)) {
+    const trigger = getBreakoutTrigger(direction, context.candles);
+    const neckline = Number(pattern.evidence?.neckline ?? pattern.keyLevels?.neckline);
+    const atrValue = Number(context.indicators?.atr14);
+    if (!Number.isFinite(trigger) || !Number.isFinite(neckline) || !Number.isFinite(atrValue) || atrValue <= 0) return false;
+    const levelTolerance = Math.max(atrValue * 0.75, Math.abs(trigger) * 0.0025);
+    if (Math.abs(neckline - trigger) > levelTolerance) return false;
+    if (setupType === "Breakout retest" && ageCandles !== 1) return false;
+    return true;
+  }
+  if (setupType === "Liquidity sweep reversal") {
+    const sweep = context.smcState?.liquiditySweep;
+    const finalPivotTime = pattern.evidence?.finalPivot?.time;
+    return Boolean(
+      sweep?.confirmed &&
+      sweep.direction === direction &&
+      sameCandleTime(sweep.time, finalPivotTime)
+    );
+  }
+  return false;
+}
+
+function getBreakoutTrigger(direction, candles = []) {
+  const priorWindow = candles.slice(-24, -3);
+  if (!priorWindow.length) return null;
+  return direction === "long"
+    ? Math.max(...priorWindow.map((candle) => Number(candle.high)))
+    : Math.min(...priorWindow.map((candle) => Number(candle.low)));
+}
+
+function sameCandleTime(left, right) {
+  const normalize = (value) => {
+    if (typeof value === "number") return value < 1e12 ? value * 1000 : value;
+    const timestamp = new Date(value).getTime();
+    return Number.isFinite(timestamp) ? timestamp : null;
+  };
+  const leftTime = normalize(left);
+  const rightTime = normalize(right);
+  return leftTime != null && rightTime != null && leftTime === rightTime;
 }
 
 function mergeAdvancedLevels(levels, advancedStructure, latestClose) {

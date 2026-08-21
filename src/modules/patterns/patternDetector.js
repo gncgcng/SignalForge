@@ -1,5 +1,11 @@
 const MIN_CANDLES = 24;
 const SHADOW_SAMPLE_MINIMUM = 30;
+const PATTERN_WINDOW_CANDLES = 48;
+const MIN_PIVOT_SEPARATION_CANDLES = 4;
+const MAX_DOUBLE_SPAN_CANDLES = 32;
+const MAX_SHOULDER_SPAN_CANDLES = 36;
+const MAX_FINAL_PIVOT_AGE_CANDLES = 16;
+const MAX_CONFIRMATION_AFTER_PIVOT_CANDLES = 8;
 
 const patternDefinitions = Object.freeze({
   bull_flag: ["Bull Flag", "bullish", "continuation"],
@@ -33,13 +39,15 @@ export function detectChartPatterns(candles = [], options = {}) {
 
   return deduplicatePatterns(detected)
     .filter((item) => item.confidence >= 0.5)
-    .sort((a, b) => b.confidence - a.confidence)
+    .sort((a, b) => Number(b.confirmed) - Number(a.confirmed) || b.confidence - a.confidence)
     .slice(0, 5);
 }
 
 export function getPrimaryPatternContext(candles = [], options = {}) {
   const detected = detectChartPatterns(candles, options);
-  const directional = detected.find((item) => item.category !== "uncertain");
+  const directional = detected
+    .filter((item) => item.category !== "uncertain")
+    .sort((a, b) => b.confidence - a.confidence)[0];
   return directional || detected[0] || null;
 }
 
@@ -59,13 +67,13 @@ export function patternStrength(confidence) {
 }
 
 function buildContext(candles, options) {
-  const window = candles.slice(-48);
+  const window = candles.slice(-PATTERN_WINDOW_CANDLES);
   const ranges = window.map((candle) => candle.high - candle.low);
   const averageRange = average(ranges) || Math.abs(window.at(-1).close) * 0.001 || 1;
   return {
     candles: window,
     timeframe: String(options.timeframe || "unknown"),
-    detectedAt: toIso(options.detectedAt || window.at(-1).time),
+    evaluatedAt: toIso(options.detectedAt || window.at(-1).time),
     averageRange,
     tolerance: Math.max(averageRange * 0.7, Math.abs(window.at(-1).close) * 0.0025),
     volumeAvailable: window.some((candle) => Number(candle.volume) > 0),
@@ -164,14 +172,86 @@ function detectReversals(context) {
   const top = findDouble(highs, "high", context.tolerance);
   const bottom = findDouble(lows, "low", context.tolerance);
 
-  if (top) results.push(makePattern(context, "double_top", top.confidence, { resistance: average([top.first.price, top.second.price]), neckline: top.middlePrice, support: top.middlePrice, invalidation: Math.max(top.first.price, top.second.price) + context.tolerance }, ["Two swing highs formed near the same resistance", "Price pulled back between the two peaks"], ["Neckline breakdown is required for reversal confirmation"]));
-  if (bottom) results.push(makePattern(context, "double_bottom", bottom.confidence, { support: average([bottom.first.price, bottom.second.price]), neckline: bottom.middlePrice, resistance: bottom.middlePrice, invalidation: Math.min(bottom.first.price, bottom.second.price) - context.tolerance }, ["Two swing lows formed near the same support", "Price bounced between the two troughs"], ["Neckline breakout is required for reversal confirmation"]));
+  if (top) results.push(makeDoublePattern(context, "double_top", top, "bearish"));
+  if (bottom) results.push(makeDoublePattern(context, "double_bottom", bottom, "bullish"));
 
   const shoulders = findShoulders(highs, "high", context.tolerance);
   const inverseShoulders = findShoulders(lows, "low", context.tolerance);
-  if (shoulders) results.push(makePattern(context, "head_and_shoulders", shoulders.confidence, { resistance: shoulders.head.price, neckline: shoulders.neckline, support: shoulders.neckline, invalidation: shoulders.head.price + context.tolerance }, ["The middle swing high is above both shoulders", "Left and right shoulders formed at similar levels"], ["Neckline breakdown is required for reversal confirmation"]));
-  if (inverseShoulders) results.push(makePattern(context, "inverse_head_and_shoulders", inverseShoulders.confidence, { support: inverseShoulders.head.price, neckline: inverseShoulders.neckline, resistance: inverseShoulders.neckline, invalidation: inverseShoulders.head.price - context.tolerance }, ["The middle swing low is below both shoulders", "Left and right shoulders formed at similar levels"], ["Neckline breakout is required for reversal confirmation"]));
+  if (shoulders) results.push(makeShoulderPattern(context, "head_and_shoulders", shoulders, "bearish"));
+  if (inverseShoulders) results.push(makeShoulderPattern(context, "inverse_head_and_shoulders", inverseShoulders, "bullish"));
   return results;
+}
+
+function makeDoublePattern(context, key, structure, bias) {
+  const confirmation = findCloseConfirmation(context.candles, structure.second.index, structure.middle.price, bias);
+  const finalPivotAge = context.candles.length - 1 - structure.second.index;
+  const confirmed = Boolean(confirmation) && finalPivotAge <= MAX_FINAL_PIVOT_AGE_CANDLES;
+  const warnings = [];
+  if (!confirmation) warnings.push(`${bias === "bearish" ? "Neckline breakdown" : "Neckline breakout"} close is required for confirmation`);
+  if (finalPivotAge > MAX_FINAL_PIVOT_AGE_CANDLES) warnings.push("The final pivot is too old to be a current confirmed pattern");
+  return makePattern(context, key, structure.confidence, {
+    resistance: key === "double_top" ? average([structure.first.price, structure.second.price]) : structure.middle.price,
+    support: key === "double_bottom" ? average([structure.first.price, structure.second.price]) : structure.middle.price,
+    neckline: structure.middle.price,
+    invalidation: key === "double_top"
+      ? Math.max(structure.first.price, structure.second.price) + context.tolerance
+      : Math.min(structure.first.price, structure.second.price) - context.tolerance
+  }, [
+    `Two swing ${key === "double_top" ? "highs" : "lows"} formed near the same level`,
+    `Price formed a meaningful ${key === "double_top" ? "trough" : "peak"} between them`,
+    ...(confirmed ? [`Price closed ${bias === "bearish" ? "below" : "above"} the neckline after the final pivot`] : [])
+  ], warnings, {
+    confirmed,
+    completion: confirmation || structure.second,
+    evidence: {
+      firstPivot: structure.first,
+      middlePivot: structure.middle,
+      secondPivot: structure.second,
+      finalPivot: structure.second,
+      neckline: structure.middle.price,
+      confirmation,
+      pivotSeparationCandles: structure.second.index - structure.first.index,
+      pivotDifference: Math.abs(structure.first.price - structure.second.price),
+      finalPivotAgeCandles: finalPivotAge
+    }
+  });
+}
+
+function makeShoulderPattern(context, key, structure, bias) {
+  const confirmation = findCloseConfirmation(context.candles, structure.right.index, structure.neckline, bias);
+  const finalPivotAge = context.candles.length - 1 - structure.right.index;
+  const confirmed = Boolean(confirmation) && finalPivotAge <= MAX_FINAL_PIVOT_AGE_CANDLES;
+  const warnings = [];
+  if (!confirmation) warnings.push(`${bias === "bearish" ? "Neckline breakdown" : "Neckline breakout"} close is required for confirmation`);
+  if (finalPivotAge > MAX_FINAL_PIVOT_AGE_CANDLES) warnings.push("The right shoulder is too old to be a current confirmed pattern");
+  return makePattern(context, key, structure.confidence, {
+    resistance: key === "head_and_shoulders" ? structure.head.price : structure.neckline,
+    support: key === "inverse_head_and_shoulders" ? structure.head.price : structure.neckline,
+    neckline: structure.neckline,
+    invalidation: key === "head_and_shoulders"
+      ? structure.head.price + context.tolerance
+      : structure.head.price - context.tolerance
+  }, [
+    `The head extends materially beyond both shoulders`,
+    "Left and right shoulders formed at comparable levels with ordered swing structure",
+    ...(confirmed ? [`Price closed ${bias === "bearish" ? "below" : "above"} the neckline after the right shoulder`] : [])
+  ], warnings, {
+    confirmed,
+    completion: confirmation || structure.right,
+    evidence: {
+      leftShoulder: structure.left,
+      leftNeckPivot: structure.leftNeck,
+      head: structure.head,
+      rightNeckPivot: structure.rightNeck,
+      rightShoulder: structure.right,
+      finalPivot: structure.right,
+      neckline: structure.neckline,
+      confirmation,
+      leftSpacingCandles: structure.head.index - structure.left.index,
+      rightSpacingCandles: structure.right.index - structure.head.index,
+      finalPivotAgeCandles: finalPivotAge
+    }
+  });
 }
 
 function detectUncertainPatterns(context) {
@@ -202,8 +282,12 @@ function detectUncertainPatterns(context) {
   return results;
 }
 
-function makePattern(context, pattern, confidence, keyLevels = {}, reasons = [], warnings = []) {
+function makePattern(context, pattern, confidence, keyLevels = {}, reasons = [], warnings = [], state = {}) {
   const definition = patternDefinitions[pattern];
+  const completion = state.completion || null;
+  const completionIndex = Number.isInteger(completion?.index) ? completion.index : null;
+  const ageCandles = completionIndex == null ? null : context.candles.length - 1 - completionIndex;
+  const confirmed = state.confirmed === true;
   return {
     pattern,
     label: definition[0],
@@ -212,7 +296,12 @@ function makePattern(context, pattern, confidence, keyLevels = {}, reasons = [],
     confidence: Number(clamp01(confidence).toFixed(2)),
     strength: patternStrength(confidence),
     timeframe: context.timeframe,
-    detectedAt: context.detectedAt,
+    detectedAt: toIso(completion?.time || context.candles.at(-1).time),
+    evaluatedAt: context.evaluatedAt,
+    state: confirmed ? "confirmed" : "potential",
+    confirmed,
+    completionIndex,
+    ageCandles,
     keyLevels: {
       breakoutLevel: finiteOrNull(keyLevels.breakoutLevel),
       neckline: finiteOrNull(keyLevels.neckline),
@@ -222,6 +311,12 @@ function makePattern(context, pattern, confidence, keyLevels = {}, reasons = [],
     },
     reasons: unique(reasons),
     warnings: unique(warnings),
+    evidence: state.evidence ? sanitizeEvidence({
+      ...state.evidence,
+      completionIndex,
+      ageCandles,
+      confirmed
+    }) : null,
     shadowMode: true,
     confidenceModifier: 0,
     minimumSamplesForWeighting: SHADOW_SAMPLE_MINIMUM,
@@ -234,15 +329,13 @@ function findDouble(pivots, type, tolerance) {
     for (let left = right - 1; left >= 0; left -= 1) {
       const first = pivots[left];
       const second = pivots[right];
-      if (second.index - first.index < 4 || Math.abs(first.price - second.price) > tolerance * 1.5) continue;
-      const between = pivots.candles?.slice(first.index + 1, second.index) || [];
-      const middlePrice = type === "high"
-        ? Math.min(...between.map((candle) => candle.low))
-        : Math.max(...between.map((candle) => candle.high));
-      if (!Number.isFinite(middlePrice)) continue;
-      const depth = type === "high" ? Math.min(first.price, second.price) - middlePrice : middlePrice - Math.max(first.price, second.price);
+      const separation = second.index - first.index;
+      if (separation < MIN_PIVOT_SEPARATION_CANDLES || separation > MAX_DOUBLE_SPAN_CANDLES || Math.abs(first.price - second.price) > tolerance * 1.5) continue;
+      const middle = findExtremePivot(pivots.candles, first.index + 1, second.index, type === "high" ? "low" : "high");
+      if (!middle) continue;
+      const depth = type === "high" ? Math.min(first.price, second.price) - middle.price : middle.price - Math.max(first.price, second.price);
       if (depth < tolerance * 1.2) continue;
-      return { first, second, middlePrice, confidence: clamp01(0.67 + Math.min(0.18, depth / Math.max(tolerance, Number.EPSILON) * 0.03)) };
+      return { first, second, middle, confidence: clamp01(0.67 + Math.min(0.18, depth / Math.max(tolerance, Number.EPSILON) * 0.03)) };
     }
   }
   return null;
@@ -252,22 +345,53 @@ function findShoulders(pivots, type, tolerance) {
   if (pivots.length < 3) return null;
   for (let index = pivots.length - 3; index >= 0; index -= 1) {
     const [left, head, right] = pivots.slice(index, index + 3);
+    const leftSpacing = head.index - left.index;
+    const rightSpacing = right.index - head.index;
+    const totalSpan = right.index - left.index;
+    if (leftSpacing < MIN_PIVOT_SEPARATION_CANDLES || rightSpacing < MIN_PIVOT_SEPARATION_CANDLES || totalSpan > MAX_SHOULDER_SPAN_CANDLES) continue;
     const shoulderMatch = Math.abs(left.price - right.price) <= tolerance * 1.8;
     const headDistance = type === "high"
       ? head.price - Math.max(left.price, right.price)
       : Math.min(left.price, right.price) - head.price;
     if (!shoulderMatch || headDistance < tolerance * 1.2) continue;
-    const between = pivots.candles || [];
-    const firstNeck = between.slice(left.index + 1, head.index).map((candle) => type === "high" ? candle.low : candle.high);
-    const secondNeck = between.slice(head.index + 1, right.index).map((candle) => type === "high" ? candle.low : candle.high);
-    const neckline = average([
-      type === "high" ? Math.min(...firstNeck) : Math.max(...firstNeck),
-      type === "high" ? Math.min(...secondNeck) : Math.max(...secondNeck)
-    ]);
+    const leftNeck = findExtremePivot(pivots.candles, left.index + 1, head.index, type === "high" ? "low" : "high");
+    const rightNeck = findExtremePivot(pivots.candles, head.index + 1, right.index, type === "high" ? "low" : "high");
+    if (!leftNeck || !rightNeck) continue;
+    const neckline = average([leftNeck.price, rightNeck.price]);
     if (!Number.isFinite(neckline)) continue;
-    return { left, head, right, neckline, confidence: clamp01(0.72 + Math.min(0.16, headDistance / Math.max(tolerance, Number.EPSILON) * 0.025)) };
+    return { left, leftNeck, head, rightNeck, right, neckline, confidence: clamp01(0.72 + Math.min(0.16, headDistance / Math.max(tolerance, Number.EPSILON) * 0.025)) };
   }
   return null;
+}
+
+function findCloseConfirmation(candles, finalPivotIndex, neckline, bias) {
+  const finalIndex = Math.min(candles.length - 1, finalPivotIndex + MAX_CONFIRMATION_AFTER_PIVOT_CANDLES);
+  for (let index = finalPivotIndex + 1; index <= finalIndex; index += 1) {
+    const candle = candles[index];
+    if (!candle) continue;
+    const confirmed = bias === "bearish" ? candle.close < neckline : candle.close > neckline;
+    if (confirmed) return { index, time: candle.time, close: candle.close };
+  }
+  return null;
+}
+
+function findExtremePivot(candles = [], start, end, field) {
+  let result = null;
+  for (let index = start; index < end; index += 1) {
+    const candle = candles[index];
+    const price = Number(candle?.[field]);
+    if (!Number.isFinite(price)) continue;
+    if (!result || (field === "low" ? price < result.price : price > result.price)) {
+      result = { index, time: candle.time, price };
+    }
+  }
+  return result;
+}
+
+function sanitizeEvidence(value) {
+  if (Array.isArray(value)) return value.map(sanitizeEvidence);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, sanitizeEvidence(item)]));
 }
 
 function findPivots(candles) {
@@ -353,4 +477,11 @@ function toIso(value) {
   return Number.isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString();
 }
 
-export { MIN_CANDLES, SHADOW_SAMPLE_MINIMUM, patternDefinitions };
+export {
+  MAX_CONFIRMATION_AFTER_PIVOT_CANDLES,
+  MAX_FINAL_PIVOT_AGE_CANDLES,
+  MIN_CANDLES,
+  PATTERN_WINDOW_CANDLES,
+  SHADOW_SAMPLE_MINIMUM,
+  patternDefinitions
+};
