@@ -18,6 +18,7 @@ import {
   currentStrategyVersion
 } from "../analyst/signalAnalystService.js";
 import { detectChartPatterns } from "../patterns/patternDetector.js";
+import { attachMomentumEntryDiagnostics } from "./momentumEntryDiagnostics.js";
 
 const minimumCandles = 60;
 const minimumQualityScore = 70;
@@ -108,6 +109,33 @@ export function generateMarketDataSetup(marketData, timeframe, options = {}) {
     );
   }
   const analyst = buildSignalAnalystReport(bestCase, options.analystProfile);
+  const entryPrice = roundPrice(bestCase.entry);
+  const stopLoss = roundPrice(bestCase.stopLoss);
+  const takeProfit = roundPrice(bestCase.takeProfit);
+  const buildSerializedIndicators = () => attachMomentumEntryDiagnostics(
+    serializeIndicators(
+      indicators,
+      levels,
+      regime,
+      bestCase.confluence,
+      bestCase.session,
+      bestCase.newsRisk,
+      bestCase.smc,
+      bestCase.riskPlan,
+      bestCase.marketStructure,
+      bestCase.correlation,
+      analyst,
+      bestCase.patternContext
+    ),
+    {
+      setupType: bestCase.setupType,
+      candles,
+      direction: bestCase.direction,
+      entryPrice,
+      stopLoss,
+      indicators
+    }
+  );
 
   return {
     valid: true,
@@ -117,9 +145,9 @@ export function generateMarketDataSetup(marketData, timeframe, options = {}) {
       symbol: marketData.pair.symbol,
       timeframe,
       direction: bestCase.direction,
-      entryPrice: roundPrice(bestCase.entry),
-      stopLoss: roundPrice(bestCase.stopLoss),
-      takeProfit: roundPrice(bestCase.takeProfit),
+      entryPrice,
+      stopLoss,
+      takeProfit,
       riskRewardRatio: Number(bestCase.riskRewardRatio.toFixed(2)),
       confidenceScore: bestCase.confidenceScore,
       confluenceScore: bestCase.confluence.score,
@@ -137,20 +165,7 @@ export function generateMarketDataSetup(marketData, timeframe, options = {}) {
       analyst,
       reasoning: analyst.summary,
       confirmations: bestCase.confirmations,
-      indicators: serializeIndicators(
-        indicators,
-        levels,
-        regime,
-        bestCase.confluence,
-        bestCase.session,
-        bestCase.newsRisk,
-        bestCase.smc,
-        bestCase.riskPlan,
-        bestCase.marketStructure,
-        bestCase.correlation,
-        analyst,
-        bestCase.patternContext
-      ),
+      indicators: buildSerializedIndicators(),
       generatedAt: new Date().toISOString(),
       marketSource: marketData.source
     },
@@ -161,20 +176,7 @@ export function generateMarketDataSetup(marketData, timeframe, options = {}) {
       patternContext: bestCase.patternContext,
       detectedPatterns,
       confirmations: bestCase.confirmations,
-      indicators: serializeIndicators(
-        indicators,
-        levels,
-        regime,
-        bestCase.confluence,
-        bestCase.session,
-        bestCase.newsRisk,
-        bestCase.smc,
-        bestCase.riskPlan,
-        bestCase.marketStructure,
-        bestCase.correlation,
-        analyst,
-        bestCase.patternContext
-      )
+      indicators: buildSerializedIndicators()
     }
   };
 }

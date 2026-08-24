@@ -119,6 +119,10 @@
     "test:advanced-structure": "node scripts/advanced-market-structure-test.js",
     "test:chart-patterns": "node scripts/chart-pattern-detection-test.js",
     "test:pattern-association": "node scripts/chart-pattern-association-test.js",
+    "analyze:momentum-breakout-entry-quality": "node scripts/momentum-breakout-entry-quality-analysis.js",
+    "test:momentum-breakout-entry-quality": "node scripts/momentum-breakout-entry-quality-analysis-test.js",
+    "report:momentum-breakout-prospective": "node scripts/momentum-breakout-prospective-report.js",
+    "test:momentum-breakout-prospective-diagnostics": "node scripts/momentum-breakout-prospective-diagnostics-test.js",
     "report:forward-shadow-cohort": "node scripts/forward-shadow-cohort-report.js",
     "test:forward-shadow-cohort": "node scripts/forward-shadow-cohort-report-test.js"
   },
