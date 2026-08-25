@@ -594,6 +594,8 @@ export async function scanAllMarkets(user, options = {}) {
 
 export async function startScanAllJob(user, options = {}, hooks = {}) {
   cleanupScanAllJobs();
+  const existingJob = findUserResumableScanAllJob(user.id, { activeOnly: true });
+  if (existingJob) return toScanAllJobStatus(existingJob);
   const universe = getManualScannerUniverse(options);
   const scanKey = `scan-all:${universe.signature}:5m-15m-1h-4h`;
   const jobId = createId("scanjob");
@@ -659,6 +661,12 @@ export function getScanAllJobStatus(user, jobId) {
     throw error;
   }
   return toScanAllJobStatus(job);
+}
+
+export function getResumableScanAllJobStatus(user) {
+  cleanupScanAllJobs();
+  const job = findUserResumableScanAllJob(user.id);
+  return job ? toScanAllJobStatus(job) : null;
 }
 
 export function cancelScanAllJob(user, jobId) {
@@ -1096,6 +1104,15 @@ function cleanupScanAllJobs() {
       scanAllJobs.delete(jobId);
     }
   }
+}
+
+function findUserResumableScanAllJob(userId, { activeOnly = false } = {}) {
+  const jobs = [...scanAllJobs.values()]
+    .filter((job) => job.userId === userId)
+    .sort((left, right) => new Date(right.updatedAt || right.createdAt || 0) - new Date(left.updatedAt || left.createdAt || 0));
+  const active = jobs.find((job) => ["queued", "running", "cancelling"].includes(job.status));
+  if (active || activeOnly) return active || null;
+  return jobs.find((job) => ["completed", "failed", "cancelled"].includes(job.status)) || null;
 }
 
 export function summarizeScanBatch(scanned, setups, candidates, diagnostics, avoidTrades = [], skippedMarkets = []) {

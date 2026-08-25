@@ -87,6 +87,7 @@ const PAPER_MARKET_LOAD_TIMEOUT_MS = 30_000;
 const RISK_ACCOUNT_SIZE_KEY = "signalforge-risk-account-size";
 const RISK_PERCENT_KEY = "signalforge-risk-percent";
 const MARKET_BRIEF_COLLAPSED_KEY = "signalforge_market_brief_collapsed";
+const SCAN_ALL_JOB_KEY = "signalforge-active-scan-all-job";
 const authStorage = window.SignalForgeAuthStorage;
 
 const state = {
@@ -494,6 +495,8 @@ let paperChartPinch = null;
 const paperChartPointers = new Map();
 let paperChartRenderFrame = null;
 let paperChartMeasurementRetryCount = 0;
+let scanAllPollJobId = null;
+let scanAllResumePromise = null;
 let loginInProgress = false;
 let authOperationVersion = 0;
 
@@ -1397,6 +1400,12 @@ document.querySelectorAll("[data-view-link]").forEach((link) => {
 
 window.addEventListener("hashchange", handleBrowserRouteChange);
 window.addEventListener("popstate", handleBrowserRouteChange);
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && state.user) void resumeScanAllJob({ reason: "visible" });
+});
+window.addEventListener("online", () => {
+  if (state.user) void resumeScanAllJob({ reason: "online" });
+});
 
 document.querySelectorAll("[data-nav-section-toggle]").forEach((button) => {
   button.addEventListener("click", () => {
@@ -1505,6 +1514,7 @@ scanAllButton.addEventListener("click", async () => {
     });
     state.activeScanJob = started.jobId;
     state.scanResultJobId = started.jobId;
+    rememberScanAllJob(started.jobId);
     applyScanJobSnapshot(started, total);
     await pollScanAllJob(started.jobId, total);
   } catch (error) {
@@ -1516,6 +1526,9 @@ scanAllButton.addEventListener("click", async () => {
         total,
         `Scan All failed. ${error.message}${retained ? ` ${retained} ready setup${retained === 1 ? " was" : "s were"} retained.` : ""}`
       );
+    } else if (isTransientScanPollingError(error)) {
+      statusLine.textContent = "Reconnecting to scan...";
+      await resumeScanAllJob({ reason: "start_or_poll_network_error" });
     } else {
       updateScanProgress(0, total, `Scan All failed. ${error.message}`);
       renderScanResults([], [], null, {
@@ -1531,11 +1544,7 @@ scanAllButton.addEventListener("click", async () => {
       statusLine.textContent = `Scan All failed. ${error.message}`;
     }
   } finally {
-    scanAllButton.disabled = false;
-    generateButton.disabled = false;
-    cancelScanButton?.classList.add("hidden");
-    if (cancelScanButton) cancelScanButton.disabled = false;
-    state.activeScanJob = null;
+    if (state.scanResultTerminalStatus || !state.activeScanJob) setScanAllTrackingUi(false);
   }
 });
 
@@ -1569,43 +1578,199 @@ cancelScanButton?.addEventListener("click", async () => {
 });
 
 async function pollScanAllJob(jobId, fallbackTotal) {
+  scanAllPollJobId = jobId;
   let latest = null;
-  while (state.scanResultJobId === jobId) {
-    await wait(1200);
-    latest = await api.request(`/api/signals/scan-all/status?jobId=${encodeURIComponent(jobId)}`);
-    if (state.scanResultJobId !== jobId) return;
-    applyScanJobSnapshot(latest, fallbackTotal);
+  try {
+    while (state.scanResultJobId === jobId) {
+      await wait(document.hidden ? 5000 : 1200);
+      if (document.hidden || navigator.onLine === false) {
+        statusLine.textContent = "Reconnecting to scan...";
+        continue;
+      }
+      try {
+        latest = await fetchScanAllJobSnapshot(jobId, fallbackTotal);
+      } catch (error) {
+        if (!isTransientScanPollingError(error)) throw error;
+        statusLine.textContent = "Reconnecting to scan...";
+        continue;
+      }
+      if (state.scanResultJobId !== jobId) return;
+      if (["completed", "failed", "cancelled"].includes(latest.status)) break;
+    }
 
-    if (["completed", "failed", "cancelled"].includes(latest.status)) break;
+    if (latest?.status === "completed") {
+      state.subscription = latest.subscription || state.subscription;
+      renderSubscription();
+      applyScanJobSnapshot(latest, fallbackTotal, true);
+      markFirstScanCompleted();
+      await Promise.allSettled([loadAlerts(), loadCandidates()]);
+      return;
+    }
+
+    if (latest?.status === "cancelled") {
+      renderTerminalScanJobSnapshot(
+        latest,
+        fallbackTotal,
+        "Scan cancelled. Partial results are still shown below."
+      );
+      return;
+    }
+
+    const error = new Error(latest?.error || "Scan All failed");
+    error.scanJobSnapshot = latest;
+    throw error;
+  } finally {
+    if (scanAllPollJobId === jobId) scanAllPollJobId = null;
   }
+}
 
-  if (latest?.status === "completed") {
-    state.subscription = latest.subscription || state.subscription;
-    renderSubscription();
-    updateScanProgress(
-      latest.progress?.totalMarkets || fallbackTotal,
-      latest.progress?.totalMarkets || fallbackTotal,
-      "Market scan complete"
-    );
-    await loadAlerts();
-    await loadCandidates();
-    markFirstScanCompleted();
-    applyScanJobSnapshot(latest, fallbackTotal, true);
+async function fetchScanAllJobSnapshot(jobId, fallbackTotal) {
+  const snapshot = await api.request(`/api/signals/scan-all/status?jobId=${encodeURIComponent(jobId)}`);
+  if (state.scanResultJobId === jobId) applyScanJobSnapshot(snapshot, fallbackTotal);
+  return snapshot;
+}
+
+async function resumeScanAllJob({ reason = "resume" } = {}) {
+  if (!state.user) return false;
+  if (scanAllResumePromise) return scanAllResumePromise;
+
+  scanAllResumePromise = (async () => {
+    const storedJobId = getStoredScanAllJobId();
+    let snapshot = null;
+
+    try {
+      const response = await api.request("/api/signals/scan-all/resume");
+      snapshot = response.job || null;
+      if (!snapshot && storedJobId) {
+        try {
+          snapshot = await api.request(`/api/signals/scan-all/status?jobId=${encodeURIComponent(storedJobId)}`);
+        } catch (error) {
+          if (error.statusCode === 404) forgetScanAllJob(storedJobId);
+          else throw error;
+        }
+      }
+    } catch (error) {
+      if (!isTransientScanPollingError(error)) throw error;
+      if (storedJobId) {
+        state.activeScanJob = storedJobId;
+        state.scanResultJobId = storedJobId;
+        setScanAllTrackingUi(true);
+      }
+      statusLine.textContent = "Reconnecting to scan...";
+      return Boolean(storedJobId);
+    }
+
+    if (!snapshot?.jobId) return false;
+    const changedJob = state.scanResultJobId !== snapshot.jobId;
+    if (changedJob) {
+      state.scanResults = [];
+      state.scanResultProgress = 0;
+      state.scanResultTerminalStatus = null;
+    }
+    state.scanResultJobId = snapshot.jobId;
+    rememberScanAllJob(snapshot.jobId);
+
+    const fallbackTotal = Math.max(1, Number(snapshot.progress?.totalMarkets || 1));
+    const terminal = ["completed", "failed", "cancelled"].includes(snapshot.status);
+    applyScanJobSnapshot(snapshot, fallbackTotal, terminal);
+
+    if (!terminal) {
+      state.activeScanJob = snapshot.jobId;
+      setScanAllTrackingUi(true);
+      statusLine.textContent = reason === "dashboard_boot"
+        ? "Resuming market scan..."
+        : "Reconnected to scan.";
+      if (scanAllPollJobId !== snapshot.jobId) {
+        void pollScanAllJob(snapshot.jobId, fallbackTotal).catch(handleResumedScanPollingFailure);
+      }
+      return true;
+    }
+
+    state.activeScanJob = null;
+    if (snapshot.status === "completed") {
+      state.subscription = snapshot.subscription || state.subscription;
+      renderSubscription();
+      updateScanProgress(fallbackTotal, fallbackTotal, "Market scan complete");
+      markFirstScanCompleted();
+      void Promise.allSettled([loadAlerts(), loadCandidates()]);
+    } else {
+      const message = snapshot.status === "cancelled"
+        ? "Scan cancelled. Partial results are still shown below."
+        : `Scan All failed. ${snapshot.error || "The scan job failed."}`;
+      renderTerminalScanJobSnapshot(snapshot, fallbackTotal, message);
+    }
+    setScanAllTrackingUi(false);
+    return true;
+  })();
+
+  try {
+    return await scanAllResumePromise;
+  } finally {
+    scanAllResumePromise = null;
+  }
+}
+
+function handleResumedScanPollingFailure(error) {
+  if (isTransientScanPollingError(error)) {
+    statusLine.textContent = "Reconnecting to scan...";
     return;
   }
-
-  if (latest?.status === "cancelled") {
+  const snapshot = error.scanJobSnapshot;
+  if (snapshot?.jobId === state.scanResultJobId) {
     renderTerminalScanJobSnapshot(
-      latest,
-      fallbackTotal,
-      "Scan cancelled. Partial results are still shown below."
+      snapshot,
+      snapshot.progress?.totalMarkets || 1,
+      `Scan All failed. ${error.message}`
     );
-    return;
+  } else {
+    statusLine.textContent = `Scan status unavailable. ${error.message}`;
   }
+  setScanAllTrackingUi(false);
+}
 
-  const error = new Error(latest?.error || "Scan All failed");
-  error.scanJobSnapshot = latest;
-  throw error;
+function setScanAllTrackingUi(active) {
+  scanAllButton.disabled = active;
+  generateButton.disabled = active;
+  cancelScanButton?.classList.toggle("hidden", !active);
+  if (cancelScanButton) cancelScanButton.disabled = false;
+  if (active) scanProgress.classList.remove("hidden");
+  else state.activeScanJob = null;
+}
+
+function rememberScanAllJob(jobId) {
+  if (!jobId || !state.user?.id) return;
+  try {
+    localStorage.setItem(SCAN_ALL_JOB_KEY, JSON.stringify({ jobId, userId: state.user.id }));
+  } catch {
+    // The authenticated backend remains the source of truth when storage is unavailable.
+  }
+}
+
+function getStoredScanAllJobId() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(SCAN_ALL_JOB_KEY) || "null");
+    return stored?.userId === state.user?.id && typeof stored?.jobId === "string"
+      ? stored.jobId
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function forgetScanAllJob(jobId) {
+  try {
+    const stored = JSON.parse(localStorage.getItem(SCAN_ALL_JOB_KEY) || "null");
+    if (!jobId || stored?.jobId === jobId) localStorage.removeItem(SCAN_ALL_JOB_KEY);
+  } catch {
+    localStorage.removeItem(SCAN_ALL_JOB_KEY);
+  }
+}
+
+function isTransientScanPollingError(error) {
+  if (navigator.onLine === false) return true;
+  if (["request_timeout", "request_aborted"].includes(error?.code)) return true;
+  if (Number(error?.statusCode) >= 500) return true;
+  return !Number.isFinite(Number(error?.statusCode));
 }
 
 function renderTerminalScanJobSnapshot(result, fallbackTotal, message) {
@@ -3362,6 +3527,13 @@ async function bootDashboard() {
   }
   renderTimeframes();
   syncRouteFromLocation({ force: true, replaceInvalid: true });
+  void resumeScanAllJob({ reason: "dashboard_boot" }).catch((error) => {
+    if (isTransientScanPollingError(error)) {
+      statusLine.textContent = "Reconnecting to scan...";
+      return;
+    }
+    console.warn("[scan-all] unable to restore scan job", error);
+  });
   renderOnboarding();
   renderCheckoutReturnStatus();
   startSignalHistoryRefresh();

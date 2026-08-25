@@ -398,9 +398,21 @@ async function runFrontendScanAllHarness(terminalStatus, options = {}) {
     loadCandidates: async () => {},
     markFirstScanCompleted: () => {}
   };
+  context.document = { hidden: false };
+  context.navigator = { onLine: true };
+  context.scanAllPollJobId = null;
+  context.rememberScanAllJob = () => {};
+  context.resumeScanAllJob = async () => false;
+  context.isTransientScanPollingError = () => false;
+  context.setScanAllTrackingUi = (active) => {
+    context.scanAllButton.disabled = active;
+    context.generateButton.disabled = active;
+    if (!active) state.activeScanJob = null;
+  };
   vm.createContext(context);
   vm.runInContext([
     extractNamedFunction(appSource, "pollScanAllJob"),
+    extractNamedFunction(appSource, "fetchScanAllJobSnapshot"),
     extractNamedFunction(appSource, "applyScanJobSnapshot"),
     extractNamedFunction(appSource, "renderTerminalScanJobSnapshot"),
     scanClickSourceForEvaluation(appSource)
