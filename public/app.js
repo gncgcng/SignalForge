@@ -19,6 +19,15 @@ import {
 } from "./signalFilters.js";
 import { calculateRiskPosition } from "./riskCalculator.js";
 import { formatSignalCountdown, getSignalValidityState } from "./signalValidity.js";
+import {
+  addPaperDrawingPoint,
+  candleAtPaperChartCoordinate,
+  deletePaperDrawing,
+  getPaperChartWindow,
+  getSignalReviewFrame,
+  getSignalReviewLevels,
+  priceAtPaperChartCoordinate
+} from "./paperChartUtils.js";
 
 const RESTORE_TOKEN_KEY = "signalforge-restore-token";
 const AUTH_RESTORE_TIMEOUT_MS = 8000;
@@ -55,6 +64,7 @@ const PAPER_INDICATORS_KEY = "signalforge-paper-indicators";
 const RISK_ACCOUNT_SIZE_KEY = "signalforge-risk-account-size";
 const RISK_PERCENT_KEY = "signalforge-risk-percent";
 const MARKET_BRIEF_COLLAPSED_KEY = "signalforge_market_brief_collapsed";
+const SCAN_ALL_JOB_KEY = "signalforge-active-scan-all-job";
 const authStorage = window.SignalForgeAuthStorage;
 
 const state = {
@@ -168,7 +178,18 @@ const state = {
     account: null,
     marketData: null,
     marketError: null,
-    draftSignalId: null
+    draftSignalId: null,
+    signalReview: null,
+    signalReviewChart: null,
+    chartNavigation: {
+      visibleCount: 120,
+      endIndex: null,
+      priceScale: 1,
+      drawings: [],
+      activeTool: null,
+      pendingTrend: null,
+      selectedDrawingId: null
+    }
   },
   journal: {
     entries: [],
@@ -271,6 +292,10 @@ const paperIndicatorControls = document.querySelector("#paper-indicator-controls
 const paperChart = document.querySelector("#paper-candle-chart");
 const paperChartLoading = document.querySelector("#paper-chart-loading");
 const paperChartTooltip = document.querySelector("#paper-chart-tooltip");
+const paperChartTools = document.querySelector("#paper-chart-tools");
+const paperSignalReview = document.querySelector("#paper-signal-review");
+const paperCrosshairPriceLabel = document.querySelector("#paper-crosshair-price-label");
+const paperCrosshairTimeLabel = document.querySelector("#paper-crosshair-time-label");
 const paperOrderForm = document.querySelector("#paper-order-form");
 const paperOrderMarket = document.querySelector("#paper-order-market");
 const paperOrderType = document.querySelector("#paper-order-type");
@@ -428,6 +453,8 @@ let marketLoadTimer = null;
 let telegramConnectionTimer = null;
 let billingRefreshTimer = null;
 let deferredInstallPrompt = null;
+let scanAllPollJobId = null;
+let scanAllResumePromise = null;
 let loginInProgress = false;
 let authOperationVersion = 0;
 
@@ -1331,6 +1358,12 @@ document.querySelectorAll("[data-view-link]").forEach((link) => {
 
 window.addEventListener("hashchange", handleBrowserRouteChange);
 window.addEventListener("popstate", handleBrowserRouteChange);
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && state.user) void resumeScanAllJob({ reason: "visible" });
+});
+window.addEventListener("online", () => {
+  if (state.user) void resumeScanAllJob({ reason: "online" });
+});
 
 document.querySelectorAll("[data-nav-section-toggle]").forEach((button) => {
   button.addEventListener("click", () => {
@@ -1439,6 +1472,7 @@ scanAllButton.addEventListener("click", async () => {
     });
     state.activeScanJob = started.jobId;
     state.scanResultJobId = started.jobId;
+    rememberScanAllJob(started.jobId);
     applyScanJobSnapshot(started, total);
     await pollScanAllJob(started.jobId, total);
   } catch (error) {
@@ -1450,6 +1484,9 @@ scanAllButton.addEventListener("click", async () => {
         total,
         `Scan All failed. ${error.message}${retained ? ` ${retained} ready setup${retained === 1 ? " was" : "s were"} retained.` : ""}`
       );
+    } else if (isTransientScanPollingError(error)) {
+      statusLine.textContent = "Reconnecting to scan...";
+      await resumeScanAllJob({ reason: "start_or_poll_network_error" });
     } else {
       updateScanProgress(0, total, `Scan All failed. ${error.message}`);
       renderScanResults([], [], null, {
@@ -1465,11 +1502,7 @@ scanAllButton.addEventListener("click", async () => {
       statusLine.textContent = `Scan All failed. ${error.message}`;
     }
   } finally {
-    scanAllButton.disabled = false;
-    generateButton.disabled = false;
-    cancelScanButton?.classList.add("hidden");
-    if (cancelScanButton) cancelScanButton.disabled = false;
-    state.activeScanJob = null;
+    if (state.scanResultTerminalStatus || !state.activeScanJob) setScanAllTrackingUi(false);
   }
 });
 
@@ -1503,43 +1536,203 @@ cancelScanButton?.addEventListener("click", async () => {
 });
 
 async function pollScanAllJob(jobId, fallbackTotal) {
+  scanAllPollJobId = jobId;
   let latest = null;
-  while (state.scanResultJobId === jobId) {
-    await wait(1200);
-    latest = await api.request(`/api/signals/scan-all/status?jobId=${encodeURIComponent(jobId)}`);
-    if (state.scanResultJobId !== jobId) return;
-    applyScanJobSnapshot(latest, fallbackTotal);
+  try {
+    while (state.scanResultJobId === jobId) {
+      await wait(document.hidden ? 5000 : 1200);
+      if (document.hidden || navigator.onLine === false) {
+        statusLine.textContent = "Reconnecting to scan...";
+        continue;
+      }
+      try {
+        latest = await fetchScanAllJobSnapshot(jobId, fallbackTotal);
+      } catch (error) {
+        if (!isTransientScanPollingError(error)) throw error;
+        statusLine.textContent = "Reconnecting to scan...";
+        continue;
+      }
+      if (state.scanResultJobId !== jobId) return;
 
-    if (["completed", "failed", "cancelled"].includes(latest.status)) break;
+      if (["completed", "failed", "cancelled"].includes(latest.status)) break;
+    }
+
+    if (latest?.status === "completed") {
+      state.subscription = latest.subscription || state.subscription;
+      renderSubscription();
+      applyScanJobSnapshot(latest, fallbackTotal, true);
+      markFirstScanCompleted();
+      await Promise.allSettled([loadAlerts(), loadCandidates()]);
+      return;
+    }
+
+    if (latest?.status === "cancelled") {
+      renderTerminalScanJobSnapshot(
+        latest,
+        fallbackTotal,
+        "Scan cancelled. Partial results are still shown below."
+      );
+      return;
+    }
+
+    const error = new Error(latest?.error || "Scan All failed");
+    error.scanJobSnapshot = latest;
+    throw error;
+  } finally {
+    if (scanAllPollJobId === jobId) scanAllPollJobId = null;
   }
+}
 
-  if (latest?.status === "completed") {
-    state.subscription = latest.subscription || state.subscription;
-    renderSubscription();
-    updateScanProgress(
-      latest.progress?.totalMarkets || fallbackTotal,
-      latest.progress?.totalMarkets || fallbackTotal,
-      "Market scan complete"
-    );
-    await loadAlerts();
-    await loadCandidates();
-    markFirstScanCompleted();
-    applyScanJobSnapshot(latest, fallbackTotal, true);
+async function fetchScanAllJobSnapshot(jobId, fallbackTotal) {
+  const snapshot = await api.request(`/api/signals/scan-all/status?jobId=${encodeURIComponent(jobId)}`);
+  if (state.scanResultJobId === jobId) applyScanJobSnapshot(snapshot, fallbackTotal);
+  return snapshot;
+}
+
+async function resumeScanAllJob({ reason = "resume" } = {}) {
+  if (!state.user) return false;
+  if (scanAllResumePromise) return scanAllResumePromise;
+
+  scanAllResumePromise = (async () => {
+    const storedJobId = getStoredScanAllJobId();
+    let snapshot = null;
+
+    try {
+      const response = await api.request("/api/signals/scan-all/resume");
+      snapshot = response.job || null;
+      if (!snapshot && storedJobId) {
+        try {
+          snapshot = await api.request(`/api/signals/scan-all/status?jobId=${encodeURIComponent(storedJobId)}`);
+        } catch (error) {
+          if (error.statusCode === 404) forgetScanAllJob(storedJobId);
+          else throw error;
+        }
+      }
+    } catch (error) {
+      if (!isTransientScanPollingError(error)) throw error;
+      if (storedJobId) {
+        state.activeScanJob = storedJobId;
+        state.scanResultJobId = storedJobId;
+        setScanAllTrackingUi(true);
+      }
+      statusLine.textContent = "Reconnecting to scan...";
+      return Boolean(storedJobId);
+    }
+
+    if (!snapshot?.jobId) return false;
+    const changedJob = state.scanResultJobId !== snapshot.jobId;
+    if (changedJob) {
+      state.scanResults = [];
+      state.scanResultProgress = 0;
+      state.scanResultTerminalStatus = null;
+    }
+    state.scanResultJobId = snapshot.jobId;
+    rememberScanAllJob(snapshot.jobId);
+
+    const fallbackTotal = Math.max(1, Number(snapshot.progress?.totalMarkets || 1));
+    const terminal = ["completed", "failed", "cancelled"].includes(snapshot.status);
+    applyScanJobSnapshot(snapshot, fallbackTotal, terminal);
+
+    if (!terminal) {
+      state.activeScanJob = snapshot.jobId;
+      setScanAllTrackingUi(true);
+      statusLine.textContent = reason === "dashboard_boot"
+        ? "Resuming market scan..."
+        : "Reconnected to scan.";
+      if (scanAllPollJobId !== snapshot.jobId) {
+        void pollScanAllJob(snapshot.jobId, fallbackTotal).catch(handleResumedScanPollingFailure);
+      }
+      return true;
+    }
+
+    state.activeScanJob = null;
+    if (snapshot.status === "completed") {
+      state.subscription = snapshot.subscription || state.subscription;
+      renderSubscription();
+      updateScanProgress(fallbackTotal, fallbackTotal, "Market scan complete");
+      markFirstScanCompleted();
+      void Promise.allSettled([loadAlerts(), loadCandidates()]);
+    } else {
+      const message = snapshot.status === "cancelled"
+        ? "Scan cancelled. Partial results are still shown below."
+        : `Scan All failed. ${snapshot.error || "The scan job failed."}`;
+      renderTerminalScanJobSnapshot(snapshot, fallbackTotal, message);
+    }
+    setScanAllTrackingUi(false);
+    return true;
+  })();
+
+  try {
+    return await scanAllResumePromise;
+  } finally {
+    scanAllResumePromise = null;
+  }
+}
+
+function handleResumedScanPollingFailure(error) {
+  if (isTransientScanPollingError(error)) {
+    statusLine.textContent = "Reconnecting to scan...";
     return;
   }
-
-  if (latest?.status === "cancelled") {
+  const snapshot = error.scanJobSnapshot;
+  if (snapshot?.jobId === state.scanResultJobId) {
     renderTerminalScanJobSnapshot(
-      latest,
-      fallbackTotal,
-      "Scan cancelled. Partial results are still shown below."
+      snapshot,
+      snapshot.progress?.totalMarkets || 1,
+      `Scan All failed. ${error.message}`
     );
-    return;
+  } else {
+    statusLine.textContent = `Scan status unavailable. ${error.message}`;
   }
+  setScanAllTrackingUi(false);
+}
 
-  const error = new Error(latest?.error || "Scan All failed");
-  error.scanJobSnapshot = latest;
-  throw error;
+function setScanAllTrackingUi(active) {
+  scanAllButton.disabled = active;
+  generateButton.disabled = active;
+  cancelScanButton?.classList.toggle("hidden", !active);
+  if (cancelScanButton) cancelScanButton.disabled = false;
+  if (active) scanProgress.classList.remove("hidden");
+  else state.activeScanJob = null;
+}
+
+function rememberScanAllJob(jobId) {
+  if (!jobId || !state.user?.id) return;
+  try {
+    localStorage.setItem(SCAN_ALL_JOB_KEY, JSON.stringify({
+      jobId,
+      userId: state.user.id
+    }));
+  } catch {
+    // The authenticated backend remains the source of truth when storage is unavailable.
+  }
+}
+
+function getStoredScanAllJobId() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(SCAN_ALL_JOB_KEY) || "null");
+    return stored?.userId === state.user?.id && typeof stored?.jobId === "string"
+      ? stored.jobId
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function forgetScanAllJob(jobId) {
+  try {
+    const stored = JSON.parse(localStorage.getItem(SCAN_ALL_JOB_KEY) || "null");
+    if (!jobId || stored?.jobId === jobId) localStorage.removeItem(SCAN_ALL_JOB_KEY);
+  } catch {
+    localStorage.removeItem(SCAN_ALL_JOB_KEY);
+  }
+}
+
+function isTransientScanPollingError(error) {
+  if (navigator.onLine === false) return true;
+  if (["request_timeout", "request_aborted"].includes(error?.code)) return true;
+  if (Number(error?.statusCode) >= 500) return true;
+  return !Number.isFinite(Number(error?.statusCode));
 }
 
 function renderTerminalScanJobSnapshot(result, fallbackTotal, message) {
@@ -1618,20 +1811,14 @@ generateButton.addEventListener("click", async () => {
 
     if (!signal) {
       markFirstScanCompleted();
-      renderNoSetup(analysis);
+      if (state.scanResults.length) renderSignals();
+      else renderNoSetup(analysis);
       statusLine.textContent = "No valid setup found. No unlock credit was used.";
       return;
     }
 
-    state.scanResults = [];
-    state.signals = [signal, ...state.signals];
     markFirstScanCompleted();
-    await loadSignals();
-    renderSignals();
-    renderSignalsHistory();
-    statusLine.textContent = alreadyUnlocked
-      ? "Already unlocked. No additional credit was used."
-      : "Setup generated from live OHLCV data. Rule-based only; not financial advice.";
+    await completeSignalUnlock({ signal, subscription, alreadyUnlocked, source: "scanner" });
   } catch (error) {
     statusLine.textContent = error.message;
   } finally {
@@ -1887,6 +2074,8 @@ document.querySelector("#admin-signal-filters-clear")?.addEventListener("click",
 document.querySelector("#admin-signals-prev")?.addEventListener("click", () => { if (state.adminSignals.page > 1) { state.adminSignals.page -= 1; loadAdminSignals(); } });
 document.querySelector("#admin-signals-next")?.addEventListener("click", () => { if (state.adminSignals.page < state.adminSignals.totalPages) { state.adminSignals.page += 1; loadAdminSignals(); } });
 adminSignalsTable?.addEventListener("click", async (event) => {
+  const review = event.target.closest("[data-review-signal-id]");
+  if (review) { openSignalReview(review.dataset.reviewSignalId); return; }
   const copy = event.target.closest("[data-admin-signal-copy]");
   if (copy) { await navigator.clipboard.writeText(copy.dataset.adminSignalCopy); showToast("Signal ID copied"); return; }
   const button = event.target.closest("[data-admin-signal-view]");
@@ -2306,7 +2495,9 @@ paperMarketSearch.addEventListener("input", () => renderPaperMarketList());
 paperTimeframes.addEventListener("click", async (event) => {
   const button = event.target.closest("[data-paper-timeframe]");
   if (!button) return;
+  clearPaperSignalReview();
   state.paperTrading.timeframe = button.dataset.paperTimeframe;
+  resetPaperChartViewport();
   await loadPaperTradingTerminal();
 });
 paperIndicatorControls.addEventListener("change", () => {
@@ -2317,8 +2508,43 @@ paperIndicatorControls.addEventListener("change", () => {
   renderPaperTradingChart();
 });
 paperOrderMarket.addEventListener("change", async () => {
+  clearPaperSignalReview();
   state.paperTrading.selectedSymbol = paperOrderMarket.value;
+  resetPaperChartViewport();
   await loadPaperTradingTerminal();
+});
+paperChartTools.addEventListener("click", (event) => {
+  const tool = event.target.closest("[data-paper-drawing-tool]");
+  if (tool) {
+    const selected = tool.dataset.paperDrawingTool;
+    state.paperTrading.chartNavigation.activeTool = state.paperTrading.chartNavigation.activeTool === selected ? null : selected;
+    state.paperTrading.chartNavigation.pendingTrend = null;
+    renderPaperChartToolState();
+    return;
+  }
+  if (event.target.closest("[data-paper-delete-drawing]")) {
+    const chart = state.paperTrading.chartNavigation;
+    chart.drawings = deletePaperDrawing(chart.drawings, chart.selectedDrawingId);
+    chart.selectedDrawingId = null;
+    renderPaperTradingChart();
+    return;
+  }
+  if (event.target.closest("[data-paper-clear-drawings]")) {
+    state.paperTrading.chartNavigation.drawings = [];
+    state.paperTrading.chartNavigation.selectedDrawingId = null;
+    state.paperTrading.chartNavigation.pendingTrend = null;
+    renderPaperTradingChart();
+    return;
+  }
+  if (event.target.closest("[data-paper-auto-scale]")) {
+    state.paperTrading.chartNavigation.priceScale = 1;
+    renderPaperTradingChart();
+    return;
+  }
+  if (event.target.closest("[data-paper-latest]")) {
+    state.paperTrading.chartNavigation.endIndex = null;
+    renderPaperTradingChart();
+  }
 });
 document.querySelector("#paper-direction-control").addEventListener("click", (event) => {
   const button = event.target.closest("[data-paper-direction]");
@@ -2341,6 +2567,11 @@ paperHistoryFilters.addEventListener("change", renderPaperOrders);
 paperResetAccount.addEventListener("click", resetPaperTrading);
 
 signalsGrid.addEventListener("click", async (event) => {
+  const review = event.target.closest("[data-review-signal-id]");
+  if (review) {
+    openSignalReview(review.dataset.reviewSignalId);
+    return;
+  }
   if (event.target.closest("[data-scan-again]")) {
     scanAllButton.click();
     return;
@@ -2386,8 +2617,9 @@ signalsGrid.addEventListener("click", async (event) => {
     renderSubscription();
 
     if (!signal) {
-      renderNoSetup(analysis);
+      renderSignals();
       statusLine.textContent = "Setup no longer qualifies. No unlock credit was used.";
+      showToast("Unlock failed. Current Scan All results were preserved.");
       return;
     }
 
@@ -2436,6 +2668,11 @@ document.addEventListener("click", (event) => {
 });
 
 signalsHistory.addEventListener("click", async (event) => {
+  const review = event.target.closest("[data-review-signal-id]");
+  if (review) {
+    openSignalReview(review.dataset.reviewSignalId);
+    return;
+  }
   const historicalButton = event.target.closest("[data-expired-history]");
   if (historicalButton) {
     signalsHistory.querySelector("[data-expired-history-details]")?.classList.toggle("hidden");
@@ -2451,6 +2688,13 @@ signalsHistory.addEventListener("click", async (event) => {
 unlockReveal.addEventListener("click", async (event) => {
   if (event.target.closest("[data-unlock-reveal-close]")) {
     closeUnlockReveal();
+    return;
+  }
+
+  const review = event.target.closest("[data-review-signal-id]");
+  if (review) {
+    closeUnlockReveal();
+    openSignalReview(review.dataset.reviewSignalId);
     return;
   }
 
@@ -2490,8 +2734,9 @@ async function unlockSignal(button, symbol, timeframe) {
     renderSubscription();
 
     if (!signal) {
-      renderNoSetup(analysis);
+      renderSignals();
       statusLine.textContent = "Setup no longer qualifies. No unlock credit was used.";
+      showToast("Unlock failed. Current Scan All results were preserved.");
       return;
     }
 
@@ -3190,6 +3435,13 @@ async function bootDashboard() {
   }
   renderTimeframes();
   syncRouteFromLocation({ force: true, replaceInvalid: true });
+  void resumeScanAllJob({ reason: "dashboard_boot" }).catch((error) => {
+    if (isTransientScanPollingError(error)) {
+      statusLine.textContent = "Reconnecting to scan...";
+      return;
+    }
+    console.warn("[scan-all] unable to restore scan job", error);
+  });
   renderOnboarding();
   renderCheckoutReturnStatus();
   startSignalHistoryRefresh();
@@ -4042,7 +4294,7 @@ function renderAdminSignalRow(signal) {
     <span data-label="Scores"><small>Confidence ${Number(signal.confidence).toFixed(0)}%</small><small>Raw ${Number(signal.rawSetupScore ?? signal.originalConfidence ?? signal.confidence).toFixed(0)} &middot; Calibrated ${Number(signal.calibratedConfidence ?? signal.confidence).toFixed(0)}</small><small>Quality ${Number(signal.setupQualityScore).toFixed(0)} &middot; Readiness ${Number(signal.entryReadinessScore).toFixed(0)}</small></span>
     <span data-label="Status"><em class="status-pill ${adminSignalStatusClass(effectiveStatus)}">${escapeHtml(effectiveStatus)}</em><small>${escapeHtml(signal.resultReason || "Tracking")}</small></span>
     <span data-label="Source"><strong>${escapeHtml(titleCase(signal.source))}</strong><small>${escapeHtml(engineMarker)} &middot; ${escapeHtml(titleCase(calibrationStatus))}</small><small>${formatDateTime(signal.createdAt)}</small><small>Valid until ${formatDateTime(signal.validUntil)}</small></span>
-    <span data-label="Actions" class="admin-signal-row-actions"><button data-admin-signal-view="${escapeHtml(signal.id)}" type="button">Show details</button><button class="secondary-action" data-admin-signal-copy="${escapeHtml(signal.signalId)}" type="button">Copy ID</button>${signal.promotedFromCandidateId ? `<button class="secondary-action" data-admin-signal-view="${escapeHtml(signal.id)}" type="button">Candidate source</button>` : ""}${signal.status !== "Active" ? `<button class="secondary-action" data-admin-signal-view="${escapeHtml(signal.id)}" type="button">Post-mortem</button>` : ""}</span>
+    <span data-label="Actions" class="admin-signal-row-actions"><button data-admin-signal-view="${escapeHtml(signal.id)}" type="button">Show details</button><button class="secondary-action" data-review-signal-id="${escapeHtml(signal.id)}" type="button">View on chart</button><button class="secondary-action" data-admin-signal-copy="${escapeHtml(signal.signalId)}" type="button">Copy ID</button>${signal.promotedFromCandidateId ? `<button class="secondary-action" data-admin-signal-view="${escapeHtml(signal.id)}" type="button">Candidate source</button>` : ""}${signal.status !== "Active" ? `<button class="secondary-action" data-admin-signal-view="${escapeHtml(signal.id)}" type="button">Post-mortem</button>` : ""}</span>
   </article>`;
 }
 
@@ -4289,28 +4541,87 @@ async function loadPaperPortfolio() {
 
 async function loadPaperTradingTerminal() {
   paperChartLoading.classList.remove("hidden");
+  const route = parseAppHash(location.hash);
+  const reviewSignalId = route.route === "paper-trading" ? route.params.get("signalId") : null;
+  const reviewPayload = reviewSignalId
+    ? await api.request(`/api/paper-trades/signal-review/${encodeURIComponent(reviewSignalId)}`)
+    : null;
+  if (reviewPayload?.review) {
+    state.paperTrading.signalReview = reviewPayload.review;
+    state.paperTrading.signalReviewChart = reviewPayload.chart;
+    state.paperTrading.selectedSymbol = reviewPayload.review.symbol;
+    state.paperTrading.timeframe = reviewPayload.review.timeframe;
+  }
   const params = new URLSearchParams({
     symbol: state.paperTrading.selectedSymbol,
     timeframe: state.paperTrading.timeframe
   });
+  if (reviewPayload) params.set("reviewOnly", "1");
   const terminal = await api.request(`/api/paper-trades/terminal?${params}`);
+  const reviewMarket = reviewPayload?.chart?.available
+    ? {
+        pair: {
+          ...(terminal.markets || []).find((market) => market.symbol === reviewPayload.review.symbol),
+          symbol: reviewPayload.review.symbol,
+          lastPrice: reviewPayload.chart.currentPrice
+        },
+        candles: reviewPayload.chart.candles,
+        source: reviewPayload.chart.source,
+        lastCandleAt: reviewPayload.chart.candles.at(-1)?.time
+          ? new Date(Number(reviewPayload.chart.candles.at(-1).time) * 1000).toISOString()
+          : null,
+        marketStatus: { label: reviewPayload.review.status === "Active" ? "Live review" : "Historical review" }
+      }
+    : null;
   state.paperTrading = {
     ...state.paperTrading,
     ...terminal,
     markets: terminal.markets || [],
     orders: terminal.orders || [],
     account: terminal.account,
-    marketData: terminal.marketData,
-    marketError: terminal.marketError
+    marketData: reviewPayload ? reviewMarket : terminal.marketData,
+    marketError: reviewPayload?.chart?.message || terminal.marketError,
+    signalReview: reviewPayload?.review || null,
+    signalReviewChart: reviewPayload?.chart || null
   };
+  if (reviewPayload?.chart?.available) {
+    const frame = getSignalReviewFrame(
+      reviewPayload.chart.candles,
+      reviewPayload.review,
+      reviewPayload.chart.outcomeCandleTime
+    );
+    state.paperTrading.chartNavigation.visibleCount = frame.visibleCount;
+    state.paperTrading.chartNavigation.endIndex = frame.endIndex;
+  } else if (!reviewPayload) {
+    resetPaperChartViewport();
+  }
   paperChartLoading.classList.add("hidden");
   renderPaperTradingTerminal();
   renderSignals();
   renderSignalsHistory();
-  const route = parseAppHash(location.hash);
-  if (route.route === "paper-trading" && route.params.has("pair")) {
+  if (route.route === "paper-trading" && route.params.has("pair") && !reviewSignalId) {
     removeHashParams(["pair"]);
   }
+}
+
+function openSignalReview(signalId) {
+  if (!signalId) return;
+  navigateTo("paper-trading", { signalId });
+}
+
+function clearPaperSignalReview() {
+  state.paperTrading.signalReview = null;
+  state.paperTrading.signalReviewChart = null;
+  const route = parseAppHash(location.hash);
+  if (route.route === "paper-trading" && route.params.has("signalId")) removeHashParams(["signalId"]);
+  renderPaperSignalReview();
+}
+
+function resetPaperChartViewport() {
+  state.paperTrading.chartNavigation.visibleCount = 120;
+  state.paperTrading.chartNavigation.endIndex = null;
+  state.paperTrading.chartNavigation.priceScale = 1;
+  state.paperTrading.chartNavigation.pendingTrend = null;
 }
 
 async function loadJournal() {
@@ -5335,7 +5646,9 @@ function renderSignals() {
     return;
   }
 
-  signalsGrid.innerHTML = currentScanResults.map((setup) => renderScanCard(setup)).join("");
+  signalsGrid.innerHTML = currentScanResults
+    .map((setup) => setup.scanDeskUnlocked ? renderSignalCard(setup) : renderScanCard(setup))
+    .join("");
 }
 
 function renderSignalsHistory() {
@@ -5519,6 +5832,8 @@ function renderPaperPortfolio() {
 function renderPaperTradingTerminal() {
   renderPaperMarketList();
   renderPaperTerminalHeader();
+  renderPaperSignalReview();
+  renderPaperChartToolState();
   renderPaperOrderTicket();
   renderPaperAccount();
   renderPaperTradingChart();
@@ -5539,7 +5854,9 @@ function renderPaperMarketList() {
   `).join("") || `<div class="empty-state"><span>No matching markets.</span></div>`;
   paperMarketList.querySelectorAll("[data-paper-market]").forEach((button) => {
     button.addEventListener("click", async () => {
+      clearPaperSignalReview();
       state.paperTrading.selectedSymbol = button.dataset.paperMarket;
+      resetPaperChartViewport();
       await loadPaperTradingTerminal();
     });
   });
@@ -5662,7 +5979,9 @@ function renderPaperTradingChart() {
     setText("#paper-chart-status", state.paperTrading.marketError || "Market data unavailable.");
     return;
   }
-  const visible = candles.slice(-120);
+  const chartState = state.paperTrading.chartNavigation;
+  const chartWindow = getPaperChartWindow(candles.length, chartState.visibleCount, chartState.endIndex);
+  const visible = candles.slice(chartWindow.start, chartWindow.end);
   const width = 920;
   const height = 480;
   const left = 14;
@@ -5671,10 +5990,22 @@ function renderPaperTradingChart() {
   const volumeHeight = state.paperTrading.indicators.has("volume") ? 72 : 0;
   const bottom = 28 + volumeHeight;
   const orders = state.paperTrading.orders.filter((order) => order.symbol === state.paperTrading.selectedSymbol);
-  const levelPrices = orders.flatMap((order) => [order.entryPrice, order.limitPrice, order.stopLoss, order.takeProfit]).filter(Number.isFinite);
-  const min = Math.min(...visible.map((candle) => Number(candle.low)), ...levelPrices);
-  const max = Math.max(...visible.map((candle) => Number(candle.high)), ...levelPrices);
-  const range = Math.max(max - min, max * 0.002, 0.000001);
+  const reviewLevels = getSignalReviewLevels(state.paperTrading.signalReview);
+  const currentDrawings = chartState.drawings.filter((drawing) =>
+    drawing.symbol === state.paperTrading.selectedSymbol && drawing.timeframe === state.paperTrading.timeframe
+  );
+  const levelPrices = [
+    ...orders.flatMap((order) => [order.entryPrice, order.limitPrice, order.stopLoss, order.takeProfit]),
+    ...reviewLevels.map((level) => level.price),
+    ...currentDrawings.flatMap((drawing) => drawing.type === "horizontal" ? [drawing.price] : [drawing.start?.price, drawing.end?.price])
+  ].filter(Number.isFinite);
+  const baseMin = Math.min(...visible.map((candle) => Number(candle.low)), ...levelPrices);
+  const baseMax = Math.max(...visible.map((candle) => Number(candle.high)), ...levelPrices);
+  const baseRange = Math.max(baseMax - baseMin, baseMax * 0.002, 0.000001);
+  const range = baseRange / Math.max(0.35, Math.min(4, Number(chartState.priceScale || 1)));
+  const center = (baseMin + baseMax) / 2;
+  const min = center - range / 2;
+  const max = center + range / 2;
   const plotWidth = width - left - right;
   const plotHeight = height - top - bottom;
   const slot = plotWidth / visible.length;
@@ -5700,6 +6031,11 @@ function renderPaperTradingChart() {
       renderPaperPriceLine(y(order.stopLoss), "stop", `SL ${formatCompactPrice(order.stopLoss)}`) +
       renderPaperPriceLine(y(order.takeProfit), "target", `TP ${formatCompactPrice(order.takeProfit)}`);
   }).join("");
+  const reviewLines = reviewLevels.map((level) =>
+    renderPaperPriceLine(y(level.price), level.type, `${level.label} ${formatCompactPrice(level.price)}`)
+  ).join("");
+  const drawings = renderPaperDrawings(currentDrawings, visible, { left, right, width, x, y });
+  const outcomeMarker = renderPaperSignalOutcomeMarker(visible, { x, y });
   const markers = orders.filter((order) => order.closedAt && order.exitPrice).slice(0, 20).map((order) => {
     const markerX = width - right - 12;
     const markerY = y(order.exitPrice);
@@ -5711,10 +6047,49 @@ function renderPaperTradingChart() {
     return `<text class="paper-time-label" x="${x(index)}" y="${height - 7}" text-anchor="middle">${escapeHtml(formatTime(Number(visible[index].time) * 1000))}</text>`;
   }).join("");
   const latest = Number(visible.at(-1).close);
-  paperChart.innerHTML = `${grid}${volume}${candleMarkup}${overlays}${tradeLines}${renderPaperPriceLine(y(latest), "current", `NOW ${formatCompactPrice(latest)}`)}${markers}${positionMarkers}${timeAxis}<line id="paper-crosshair-x" class="paper-crosshair hidden" x1="0" x2="0" y1="${top}" y2="${height - bottom}"></line><line id="paper-crosshair-y" class="paper-crosshair hidden" x1="${left}" x2="${width - right}" y1="0" y2="0"></line>`;
-  bindPaperChartCrosshair(visible, { left, right, top, bottom, width, height, min, max, x, y });
+  paperChart.innerHTML = `${grid}${volume}${candleMarkup}${overlays}${tradeLines}${reviewLines}${drawings}${renderPaperPriceLine(y(latest), "current", `NOW ${formatCompactPrice(latest)}`)}${markers}${positionMarkers}${outcomeMarker}${timeAxis}<line id="paper-crosshair-x" class="paper-crosshair hidden" x1="0" x2="0" y1="${top}" y2="${height - bottom}"></line><line id="paper-crosshair-y" class="paper-crosshair hidden" x1="${left}" x2="${width - right}" y1="0" y2="0"></line>`;
+  bindPaperChartInteractions(candles, visible, chartWindow, { left, right, top, bottom, width, height, min, max, x, y });
   renderPaperIndicatorReadout(visible);
-  setText("#paper-chart-status", `${candles.length} live candles · Last ${formatDateTime(data.lastCandleAt)} · ${data.marketStatus?.label || "Ready"}`);
+  const navigation = chartWindow.end < candles.length ? ` · Viewing ${chartWindow.start + 1}-${chartWindow.end}` : " · Latest";
+  setText("#paper-chart-status", `${candles.length} candles · Last ${formatDateTime(data.lastCandleAt)} · ${data.marketStatus?.label || "Ready"}${navigation}`);
+  renderPaperChartToolState();
+}
+
+function renderPaperDrawings(drawings, candles, dimensions) {
+  const firstTime = Number(candles[0]?.time);
+  const lastTime = Number(candles.at(-1)?.time);
+  const timeX = (time) => {
+    if (!(lastTime > firstTime)) return dimensions.x(0);
+    const ratio = (Number(time) - firstTime) / (lastTime - firstTime);
+    return dimensions.left + ratio * (dimensions.width - dimensions.left - dimensions.right);
+  };
+  return drawings.map((drawing) => {
+    const selected = drawing.id === state.paperTrading.chartNavigation.selectedDrawingId ? " selected" : "";
+    if (drawing.type === "horizontal") {
+      const lineY = dimensions.y(drawing.price);
+      return `<g data-paper-drawing-id="${escapeHtml(drawing.id)}"><line class="paper-drawing-hit" x1="${dimensions.left}" x2="${dimensions.width - dimensions.right}" y1="${lineY}" y2="${lineY}"></line><line class="paper-drawing${selected}" x1="${dimensions.left}" x2="${dimensions.width - dimensions.right}" y1="${lineY}" y2="${lineY}"></line></g>`;
+    }
+    const x1 = timeX(drawing.start?.time);
+    const x2 = timeX(drawing.end?.time);
+    const y1 = dimensions.y(drawing.start?.price);
+    const y2 = dimensions.y(drawing.end?.price);
+    return `<g data-paper-drawing-id="${escapeHtml(drawing.id)}"><line class="paper-drawing-hit" x1="${x1}" x2="${x2}" y1="${y1}" y2="${y2}"></line><line class="paper-drawing${selected}" x1="${x1}" x2="${x2}" y1="${y1}" y2="${y2}"></line></g>`;
+  }).join("");
+}
+
+function renderPaperSignalOutcomeMarker(candles, dimensions) {
+  const review = state.paperTrading.signalReview;
+  const storedOutcomeTime = state.paperTrading.signalReviewChart?.outcomeCandleTime;
+  const outcomeTime = Number(storedOutcomeTime);
+  if (!review || storedOutcomeTime === null || storedOutcomeTime === undefined || !Number.isFinite(outcomeTime) || review.status === "Active") return "";
+  const index = candles.findIndex((candle) => Number(candle.time) === outcomeTime);
+  if (index < 0) return "";
+  const price = review.status === "Hit TP" ? review.takeProfit : review.status === "Hit SL" ? review.stopLoss : candles[index].close;
+  const type = review.status === "Hit TP" ? "tp" : review.status === "Hit SL" ? "sl" : "expired";
+  const label = review.status === "Hit TP" ? "TP reached" : review.status === "Hit SL" ? "SL touched" : "Expired";
+  const markerX = dimensions.x(index);
+  const markerY = dimensions.y(price);
+  return `<circle class="paper-outcome-marker ${type}" cx="${markerX}" cy="${markerY}" r="6"></circle><text class="paper-outcome-label" x="${markerX + 9}" y="${markerY - 8}">${escapeHtml(label)}</text>`;
 }
 
 function renderPaperChartOverlays(candles, x, y) {
@@ -5750,27 +6125,117 @@ function renderPaperPriceLine(lineY, type, label) {
   return `<line class="paper-trade-line ${type}" x1="14" x2="844" y1="${lineY}" y2="${lineY}"></line><text class="paper-trade-label ${type}" x="838" y="${lineY - 4}" text-anchor="end">${escapeHtml(label)}</text>`;
 }
 
-function bindPaperChartCrosshair(candles, dimensions) {
-  paperChart.onpointermove = (event) => {
+function bindPaperChartInteractions(allCandles, candles, chartWindow, dimensions) {
+  let drag = null;
+  const coordinates = (event) => {
     const rect = paperChart.getBoundingClientRect();
-    const svgX = ((event.clientX - rect.left) / rect.width) * dimensions.width;
-    const svgY = ((event.clientY - rect.top) / rect.height) * dimensions.height;
-    const plotWidth = dimensions.width - dimensions.left - dimensions.right;
-    const index = Math.max(0, Math.min(candles.length - 1, Math.floor(((svgX - dimensions.left) / plotWidth) * candles.length)));
-    const candle = candles[index];
+    return {
+      rect,
+      x: ((event.clientX - rect.left) / rect.width) * dimensions.width,
+      y: ((event.clientY - rect.top) / rect.height) * dimensions.height
+    };
+  };
+
+  paperChart.onpointerdown = (event) => {
+    const drawingTarget = event.target.closest?.("[data-paper-drawing-id]");
+    if (drawingTarget) {
+      state.paperTrading.chartNavigation.selectedDrawingId = drawingTarget.dataset.paperDrawingId;
+      renderPaperTradingChart();
+      return;
+    }
+    const point = coordinates(event);
+    const chart = state.paperTrading.chartNavigation;
+    if (chart.activeTool && point.x >= dimensions.left && point.x <= dimensions.width - dimensions.right) {
+      const match = candleAtPaperChartCoordinate(point.x, candles, dimensions);
+      const price = priceAtPaperChartCoordinate(point.y, dimensions);
+      const hadPendingTrend = Boolean(chart.pendingTrend);
+      const result = addPaperDrawingPoint(chart.drawings, {
+        tool: chart.activeTool,
+        id: `paper-drawing-${Date.now()}-${chart.drawings.length + 1}`,
+        symbol: state.paperTrading.selectedSymbol,
+        timeframe: state.paperTrading.timeframe,
+        time: match?.candle?.time,
+        price,
+        pending: chart.pendingTrend
+      });
+      chart.drawings = result.drawings;
+      chart.pendingTrend = result.pending;
+      chart.selectedDrawingId = result.selectedId;
+      if (chart.activeTool === "horizontal" || hadPendingTrend) chart.activeTool = null;
+      renderPaperTradingChart();
+      return;
+    }
+    drag = {
+      mode: point.x > dimensions.width - dimensions.right ? "scale" : "pan",
+      startX: point.x,
+      currentX: point.x,
+      startY: point.y,
+      currentY: point.y,
+      startEnd: chartWindow.end,
+      startScale: chart.priceScale
+    };
+    paperChart.setPointerCapture?.(event.pointerId);
+  };
+
+  paperChart.onpointermove = (event) => {
+    const point = coordinates(event);
+    if (drag) {
+      drag.currentX = point.x;
+      drag.currentY = point.y;
+    }
+    const match = candleAtPaperChartCoordinate(point.x, candles, dimensions);
+    if (!match) return;
     const crossX = paperChart.querySelector("#paper-crosshair-x");
     const crossY = paperChart.querySelector("#paper-crosshair-y");
-    crossX.classList.remove("hidden"); crossY.classList.remove("hidden");
-    crossX.setAttribute("x1", dimensions.x(index)); crossX.setAttribute("x2", dimensions.x(index));
-    crossY.setAttribute("y1", svgY); crossY.setAttribute("y2", svgY);
+    const crossYValue = Math.max(dimensions.top, Math.min(dimensions.height - dimensions.bottom, point.y));
+    crossX.classList.remove("hidden");
+    crossY.classList.remove("hidden");
+    crossX.setAttribute("x1", dimensions.x(match.index));
+    crossX.setAttribute("x2", dimensions.x(match.index));
+    crossY.setAttribute("y1", crossYValue);
+    crossY.setAttribute("y2", crossYValue);
     paperChartTooltip.classList.remove("hidden");
-    paperChartTooltip.style.left = `${Math.min(rect.width - 190, Math.max(8, event.clientX - rect.left + 12))}px`;
-    paperChartTooltip.style.top = `${Math.max(8, event.clientY - rect.top - 68)}px`;
-    paperChartTooltip.textContent = `${formatDateTime(Number(candle.time) * 1000)} · O ${formatCompactPrice(candle.open)} H ${formatCompactPrice(candle.high)} L ${formatCompactPrice(candle.low)} C ${formatCompactPrice(candle.close)}`;
+    paperChartTooltip.style.left = `${Math.min(point.rect.width - 190, Math.max(8, event.clientX - point.rect.left + 12))}px`;
+    paperChartTooltip.style.top = `${Math.max(8, event.clientY - point.rect.top - 68)}px`;
+    paperChartTooltip.textContent = `${formatDateTime(Number(match.candle.time) * 1000)} · O ${formatCompactPrice(match.candle.open)} H ${formatCompactPrice(match.candle.high)} L ${formatCompactPrice(match.candle.low)} C ${formatCompactPrice(match.candle.close)}`;
+    paperCrosshairPriceLabel.textContent = formatCurrency(priceAtPaperChartCoordinate(crossYValue, dimensions));
+    paperCrosshairPriceLabel.style.top = `${(crossYValue / dimensions.height) * point.rect.height}px`;
+    paperCrosshairPriceLabel.classList.remove("hidden");
+    paperCrosshairTimeLabel.textContent = formatDateTime(Number(match.candle.time) * 1000);
+    const timeLabelLeft = (dimensions.x(match.index) / dimensions.width) * point.rect.width;
+    paperCrosshairTimeLabel.style.left = `${Math.max(64, Math.min(point.rect.width - 64, timeLabelLeft))}px`;
+    paperCrosshairTimeLabel.classList.remove("hidden");
   };
+
+  paperChart.onpointerup = () => {
+    if (!drag) return;
+    const chart = state.paperTrading.chartNavigation;
+    if (drag.mode === "pan") {
+      const slot = (dimensions.width - dimensions.left - dimensions.right) / Math.max(1, candles.length);
+      const delta = Math.round((drag.startX - drag.currentX) / slot);
+      const nextEnd = Math.max(chartWindow.count, Math.min(allCandles.length, drag.startEnd + delta));
+      chart.endIndex = nextEnd === allCandles.length ? null : nextEnd;
+    } else {
+      chart.priceScale = Math.max(0.35, Math.min(4, drag.startScale * Math.exp((drag.startY - drag.currentY) * 0.012)));
+    }
+    drag = null;
+    renderPaperTradingChart();
+  };
+
+  paperChart.onpointercancel = () => { drag = null; };
   paperChart.onpointerleave = () => {
     paperChart.querySelectorAll(".paper-crosshair").forEach((line) => line.classList.add("hidden"));
     paperChartTooltip.classList.add("hidden");
+    paperCrosshairPriceLabel.classList.add("hidden");
+    paperCrosshairTimeLabel.classList.add("hidden");
+  };
+  paperChart.onwheel = (event) => {
+    event.preventDefault();
+    const chart = state.paperTrading.chartNavigation;
+    const factor = event.deltaY > 0 ? 1.2 : 1 / 1.2;
+    chart.visibleCount = Math.max(30, Math.min(Math.min(300, allCandles.length), Math.round(chartWindow.count * factor)));
+    if (chart.endIndex == null) chart.endIndex = null;
+    renderPaperTradingChart();
   };
 }
 
@@ -6451,6 +6916,7 @@ function renderSignalHistoryRow(signal) {
         <button class="history-details-button" type="button" data-history-details="${key}">
           ${state.expandedSignalKeys.has(key) ? "Hide details" : "View details"}
         </button>
+        ${renderSignalReviewAction(signal, "history-details-button")}
       </td>
       <td>${signal.timeframe}</td>
       <td><strong class="direction ${signal.direction}">${signal.direction}</strong></td>
@@ -6493,6 +6959,7 @@ function renderMobileSignalHistoryCard(signal) {
       </div>
       ${renderRiskCalculator(signal)}
       ${renderPaperTradeAction(signal)}
+      ${renderSignalReviewAction(signal)}
       ${renderConfidenceSummary(signal)}
       ${state.scannerMode === "advanced" ? renderSignalQuality(signal, { compact: true }) : ""}
       ${renderMobileSignalAccordion(signal)}
@@ -6657,7 +7124,6 @@ function renderNoSetup(analysis) {
         <span>No trial credit was used for this analysis.</span>
       </div>
     </article>
-    ${state.signals.map((signal) => renderSignalCard(signal)).join("")}
   `;
 }
 
@@ -6862,7 +7328,7 @@ function renderScanResults(setups, errors, diagnostics = null, scanSummary = nul
     return;
   }
 
-  signalsGrid.innerHTML = setups.map((setup) => renderScanCard(setup)).join("");
+  renderSignals();
   statusLine.textContent = `Found ${setups.length} high-probability setup${setups.length === 1 ? "" : "s"}. Unlocking one will use a trial credit.`;
   if (options.scroll !== false) scanSummaryPanel.scrollIntoView({ behavior: "smooth", block: "start" });
 }
@@ -6959,6 +7425,7 @@ function renderSignalCard(signal) {
       <div class="compact-actions">
         <button class="secondary-action" data-signal-details="${key}" type="button">${expanded ? "Hide Details" : "View Details"}</button>
         ${renderPaperTradeAction(signal)}
+        ${renderSignalReviewAction(signal)}
       </div>
       <div class="signal-details ${expanded ? "" : "hidden"}">
         ${renderModeDetails(signal)}
@@ -7331,6 +7798,11 @@ function renderPaperTradeAction(signal, primary = false) {
     ${validity.status === "expiring-soon" ? `<p class="signal-expiry-warning">This signal is close to expiring. Price conditions may have changed.</p>` : ""}
     <button class="${className}" data-paper-signal-id="${signal.id}" type="button">Add to Paper Trading</button>
   `;
+}
+
+function renderSignalReviewAction(signal, className = "secondary-action") {
+  if (!signal?.id) return "";
+  return `<button class="${className}" data-review-signal-id="${escapeHtml(signal.id)}" type="button">View on chart</button>`;
 }
 
 function renderConfidenceSummary(signal) {
@@ -9661,18 +10133,21 @@ function scrollToSignalDesk() {
 async function completeSignalUnlock({ signal, subscription, alreadyUnlocked, source }) {
   state.subscription = subscription || state.subscription;
   renderSubscription();
-  state.scanResults = [];
+  if (mergeUnlockedSignalIntoScanResults(signal)) renderSignals();
   await Promise.all([loadSignals(), loadPaperPortfolio()]);
 
   const unlockedSignal = state.signals.find((item) => item.id === signal.id) ||
     state.signals.find((item) => item.setupKey && item.setupKey === signal.setupKey) ||
     signal;
+  mergeUnlockedSignalIntoScanResults(unlockedSignal);
   const unlockedKey = getSignalKey(unlockedSignal);
   state.expandedSignalKeys = new Set([unlockedKey]);
   state.unlockedRevealSignalId = unlockedSignal.id;
   sessionStorage.setItem(UNLOCK_REVEAL_KEY, unlockedSignal.id);
 
-  navigateTo("signals", {}, { replace: source === "telegram" });
+  if (source !== "scanner") {
+    navigateTo("signals", {}, { replace: source === "telegram" });
+  }
   renderSignals();
   renderSignalsHistory();
   renderUnlockReveal();
@@ -9682,6 +10157,101 @@ async function completeSignalUnlock({ signal, subscription, alreadyUnlocked, sou
     ? "Already unlocked. No additional credit was used."
     : `Signal unlocked${sourceLabel}. One unlock credit deducted.`;
   showToast(alreadyUnlocked ? "Already unlocked" : "Signal unlocked");
+}
+
+function renderPaperSignalReview() {
+  const review = state.paperTrading.signalReview;
+  if (!review) {
+    paperSignalReview.classList.add("hidden");
+    paperSignalReview.innerHTML = "";
+    return;
+  }
+  const outcome = getPaperSignalReviewOutcome(review);
+  const chartMessage = state.paperTrading.signalReviewChart?.available
+    ? ""
+    : `<p class="paper-signal-review-unavailable">Historical chart data is unavailable for this signal.</p>`;
+  const currentPrice = state.paperTrading.signalReviewChart?.currentPrice;
+  const hasCurrentPrice = currentPrice !== null && currentPrice !== undefined && Number.isFinite(Number(currentPrice));
+  paperSignalReview.innerHTML = `
+    <div class="paper-signal-review-header">
+      <div><h4>${escapeHtml(getDisplaySymbol(review.symbol))}</h4><p>${escapeHtml(String(review.direction || "").toUpperCase())} · ${escapeHtml(review.timeframe)} · ${escapeHtml(titleCase(review.strategy || "Signal"))}</p></div>
+      <div class="paper-signal-review-outcome"><strong class="${outcome.className}">${escapeHtml(outcome.label)}</strong><span>${escapeHtml(outcome.value)}</span></div>
+    </div>
+    <div class="paper-signal-review-levels">
+      <div><span>Entry</span><strong>${formatCurrency(review.entry)}</strong></div>
+      <div><span>Stop Loss</span><strong>${formatCurrency(review.stopLoss)}</strong></div>
+      <div><span>Take Profit</span><strong>${formatCurrency(review.takeProfit)}</strong></div>
+      <div><span>Current price</span><strong>${hasCurrentPrice ? formatCurrency(currentPrice) : "--"}</strong></div>
+    </div>
+    <div class="paper-signal-review-meta"><span>Created ${formatDateTime(review.createdAt)}</span><span>Valid until ${formatDateTime(review.validUntil)}</span><span>Source ${escapeHtml(formatSignalReviewSource(review.source))}</span><span>Read-only review</span></div>
+    ${chartMessage}`;
+  paperSignalReview.classList.remove("hidden");
+}
+
+function getPaperSignalReviewOutcome(review) {
+  if (review.status === "Hit TP") {
+    const hasRealizedR = review.realizedR !== null && review.realizedR !== undefined && Number.isFinite(Number(review.realizedR));
+    const result = hasRealizedR ? Number(review.realizedR) : Number(review.riskReward);
+    return { label: "TAKE PROFIT REACHED", value: `+${Number(result || 0).toFixed(2)}R · Take profit reached during the marked candle.`, className: "positive" };
+  }
+  if (review.status === "Hit SL") {
+    const hasRealizedR = review.realizedR !== null && review.realizedR !== undefined && Number.isFinite(Number(review.realizedR));
+    const result = hasRealizedR ? Number(review.realizedR) : -1;
+    return { label: "STOP LOSS REACHED", value: `${Number(result).toFixed(2)}R · Stop loss touched during the marked candle.`, className: "negative" };
+  }
+  if (review.status === "Expired") {
+    return { label: "SIGNAL EXPIRED", value: "The stored signal validity window ended.", className: "" };
+  }
+  return { label: "Signal in progress", value: "Signal in progress — live market tracking.", className: "" };
+}
+
+function formatSignalReviewSource(source) {
+  const labels = {
+    auto_crypto_watcher: "Auto Crypto Watcher",
+    manual_scan: "Manual Scan",
+    telegram_alert: "Telegram Alert",
+    candidate_promotion: "Candidate Promotion",
+    legacy_unlocked_signal: "Legacy Unlocked Signal"
+  };
+  return labels[source] || titleCase(source || "SignalForge");
+}
+
+function renderPaperChartToolState() {
+  const chart = state.paperTrading.chartNavigation;
+  paperChartTools.querySelectorAll("[data-paper-drawing-tool]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.paperDrawingTool === chart.activeTool);
+  });
+  const deleteButton = paperChartTools.querySelector("[data-paper-delete-drawing]");
+  if (deleteButton) deleteButton.disabled = !chart.selectedDrawingId;
+}
+
+function mergeUnlockedSignalIntoScanResults(signal) {
+  const scanResults = Array.isArray(state.scanResults) ? state.scanResults : [];
+  const signalId = String(signal?.id || "");
+  const setupKey = String(signal?.setupKey || "");
+  const symbol = String(signal?.symbol || "").toUpperCase();
+  const timeframe = String(signal?.timeframe || "").toLowerCase();
+  const direction = String(signal?.direction || "").toLowerCase();
+  const index = scanResults.findIndex((setup) => {
+    if (setupKey && String(setup?.setupKey || "") === setupKey) return true;
+    if (signalId && String(setup?.id || "") === signalId) return true;
+    return symbol && timeframe &&
+      String(setup?.symbol || "").toUpperCase() === symbol &&
+      String(setup?.timeframe || "").toLowerCase() === timeframe &&
+      (!direction || String(setup?.direction || "").toLowerCase() === direction);
+  });
+  if (index < 0) return false;
+
+  const current = scanResults[index];
+  state.scanResults = scanResults.map((setup, setupIndex) => setupIndex === index
+    ? {
+        ...current,
+        ...signal,
+        setupKey: signal.setupKey || current.setupKey,
+        scanDeskUnlocked: true
+      }
+    : setup);
+  return true;
 }
 
 async function restoreUnlockReveal() {
@@ -9739,6 +10309,7 @@ function renderUnlockReveal() {
     ${renderUnlockSignalModeContent(signal)}
     <div class="unlock-reveal-primary">${renderPaperTradeAction(signal, true)}</div>
     <div class="unlock-reveal-actions">
+      ${renderSignalReviewAction(signal)}
       <button class="secondary-action" type="button" data-unlock-view-analysis>View full analysis</button>
       <button class="secondary-action" type="button" data-copy-signal-levels>Copy levels</button>
       <button class="text-action" type="button" data-unlock-reveal-close>Close</button>

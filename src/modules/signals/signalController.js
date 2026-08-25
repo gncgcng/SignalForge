@@ -4,6 +4,7 @@ import { enqueueMatchingTelegramNotifications } from "../notifications/notificat
 import {
   createSignal,
   cancelScanAllJob,
+  getResumableScanAllJobStatus,
   getScanAllJobStatus,
   listUserSignals,
   scanAllMarkets,
@@ -86,6 +87,14 @@ export async function handleSignalRoutes(req, res, pathname) {
     try {
       const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
       return sendJson(res, 200, getScanAllJobStatus(req.user, url.searchParams.get("jobId")));
+    } catch (error) {
+      return sendError(res, error.statusCode || 400, error.message);
+    }
+  }
+
+  if (pathname === "/api/signals/scan-all/resume" && req.method === "GET") {
+    try {
+      return sendJson(res, 200, { job: getResumableScanAllJobStatus(req.user) });
     } catch (error) {
       return sendError(res, error.statusCode || 400, error.message);
     }

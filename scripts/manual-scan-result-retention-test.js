@@ -26,6 +26,13 @@ const setupB = {
   confidenceScore: 92,
   validUntil: "2026-08-06T18:00:00.000Z"
 };
+const readySetup = {
+  ...setupA,
+  id: "sig-ready",
+  setupKey: "READY-USD:15m:long:fixture",
+  symbol: "READY-USD",
+  timeframe: "15m"
+};
 const setups = [setupA, setupB];
 const providerError = {
   symbol: "BROKEN-USD",
@@ -63,6 +70,12 @@ assert.equal(backendSummary.ready, 2);
 assert.equal(backendSummary.providerErrors, 1);
 
 const failedRun = await runFrontendScanAllHarness("failed");
+const productionFailedRun = await runFrontendScanAllHarness("failed", {
+  terminalSetups: [readySetup],
+  terminalScannedMarkets: 350,
+  totalMarkets: 350,
+  providerErrors: []
+});
 const cancelledRun = await runFrontendScanAllHarness("cancelled", {
   terminalSetups: [setupA],
   terminalScannedMarkets: 217,
@@ -81,7 +94,9 @@ const historicalSignals = [
   ...Array.from({ length: 14 }, (_, index) => ({ id: `history-tp-${index}`, status: "Hit TP" }))
 ];
 const currentSignalDesk = renderActualSignalDesk(setups, historicalSignals);
+const readyOnlySignalDesk = renderActualSignalDesk([readySetup], historicalSignals);
 const emptySignalDesk = renderActualSignalDesk([], historicalSignals);
+const unlockRun = await runActualSignalDeskUnlockHarness(readySetup, historicalSignals);
 
 assert.equal(historicalSignals.length, 49);
 assert.equal(currentSignalDesk.count, "2 scan results");
@@ -90,11 +105,27 @@ assert.equal(currentSignalDesk.historicalCardsRendered, 0);
 assert.match(currentSignalDesk.html, /sig-trump/);
 assert.match(currentSignalDesk.html, /sig-plume/);
 assert.doesNotMatch(currentSignalDesk.html, /history-/);
+assert.equal(readyOnlySignalDesk.count, "1 scan results");
+assert.equal(readyOnlySignalDesk.currentCardsRendered, 1);
+assert.equal(readyOnlySignalDesk.historicalCardsRendered, 0);
+assert.match(readyOnlySignalDesk.html, /sig-ready/);
+assert.doesNotMatch(readyOnlySignalDesk.html, /history-/);
 assert.equal(emptySignalDesk.count, "0 scan results");
 assert.equal(emptySignalDesk.currentCardsRendered, 0);
 assert.equal(emptySignalDesk.historicalCardsRendered, 0);
 assert.match(emptySignalDesk.html, /Current Scan All setups will appear here/);
 assert.doesNotMatch(emptySignalDesk.html, /history-/);
+assert.equal(unlockRun.duringHistoryLoad.scanResults.length, 1);
+assert.equal(unlockRun.duringHistoryLoad.scanResults[0].setupKey, readySetup.setupKey);
+assert.equal(unlockRun.duringHistoryLoad.scanResults[0].scanDeskUnlocked, true);
+assert.match(unlockRun.duringHistoryLoad.html, /data-current-unlocked="sig-ready"/);
+assert.doesNotMatch(unlockRun.duringHistoryLoad.html, /history-/);
+assert.equal(unlockRun.afterHistoryLoad.scanResults.length, 1);
+assert.equal(unlockRun.afterHistoryLoad.scanResults[0].setupKey, readySetup.setupKey);
+assert.equal(unlockRun.afterHistoryLoad.scanResults[0].scanDeskUnlocked, true);
+assert.match(unlockRun.afterHistoryLoad.html, /data-current-unlocked="sig-ready"/);
+assert.doesNotMatch(unlockRun.afterHistoryLoad.html, /history-/);
+assert.equal(unlockRun.historyApiSignalsLoaded, historicalSignals.length + 1);
 
 const failedReadySnapshot = failedRun.renderCalls.find((call) =>
   call.responseStatus === "failed" && call.setups.length === 2
@@ -114,6 +145,18 @@ assert.deepEqual(failedRun.progressCalls.at(-1), {
   done: 353,
   total: 353,
   message: "Scan All failed. Late scan finalization failed 2 ready setups were retained."
+});
+
+const productionFailedFinalRender = productionFailedRun.renderCalls.at(-1);
+assert.equal(productionFailedFinalRender.responseStatus, "failed");
+assert.equal(productionFailedFinalRender.setups.length, 1);
+assert.equal(productionFailedFinalRender.setups[0].symbol, "READY-USD");
+assert.equal(productionFailedFinalRender.summary.ready, 1);
+assert.equal(productionFailedRun.state.scanResults.length, 1);
+assert.deepEqual(productionFailedRun.progressCalls.at(-1), {
+  done: 350,
+  total: 350,
+  message: "Scan All failed. Late scan finalization failed 1 ready setup was retained."
 });
 
 const currentFailedUiSummary = {
@@ -177,6 +220,7 @@ const pollSource = extractNamedFunction(appSource, "pollScanAllJob");
 const applySnapshotSource = extractNamedFunction(appSource, "applyScanJobSnapshot");
 const renderSignalsSource = extractNamedFunction(appSource, "renderSignals");
 const loadSignalsSource = extractNamedFunction(appSource, "loadSignals");
+const renderNoSetupSource = extractNamedFunction(appSource, "renderNoSetup");
 const scanCardSource = extractNamedFunction(appSource, "renderScanCard");
 const unlockClickSource = extractBetween(
   appSource,
@@ -194,9 +238,10 @@ assert.match(pollSource, /if \(state\.scanResultJobId !== jobId\) return/);
 assert.match(applySnapshotSource, /done < state\.scanResultProgress/);
 assert.match(applySnapshotSource, /state\.scanResultTerminalStatus && !isTerminal/);
 assert.match(renderSignalsSource, /currentScanResults/);
-assert.doesNotMatch(renderSignalsSource, /state\.signals|renderSignalCard/);
+assert.doesNotMatch(renderSignalsSource, /state\.signals/);
 assert.match(loadSignalsSource, /api\.request\("\/api\/signals"\)/);
 assert.match(loadSignalsSource, /renderSignalsHistory\(\)/);
+assert.doesNotMatch(renderNoSetupSource, /state\.signals|renderSignalCard/);
 assert.match(scanCardSource, /getSignalValidityState\(setup\)\.status === "expired" \? "disabled" : ""/);
 assert.doesNotMatch(scanCardSource, /activeScanJob|scanInProgress/);
 assert.doesNotMatch(unlockClickSource, /activeScanJob|scanInProgress/);
@@ -275,6 +320,18 @@ console.log(JSON.stringify({
     historicalCardsVisible: currentSignalDesk.historicalCardsRendered,
     emptyDeskHistoricalCardsVisible: emptySignalDesk.historicalCardsRendered
   },
+  productionRecordingRegression: {
+    status: productionFailedFinalRender.responseStatus,
+    progress: "350/350",
+    ready: productionFailedFinalRender.summary.ready,
+    setup: productionFailedFinalRender.setups[0].symbol
+  },
+  unlockRetention: {
+    setupKey: unlockRun.afterHistoryLoad.scanResults[0].setupKey,
+    currentCardsAfterUnlock: unlockRun.afterHistoryLoad.scanResults.length,
+    historicalSignalsLoadedSeparately: unlockRun.historyApiSignalsLoaded,
+    historicalCardsInSignalDesk: 0
+  },
   rootCauseRepaired: "Terminal failed and cancelled snapshots retain their canonical setups, summaries, and backend progress while showing the job failure separately."
 }, null, 2));
 
@@ -319,7 +376,8 @@ async function runFrontendScanAllHarness(terminalStatus, options = {}) {
     scanResultTerminalStatus: null,
     subscription: null
   };
-  const markets = Array.from({ length: 353 }, (_, index) => ({
+  const totalMarkets = options.totalMarkets ?? 353;
+  const markets = Array.from({ length: totalMarkets }, (_, index) => ({
     symbol: `MARKET-${index}`,
     category: "Crypto"
   }));
@@ -331,13 +389,15 @@ async function runFrontendScanAllHarness(terminalStatus, options = {}) {
     terminalStatus,
     terminalScannedMarkets,
     terminalSetups,
-    currentProviderErrors
+    currentProviderErrors,
+    totalMarkets
   );
   const runningSnapshot = buildSnapshot(
     "running",
     Math.min(200, terminalScannedMarkets),
     terminalSetups,
-    currentProviderErrors
+    currentProviderErrors,
+    totalMarkets
   );
   let initialResultsClearedAtStart = false;
   const context = {
@@ -359,7 +419,7 @@ async function runFrontendScanAllHarness(terminalStatus, options = {}) {
     statusLine,
     getManualScanMarkets: () => markets,
     getFrontendSupportedScanTimeframes: () => ["15m"],
-    summarizeFrontendScanUniverse: () => ({ total: 353, crypto: 353, commodities: 0 }),
+    summarizeFrontendScanUniverse: () => ({ total: totalMarkets, crypto: totalMarkets, commodities: 0 }),
     updateScanProgress: (done, total, message) => {
       progressCalls.push({ done, total, message });
       statusLine.textContent = message;
@@ -383,7 +443,7 @@ async function runFrontendScanAllHarness(terminalStatus, options = {}) {
       request: async (path) => {
         if (path === "/api/signals/scan-all/start") {
           lastResponseStatus = "queued";
-          return buildSnapshot("queued", 0, []);
+          return buildSnapshot("queued", 0, [], [], totalMarkets);
         }
         statusRequestCount += 1;
         generateDisabledDuringPolling ||= context.generateButton.disabled === true;
@@ -398,9 +458,21 @@ async function runFrontendScanAllHarness(terminalStatus, options = {}) {
     loadCandidates: async () => {},
     markFirstScanCompleted: () => {}
   };
+  context.document = { hidden: false };
+  context.navigator = { onLine: true };
+  context.scanAllPollJobId = null;
+  context.rememberScanAllJob = () => {};
+  context.resumeScanAllJob = async () => false;
+  context.isTransientScanPollingError = () => false;
+  context.setScanAllTrackingUi = (active) => {
+    context.scanAllButton.disabled = active;
+    context.generateButton.disabled = active;
+    if (!active) state.activeScanJob = null;
+  };
   vm.createContext(context);
   vm.runInContext([
     extractNamedFunction(appSource, "pollScanAllJob"),
+    extractNamedFunction(appSource, "fetchScanAllJobSnapshot"),
     extractNamedFunction(appSource, "applyScanJobSnapshot"),
     extractNamedFunction(appSource, "renderTerminalScanJobSnapshot"),
     scanClickSourceForEvaluation(appSource)
@@ -418,14 +490,14 @@ async function runFrontendScanAllHarness(terminalStatus, options = {}) {
   };
 }
 
-function buildSnapshot(status, scannedMarkets = 353, currentSetups = setups, providerErrors = [providerError]) {
+function buildSnapshot(status, scannedMarkets = 353, currentSetups = setups, providerErrors = [providerError], totalMarkets = 353) {
   return {
     jobId: "scanjob-fixture",
     status,
     progress: {
       scannedMarkets,
-      totalMarkets: 353,
-      selectedMarkets: 353,
+      totalMarkets,
+      selectedMarkets: totalMarkets,
       currentMarket: status === "running" ? "MARKET-200" : null,
       currentTimeframe: status === "running" ? "15m" : null
     },
@@ -446,7 +518,7 @@ function buildSnapshot(status, scannedMarkets = 353, currentSetups = setups, pro
           providerErrors: providerErrors.length,
           noData: 0
         },
-    scanUniverse: { selectedMarkets: 353, scannedMarkets, timeframes: 3 },
+    scanUniverse: { selectedMarkets: totalMarkets, scannedMarkets, timeframes: 3 },
     skippedMarkets: [],
     marketBrief: null,
     subscription: null,
@@ -504,6 +576,146 @@ function renderActualSignalDesk(currentScanResults, signals) {
     html: grid.innerHTML,
     currentCardsRendered,
     historicalCardsRendered
+  };
+}
+
+async function runActualSignalDeskUnlockHarness(currentSetup, history) {
+  let clickHandler = null;
+  let resolveHistoryRequest;
+  let markHistoryRequested;
+  const historyRequested = new Promise((resolve) => { markHistoryRequested = resolve; });
+  const historyResponse = new Promise((resolve) => { resolveHistoryRequest = resolve; });
+  const signalCount = { textContent: "" };
+  const signalsGridHarness = {
+    innerHTML: "",
+    addEventListener: (event, callback) => {
+      if (event === "click") clickHandler = callback;
+    }
+  };
+  const unlockedSignal = {
+    ...currentSetup,
+    status: "Active",
+    entryPrice: 100,
+    stopLoss: 98,
+    takeProfit: 104,
+    riskRewardRatio: 2
+  };
+  const state = {
+    scanResults: [{ ...currentSetup }],
+    signals: [],
+    signalStats: null,
+    subscription: null,
+    expandedSignalKeys: new Set(),
+    unlockedRevealSignalId: null
+  };
+  const session = new Map();
+  const context = {
+    console,
+    state,
+    signalsGrid: signalsGridHarness,
+    statusLine: { textContent: "" },
+    document: {
+      querySelector: (selector) => {
+        assert.equal(selector, "#signal-count");
+        return signalCount;
+      }
+    },
+    api: {
+      request: async (path) => {
+        if (path === "/api/signals/generate") {
+          return {
+            signal: unlockedSignal,
+            subscription: { unlockCredits: 4 },
+            analysis: null,
+            alreadyUnlocked: false
+          };
+        }
+        if (path === "/api/signals") {
+          markHistoryRequested();
+          return historyResponse;
+        }
+        throw new Error(`Unexpected API request: ${path}`);
+      }
+    },
+    normalizeSignal: (signal) => ({ ...signal }),
+    getSignalSummary: () => ({}),
+    logSignalHistoryDiagnostics: () => {},
+    renderSignalsHistory: () => {},
+    renderPerformanceStats: () => {},
+    renderOnboarding: () => {},
+    renderSubscription: () => {},
+    loadPaperPortfolio: async () => {},
+    getSignalKey: (signal) => signal.setupKey || signal.id,
+    sessionStorage: {
+      setItem: (key, value) => session.set(key, value),
+      getItem: (key) => session.get(key),
+      removeItem: (key) => session.delete(key)
+    },
+    UNLOCK_REVEAL_KEY: "signalforge_unlock_reveal",
+    navigateTo: () => {},
+    renderUnlockReveal: () => {},
+    showToast: () => {},
+    renderNoSetup: () => {},
+    enterPaperTrade: async () => {},
+    scrollToSignalKey: () => {},
+    renderScanCard: (setup) => `<article data-current-locked="${setup.id}"></article>`,
+    renderSignalCard: (signal) => {
+      if (String(signal.id).startsWith("history-")) {
+        return `<article data-historical-signal="${signal.id}"></article>`;
+      }
+      return `<article data-current-unlocked="${signal.id}"></article>`;
+    }
+  };
+  vm.createContext(context);
+  const optionalMergeSource = appSource.includes("function mergeUnlockedSignalIntoScanResults(")
+    ? extractNamedFunction(appSource, "mergeUnlockedSignalIntoScanResults")
+    : "";
+  vm.runInContext([
+    extractNamedFunction(appSource, "loadSignals"),
+    extractNamedFunction(appSource, "renderSignals"),
+    optionalMergeSource,
+    extractBetween(
+      appSource,
+      "async function completeSignalUnlock",
+      "async function restoreUnlockReveal"
+    ),
+    extractBetween(
+      appSource,
+      'signalsGrid.addEventListener("click", async (event) => {',
+      'signalsGrid.addEventListener("input"'
+    )
+  ].filter(Boolean).join("\n\n"), context);
+  context.renderSignals();
+  assert.equal(typeof clickHandler, "function");
+
+  const button = {
+    disabled: false,
+    dataset: {
+      unlockSymbol: currentSetup.symbol,
+      unlockTimeframe: currentSetup.timeframe,
+      unlockSetupKey: currentSetup.setupKey
+    }
+  };
+  const clickPromise = clickHandler({
+    target: {
+      closest: (selector) => selector === "[data-unlock-symbol]" ? button : null
+    }
+  });
+  await historyRequested;
+  const duringHistoryLoad = {
+    scanResults: state.scanResults.map((signal) => ({ ...signal })),
+    html: signalsGridHarness.innerHTML
+  };
+
+  resolveHistoryRequest({ signals: [unlockedSignal, ...history] });
+  await clickPromise;
+  return {
+    duringHistoryLoad,
+    afterHistoryLoad: {
+      scanResults: state.scanResults.map((signal) => ({ ...signal })),
+      html: signalsGridHarness.innerHTML
+    },
+    historyApiSignalsLoaded: state.signals.length
   };
 }
 
