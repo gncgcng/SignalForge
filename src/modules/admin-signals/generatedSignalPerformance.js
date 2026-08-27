@@ -8,7 +8,9 @@ export function buildGeneratedSignalPerformance(records = [], options = {}) {
   const grouping = groupings.has(options.grouping) ? options.grouping : "day";
   const category = categoryDimensions.has(options.category) ? options.category : "strategy";
   const range = resolvePerformanceRange(options.range || "30d", options.from, options.to, now, timezone);
-  const terminal = records.map(normalizeRecord).filter((record) => terminalStatuses.has(record.status));
+  const normalized = records.map(normalizeRecord);
+  const population = summarizePopulation(normalized);
+  const terminal = normalized.filter((record) => terminalStatuses.has(record.status));
   const missingOutcomeTimestamp = terminal.filter((record) => !record.outcomeAt).length;
   const datedInRange = terminal.filter((record) => record.outcomeAt && inRange(record.outcomeAt, range));
   const performanceRecords = range.key === "all" ? terminal : datedInRange;
@@ -18,12 +20,24 @@ export function buildGeneratedSignalPerformance(records = [], options = {}) {
     cumulativeR += period.netRealizedR;
     return { ...period, cumulativeRealizedR: round(cumulativeR) };
   });
+  const realizedRSeries = buildCumulativeRealizedRSeries(datedInRange);
+  const seriesValues = realizedRSeries.map((point) => point.cumulativeRealizedR);
+  const realizedRSummary = {
+    count: realizedRSeries.length,
+    first: realizedRSeries[0] || null,
+    last: realizedRSeries[realizedRSeries.length - 1] || null,
+    minimumCumulativeR: seriesValues.length ? Math.min(...seriesValues) : null,
+    maximumCumulativeR: seriesValues.length ? Math.max(...seriesValues) : null,
+    finalCumulativeR: seriesValues.length ? seriesValues[seriesValues.length - 1] : null
+  };
 
   return {
     range: { key: range.key, from: range.from?.toISOString() || null, to: range.to?.toISOString() || null, toExclusive: Boolean(range.toExclusive), timezone },
     grouping,
     category,
+    population,
     semantics: {
+      population: "All generated_signals matching categorical Performance filters; date range applies to outcome analytics",
       outcomeTimestamp: `Canonical terminal timestamp grouped in ${timezone}; undated legacy outcomes remain in All totals only`,
       winRate: "Hit TP / (Hit TP + Hit SL); Expired excluded",
       netRealizedR: "Sum of available canonical realized_r values",
@@ -34,9 +48,12 @@ export function buildGeneratedSignalPerformance(records = [], options = {}) {
       terminalRecordsConsidered: performanceRecords.length,
       timelineRecordsConsidered: datedInRange.length,
       missingOutcomeTimestamp,
-      missingRealizedR: performanceRecords.filter((record) => record.realizedR == null).length
+      missingRealizedR: performanceRecords.filter((record) => record.realizedR == null).length,
+      realizedRWithoutOutcomeTimestamp: performanceRecords.filter((record) => record.realizedR != null && !record.outcomeAt).length
     },
     timeline: timelineWithCumulative,
+    realizedRSeries,
+    realizedRSummary,
     categories: groupCategories(performanceRecords, category),
     bestWorst: {
       day: rankPeriods(groupRecords(datedInRange, "day", timezone), 5),
@@ -102,10 +119,12 @@ export function summarizeRecords(records = []) {
   return {
     signals: records.length,
     closedSignals,
+    decidedTrades: closedSignals,
     wins: wins.length,
     losses: losses.length,
     expired: expired.length,
     winRate: closedSignals ? round((wins.length / closedSignals) * 100, 1) : null,
+    winRateExact: closedSignals ? round((wins.length / closedSignals) * 100, 6) : null,
     netRealizedR: round(netRealizedR),
     expectancyR: withRealizedR.length ? round(netRealizedR / withRealizedR.length) : null,
     averageWinnerR: winnerR.length ? round(average(winnerR.map((record) => record.realizedR))) : null,
@@ -114,6 +133,48 @@ export function summarizeRecords(records = []) {
     realizedRObservations: withRealizedR.length,
     missingRealizedR: records.length - withRealizedR.length
   };
+}
+
+export function summarizePopulation(records = []) {
+  const counts = new Map();
+  for (const record of records) {
+    const status = String(record.status || "Unknown").trim() || "Unknown";
+    counts.set(status, (counts.get(status) || 0) + 1);
+  }
+  const tpCount = counts.get("Hit TP") || 0;
+  const slCount = counts.get("Hit SL") || 0;
+  const expiredCount = counts.get("Expired") || 0;
+  const terminalCount = tpCount + slCount + expiredCount;
+  const decidedCount = tpCount + slCount;
+  return {
+    generatedCount: records.length,
+    terminalCount,
+    decidedCount,
+    tpCount,
+    slCount,
+    expiredCount,
+    nonTerminalCount: records.length - terminalCount,
+    winRate: decidedCount ? round((tpCount / decidedCount) * 100, 1) : null,
+    statusBreakdown: [...counts.entries()]
+      .map(([status, count]) => ({ status, count, terminal: terminalStatuses.has(status) }))
+      .sort((left, right) => right.count - left.count || left.status.localeCompare(right.status))
+  };
+}
+
+export function buildCumulativeRealizedRSeries(records = []) {
+  const ordered = records
+    .filter((record) => record.realizedR != null && validDate(record.outcomeAt))
+    .sort((left, right) => left.outcomeAt - right.outcomeAt || String(left.id || "").localeCompare(String(right.id || "")));
+  let cumulativeRealizedR = 0;
+  return ordered.map((record) => {
+    cumulativeRealizedR = round(cumulativeRealizedR + record.realizedR);
+    return {
+      id: record.id || null,
+      outcomeAt: record.outcomeAt.toISOString(),
+      realizedR: round(record.realizedR),
+      cumulativeRealizedR
+    };
+  });
 }
 
 export function groupRecords(records, grouping, requestedTimezone = "UTC") {

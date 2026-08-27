@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
+  buildCumulativeRealizedRSeries,
   buildGeneratedSignalPerformance,
   groupRecords,
   normalizePerformanceTimezone,
   rankPeriods,
   resolvePerformanceRange,
+  summarizePopulation,
   summarizeRecords
 } from "../src/modules/admin-signals/generatedSignalPerformance.js";
 
@@ -151,6 +153,39 @@ assert.equal(mixedToday.metrics.losses, 1);
 assert.equal(mixedToday.metrics.expired, 1);
 assert.equal(mixedToday.timeline[0].signals, 4);
 
+const productionLike = productionLikeRecords();
+const productionLikeResult = buildGeneratedSignalPerformance(productionLike, { range: "all", grouping: "day", now });
+assert.equal(productionLikeResult.population.generatedCount, 421);
+assert.equal(productionLikeResult.population.terminalCount, 234);
+assert.equal(productionLikeResult.population.decidedCount, 184);
+assert.equal(productionLikeResult.population.tpCount, 49);
+assert.equal(productionLikeResult.population.slCount, 135);
+assert.equal(productionLikeResult.population.expiredCount, 50);
+assert.equal(productionLikeResult.population.nonTerminalCount, 187);
+assert.equal(productionLikeResult.population.generatedCount, productionLikeResult.population.terminalCount + productionLikeResult.population.nonTerminalCount);
+assert.equal(productionLikeResult.population.terminalCount, productionLikeResult.population.tpCount + productionLikeResult.population.slCount + productionLikeResult.population.expiredCount);
+assert.equal(productionLikeResult.population.decidedCount, productionLikeResult.population.tpCount + productionLikeResult.population.slCount);
+assert.equal(productionLikeResult.metrics.winRateExact, 26.630435);
+assert.equal(productionLikeResult.metrics.winRate, 26.6);
+assert.equal(productionLikeResult.metrics.realizedRObservations, 90);
+assert.equal(productionLikeResult.metrics.missingRealizedR, 144);
+assert.equal(productionLikeResult.realizedRSeries.length, 90);
+assert.equal(productionLikeResult.realizedRSummary.count, 90);
+assert.deepEqual(productionLikeResult.realizedRSummary.first, productionLikeResult.realizedRSeries[0]);
+assert.deepEqual(productionLikeResult.realizedRSummary.last, productionLikeResult.realizedRSeries.at(-1));
+assert.equal(productionLikeResult.realizedRSummary.minimumCumulativeR, 2);
+assert.equal(productionLikeResult.realizedRSummary.maximumCumulativeR, 98);
+assert.equal(productionLikeResult.realizedRSummary.finalCumulativeR, productionLikeResult.metrics.netRealizedR, "Final cumulative R must reconcile exactly with the Net Realized R KPI.");
+assert.equal(productionLikeResult.realizedRSeries.at(-1).cumulativeRealizedR, productionLikeResult.realizedRSeries.reduce((sum, point) => Number((sum + point.realizedR).toFixed(3)), 0));
+for (let index = 1; index < productionLikeResult.realizedRSeries.length; index += 1) {
+  assert.ok(new Date(productionLikeResult.realizedRSeries[index - 1].outcomeAt) <= new Date(productionLikeResult.realizedRSeries[index].outcomeAt));
+}
+assert.equal(productionLikeResult.population.statusBreakdown.reduce((sum, item) => sum + item.count, 0), 421);
+assert.deepEqual(summarizePopulation(productionLike).statusBreakdown, productionLikeResult.population.statusBreakdown);
+
+const paginationFixture = { total: 421, pageSize: 25, totalPages: Math.ceil(421 / 25), lastPageRows: 421 - (Math.ceil(421 / 25) - 1) * 25 };
+assert.deepEqual(paginationFixture, { total: 421, pageSize: 25, totalPages: 17, lastPageRows: 21 }, "Pagination must retain the backend total rather than multiplying pages by page size.");
+
 const repository = read("src/modules/admin-signals/generatedSignalRepository.js");
 const controller = read("src/modules/admin-signals/generatedSignalController.js");
 const service = read("src/modules/admin-signals/generatedSignalService.js");
@@ -158,7 +193,7 @@ const html = read("public/index.html");
 const css = read("public/styles.css");
 const app = read("public/app.js");
 
-assert.match(repository, /status IN \('Hit TP','Hit SL','Expired'\)/);
+assert.doesNotMatch(repository.slice(repository.indexOf("export async function listGeneratedSignalPerformanceRecords"), repository.indexOf("export async function listActiveGeneratedSignals")), /clauses = \["g\.status IN/, "Performance must query the full generated population rather than terminal records only.");
 for (const terminalTimestamp of ["hit_tp_at", "hit_sl_at", "expired_at"]) {
   assert.ok(repository.includes(terminalTimestamp), `Performance repository must retrieve ${terminalTimestamp} for legacy timeline placement.`);
 }
@@ -177,11 +212,17 @@ assert.ok(app.includes("renderAdminSignalDetail"), "Admin Signal Review details 
 assert.match(app, /async function loadAdminSignalToday\(\)[\s\S]*?\/api\/admin\/signals\/performance\?/s, "Today must use the authoritative Performance endpoint.");
 assert.ok(app.includes("Intl.DateTimeFormat().resolvedOptions().timeZone"));
 assert.ok(html.includes('id="admin-performance-timezone"'));
+assert.ok(html.includes('id="admin-performance-population"'));
+for (const label of ["Generated signals", "Terminal outcomes", "Open / other", "Decided trades", "Expectancy / R-record"]) {
+  assert.ok(app.includes(label), `Performance UI must label ${label} explicitly.`);
+}
+assert.ok(app.includes("excluded from R-based metrics, not win rate"));
 assert.ok(css.includes(".admin-signals-tabs") && css.includes("overflow-x: auto"));
 assert.ok(css.includes(".admin-performance-chart-grid") && css.includes("grid-template-columns: 1fr"));
 
 const outcomeRenderer = loadFrontendFunction(app, "renderAdminOutcomeChart", "renderAdminCumulativeRChart", { escapeHtml });
 const winRateRenderer = loadFrontendFunction(app, "renderAdminWinRateChart", "renderAdminOutcomeChart", { escapeHtml, formatAdminPercent, formatSignedR, formatMaybeR });
+const cumulativeRenderer = loadFrontendFunction(app, "renderAdminCumulativeRChart", "renderAdminBestWorstPeriods", { escapeHtml, formatSignedR, formatDateTime });
 const mixedOutcomeHtml = outcomeRenderer([{ period: "2026-08-26", signals: 14, wins: 3, losses: 4, expired: 7 }]);
 assert.match(mixedOutcomeHtml, />3\/4\/7</);
 assertVisibleSegment(mixedOutcomeHtml, "tp");
@@ -198,11 +239,33 @@ for (const status of ["tp", "sl", "expired"]) assert.equal(segmentWidth(zeroOutc
 const winRateHtml = winRateRenderer([{ period: "2026-08-26", signals: 14, closedSignals: 7, wins: 3, losses: 4, expired: 7, winRate: 42.9, netRealizedR: -1, expectancyR: -0.143 }]);
 assert.match(winRateHtml, /class="win-rate" style="width:42\.9%"/, "Win-rate payload must produce a visible filled bar.");
 
+for (const count of [1, 2, 5, 90, 300]) {
+  const series = chartSeries(count, (index) => (index % 3 === 0 ? 1.5 : -0.5));
+  const finalR = series.at(-1).cumulativeRealizedR;
+  const rendered = cumulativeRenderer(series, { missingRealizedR: 0, realizedRWithoutOutcomeTimestamp: 0 }, { netRealizedR: finalR });
+  assert.match(rendered, new RegExp(`data-point-count="${count}"`));
+  assert.match(rendered, /class="r-line"/, `${count}-point series must render a visible line.`);
+  assert.match(rendered, /Final cumulative R reconciles with the KPI\./);
+  assert.equal((rendered.match(/class="r-point"/g) || []).length, count <= 40 ? count : 0, "Dense series must omit individual markers.");
+  assertChartCoordinatesInsideBounds(rendered);
+}
+for (const values of [[1, 2, 3, 4, 5], [-1, -2, -3, -4, -5], [2, -3, 2, -3, 5]]) {
+  const series = chartSeriesFromCumulative(values);
+  const rendered = cumulativeRenderer(series, {}, { netRealizedR: values.at(-1) });
+  assertChartCoordinatesInsideBounds(rendered);
+}
+const largeGapSeries = chartSeriesFromCumulative([1, 2, 3], ["2025-01-01T00:00:00.000Z", "2025-01-02T00:00:00.000Z", "2026-01-01T00:00:00.000Z"]);
+const largeGapCoordinates = polylineCoordinates(cumulativeRenderer(largeGapSeries, {}, { netRealizedR: 3 }));
+assert.equal(Number((largeGapCoordinates[1].x - largeGapCoordinates[0].x).toFixed(2)), Number((largeGapCoordinates[2].x - largeGapCoordinates[1].x).toFixed(2)), "Chronological observations must not compress into one corner because of a large wall-clock gap.");
+
 assert.match(css, /\.admin-signals-page\s*{[^}]*--border:\s*var\(--line\);[^}]*--accent:\s*var\(--cyan\)/s, "Admin Signals must resolve its intended border and accent tokens.");
 assert.match(css, /\.performance-bar-row \.tp\s*{\s*background:\s*var\(--green\);\s*}/);
 assert.match(css, /\.performance-bar-row \.sl\s*{\s*background:\s*#ff6868;\s*}/);
 assert.match(css, /\.performance-bar-row \.expired\s*{\s*background:\s*#7d8998;\s*}/);
 assert.match(css, /\.performance-line-chart\s*{[^}]*overflow:\s*hidden;[^}]*pointer-events:\s*none;/s, "Cumulative markers must be clipped and removed from hit testing.");
+assert.match(css, /\.performance-line-chart \.r-line\s*{[^}]*stroke:\s*var\(--cyan\);[^}]*stroke-width:\s*2\.5;/s, "Cumulative line must use a defined, visible SignalForge token.");
+assert.match(css, /\.performance-line-chart \.r-point\s*{[^}]*fill:\s*var\(--cyan\);/s);
+assert.doesNotMatch(css, /\.performance-line-chart circle\s*{[^}]*fill:\s*#fff/s, "Cumulative chart must not use dominant white oval markers.");
 assert.match(css, /\.admin-performance-chart\s*{[^}]*position:\s*relative;[^}]*overflow:\s*hidden;/s, "Charts must own and clip their visual children.");
 assert.match(css, /\.admin-signals-tabs button\s*{[^}]*min-height:\s*44px;[^}]*cursor:\s*pointer;/s, "The full tab target must remain usable on desktop and mobile.");
 assert.match(css, /\.admin-generated-row\s*{[^}]*border-bottom:\s*1px solid var\(--border\);/s, "Pre-upgrade row separators must remain visible.");
@@ -213,6 +276,7 @@ console.log(JSON.stringify({
   missingRealizedR: missingR.missingRealizedR,
   missingOutcomeTimestamp: missingTimestampResult.dataQuality.missingOutcomeTimestamp,
   reconciliation: { allTerminal: mixedAll.metrics.signals, timelinePlaceable: mixedAll.dataQuality.timelineRecordsConsidered, winRate: mixedAll.metrics.winRate },
+  productionLike: { population: productionLikeResult.population, rCount: productionLikeResult.realizedRSeries.length, finalR: productionLikeResult.realizedRSummary.finalCumulativeR },
   chartRegression: { mixedLabel: "3/4/7", markersContained: true, tabsPointerSafe: true, rowContainersRestored: true },
   rankingMinimums: { day: 5, week: 10, month: 20 },
   timezone: {
@@ -251,6 +315,25 @@ function authoritativeTerminalCounts(records) {
   return { wins, losses, expired, winRate: wins + losses ? Number(((wins / (wins + losses)) * 100).toFixed(1)) : null };
 }
 
+function productionLikeRecords() {
+  const records = [];
+  const statuses = [["Hit TP", 49], ["Hit SL", 135], ["Expired", 50], ["Active", 100], ["Duplicate blocked", 30], ["Cooldown blocked", 20], ["Quarantined timeframe", 15], ["Readiness failed", 12], ["Invalid legacy ready signal", 10]];
+  let terminalIndex = 0;
+  let id = 0;
+  for (const [status, count] of statuses) {
+    for (let index = 0; index < count; index += 1) {
+      const terminal = ["Hit TP", "Hit SL", "Expired"].includes(status);
+      const hasR = terminal && terminalIndex < 90;
+      const realizedR = hasR ? (status === "Hit TP" ? 2 : status === "Hit SL" ? -1 : 0) : null;
+      const timestamp = terminal ? new Date(Date.UTC(2026, 0, 1, 0, terminalIndex)).toISOString() : null;
+      records.push(record(`production-${id}`, status, realizedR, timestamp));
+      if (terminal) terminalIndex += 1;
+      id += 1;
+    }
+  }
+  return records;
+}
+
 function pickOutcomeCounts(metrics) {
   return { wins: metrics.wins, losses: metrics.losses, expired: metrics.expired, winRate: metrics.winRate };
 }
@@ -273,6 +356,38 @@ function assertVisibleSegment(html, className) {
   assert.ok(segmentWidth(html, className) > 0, `${className} segment must have a positive rendered width.`);
 }
 
+function chartSeries(count, realizedRForIndex) {
+  let cumulative = 0;
+  return Array.from({ length: count }, (_, index) => {
+    const realizedR = realizedRForIndex(index);
+    cumulative = Number((cumulative + realizedR).toFixed(3));
+    return { id: `chart-${index}`, outcomeAt: new Date(Date.UTC(2026, 0, 1, 0, index)).toISOString(), realizedR, cumulativeRealizedR: cumulative };
+  });
+}
+
+function chartSeriesFromCumulative(values, timestamps = []) {
+  return values.map((value, index) => ({
+    id: `cumulative-${index}`,
+    outcomeAt: timestamps[index] || new Date(Date.UTC(2026, 0, 1, 0, index)).toISOString(),
+    realizedR: index ? value - values[index - 1] : value,
+    cumulativeRealizedR: value
+  }));
+}
+
+function polylineCoordinates(html) {
+  const match = html.match(/<polyline points="([^"]+)" class="r-line">/);
+  assert.ok(match, "Expected cumulative polyline coordinates.");
+  return match[1].split(" ").map((point) => { const [x, y] = point.split(",").map(Number); return { x, y }; });
+}
+
+function assertChartCoordinatesInsideBounds(html) {
+  if (!html.includes("<polyline")) return;
+  for (const point of polylineCoordinates(html)) {
+    assert.ok(point.x >= 34 && point.x <= 980, `Chart x coordinate ${point.x} must remain inside plot bounds.`);
+    assert.ok(point.y >= 18 && point.y <= 240, `Chart y coordinate ${point.y} must remain inside plot bounds.`);
+  }
+}
+
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
 }
@@ -280,5 +395,6 @@ function escapeHtml(value) {
 function formatAdminPercent(value) { return value == null ? "n/a" : `${Number(value).toFixed(1)}%`; }
 function formatSignedR(value) { const number = Number(value || 0); return `${number > 0 ? "+" : ""}${number.toFixed(2)}R`; }
 function formatMaybeR(value) { return value == null ? "n/a" : `${Number(value).toFixed(2)}R`; }
+function formatDateTime(value) { return new Date(value).toISOString(); }
 
 function read(path) { return readFileSync(new URL(`../${path}`, import.meta.url), "utf8"); }

@@ -2100,12 +2100,16 @@
               <p class="admin-performance-semantics">Performance uses canonical UTC outcome timestamps grouped into local calendar periods. <span id="admin-performance-timezone">Timezone: UTC</span> Win rate excludes expired signals; missing realized R is never treated as zero.</p>
               <p class="admin-performance-data-quality" id="admin-performance-data-quality"></p>
               <div class="admin-performance-kpis" id="admin-performance-kpis"></div>
+              <section class="admin-performance-population" aria-labelledby="admin-performance-population-title">
+                <div class="section-title"><div><h4 id="admin-performance-population-title">Signal population</h4><p id="admin-performance-population-scope"></p></div></div>
+                <div id="admin-performance-population"></div>
+              </section>
               <div class="admin-performance-chart-grid">
                 <article class="admin-performance-chart"><header><h4>Win rate over time</h4><span>TP / (TP + SL)</span></header><div id="admin-performance-win-rate"></div></article>
                 <article class="admin-performance-chart"><header><h4>TP vs SL</h4><span>Expired shown separately</span></header><div id="admin-performance-outcomes"></div></article>
                 <article class="admin-performance-chart wide"><header><h4>Cumulative realized R</h4><span>Canonical realized_r only</span></header><div id="admin-performance-cumulative"></div></article>
               </div>
-              <section class="admin-performance-periods"><div class="section-title"><div><h4>Best / worst periods</h4><p>Ranked by net R after minimum terminal outcomes with canonical realized R.</p></div></div><div id="admin-performance-best-worst"></div></section>
+              <section class="admin-performance-periods"><div class="section-title"><div><h4>Best / worst periods</h4><p>Ranked by net R using canonical realized-R records only; period win rate still uses all date-placeable TP/SL outcomes.</p></div></div><div id="admin-performance-best-worst"></div></section>
               <section class="admin-performance-categories"><div class="section-title"><div><h4>Category performance</h4><p>Click a category to apply it as a dashboard filter.</p></div><select class="sf-select" id="admin-performance-category"><option value="strategy">Strategy</option><option value="timeframe">Timeframe</option><option value="direction">Direction</option><option value="pattern">Pattern</option><option value="confidence">Confidence bucket</option><option value="source">Source</option><option value="symbol">Symbol</option></select></div><div id="admin-performance-category-table"></div></section>
               <div class="empty-state hidden" id="admin-performance-empty"><strong>No terminal outcomes match these filters.</strong></div>
             </section>

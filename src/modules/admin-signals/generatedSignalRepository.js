@@ -173,7 +173,7 @@ export async function getGeneratedSignalStats() {
 
 export async function listGeneratedSignalPerformanceRecords(filters = {}) {
   const values = [];
-  const clauses = ["g.status IN ('Hit TP','Hit SL','Expired')"];
+  const clauses = [];
   const add = (sql, value) => { values.push(value); clauses.push(sql.replace("?", `$${values.length}`)); };
   if (filters.pair) {
     values.push(`%${filters.pair}%`);
@@ -190,12 +190,13 @@ export async function listGeneratedSignalPerformanceRecords(filters = {}) {
   if (filters.engineVersion) add("g.confidence_version = ?", filters.engineVersion);
   if (Number.isFinite(filters.confidenceMin)) add("COALESCE(g.calibrated_confidence, g.confidence) >= ?", filters.confidenceMin);
   if (Number.isFinite(filters.confidenceMax)) add("COALESCE(g.calibrated_confidence, g.confidence) <= ?", filters.confidenceMax);
+  const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   const result = await query(`
     SELECT g.id, g.pair, g.display_pair, g.timeframe, g.direction, g.strategy, g.pattern,
       g.source, g.confidence, g.calibrated_confidence, g.confidence_version, g.status,
       g.realized_r, g.outcome_evaluated_at, g.hit_tp_at, g.hit_sl_at, g.expired_at
     FROM generated_signals g
-    WHERE ${clauses.join(" AND ")}
+    ${where}
     ORDER BY g.outcome_evaluated_at ASC NULLS LAST, g.id ASC
   `, values);
   return result.rows.map((row) => ({

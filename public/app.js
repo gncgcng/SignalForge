@@ -4354,27 +4354,47 @@ function renderAdminSignalPerformance() {
   const data = state.adminSignals.performance.data;
   if (!data) return;
   const metrics = data.metrics || {};
+  const population = data.population || {};
   const timezone = data.range?.timezone || "UTC";
   const timezoneLabel = document.querySelector("#admin-performance-timezone");
   if (timezoneLabel) timezoneLabel.textContent = `Timezone: ${timezone}`;
+  const populationSuffix = data.range?.key === "all" ? "" : " (all dates)";
   const kpis = [
-    ["Closed signals", metrics.closedSignals ?? 0], ["Wins / TP", metrics.wins ?? 0], ["Losses / SL", metrics.losses ?? 0],
+    [`Generated signals${populationSuffix}`, population.generatedCount ?? 0], [`Terminal outcomes${populationSuffix}`, population.terminalCount ?? 0], [`Open / other${populationSuffix}`, population.nonTerminalCount ?? 0],
+    ["Decided trades", metrics.decidedTrades ?? metrics.closedSignals ?? 0], ["Wins / TP", metrics.wins ?? 0], ["Losses / SL", metrics.losses ?? 0],
     ["Expired", metrics.expired ?? 0], ["Win rate", formatAdminPercent(metrics.winRate)], ["Net realized R", formatSignedR(metrics.netRealizedR)],
-    ["Expectancy / terminal", formatMaybeR(metrics.expectancyR)], ["Average winner", formatMaybeR(metrics.averageWinnerR)], ["Average loser", formatMaybeR(metrics.averageLoserR)]
+    ["Expectancy / R-record", formatMaybeR(metrics.expectancyR)], ["Average winner", formatMaybeR(metrics.averageWinnerR)], ["Average loser", formatMaybeR(metrics.averageLoserR)]
   ];
   document.querySelector("#admin-performance-kpis").innerHTML = kpis.map(([label, value]) => `<article><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value))}</strong></article>`).join("");
   const quality = data.dataQuality || {};
   document.querySelector("#admin-performance-data-quality").textContent = [
-    `${Number(quality.terminalRecordsConsidered ?? metrics.signals ?? 0)} terminal outcome(s) counted`,
-    `${Number(metrics.realizedRObservations || 0)} with canonical realized R`,
+    `${Number(metrics.realizedRObservations || 0)} of ${Number(quality.terminalRecordsConsidered ?? metrics.signals ?? 0)} terminal outcome(s) have canonical realized R`,
+    Number(quality.missingRealizedR || 0) ? `${Number(quality.missingRealizedR)} legacy terminal outcome(s) are excluded from R-based metrics, not win rate` : "No terminal outcomes are missing canonical realized R",
     Number(quality.missingOutcomeTimestamp || 0) ? `${Number(quality.missingOutcomeTimestamp)} legacy terminal signal(s) have no trustworthy outcome timestamp and cannot be placed on the timeline` : "All terminal signals have a trustworthy outcome timestamp"
   ].join(" · ");
+  renderAdminPerformancePopulation(population, data.range?.key);
   document.querySelector("#admin-performance-win-rate").innerHTML = renderAdminWinRateChart(data.timeline || []);
   document.querySelector("#admin-performance-outcomes").innerHTML = renderAdminOutcomeChart(data.timeline || []);
-  document.querySelector("#admin-performance-cumulative").innerHTML = renderAdminCumulativeRChart(data.timeline || [], quality);
+  document.querySelector("#admin-performance-cumulative").innerHTML = renderAdminCumulativeRChart(data.realizedRSeries || [], quality, metrics);
   document.querySelector("#admin-performance-best-worst").innerHTML = renderAdminBestWorstPeriods(data.bestWorst || {});
   document.querySelector("#admin-performance-category-table").innerHTML = renderAdminPerformanceCategories(data.categories || [], data.category || state.adminSignals.performance.category);
   document.querySelector("#admin-performance-empty")?.classList.toggle("hidden", Number(metrics.signals || 0) > 0);
+}
+
+function renderAdminPerformancePopulation(population = {}, rangeKey = "all") {
+  const target = document.querySelector("#admin-performance-population");
+  const scope = document.querySelector("#admin-performance-population-scope");
+  if (!target) return;
+  if (scope) scope.textContent = rangeKey === "all"
+    ? "All generated records matching the current Performance filters."
+    : "All-time generated population for the current categorical filters; the selected date range applies to outcome KPIs and charts.";
+  const summary = [
+    ["Generated", population.generatedCount], ["Terminal", population.terminalCount], ["Decided", population.decidedCount],
+    ["TP", population.tpCount], ["SL", population.slCount], ["Expired", population.expiredCount], ["Non-terminal", population.nonTerminalCount]
+  ];
+  const statuses = Array.isArray(population.statusBreakdown) ? population.statusBreakdown : [];
+  target.innerHTML = `<div class="admin-performance-population-summary">${summary.map(([label, value]) => `<span><small>${escapeHtml(label)}</small><strong>${Number(value || 0)}</strong></span>`).join("")}</div>
+    <div class="admin-performance-status-list">${statuses.map((item) => `<span><small>${escapeHtml(item.status)}</small><strong>${Number(item.count || 0)}</strong></span>`).join("")}</div>`;
 }
 
 function renderAdminWinRateChart(timeline) {
@@ -4395,23 +4415,41 @@ function renderAdminOutcomeChart(timeline) {
   }).join("")}</div>`;
 }
 
-function renderAdminCumulativeRChart(timeline, quality) {
-  if (!timeline.length) return `<p class="reasoning">No canonical realized R observations to chart.</p>`;
-  const values = timeline.map((period) => Number(period.cumulativeRealizedR || 0));
-  const minimum = Math.min(0, ...values);
-  const maximum = Math.max(0, ...values);
-  const span = Math.max(1, maximum - minimum);
-  const points = timeline.map((period, index) => {
-    const x = timeline.length === 1 ? 50 : 4 + (index / (timeline.length - 1)) * 92;
-    const y = 92 - ((Number(period.cumulativeRealizedR || 0) - minimum) / span) * 84;
-    return { x, y, period };
-  });
-  return `<svg class="performance-line-chart" viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="Cumulative realized R over time">
-    <line x1="4" y1="${92 - ((0 - minimum) / span) * 84}" x2="96" y2="${92 - ((0 - minimum) / span) * 84}" class="zero-line"></line>
-    <polyline points="${points.map((point) => `${point.x},${point.y}`).join(" ")}" class="r-line"></polyline>
-    ${points.map((point) => `<circle cx="${point.x}" cy="${point.y}" r="1.4"><title>${escapeHtml(`${point.period.period}: ${formatSignedR(point.period.cumulativeRealizedR)}`)}</title></circle>`).join("")}
-  </svg><div class="performance-chart-footer"><span>${escapeHtml(timeline[0].period)}</span><strong>${formatSignedR(timeline[timeline.length - 1].cumulativeRealizedR)}</strong><span>${escapeHtml(timeline[timeline.length - 1].period)}</span></div>
-  ${Number(quality.missingRealizedR || 0) ? `<p class="performance-data-note">${Number(quality.missingRealizedR)} terminal record(s) have no canonical realized R and were excluded from the line.</p>` : ""}`;
+function renderAdminCumulativeRChart(series, quality, metrics) {
+  if (!series.length) return `<p class="reasoning">No date-placeable canonical realized R observations to chart.</p>`;
+  const width = 1000;
+  const height = 260;
+  const inset = { left: 34, right: 20, top: 18, bottom: 20 };
+  const values = series.map((point) => Number(point.cumulativeRealizedR));
+  const observedMinimum = Math.min(0, ...values);
+  const observedMaximum = Math.max(0, ...values);
+  const observedSpan = Math.max(0.5, observedMaximum - observedMinimum);
+  const yPadding = Math.max(0.35, observedSpan * 0.1);
+  const yMinimum = observedMinimum - yPadding;
+  const yMaximum = observedMaximum + yPadding;
+  const ySpan = yMaximum - yMinimum;
+  const plotWidth = width - inset.left - inset.right;
+  const plotHeight = height - inset.top - inset.bottom;
+  const points = series.map((point, index) => ({
+    x: series.length === 1 ? inset.left + plotWidth / 2 : inset.left + (index / (series.length - 1)) * plotWidth,
+    y: inset.top + ((yMaximum - Number(point.cumulativeRealizedR)) / ySpan) * plotHeight,
+    point
+  }));
+  const zeroY = inset.top + ((yMaximum - 0) / ySpan) * plotHeight;
+  const line = series.length === 1
+    ? `<line x1="${points[0].x - 8}" y1="${points[0].y}" x2="${points[0].x + 8}" y2="${points[0].y}" class="r-line"></line>`
+    : `<polyline points="${points.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(" ")}" class="r-line"></polyline>`;
+  const markers = series.length <= 40
+    ? points.map(({ x, y, point }) => `<circle class="r-point" cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="2.4"><title>${escapeHtml(`${formatDateTime(point.outcomeAt)} · trade ${formatSignedR(point.realizedR)} · cumulative ${formatSignedR(point.cumulativeRealizedR)}`)}</title></circle>`).join("")
+    : "";
+  const first = series[0];
+  const last = series[series.length - 1];
+  const finalMatchesKpi = Math.abs(Number(last.cumulativeRealizedR) - Number(metrics?.netRealizedR || 0)) < 0.0005;
+  return `<svg class="performance-line-chart" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="Cumulative realized R over ${series.length} chronological outcomes" data-point-count="${series.length}">
+    <line x1="${inset.left}" y1="${zeroY.toFixed(2)}" x2="${width - inset.right}" y2="${zeroY.toFixed(2)}" class="zero-line"></line>
+    ${line}${markers}
+  </svg><div class="performance-chart-footer"><span>${escapeHtml(formatDateTime(first.outcomeAt))}</span><strong>${formatSignedR(last.cumulativeRealizedR)}</strong><span>${escapeHtml(formatDateTime(last.outcomeAt))}</span></div>
+  <p class="performance-data-note">${series.length} canonical R record(s) plotted chronologically.${Number(quality.realizedRWithoutOutcomeTimestamp || 0) ? ` ${Number(quality.realizedRWithoutOutcomeTimestamp)} R record(s) lack a trustworthy outcome timestamp and cannot be plotted.` : ""}${finalMatchesKpi ? " Final cumulative R reconciles with the KPI." : " Final cumulative R does not reconcile with the KPI because some canonical R records cannot be dated."}</p>`;
 }
 
 function renderAdminBestWorstPeriods(bestWorst) {
@@ -4423,7 +4461,7 @@ function renderAdminBestWorstPeriods(bestWorst) {
 
 function renderPeriodRank(label, period) {
   if (!period) return `<div><span>${label}</span><strong>Not enough data</strong></div>`;
-  return `<div><span>${label}</span><strong>${escapeHtml(period.period)}</strong><small>${formatSignedR(period.netRealizedR)} · ${formatAdminPercent(period.winRate)} win · ${period.signals} terminal</small></div>`;
+  return `<div><span>${label}</span><strong>${escapeHtml(period.period)}</strong><small>${formatSignedR(period.netRealizedR)} · ${formatAdminPercent(period.winRate)} win · ${period.realizedRObservations} R records · ${period.signals} terminal</small></div>`;
 }
 
 function renderAdminPerformanceCategories(categories, dimension) {
