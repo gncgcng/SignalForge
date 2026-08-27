@@ -171,6 +171,51 @@ export async function getGeneratedSignalStats() {
   return { total: Number(row.total || 0), active: Number(row.active || 0), expiringSoon: Number(row.expiring_soon || 0), hitTp: Number(row.hit_tp || 0), hitSl: Number(row.hit_sl || 0), expired: Number(row.expired || 0), duplicateBlocked: Number(row.duplicate_blocked || 0), cooldownBlocked: Number(row.cooldown_blocked || 0), correlatedDuplicate: Number(row.correlated_duplicate || 0), quarantinedTimeframe: Number(row.quarantined_timeframe || 0), readinessFailed: Number(row.readiness_failed || 0), invalidLegacyReady: Number(row.invalid_legacy_ready || 0), today: Number(row.today || 0), week: Number(row.week || 0), winRate: closed ? Number(((Number(row.hit_tp) / closed) * 100).toFixed(1)) : 0, averageRiskReward: Number(Number(row.average_rr || 0).toFixed(2)), averageConfidence: Number(Number(row.average_confidence || 0).toFixed(1)) };
 }
 
+export async function listGeneratedSignalPerformanceRecords(filters = {}) {
+  const values = [];
+  const clauses = ["g.status IN ('Hit TP','Hit SL','Expired')"];
+  const add = (sql, value) => { values.push(value); clauses.push(sql.replace("?", `$${values.length}`)); };
+  if (filters.pair) {
+    values.push(`%${filters.pair}%`);
+    clauses.push(`(g.pair ILIKE $${values.length} OR g.display_pair ILIKE replace(replace($${values.length}, '-', ''), '/', ''))`);
+  }
+  if (filters.timeframe) add("g.timeframe = ?", filters.timeframe);
+  if (filters.direction) add("g.direction = ?", filters.direction);
+  if (filters.strategy) { values.push(`%${filters.strategy}%`); clauses.push(`g.strategy ILIKE $${values.length}`); }
+  if (filters.pattern) { values.push(`%${filters.pattern}%`); clauses.push(`COALESCE(g.pattern,'') ILIKE $${values.length}`); }
+  if (filters.source) {
+    values.push(filters.source);
+    clauses.push(`(g.source = $${values.length} OR g.source_history ? $${values.length})`);
+  }
+  if (filters.engineVersion) add("g.confidence_version = ?", filters.engineVersion);
+  if (Number.isFinite(filters.confidenceMin)) add("COALESCE(g.calibrated_confidence, g.confidence) >= ?", filters.confidenceMin);
+  if (Number.isFinite(filters.confidenceMax)) add("COALESCE(g.calibrated_confidence, g.confidence) <= ?", filters.confidenceMax);
+  const result = await query(`
+    SELECT g.id, g.pair, g.display_pair, g.timeframe, g.direction, g.strategy, g.pattern,
+      g.source, g.confidence, g.calibrated_confidence, g.confidence_version, g.status,
+      g.realized_r, g.outcome_evaluated_at
+    FROM generated_signals g
+    WHERE ${clauses.join(" AND ")}
+    ORDER BY g.outcome_evaluated_at ASC NULLS LAST, g.id ASC
+  `, values);
+  return result.rows.map((row) => ({
+    id: row.id,
+    pair: row.pair,
+    displayPair: row.display_pair,
+    timeframe: row.timeframe,
+    direction: row.direction,
+    strategy: row.strategy,
+    pattern: row.pattern,
+    source: row.source,
+    confidence: Number(row.confidence),
+    calibratedConfidence: row.calibrated_confidence == null ? Number(row.confidence) : Number(row.calibrated_confidence),
+    confidenceVersion: row.confidence_version,
+    status: row.status,
+    realizedR: row.realized_r == null ? null : Number(row.realized_r),
+    outcomeEvaluatedAt: row.outcome_evaluated_at || null
+  }));
+}
+
 export async function listActiveGeneratedSignals(limit = 500) {
   const result = await query("SELECT * FROM generated_signals WHERE status = 'Active' ORDER BY created_at ASC LIMIT $1", [limit]);
   return result.rows.map(mapGeneratedSignal);

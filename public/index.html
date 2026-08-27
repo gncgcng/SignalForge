@@ -2051,29 +2051,67 @@
               <div><span class="eyebrow">ADMIN SIGNALS</span><h3>All generated signals</h3><p>Validated setups found by SignalForge, independent of unlocks or credits.</p></div>
               <span id="admin-signals-total-label">0 records</span>
             </div>
-            <div class="admin-signal-stats" id="admin-signal-stats"></div>
-            <div class="admin-signal-quality-panel" id="admin-signal-quality-panel"></div>
-            <form class="admin-signal-filters" id="admin-signal-filters">
-              <input class="sf-input" name="search" type="search" placeholder="Search pair, strategy, pattern, notes, or signal ID">
-              <select class="sf-select" name="status"><option value="all">All statuses</option><option>Active</option><option value="expiring-soon">Expiring Soon</option><option>Hit TP</option><option>Hit SL</option><option>Expired</option><option value="closed">Closed</option><option>Duplicate blocked</option><option>Cooldown blocked</option><option>Correlated duplicate</option><option>Quarantined timeframe</option><option>Readiness failed</option><option>Invalid legacy ready signal</option></select>
-              <select class="sf-select" name="performanceScope"><option value="current">Current engine only</option><option value="legacy">Legacy only</option><option value="all">All signals</option></select>
-              <input class="sf-input" name="pair" placeholder="Pair">
-              <select class="sf-select" name="timeframe"><option value="">All timeframes</option><option>1m</option><option>5m</option><option>15m</option><option>1h</option><option>4h</option></select>
-              <select class="sf-select" name="direction"><option value="">Both directions</option><option value="long">Long</option><option value="short">Short</option></select>
-              <input class="sf-input" name="strategy" placeholder="Strategy">
-              <input class="sf-input" name="pattern" placeholder="Pattern">
-              <select class="sf-select" name="source"><option value="">All sources</option><option value="manual_scan">Manual scan</option><option value="auto_crypto_watcher">Auto crypto watcher</option><option value="telegram_alert">Telegram alert</option><option value="candidate_promotion">Candidate promotion</option><option value="backtest_shadow">Backtest shadow</option><option value="admin_test">Admin test</option><option value="legacy_unlocked_signal">Legacy unlocked</option><option value="legacy_saved_signal">Legacy saved</option></select>
-              <label>Confidence <input class="sf-input" name="confidenceMin" type="number" min="0" max="99" placeholder="Min"></label>
-              <label>Confidence <input class="sf-input" name="confidenceMax" type="number" min="0" max="99" placeholder="Max"></label>
-              <label>Quality <input class="sf-input" name="qualityMin" type="number" min="0" max="100" placeholder="Min"></label>
-              <label>Quality <input class="sf-input" name="qualityMax" type="number" min="0" max="100" placeholder="Max"></label>
-              <input class="sf-input" name="from" type="date" aria-label="Created from">
-              <input class="sf-input" name="to" type="date" aria-label="Created through">
-              <select class="sf-select" name="sort"><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="confidence">Highest confidence</option><option value="rr">Highest R/R</option></select>
-              <button type="submit">Apply filters</button><button class="secondary-action" id="admin-signal-filters-clear" type="button">Clear</button>
-            </form>
-            <div class="admin-signals-table-wrap" id="admin-signals-table"><div class="empty-state"><strong>Loading generated signals...</strong></div></div>
-            <div class="admin-signals-pagination"><button class="secondary-action" id="admin-signals-prev" type="button">Previous</button><span id="admin-signals-page-label">Page 1</span><button class="secondary-action" id="admin-signals-next" type="button">Next</button></div>
+            <div class="admin-signals-tabs" role="tablist" aria-label="Admin Signals sections">
+              <button class="active" id="admin-signals-tab-signals" data-admin-signals-tab="signals" type="button" role="tab" aria-selected="true" aria-controls="admin-signals-panel-signals">Signals</button>
+              <button id="admin-signals-tab-performance" data-admin-signals-tab="performance" type="button" role="tab" aria-selected="false" aria-controls="admin-signals-panel-performance">Performance</button>
+              <button id="admin-signals-tab-calibration" data-admin-signals-tab="calibration" type="button" role="tab" aria-selected="false" aria-controls="admin-signals-panel-calibration">Calibration</button>
+            </div>
+            <section class="admin-signals-tab-panel" id="admin-signals-panel-signals" role="tabpanel" aria-labelledby="admin-signals-tab-signals">
+              <div class="admin-signal-today" id="admin-signal-today"><div class="empty-state"><strong>Loading today's outcomes...</strong></div></div>
+              <form class="admin-signal-filters" id="admin-signal-filters">
+                <input class="sf-input" name="search" type="search" placeholder="Search pair, strategy, pattern, notes, or signal ID">
+                <select class="sf-select" name="status"><option value="all">All statuses</option><option>Active</option><option value="expiring-soon">Expiring Soon</option><option>Hit TP</option><option>Hit SL</option><option>Expired</option><option value="closed">Closed</option><option>Duplicate blocked</option><option>Cooldown blocked</option><option>Correlated duplicate</option><option>Quarantined timeframe</option><option>Readiness failed</option><option>Invalid legacy ready signal</option></select>
+                <select class="sf-select" name="performanceScope"><option value="current">Current engine only</option><option value="legacy">Legacy only</option><option value="all">All signals</option></select>
+                <input class="sf-input" name="pair" placeholder="Pair">
+                <select class="sf-select" name="timeframe"><option value="">All timeframes</option><option>1m</option><option>5m</option><option>15m</option><option>1h</option><option>4h</option></select>
+                <select class="sf-select" name="direction"><option value="">Both directions</option><option value="long">Long</option><option value="short">Short</option></select>
+                <input class="sf-input" name="strategy" placeholder="Strategy">
+                <input class="sf-input" name="pattern" placeholder="Pattern">
+                <select class="sf-select" name="source"><option value="">All sources</option><option value="manual_scan">Manual scan</option><option value="auto_crypto_watcher">Auto crypto watcher</option><option value="telegram_alert">Telegram alert</option><option value="candidate_promotion">Candidate promotion</option><option value="backtest_shadow">Backtest shadow</option><option value="admin_test">Admin test</option><option value="legacy_unlocked_signal">Legacy unlocked</option><option value="legacy_saved_signal">Legacy saved</option></select>
+                <label>Confidence <input class="sf-input" name="confidenceMin" type="number" min="0" max="99" placeholder="Min"></label>
+                <label>Confidence <input class="sf-input" name="confidenceMax" type="number" min="0" max="99" placeholder="Max"></label>
+                <label>Quality <input class="sf-input" name="qualityMin" type="number" min="0" max="100" placeholder="Min"></label>
+                <label>Quality <input class="sf-input" name="qualityMax" type="number" min="0" max="100" placeholder="Max"></label>
+                <input class="sf-input" name="from" type="date" aria-label="Created from">
+                <input class="sf-input" name="to" type="date" aria-label="Created through">
+                <select class="sf-select" name="sort"><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="confidence">Highest confidence</option><option value="rr">Highest R/R</option></select>
+                <button type="submit">Apply filters</button><button class="secondary-action" id="admin-signal-filters-clear" type="button">Clear</button>
+              </form>
+              <div class="admin-signals-table-wrap" id="admin-signals-table"><div class="empty-state"><strong>Loading generated signals...</strong></div></div>
+              <div class="admin-signals-pagination"><button class="secondary-action" id="admin-signals-prev" type="button">Previous</button><span id="admin-signals-page-label">Page 1</span><button class="secondary-action" id="admin-signals-next" type="button">Next</button></div>
+            </section>
+            <section class="admin-signals-tab-panel hidden" id="admin-signals-panel-performance" role="tabpanel" aria-labelledby="admin-signals-tab-performance">
+              <form class="admin-performance-filters" id="admin-signal-performance-filters">
+                <select class="sf-select" name="range" aria-label="Performance date range"><option value="today">Today</option><option value="7d">7D</option><option value="30d" selected>30D</option><option value="90d">90D</option><option value="ytd">YTD</option><option value="all">All</option><option value="custom">Custom</option></select>
+                <select class="sf-select" name="grouping" aria-label="Group performance"><option value="day">By day</option><option value="week">By week</option><option value="month">By month</option></select>
+                <input class="sf-input" name="from" type="date" aria-label="Outcome from">
+                <input class="sf-input" name="to" type="date" aria-label="Outcome through">
+                <input class="sf-input" name="pair" placeholder="Symbol / pair">
+                <select class="sf-select" name="timeframe"><option value="">All timeframes</option><option>1m</option><option>5m</option><option>15m</option><option>1h</option><option>4h</option></select>
+                <select class="sf-select" name="direction"><option value="">Both directions</option><option value="long">Long</option><option value="short">Short</option></select>
+                <input class="sf-input" name="strategy" placeholder="Strategy">
+                <input class="sf-input" name="pattern" placeholder="Pattern">
+                <select class="sf-select" name="source"><option value="">All sources</option><option value="manual_scan">Manual scan</option><option value="auto_crypto_watcher">Auto crypto watcher</option><option value="telegram_alert">Telegram alert</option><option value="candidate_promotion">Candidate promotion</option><option value="backtest_shadow">Backtest shadow</option><option value="admin_test">Admin test</option><option value="legacy_unlocked_signal">Legacy unlocked</option><option value="legacy_saved_signal">Legacy saved</option></select>
+                <input class="sf-input" name="engineVersion" placeholder="Engine / confidence version">
+                <label>Confidence <input class="sf-input" name="confidenceMin" type="number" min="0" max="100" placeholder="Min"></label>
+                <label>Confidence <input class="sf-input" name="confidenceMax" type="number" min="0" max="100" placeholder="Max"></label>
+                <button type="submit">Apply</button><button class="secondary-action" id="admin-signal-performance-clear" type="button">Clear</button>
+              </form>
+              <p class="admin-performance-semantics">Performance uses canonical UTC outcome timestamps grouped into local calendar periods. <span id="admin-performance-timezone">Timezone: UTC</span> Win rate excludes expired signals; missing realized R is never treated as zero.</p>
+              <p class="admin-performance-data-quality" id="admin-performance-data-quality"></p>
+              <div class="admin-performance-kpis" id="admin-performance-kpis"></div>
+              <div class="admin-performance-chart-grid">
+                <article class="admin-performance-chart"><header><h4>Win rate over time</h4><span>TP / (TP + SL)</span></header><div id="admin-performance-win-rate"></div></article>
+                <article class="admin-performance-chart"><header><h4>TP vs SL</h4><span>Expired shown separately</span></header><div id="admin-performance-outcomes"></div></article>
+                <article class="admin-performance-chart wide"><header><h4>Cumulative realized R</h4><span>Canonical realized_r only</span></header><div id="admin-performance-cumulative"></div></article>
+              </div>
+              <section class="admin-performance-periods"><div class="section-title"><div><h4>Best / worst periods</h4><p>Ranked by net R after minimum terminal outcomes with canonical realized R.</p></div></div><div id="admin-performance-best-worst"></div></section>
+              <section class="admin-performance-categories"><div class="section-title"><div><h4>Category performance</h4><p>Click a category to apply it as a dashboard filter.</p></div><select class="sf-select" id="admin-performance-category"><option value="strategy">Strategy</option><option value="timeframe">Timeframe</option><option value="direction">Direction</option><option value="pattern">Pattern</option><option value="confidence">Confidence bucket</option><option value="source">Source</option><option value="symbol">Symbol</option></select></div><div id="admin-performance-category-table"></div></section>
+              <div class="empty-state hidden" id="admin-performance-empty"><strong>No terminal outcomes match these filters.</strong></div>
+            </section>
+            <section class="admin-signals-tab-panel hidden" id="admin-signals-panel-calibration" role="tabpanel" aria-labelledby="admin-signals-tab-calibration">
+              <div class="admin-signal-quality-panel" id="admin-signal-quality-panel"></div>
+            </section>
             <div class="admin-signal-modal hidden" id="admin-signal-modal" role="dialog" aria-modal="true" aria-labelledby="admin-signal-modal-title">
               <button class="admin-signal-modal-backdrop" data-admin-signal-close type="button" aria-label="Close signal details"></button>
               <article class="admin-signal-detail-card"><header><div><span class="eyebrow">Full internal record</span><h3 id="admin-signal-modal-title">Generated signal</h3></div><button class="secondary-action" data-admin-signal-close type="button">Close</button></header><div id="admin-signal-detail"></div></article>

@@ -171,7 +171,11 @@ const state = {
   adminUserSearchResults: [],
   validationDashboard: null,
   candidateQuality: null,
-  adminSignals: { signals: [], stats: {}, page: 1, totalPages: 1, total: 0, filters: {} },
+  adminSignals: {
+    signals: [], stats: {}, page: 1, totalPages: 1, total: 0, filters: {}, activeTab: "signals",
+    todayPerformance: null,
+    performance: { filters: { range: "30d", grouping: "day" }, category: "strategy", data: null }
+  },
   adminCryptoMarkets: { markets: [], summary: {}, filters: {} },
   profile: null,
   publicProfile: null,
@@ -446,6 +450,8 @@ const webhookEventList = document.querySelector("#webhook-event-list");
 const webhookEventSummary = document.querySelector("#webhook-event-summary");
 const adminSignalFilters = document.querySelector("#admin-signal-filters");
 const adminSignalsTable = document.querySelector("#admin-signals-table");
+const adminSignalPerformanceFilters = document.querySelector("#admin-signal-performance-filters");
+const adminPerformanceCategory = document.querySelector("#admin-performance-category");
 const adminSignalModal = document.querySelector("#admin-signal-modal");
 const adminSignalDetail = document.querySelector("#admin-signal-detail");
 const adminCryptoFilters = document.querySelector("#admin-crypto-filters");
@@ -2111,6 +2117,30 @@ document.querySelector("#admin-signal-filters-clear")?.addEventListener("click",
 });
 document.querySelector("#admin-signals-prev")?.addEventListener("click", () => { if (state.adminSignals.page > 1) { state.adminSignals.page -= 1; loadAdminSignals(); } });
 document.querySelector("#admin-signals-next")?.addEventListener("click", () => { if (state.adminSignals.page < state.adminSignals.totalPages) { state.adminSignals.page += 1; loadAdminSignals(); } });
+document.querySelector(".admin-signals-tabs")?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-admin-signals-tab]");
+  if (!button) return;
+  setAdminSignalsTab(button.dataset.adminSignalsTab);
+});
+adminSignalPerformanceFilters?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  state.adminSignals.performance.filters = Object.fromEntries(new FormData(adminSignalPerformanceFilters).entries());
+  loadAdminSignalPerformance();
+});
+document.querySelector("#admin-signal-performance-clear")?.addEventListener("click", () => {
+  adminSignalPerformanceFilters.reset();
+  state.adminSignals.performance.filters = { range: "30d", grouping: "day" };
+  loadAdminSignalPerformance();
+});
+adminPerformanceCategory?.addEventListener("change", () => {
+  state.adminSignals.performance.category = adminPerformanceCategory.value;
+  loadAdminSignalPerformance();
+});
+document.querySelector("#admin-performance-category-table")?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-performance-category-value]");
+  if (!button) return;
+  applyAdminPerformanceCategoryFilter(button.dataset.performanceCategory, button.dataset.performanceCategoryValue);
+});
 adminSignalsTable?.addEventListener("click", async (event) => {
   const review = event.target.closest("[data-review-signal-id]");
   if (review) { openSignalReview(review.dataset.reviewSignalId); return; }
@@ -4124,6 +4154,48 @@ async function loadAdminSignals() {
   const result = await api.request(`/api/admin/signals?${params}`);
   state.adminSignals = { ...state.adminSignals, ...result, signals: result.signals || [], stats: result.stats || {} };
   renderAdminSignals();
+  loadAdminSignalToday().catch((error) => {
+    const target = document.querySelector("#admin-signal-today");
+    if (target) target.innerHTML = `<div class="empty-state"><strong>Today's summary is unavailable.</strong><p class="reasoning">${escapeHtml(error.message)}</p></div>`;
+  });
+}
+
+async function loadAdminSignalToday() {
+  if (!state.user?.isAdmin) throw new Error("Admin access required.");
+  const params = new URLSearchParams({ range: "today", grouping: "day", category: "strategy", timezone: getAdminPerformanceTimezone() });
+  state.adminSignals.todayPerformance = await api.request(`/api/admin/signals/performance?${params}`);
+  renderAdminSignalToday();
+}
+
+async function loadAdminSignalPerformance() {
+  if (!state.user?.isAdmin) throw new Error("Admin access required.");
+  const performance = state.adminSignals.performance;
+  const params = new URLSearchParams({ category: performance.category || "strategy", timezone: getAdminPerformanceTimezone() });
+  for (const [key, value] of Object.entries(performance.filters || {})) {
+    if (String(value || "").trim()) params.set(key, String(value).trim());
+  }
+  const kpis = document.querySelector("#admin-performance-kpis");
+  if (kpis) kpis.innerHTML = `<div class="empty-state"><strong>Loading performance...</strong></div>`;
+  try {
+    performance.data = await api.request(`/api/admin/signals/performance?${params}`);
+    renderAdminSignalPerformance();
+  } catch (error) {
+    if (kpis) kpis.innerHTML = `<div class="empty-state"><strong>Performance is unavailable.</strong><p class="reasoning">${escapeHtml(error.message)}</p></div>`;
+  }
+}
+
+function setAdminSignalsTab(tab) {
+  const next = ["signals", "performance", "calibration"].includes(tab) ? tab : "signals";
+  state.adminSignals.activeTab = next;
+  document.querySelectorAll("[data-admin-signals-tab]").forEach((button) => {
+    const active = button.dataset.adminSignalsTab === next;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", String(active));
+  });
+  ["signals", "performance", "calibration"].forEach((name) => {
+    document.querySelector(`#admin-signals-panel-${name}`)?.classList.toggle("hidden", name !== next);
+  });
+  if (next === "performance" && !state.adminSignals.performance.data) loadAdminSignalPerformance();
 }
 
 async function loadAdminCryptoMarkets() {
@@ -4249,18 +4321,9 @@ function cryptoSettingToggle(market, key, label, disabled = false) {
 
 function renderAdminSignals() {
   const data = state.adminSignals;
-  const stats = data.stats || {};
   document.querySelector("#admin-signals-total-label").textContent = `${formatInteger(data.total || 0)} records`;
-  document.querySelector("#admin-signal-stats").innerHTML = [
-    ["Total generated", stats.total], ["Active", stats.active], ["Expiring soon", stats.expiringSoon],
-    ["Hit TP", stats.hitTp], ["Hit SL", stats.hitSl], ["Expired", stats.expired],
-    ["Duplicate blocked", stats.duplicateBlocked], ["Cooldown blocked", stats.cooldownBlocked],
-    ["Correlated blocked", stats.correlatedDuplicate], ["Timeframe blocked", stats.quarantinedTimeframe],
-    ["Readiness failed", stats.readinessFailed], ["Invalid legacy", stats.invalidLegacyReady],
-    ["Win rate", `${Number(stats.winRate || 0).toFixed(1)}%`], ["Average R/R", `${Number(stats.averageRiskReward || 0).toFixed(2)}R`],
-    ["Average confidence", `${Number(stats.averageConfidence || 0).toFixed(1)}%`], ["Today", stats.today], ["This week", stats.week]
-  ].map(([label, value]) => `<article><span>${label}</span><strong>${value ?? 0}</strong></article>`).join("");
-  renderAdminSignalQualityPanel(data.qualityBreakdown || {});
+  renderAdminSignalQualityPanel(data.qualityBreakdown || {}, data.stats || {});
+  renderAdminSignalToday();
   adminSignalsTable.innerHTML = data.signals.length ? `
     <div class="admin-generated-table">
       <div class="admin-generated-row admin-generated-head"><span>Pair</span><span>Setup</span><span>Levels</span><span>Scores</span><span>Status</span><span>Source / created</span><span>Actions</span></div>
@@ -4269,9 +4332,129 @@ function renderAdminSignals() {
   document.querySelector("#admin-signals-page-label").textContent = `Page ${data.page || 1} of ${data.totalPages || 1}`;
   document.querySelector("#admin-signals-prev").disabled = Number(data.page || 1) <= 1;
   document.querySelector("#admin-signals-next").disabled = Number(data.page || 1) >= Number(data.totalPages || 1);
+  setAdminSignalsTab(data.activeTab || "signals");
 }
 
-function renderAdminSignalQualityPanel(quality = {}) {
+function renderAdminSignalToday() {
+  const target = document.querySelector("#admin-signal-today");
+  if (!target) return;
+  const metrics = state.adminSignals.todayPerformance?.metrics;
+  if (!metrics) return;
+  target.innerHTML = `<strong>Today</strong><div>
+    <span class="performance-win"><b>${Number(metrics.wins || 0)}</b> Wins</span>
+    <span class="performance-loss"><b>${Number(metrics.losses || 0)}</b> Losses</span>
+    <span class="performance-expired"><b>${Number(metrics.expired || 0)}</b> Expired</span>
+    <span><b>${formatAdminPercent(metrics.winRate)}</b> Win Rate</span>
+    <span><b>${formatSignedR(metrics.netRealizedR)}</b> Net realized R</span>
+    ${Number(metrics.missingRealizedR || 0) ? `<span><b>${Number(metrics.missingRealizedR)}</b> R unavailable</span>` : ""}
+  </div>`;
+}
+
+function renderAdminSignalPerformance() {
+  const data = state.adminSignals.performance.data;
+  if (!data) return;
+  const metrics = data.metrics || {};
+  const timezone = data.range?.timezone || "UTC";
+  const timezoneLabel = document.querySelector("#admin-performance-timezone");
+  if (timezoneLabel) timezoneLabel.textContent = `Timezone: ${timezone}`;
+  const kpis = [
+    ["Closed signals", metrics.closedSignals ?? 0], ["Wins / TP", metrics.wins ?? 0], ["Losses / SL", metrics.losses ?? 0],
+    ["Expired", metrics.expired ?? 0], ["Win rate", formatAdminPercent(metrics.winRate)], ["Net realized R", formatSignedR(metrics.netRealizedR)],
+    ["Expectancy / terminal", formatMaybeR(metrics.expectancyR)], ["Average winner", formatMaybeR(metrics.averageWinnerR)], ["Average loser", formatMaybeR(metrics.averageLoserR)]
+  ];
+  document.querySelector("#admin-performance-kpis").innerHTML = kpis.map(([label, value]) => `<article><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value))}</strong></article>`).join("");
+  const quality = data.dataQuality || {};
+  document.querySelector("#admin-performance-data-quality").textContent = [
+    Number(quality.missingRealizedR || 0) ? `${Number(quality.missingRealizedR)} terminal record(s) excluded from R calculations` : "All displayed terminal records have canonical realized R",
+    Number(quality.missingOutcomeTimestamp || 0) ? `${Number(quality.missingOutcomeTimestamp)} historical terminal record(s) excluded because outcome_evaluated_at is unavailable` : "All considered records have an outcome evaluation timestamp"
+  ].join(" · ");
+  document.querySelector("#admin-performance-win-rate").innerHTML = renderAdminWinRateChart(data.timeline || []);
+  document.querySelector("#admin-performance-outcomes").innerHTML = renderAdminOutcomeChart(data.timeline || []);
+  document.querySelector("#admin-performance-cumulative").innerHTML = renderAdminCumulativeRChart(data.timeline || [], quality);
+  document.querySelector("#admin-performance-best-worst").innerHTML = renderAdminBestWorstPeriods(data.bestWorst || {});
+  document.querySelector("#admin-performance-category-table").innerHTML = renderAdminPerformanceCategories(data.categories || [], data.category || state.adminSignals.performance.category);
+  document.querySelector("#admin-performance-empty")?.classList.toggle("hidden", Number(metrics.signals || 0) > 0);
+}
+
+function renderAdminWinRateChart(timeline) {
+  if (!timeline.length) return `<p class="reasoning">No periods to chart.</p>`;
+  return `<div class="performance-bars">${timeline.map((period) => {
+    const rate = period.winRate == null ? 0 : period.winRate;
+    const detail = `${period.period}: ${period.closedSignals} closed, TP ${period.wins}, SL ${period.losses}, Expired ${period.expired}, ${formatAdminPercent(period.winRate)} win, ${formatSignedR(period.netRealizedR)}, ${formatMaybeR(period.expectancyR)} expectancy`;
+    return `<div class="performance-bar-row" title="${escapeHtml(detail)}"><span>${escapeHtml(period.period)}</span><div><i class="win-rate" style="width:${Math.max(0, Math.min(100, rate))}%"></i></div><strong>${formatAdminPercent(period.winRate)}</strong></div>`;
+  }).join("")}</div>`;
+}
+
+function renderAdminOutcomeChart(timeline) {
+  if (!timeline.length) return `<p class="reasoning">No periods to chart.</p>`;
+  const maximum = Math.max(1, ...timeline.map((period) => period.signals));
+  return `<div class="performance-bars">${timeline.map((period) => {
+    const detail = `${period.period}: TP ${period.wins}, SL ${period.losses}, Expired ${period.expired}`;
+    return `<div class="performance-bar-row outcomes" title="${escapeHtml(detail)}"><span>${escapeHtml(period.period)}</span><div><i class="tp" style="width:${(period.wins / maximum) * 100}%"></i><i class="sl" style="width:${(period.losses / maximum) * 100}%"></i><i class="expired" style="width:${(period.expired / maximum) * 100}%"></i></div><strong>${period.wins}/${period.losses}/${period.expired}</strong></div>`;
+  }).join("")}</div>`;
+}
+
+function renderAdminCumulativeRChart(timeline, quality) {
+  if (!timeline.length) return `<p class="reasoning">No canonical realized R observations to chart.</p>`;
+  const values = timeline.map((period) => Number(period.cumulativeRealizedR || 0));
+  const minimum = Math.min(0, ...values);
+  const maximum = Math.max(0, ...values);
+  const span = Math.max(1, maximum - minimum);
+  const points = timeline.map((period, index) => {
+    const x = timeline.length === 1 ? 50 : 4 + (index / (timeline.length - 1)) * 92;
+    const y = 92 - ((Number(period.cumulativeRealizedR || 0) - minimum) / span) * 84;
+    return { x, y, period };
+  });
+  return `<svg class="performance-line-chart" viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="Cumulative realized R over time">
+    <line x1="4" y1="${92 - ((0 - minimum) / span) * 84}" x2="96" y2="${92 - ((0 - minimum) / span) * 84}" class="zero-line"></line>
+    <polyline points="${points.map((point) => `${point.x},${point.y}`).join(" ")}" class="r-line"></polyline>
+    ${points.map((point) => `<circle cx="${point.x}" cy="${point.y}" r="1.4"><title>${escapeHtml(`${point.period.period}: ${formatSignedR(point.period.cumulativeRealizedR)}`)}</title></circle>`).join("")}
+  </svg><div class="performance-chart-footer"><span>${escapeHtml(timeline[0].period)}</span><strong>${formatSignedR(timeline[timeline.length - 1].cumulativeRealizedR)}</strong><span>${escapeHtml(timeline[timeline.length - 1].period)}</span></div>
+  ${Number(quality.missingRealizedR || 0) ? `<p class="performance-data-note">${Number(quality.missingRealizedR)} terminal record(s) have no canonical realized R and were excluded from the line.</p>` : ""}`;
+}
+
+function renderAdminBestWorstPeriods(bestWorst) {
+  return ["day", "week", "month"].map((grouping) => {
+    const data = bestWorst[grouping] || {};
+    return `<article><header><strong>${titleCase(grouping)}</strong><span>Min ${Number(data.minimumTerminalSignals || 0)} terminal</span></header>${renderPeriodRank("Best", data.best)}${renderPeriodRank("Worst", data.worst)}</article>`;
+  }).join("");
+}
+
+function renderPeriodRank(label, period) {
+  if (!period) return `<div><span>${label}</span><strong>Not enough data</strong></div>`;
+  return `<div><span>${label}</span><strong>${escapeHtml(period.period)}</strong><small>${formatSignedR(period.netRealizedR)} · ${formatAdminPercent(period.winRate)} win · ${period.signals} terminal</small></div>`;
+}
+
+function renderAdminPerformanceCategories(categories, dimension) {
+  if (!categories.length) return `<p class="reasoning">No category results.</p>`;
+  return `<div class="admin-performance-table"><div class="admin-performance-row head"><span>${escapeHtml(titleCase(dimension))}</span><span>Signals</span><span>TP / SL / Exp</span><span>Win rate</span><span>Net R</span><span>Expectancy</span><span>Avg confidence</span></div>${categories.map((item) => `<button class="admin-performance-row" data-performance-category="${escapeHtml(dimension)}" data-performance-category-value="${escapeHtml(item.filterValue)}" type="button"><span><strong>${escapeHtml(item.value)}</strong></span><span>${item.signals}</span><span>${item.wins} / ${item.losses} / ${item.expired}</span><span>${formatAdminPercent(item.winRate)}</span><span>${formatSignedR(item.netRealizedR)}</span><span>${formatMaybeR(item.expectancyR)}</span><span>${item.averageConfidence == null ? "n/a" : `${Number(item.averageConfidence).toFixed(1)}%`}</span></button>`).join("")}</div>`;
+}
+
+function applyAdminPerformanceCategoryFilter(dimension, value) {
+  if (!adminSignalPerformanceFilters) return;
+  const field = { symbol: "pair", confidence: null }[dimension] ?? dimension;
+  if (dimension === "confidence") {
+    const ranges = { "Below 60": [0, 59.999], "60-69": [60, 69.999], "70-79": [70, 79.999], "80-84": [80, 84.999], "85-89": [85, 89.999], "90-100": [90, 100] };
+    const selected = ranges[value];
+    if (selected) {
+      adminSignalPerformanceFilters.elements.confidenceMin.value = selected[0];
+      adminSignalPerformanceFilters.elements.confidenceMax.value = selected[1];
+    }
+  } else if (field && adminSignalPerformanceFilters.elements[field]) {
+    adminSignalPerformanceFilters.elements[field].value = value === "No pattern" ? "" : value;
+  }
+  state.adminSignals.performance.filters = Object.fromEntries(new FormData(adminSignalPerformanceFilters).entries());
+  loadAdminSignalPerformance();
+}
+
+function formatAdminPercent(value) { return value == null ? "n/a" : `${Number(value).toFixed(1)}%`; }
+function formatSignedR(value) { const number = Number(value || 0); return `${number > 0 ? "+" : ""}${number.toFixed(2)}R`; }
+function formatMaybeR(value) { return value == null ? "n/a" : `${Number(value).toFixed(2)}R`; }
+function getAdminPerformanceTimezone() {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"; } catch { return "UTC"; }
+}
+
+function renderAdminSignalQualityPanel(quality = {}, stats = {}) {
   const panel = document.querySelector("#admin-signal-quality-panel");
   if (!panel) return;
   const warning = quality.warning || {};
@@ -4297,6 +4480,13 @@ function renderAdminSignalQualityPanel(quality = {}) {
     ["Best sources", quality.bestSources || [], "best"]
   ];
   panel.innerHTML = `
+    <article class="signal-quality-summary">
+      <div><span>Duplicate blocked</span><strong>${Number(stats.duplicateBlocked || 0)}</strong><small>Direct duplicate protection</small></div>
+      <div><span>Cooldown blocked</span><strong>${Number(stats.cooldownBlocked || 0)}</strong><small>Recent similar loss protection</small></div>
+      <div><span>Correlated duplicate</span><strong>${Number(stats.correlatedDuplicate || 0)}</strong><small>Cross-timeframe overlap</small></div>
+      <div><span>Quarantined timeframe</span><strong>${Number(stats.quarantinedTimeframe || 0)}</strong><small>Specific timeframe policy</small></div>
+      <div><span>Readiness failed</span><strong>${Number(stats.readinessFailed || 0)}</strong><small>Readiness gate</small></div>
+    </article>
     <article class="signal-quality-warning muted"><strong>${quality.scope === "legacy" ? "Legacy only" : quality.scope === "all" ? "All signals" : "Current engine only"}</strong><p>Admin Signal Quality defaults to current-engine records so legacy unlocked/saved signals do not distort live calibration.</p></article>
     ${warning.active ? `<article class="signal-quality-warning"><strong>Signal quality warning</strong><p>${escapeHtml(warning.message)}</p><small>Win rate excludes expired signals. Expired signals still reduce the quality score because they represent setups that failed to complete.</small></article>` : ""}
     ${renderConfidenceCalibrationSummary(quality.calibrationSummary || {})}

@@ -7,11 +7,13 @@ import {
   getGeneratedSignalById,
   getGeneratedSignalStats,
   listActiveGeneratedSignals,
+  listGeneratedSignalPerformanceRecords,
   listGeneratedSignals,
   isForwardOutcomeEligibleSignal,
   updateGeneratedSignalStatus,
   upsertGeneratedSignal
 } from "./generatedSignalRepository.js";
+import { buildGeneratedSignalPerformance } from "./generatedSignalPerformance.js";
 
 export async function saveGeneratedSignal(signal, context = {}) {
   if (!signal || signal.validationPassed === false) return null;
@@ -39,6 +41,11 @@ export async function getAdminGeneratedSignals(filters) {
 
 export async function getAdminGeneratedSignal(id) {
   return getGeneratedSignalById(id);
+}
+
+export async function getAdminGeneratedSignalPerformance(filters = {}) {
+  const records = await listGeneratedSignalPerformanceRecords(filters);
+  return buildGeneratedSignalPerformance(records, filters);
 }
 
 export async function updateAdminSignalGroupStatus(input, user) {

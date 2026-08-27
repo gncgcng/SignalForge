@@ -1,6 +1,6 @@
 import { readJson, sendError, sendJson } from "../../shared/http.js";
 import { isAdminUser } from "../auth/authService.js";
-import { getAdminGeneratedSignal, getAdminGeneratedSignals, updateAdminSignalGroupStatus } from "./generatedSignalService.js";
+import { getAdminGeneratedSignal, getAdminGeneratedSignalPerformance, getAdminGeneratedSignals, updateAdminSignalGroupStatus } from "./generatedSignalService.js";
 
 export async function handleAdminGeneratedSignalRoutes(req, res, pathname, url) {
   if (!pathname.startsWith("/api/admin/signals")) return false;
@@ -27,12 +27,34 @@ export async function handleAdminGeneratedSignalRoutes(req, res, pathname, url) 
   if (pathname === "/api/admin/signals") {
     return sendJson(res, 200, await getAdminGeneratedSignals(parseFilters(url.searchParams)));
   }
+  if (pathname === "/api/admin/signals/performance") {
+    try {
+      return sendJson(res, 200, await getAdminGeneratedSignalPerformance(parsePerformanceFilters(url.searchParams)));
+    } catch (error) {
+      return sendError(res, 400, error.message);
+    }
+  }
   const match = pathname.match(/^\/api\/admin\/signals\/([^/]+)$/);
   if (match) {
     const signal = await getAdminGeneratedSignal(decodeURIComponent(match[1]));
     return signal ? sendJson(res, 200, { signal }) : sendError(res, 404, "Generated signal not found.");
   }
   return false;
+}
+
+function parsePerformanceFilters(params) {
+  const number = (key) => { if (!params.has(key) || params.get(key) === "") return undefined; const value = Number(params.get(key)); return Number.isFinite(value) ? value : undefined; };
+  return {
+    range: ["today", "7d", "30d", "90d", "ytd", "all", "custom"].includes(params.get("range")) ? params.get("range") : "30d",
+    grouping: ["day", "week", "month"].includes(params.get("grouping")) ? params.get("grouping") : "day",
+    category: ["strategy", "timeframe", "direction", "pattern", "confidence", "source", "symbol"].includes(params.get("category")) ? params.get("category") : "strategy",
+    timezone: clean(params.get("timezone"), 80),
+    from: clean(params.get("from"), 10), to: clean(params.get("to"), 10),
+    pair: clean(params.get("pair"), 32), timeframe: clean(params.get("timeframe"), 8),
+    direction: ["long", "short"].includes(params.get("direction")) ? params.get("direction") : "",
+    strategy: clean(params.get("strategy"), 80), pattern: clean(params.get("pattern"), 80), source: clean(params.get("source"), 40),
+    engineVersion: clean(params.get("engineVersion"), 80), confidenceMin: number("confidenceMin"), confidenceMax: number("confidenceMax")
+  };
 }
 
 function parseFilters(params) {

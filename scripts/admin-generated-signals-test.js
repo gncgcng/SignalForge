@@ -72,6 +72,9 @@ const checks = {
     repository.includes("OFFSET") && repository.includes("totalPages"),
   dashboardAndFullDetails:
     html.includes('id="admin-signals-view"') && html.includes("All generated signals") &&
+    html.includes('data-admin-signals-tab="signals"') &&
+    html.includes('data-admin-signals-tab="performance"') &&
+    html.includes('data-admin-signals-tab="calibration"') &&
     html.includes('id="admin-signal-modal"') && app.includes("renderAdminSignalDetail") &&
     app.includes("Entry") && app.includes("Stop loss") && app.includes("Take profit") &&
     app.includes("Signal quality breakdown") && app.includes("Candidate origin") &&
@@ -83,6 +86,16 @@ const checks = {
     html.includes("Loading generated signals...") &&
     app.slice(app.indexOf("function renderAdminSignals()"), app.indexOf("function renderAdminSignalQualityPanel"))
       .includes("data.signals.map(renderAdminSignalRow)"),
+  calibrationRelocatedWithoutCalculationChange:
+    html.includes('id="admin-signals-panel-calibration"') &&
+    html.includes('class="admin-signal-quality-panel" id="admin-signal-quality-panel"') &&
+    app.includes("renderConfidenceCalibrationSummary") &&
+    app.includes("renderBestSignalQualityActions") &&
+    app.includes("renderWorstSignalQualityActions"),
+  performanceAdminOnlyAndReadOnly:
+    controller.includes('pathname === "/api/admin/signals/performance"') &&
+    controller.indexOf("if (!isAdminUser(req.user))") < controller.indexOf('pathname === "/api/admin/signals/performance"') &&
+    !controller.slice(controller.indexOf('pathname === "/api/admin/signals/performance"')).match(/UPDATE|INSERT|DELETE/),
   userSignalsRemainSeparate:
     controller.includes("/api/admin/signals") &&
     !controller.includes("listUserSignals") &&
@@ -108,6 +121,7 @@ const historicalSignals = [
   ...Array.from({ length: 14 }, (_, index) => adminSignal(`history-active-${index}`, "Active"))
 ];
 const adminRender = renderActualAdminSignals(historicalSignals);
+const tabRender = exerciseAdminSignalTabs();
 assert.equal(adminRender.renderedRows, 49);
 assert.equal(adminRender.detailButtons, 49);
 assert.match(adminRender.html, /Hit SL/);
@@ -116,6 +130,9 @@ assert.match(adminRender.html, /Active/);
 assert.equal(adminRender.totalLabel, "49 records");
 assert.deepEqual(adminRender.scanResults, ["TRUMP-USD", "PLUME-USD"]);
 assert.equal(adminRender.scannerHtml, "scanner-current-session");
+assert.equal(tabRender.performanceVisible, true);
+assert.equal(tabRender.signalsVisible, false);
+assert.equal(tabRender.performanceSelected, "true");
 
 for (const [name, passed] of Object.entries(checks)) {
   assert.equal(Boolean(passed), true, `Admin generated signals check failed: ${name}`);
@@ -167,7 +184,8 @@ console.log(JSON.stringify({
     availableRecords: historicalSignals.length,
     renderedRows: adminRender.renderedRows,
     detailButtons: adminRender.detailButtons,
-    scannerResultsPreserved: adminRender.scanResults.length
+    scannerResultsPreserved: adminRender.scanResults.length,
+    tabsSwitch: tabRender.performanceVisible
   },
   liveMigration
 }, null, 2));
@@ -175,7 +193,6 @@ console.log(JSON.stringify({
 function renderActualAdminSignals(signals) {
   const elements = new Map([
     ["#admin-signals-total-label", { textContent: "" }],
-    ["#admin-signal-stats", { innerHTML: "" }],
     ["#admin-signals-page-label", { textContent: "" }],
     ["#admin-signals-prev", { disabled: false }],
     ["#admin-signals-next", { disabled: false }]
@@ -199,6 +216,8 @@ function renderActualAdminSignals(signals) {
     adminSignalsTable,
     document: { querySelector: (selector) => elements.get(selector) },
     renderAdminSignalQualityPanel: () => {},
+    renderAdminSignalToday: () => {},
+    setAdminSignalsTab: () => {},
     formatInteger: (value) => String(Number(value || 0)),
     formatCurrency: (value) => String(value),
     formatDateTime: (value) => String(value),
@@ -244,6 +263,35 @@ function adminSignal(id, status) {
     source: "manual_scan",
     createdAt: "2026-08-07T12:00:00.000Z",
     validUntil: "2026-08-07T18:00:00.000Z"
+  };
+}
+
+function exerciseAdminSignalTabs() {
+  const names = ["signals", "performance", "calibration"];
+  const buttons = names.map((name) => ({
+    dataset: { adminSignalsTab: name },
+    selected: "false",
+    classList: { toggle() {} },
+    setAttribute(key, value) { if (key === "aria-selected") this.selected = value; }
+  }));
+  const panels = Object.fromEntries(names.map((name) => [name, {
+    hidden: name !== "signals",
+    classList: { toggle(_name, value) { panels[name].hidden = value; } }
+  }]));
+  const context = {
+    state: { adminSignals: { activeTab: "signals", performance: { data: {} } } },
+    document: {
+      querySelectorAll: () => buttons,
+      querySelector: (selector) => panels[selector.match(/panel-(\w+)/)?.[1]] || null
+    }
+  };
+  vm.createContext(context);
+  vm.runInContext(extractNamedFunction(app, "setAdminSignalsTab"), context);
+  context.setAdminSignalsTab("performance");
+  return {
+    performanceVisible: panels.performance.hidden === false,
+    signalsVisible: panels.signals.hidden === false,
+    performanceSelected: buttons.find((button) => button.dataset.adminSignalsTab === "performance").selected
   };
 }
 

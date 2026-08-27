@@ -19,6 +19,7 @@
     "test:product-analytics": "node scripts/product-analytics-test.js",
     "test:admin-dashboard": "node scripts/admin-dashboard-test.js",
     "test:admin-signals": "node scripts/admin-generated-signals-test.js",
+    "test:admin-signal-performance": "node scripts/admin-signal-performance-test.js",
     "test:user-profiles": "node scripts/user-profiles-test.js",
     "test:leaderboards": "node scripts/leaderboard-test.js",
     "test:onboarding": "node scripts/onboarding-flow-test.js",
