@@ -4365,8 +4365,9 @@ function renderAdminSignalPerformance() {
   document.querySelector("#admin-performance-kpis").innerHTML = kpis.map(([label, value]) => `<article><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value))}</strong></article>`).join("");
   const quality = data.dataQuality || {};
   document.querySelector("#admin-performance-data-quality").textContent = [
-    Number(quality.missingRealizedR || 0) ? `${Number(quality.missingRealizedR)} terminal record(s) excluded from R calculations` : "All displayed terminal records have canonical realized R",
-    Number(quality.missingOutcomeTimestamp || 0) ? `${Number(quality.missingOutcomeTimestamp)} historical terminal record(s) excluded because outcome_evaluated_at is unavailable` : "All considered records have an outcome evaluation timestamp"
+    `${Number(quality.terminalRecordsConsidered ?? metrics.signals ?? 0)} terminal outcome(s) counted`,
+    `${Number(metrics.realizedRObservations || 0)} with canonical realized R`,
+    Number(quality.missingOutcomeTimestamp || 0) ? `${Number(quality.missingOutcomeTimestamp)} legacy terminal signal(s) have no trustworthy outcome timestamp and cannot be placed on the timeline` : "All terminal signals have a trustworthy outcome timestamp"
   ].join(" · ");
   document.querySelector("#admin-performance-win-rate").innerHTML = renderAdminWinRateChart(data.timeline || []);
   document.querySelector("#admin-performance-outcomes").innerHTML = renderAdminOutcomeChart(data.timeline || []);

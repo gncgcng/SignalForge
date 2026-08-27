@@ -10,8 +10,9 @@ export function buildGeneratedSignalPerformance(records = [], options = {}) {
   const range = resolvePerformanceRange(options.range || "30d", options.from, options.to, now, timezone);
   const terminal = records.map(normalizeRecord).filter((record) => terminalStatuses.has(record.status));
   const missingOutcomeTimestamp = terminal.filter((record) => !record.outcomeAt).length;
-  const filtered = terminal.filter((record) => record.outcomeAt && inRange(record.outcomeAt, range));
-  const timeline = groupRecords(filtered, grouping, timezone);
+  const datedInRange = terminal.filter((record) => record.outcomeAt && inRange(record.outcomeAt, range));
+  const performanceRecords = range.key === "all" ? terminal : datedInRange;
+  const timeline = groupRecords(datedInRange, grouping, timezone);
   let cumulativeR = 0;
   const timelineWithCumulative = timeline.map((period) => {
     cumulativeR += period.netRealizedR;
@@ -23,23 +24,24 @@ export function buildGeneratedSignalPerformance(records = [], options = {}) {
     grouping,
     category,
     semantics: {
-      outcomeTimestamp: `outcome_evaluated_at grouped in ${timezone}`,
+      outcomeTimestamp: `Canonical terminal timestamp grouped in ${timezone}; undated legacy outcomes remain in All totals only`,
       winRate: "Hit TP / (Hit TP + Hit SL); Expired excluded",
       netRealizedR: "Sum of available canonical realized_r values",
       expectancy: "Net realized R / terminal outcomes with available realized_r"
     },
-    metrics: summarizeRecords(filtered),
+    metrics: summarizeRecords(performanceRecords),
     dataQuality: {
-      terminalRecordsConsidered: filtered.length,
+      terminalRecordsConsidered: performanceRecords.length,
+      timelineRecordsConsidered: datedInRange.length,
       missingOutcomeTimestamp,
-      missingRealizedR: filtered.filter((record) => record.realizedR == null).length
+      missingRealizedR: performanceRecords.filter((record) => record.realizedR == null).length
     },
     timeline: timelineWithCumulative,
-    categories: groupCategories(filtered, category),
+    categories: groupCategories(performanceRecords, category),
     bestWorst: {
-      day: rankPeriods(groupRecords(filtered, "day", timezone), 5),
-      week: rankPeriods(groupRecords(filtered, "week", timezone), 10),
-      month: rankPeriods(groupRecords(filtered, "month", timezone), 20)
+      day: rankPeriods(groupRecords(datedInRange, "day", timezone), 5),
+      week: rankPeriods(groupRecords(datedInRange, "week", timezone), 10),
+      month: rankPeriods(groupRecords(datedInRange, "month", timezone), 20)
     }
   };
 }
@@ -148,6 +150,14 @@ function normalizeRecord(record) {
   const rawRealizedR = record.realizedR ?? record.realized_r;
   const parsedR = rawRealizedR === null || rawRealizedR === undefined || rawRealizedR === "" ? null : Number(rawRealizedR);
   const rawConfidence = record.calibratedConfidence ?? record.calibrated_confidence ?? record.confidence;
+  const status = String(record.status || "");
+  const canonicalStatusTimestamp = status === "Hit TP"
+    ? record.hitTpAt ?? record.hit_tp_at
+    : status === "Hit SL"
+      ? record.hitSlAt ?? record.hit_sl_at
+      : status === "Expired"
+        ? record.expiredAt ?? record.expired_at
+        : null;
   return {
     id: record.id,
     symbol: String(record.pair || record.symbol || "Unknown"),
@@ -158,9 +168,9 @@ function normalizeRecord(record) {
     source: String(record.source || "Unknown"),
     confidence: Number.isFinite(Number(rawConfidence)) ? Number(rawConfidence) : 0,
     engineVersion: String(record.confidenceVersion || record.confidence_version || "Unknown"),
-    status: String(record.status || ""),
+    status,
     realizedR: Number.isFinite(parsedR) ? parsedR : null,
-    outcomeAt: validDate(record.outcomeEvaluatedAt ?? record.outcome_evaluated_at)
+    outcomeAt: validDate(record.outcomeEvaluatedAt ?? record.outcome_evaluated_at) || validDate(canonicalStatusTimestamp)
   };
 }
 

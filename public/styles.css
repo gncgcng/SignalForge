@@ -3740,8 +3740,9 @@ polyline {
   color: var(--muted);
 }
 
-.admin-signals-tabs { display: flex; gap: 4px; margin: 0 0 16px; padding-bottom: 1px; overflow-x: auto; border-bottom: 1px solid var(--border); scrollbar-width: thin; }
-.admin-signals-tabs button { flex: 0 0 auto; min-width: 112px; padding: 10px 16px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: var(--muted); box-shadow: none; }
+.admin-signals-page { --border: var(--line); --accent: var(--cyan); }
+.admin-signals-tabs { position: relative; isolation: isolate; display: flex; gap: 4px; margin: 0 0 16px; padding-bottom: 1px; overflow-x: auto; border-bottom: 1px solid var(--border); scrollbar-width: thin; }
+.admin-signals-tabs button { position: relative; flex: 0 0 auto; min-width: 112px; min-height: 44px; padding: 10px 16px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: var(--muted); box-shadow: none; cursor: pointer; }
 .admin-signals-tabs button:hover,
 .admin-signals-tabs button.active { transform: none; color: var(--text); border-bottom-color: var(--accent); background: rgba(58, 207, 255, 0.06); }
 .admin-signals-tab-panel { min-width: 0; }
@@ -3751,7 +3752,7 @@ polyline {
 .admin-signal-today > div { display: flex; flex-wrap: wrap; gap: 8px 18px; min-width: 0; }
 .admin-signal-today span { color: var(--muted); white-space: nowrap; }
 .admin-signal-today b { margin-right: 3px; color: var(--text); }
-.admin-signal-today .performance-win b { color: var(--success); }
+.admin-signal-today .performance-win b { color: var(--green); }
 .admin-signal-today .performance-loss b { color: #ff7272; }
 .admin-signal-today .performance-expired b { color: #9aa9b9; }
 
@@ -3770,7 +3771,7 @@ polyline {
 .admin-performance-kpis strong { font-size: 1.35rem; }
 
 .admin-performance-chart-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
-.admin-performance-chart { min-width: 0; padding: 14px; border: 1px solid var(--border); border-radius: 8px; background: rgba(7, 18, 29, 0.72); }
+.admin-performance-chart { position: relative; min-width: 0; overflow: hidden; padding: 14px; border: 1px solid var(--border); border-radius: 8px; background: rgba(7, 18, 29, 0.72); }
 .admin-performance-chart.wide { grid-column: 1 / -1; }
 .admin-performance-chart header { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; margin-bottom: 12px; }
 .admin-performance-chart h4,
@@ -3783,12 +3784,13 @@ polyline {
 .performance-bar-row > div { display: flex; height: 12px; overflow: hidden; background: rgba(148, 163, 184, 0.12); }
 .performance-bar-row i { display: block; height: 100%; }
 .performance-bar-row .win-rate,
-.performance-bar-row .tp { background: var(--success); }
+.performance-bar-row .tp { background: var(--green); }
 .performance-bar-row .sl { background: #ff6868; }
 .performance-bar-row .expired { background: #7d8998; }
 .performance-bar-row strong { text-align: right; font-size: 0.76rem; }
 
-.performance-line-chart { display: block; width: 100%; height: 220px; overflow: visible; }
+.performance-line-chart { display: block; width: 100%; height: 220px; overflow: hidden; pointer-events: none; }
+.performance-line-chart * { pointer-events: none; }
 .performance-line-chart .zero-line { stroke: rgba(148, 163, 184, 0.28); stroke-width: 0.4; stroke-dasharray: 2 2; }
 .performance-line-chart .r-line { fill: none; stroke: var(--accent); stroke-width: 1.1; vector-effect: non-scaling-stroke; }
 .performance-line-chart circle { fill: #fff; stroke: var(--accent); stroke-width: 0.5; vector-effect: non-scaling-stroke; }

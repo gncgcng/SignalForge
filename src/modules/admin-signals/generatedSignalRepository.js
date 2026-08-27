@@ -193,7 +193,7 @@ export async function listGeneratedSignalPerformanceRecords(filters = {}) {
   const result = await query(`
     SELECT g.id, g.pair, g.display_pair, g.timeframe, g.direction, g.strategy, g.pattern,
       g.source, g.confidence, g.calibrated_confidence, g.confidence_version, g.status,
-      g.realized_r, g.outcome_evaluated_at
+      g.realized_r, g.outcome_evaluated_at, g.hit_tp_at, g.hit_sl_at, g.expired_at
     FROM generated_signals g
     WHERE ${clauses.join(" AND ")}
     ORDER BY g.outcome_evaluated_at ASC NULLS LAST, g.id ASC
@@ -212,7 +212,10 @@ export async function listGeneratedSignalPerformanceRecords(filters = {}) {
     confidenceVersion: row.confidence_version,
     status: row.status,
     realizedR: row.realized_r == null ? null : Number(row.realized_r),
-    outcomeEvaluatedAt: row.outcome_evaluated_at || null
+    outcomeEvaluatedAt: row.outcome_evaluated_at || null,
+    hitTpAt: row.hit_tp_at || null,
+    hitSlAt: row.hit_sl_at || null,
+    expiredAt: row.expired_at || null
   }));
 }
 
