@@ -22,6 +22,7 @@ import { attachMomentumEntryDiagnostics } from "./momentumEntryDiagnostics.js";
 
 const minimumCandles = 60;
 const minimumQualityScore = 70;
+export const BREAKOUT_RETEST_TOLERANCE_ATR = 0.35;
 // User-facing pattern labels may describe only the trigger candle or two immediately preceding candles.
 export const PATTERN_ASSOCIATION_MAX_AGE_CANDLES = 2;
 
@@ -125,7 +126,8 @@ export function generateMarketDataSetup(marketData, timeframe, options = {}) {
       bestCase.marketStructure,
       bestCase.correlation,
       analyst,
-      bestCase.patternContext
+      bestCase.patternContext,
+      bestCase.strategyEvidence
     ),
     {
       setupType: bestCase.setupType,
@@ -162,6 +164,7 @@ export function generateMarketDataSetup(marketData, timeframe, options = {}) {
       marketStructure: bestCase.marketStructure,
       correlation: bestCase.correlation,
       patternContext: bestCase.patternContext,
+      strategyEvidence: bestCase.strategyEvidence,
       analyst,
       reasoning: analyst.summary,
       confirmations: bestCase.confirmations,
@@ -174,6 +177,7 @@ export function generateMarketDataSetup(marketData, timeframe, options = {}) {
       qualityScore: bestCase.qualityScore,
       setupType: bestCase.setupType,
       patternContext: bestCase.patternContext,
+      strategyEvidence: bestCase.strategyEvidence,
       detectedPatterns,
       confirmations: bestCase.confirmations,
       indicators: buildSerializedIndicators()
@@ -337,6 +341,9 @@ function validateCandidate(
     advancedStructure,
     confluenceContext
   );
+  const strategyEvidence = setupType === "Breakout retest"
+    ? evaluateBreakoutRetestSetup(candidate.direction, candles, indicators)
+    : null;
   const confluence = scoreMultiTimeframeConfluence(confluenceContext, candidate.direction);
   const smc = evaluateSmcConfluence(smcState, candidate.direction, regime);
   const marketStructure = evaluateAdvancedStructure(
@@ -526,6 +533,7 @@ function validateCandidate(
     takeProfit: riskPlan.takeProfit,
     riskRewardRatio: riskPlan.riskRewardRatio,
     setupType,
+    strategyEvidence,
     qualityScore,
     confidenceScore,
     confluence,
@@ -728,9 +736,7 @@ export function classifySetupType(
   const directionalBreakout = direction === "long"
     ? previous.close <= priorHigh && latest.close > priorHigh && latest.close > latest.open
     : previous.close >= priorLow && latest.close < priorLow && latest.close < latest.open;
-  const breakoutRetest = direction === "long"
-    ? previous.close > priorHigh && latest.low <= priorHigh + atrValue * 0.35 && latest.close > priorHigh
-    : previous.close < priorLow && latest.high >= priorLow - atrValue * 0.35 && latest.close < priorLow;
+  const breakoutRetest = evaluateBreakoutRetestSetup(direction, candles, indicators);
   const activeVwap = advancedStructure?.vwap;
   const vwapEvent = activeVwap?.event === "Reclaim" && direction === "long" ||
     activeVwap?.event === "Rejection" && direction === "short";
@@ -744,7 +750,7 @@ export function classifySetupType(
     return "Liquidity sweep reversal";
   }
 
-  if (breakoutRetest && aligned) {
+  if (breakoutRetest.qualified && aligned) {
     return "Breakout retest";
   }
 
@@ -786,6 +792,85 @@ export function classifySetupType(
   }
 
   return null;
+}
+
+export function evaluateBreakoutRetestSetup(direction, candles, indicators) {
+  const preBreakoutCandle = candles[candles.length - 3];
+  const breakoutCandle = candles[candles.length - 2];
+  const retestCandle = candles[candles.length - 1];
+  const priorWindow = candles.slice(-24, -3);
+  const atrValue = Number(indicators?.atr14);
+  if (
+    !["long", "short"].includes(direction) ||
+    !preBreakoutCandle ||
+    !breakoutCandle ||
+    !retestCandle ||
+    !priorWindow.length ||
+    !Number.isFinite(atrValue) ||
+    atrValue <= 0
+  ) {
+    return {
+      strategy: "Breakout retest",
+      direction,
+      qualified: false,
+      breakoutLevel: null,
+      breakoutCandle: serializeStrategyCandle(breakoutCandle),
+      retestCandle: serializeStrategyCandle(retestCandle),
+      retestExtreme: null,
+      retestDistanceAtr: null,
+      retestToleranceAtr: BREAKOUT_RETEST_TOLERANCE_ATR,
+      freshBreakout: false,
+      heldLevel: false,
+      confirmation: false,
+      invalidationLevel: null
+    };
+  }
+
+  const breakoutLevel = direction === "long"
+    ? Math.max(...priorWindow.map((candle) => Number(candle.high)))
+    : Math.min(...priorWindow.map((candle) => Number(candle.low)));
+  const tolerance = atrValue * BREAKOUT_RETEST_TOLERANCE_ATR;
+  const zoneLower = breakoutLevel - tolerance;
+  const zoneUpper = breakoutLevel + tolerance;
+  const retestExtreme = direction === "long" ? Number(retestCandle.low) : Number(retestCandle.high);
+  const breakoutConfirmed = direction === "long"
+    ? Number(breakoutCandle.close) > breakoutLevel
+    : Number(breakoutCandle.close) < breakoutLevel;
+  const freshBreakout = direction === "long"
+    ? Number(preBreakoutCandle.close) <= breakoutLevel
+    : Number(preBreakoutCandle.close) >= breakoutLevel;
+  const retestInteracted = retestExtreme >= zoneLower && retestExtreme <= zoneUpper;
+  const heldLevel = retestInteracted && (direction === "long"
+    ? Number(retestCandle.close) > breakoutLevel
+    : Number(retestCandle.close) < breakoutLevel);
+  const confirmation = isDirectionalCandle(retestCandle, direction);
+
+  return {
+    strategy: "Breakout retest",
+    direction,
+    qualified: breakoutConfirmed && freshBreakout && heldLevel && confirmation,
+    breakoutLevel,
+    breakoutCandle: serializeStrategyCandle(breakoutCandle),
+    retestCandle: serializeStrategyCandle(retestCandle),
+    retestExtreme,
+    retestDistanceAtr: Math.abs(retestExtreme - breakoutLevel) / atrValue,
+    retestToleranceAtr: BREAKOUT_RETEST_TOLERANCE_ATR,
+    freshBreakout,
+    heldLevel,
+    confirmation,
+    invalidationLevel: direction === "long" ? zoneLower : zoneUpper
+  };
+}
+
+function serializeStrategyCandle(candle) {
+  if (!candle) return null;
+  return {
+    time: candle.time ?? candle.timestamp ?? null,
+    open: Number(candle.open),
+    high: Number(candle.high),
+    low: Number(candle.low),
+    close: Number(candle.close)
+  };
 }
 
 function calculateQualityScore({ candidate, setupType, regime, levelStrength, opposingRoom, emaAligned }) {
@@ -1210,7 +1295,8 @@ function serializeIndicators(
   correlation = null
   ,
   analyst = null,
-  patternContext = null
+  patternContext = null,
+  strategyEvidence = null
 ) {
   return {
     ema20: roundPrice(indicators.ema20),
@@ -1273,7 +1359,8 @@ function serializeIndicators(
     analystSections: analyst?.sections || {},
     analystAdaptiveAdjustment: analyst?.adaptive?.adjustment || 0,
     analystAdaptiveFactors: analyst?.adaptive?.factors || [],
-    patternContext
+    patternContext,
+    strategyEvidence
   };
 }
 
