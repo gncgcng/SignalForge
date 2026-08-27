@@ -1,18 +1,22 @@
 const pivotWidth = 2;
 const analysisWindow = 120;
+export const LIQUIDITY_SWEEP_REVERSAL_MAX_AGE_CANDLES = 1;
 
 export function analyzeSmartMoneyConcepts(candles) {
   const closedCandles = candles.slice(-analysisWindow);
   if (closedCandles.length < 12) return emptySmc();
+  const indexOffset = candles.length - closedCandles.length;
 
   const swings = detectConfirmedSwings(closedCandles);
   const structure = detectStructure(closedCandles, swings);
   const liquiditySweep = detectLiquiditySweep(closedCandles, swings);
+  const liquiditySweepReversal = detectLiquiditySweepReversal(closedCandles, swings, indexOffset);
   const fairValueGaps = detectFairValueGaps(closedCandles);
   const orderBlocks = detectOrderBlocks(closedCandles, structure);
 
   return {
     liquiditySweep,
+    liquiditySweepReversal,
     fairValueGaps,
     orderBlocks,
     structure,
@@ -111,6 +115,74 @@ function detectLiquiditySweep(candles, swings) {
   }
 
   return latestSweep;
+}
+
+function detectLiquiditySweepReversal(candles, swings, indexOffset) {
+  const start = Math.max(0, candles.length - LIQUIDITY_SWEEP_REVERSAL_MAX_AGE_CANDLES - 1);
+  let latestEvent = null;
+
+  for (let index = start; index < candles.length; index += 1) {
+    const candle = candles[index];
+    const priorHigh = findLatestBefore(swings.highs, index);
+    const priorLow = findLatestBefore(swings.lows, index);
+    const sweptHigh = Boolean(priorHigh && candle.high > priorHigh.price);
+    const sweptLow = Boolean(priorLow && candle.low < priorLow.price);
+
+    if (sweptHigh && sweptLow) {
+      latestEvent = {
+        confirmed: false,
+        ambiguous: true,
+        direction: null,
+        time: candle.time,
+        sweepIndex: index + indexOffset,
+        sweepCandle: serializeCandle(candle),
+        referenceHigh: serializeSwing(priorHigh, indexOffset),
+        referenceLow: serializeSwing(priorLow, indexOffset)
+      };
+      continue;
+    }
+
+    if (sweptHigh && candle.close < priorHigh.price) {
+      latestEvent = createStrictSweep("short", "buy-side", priorHigh, candle, index, indexOffset);
+    } else if (sweptLow && candle.close > priorLow.price) {
+      latestEvent = createStrictSweep("long", "sell-side", priorLow, candle, index, indexOffset);
+    }
+  }
+
+  return latestEvent;
+}
+
+function createStrictSweep(direction, type, referenceSwing, candle, sweepIndex, indexOffset) {
+  return {
+    confirmed: true,
+    ambiguous: false,
+    direction,
+    type,
+    level: referenceSwing.price,
+    time: candle.time,
+    sweepIndex: sweepIndex + indexOffset,
+    referenceSwing: serializeSwing(referenceSwing, indexOffset),
+    sweepCandle: serializeCandle(candle),
+    reclaimed: direction === "long"
+      ? candle.close > referenceSwing.price
+      : candle.close < referenceSwing.price
+  };
+}
+
+function serializeSwing(swing, indexOffset = 0) {
+  if (!swing) return null;
+  return { index: swing.index + indexOffset, time: swing.time, price: swing.price };
+}
+
+function serializeCandle(candle) {
+  if (!candle) return null;
+  return {
+    time: candle.time,
+    open: candle.open,
+    high: candle.high,
+    low: candle.low,
+    close: candle.close
+  };
 }
 
 function detectFairValueGaps(candles) {
@@ -292,6 +364,7 @@ function buildExplanation(smc) {
 function emptySmc() {
   return {
     liquiditySweep: null,
+    liquiditySweepReversal: null,
     fairValueGaps: { active: [], recent: [] },
     orderBlocks: { active: [], recent: [] },
     structure: { bias: "neutral", latest: null, events: [] },

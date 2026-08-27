@@ -97,7 +97,8 @@ const fullGeneratorCharacterization = characterizeFullGenerator();
 
 console.log(JSON.stringify({
   auditType: "strategy_correctness_characterization",
-  productionBehaviorChanged: false,
+  productionBehaviorChanged: true,
+  productionBehaviorScope: "Liquidity sweep reversal classification only",
   reachableStrategyCount: discoveredStrategies.length,
   discoveredStrategies,
   mirroredClassificationCases: cases,
@@ -167,40 +168,30 @@ function auditLiquiditySweepFreshness() {
   const base = buildSweepCandles("long");
   const latestSweep = analyzeSmartMoneyConcepts(base);
   assert.equal(latestSweep.liquiditySweep?.direction, "long");
+  assert.equal(latestSweep.liquiditySweepReversal?.direction, "long");
 
   const staleButRetained = [
-    ...base.slice(0, -1),
-    candle(base.length - 1, 100, 100.4, 100.6, 99.8, 100)
+    ...base,
+    candle(base.length, 100, 100, 100.4, 99.8, 100),
+    candle(base.length + 1, 100, 100.4, 100.6, 99.8, 100)
   ];
   const smc = analyzeSmartMoneyConcepts(staleButRetained);
   assert.equal(smc.liquiditySweep?.direction, "long");
+  assert.equal(smc.liquiditySweepReversal, null);
 
-  const fixture = fixtureFor("Liquidity sweep reversal", "long", {
-    latestOpen: 100,
-    latestClose: 100.4,
-    latestHigh: 100.6,
-    latestLow: 99.8
-  });
-  assert.equal(classify({ ...fixture, smcState: smc }), "Liquidity sweep reversal");
-  findings.push({
-    severity: "HIGH",
-    classification: "PERMISSIVE RULE",
-    strategy: "Liquidity sweep reversal",
-    code: "smartMoneyConceptsService.js:84-113; signalGenerator.js:740-744",
-    finding: "Any confirmed sweep in the last six candles remains active; the current signal candle only needs the same direction. Sweep distance, displacement, volume, and current proximity to the swept level are not required.",
-    observed: "earlier sweep reused by later directional candle"
-  });
+  const fixture = fixtureFor("Liquidity sweep reversal", "long");
+  assert.notEqual(
+    classify({ ...fixture, candles: staleButRetained, smcState: smc }),
+    "Liquidity sweep reversal"
+  );
 
   const doubleSweep = analyzeSmartMoneyConcepts(buildDoubleSweepCandles());
   assert.equal(doubleSweep.liquiditySweep?.direction, "long");
-  findings.push({
-    severity: "HIGH",
-    classification: "CODE BUG",
-    strategy: "Liquidity sweep reversal",
-    code: "smartMoneyConceptsService.js:93-109",
-    finding: "An outside candle that sweeps both a prior high and prior low satisfies both branches. The later sell-side assignment always overwrites buy-side, creating a deterministic LONG bias.",
-    observed: "dual-sided sweep resolved as long"
-  });
+  assert.equal(doubleSweep.liquiditySweepReversal?.ambiguous, true);
+  assert.notEqual(
+    classify({ ...fixture, candles: buildDoubleSweepCandles(), smcState: doubleSweep }),
+    "Liquidity sweep reversal"
+  );
 }
 
 function auditRemainingStrategySemantics() {
@@ -334,10 +325,10 @@ function auditRegimeAndTimeframeSemantics() {
   });
 
   const timeframeDurations = {
-    "5m": { breakoutReference: "105 minutes", sweepFreshness: "30 minutes" },
-    "15m": { breakoutReference: "315 minutes", sweepFreshness: "90 minutes" },
-    "1h": { breakoutReference: "21 hours", sweepFreshness: "6 hours" },
-    "4h": { breakoutReference: "84 hours", sweepFreshness: "24 hours" }
+    "5m": { breakoutReference: "105 minutes", sweepMaximumAge: "1 candle" },
+    "15m": { breakoutReference: "315 minutes", sweepMaximumAge: "1 candle" },
+    "1h": { breakoutReference: "21 hours", sweepMaximumAge: "1 candle" },
+    "4h": { breakoutReference: "84 hours", sweepMaximumAge: "1 candle" }
   };
   findings.push({
     severity: "MEDIUM",
@@ -533,7 +524,19 @@ function buildLongFixture(strategy, shape = {}) {
   };
 
   if (strategy === "Liquidity sweep reversal") {
-    return { ...base, smcState: { liquiditySweep: { confirmed: true, direction: "long" } } };
+    const sweepFixture = withShape(base, {
+      previousClose: 101,
+      previousHigh: 104,
+      latestOpen: 100.8,
+      latestHigh: 102,
+      latestLow: 94.5,
+      latestClose: 101.8,
+      ...shape
+    });
+    return {
+      ...sweepFixture,
+      smcState: analyzeSmartMoneyConcepts(sweepFixture.candles)
+    };
   }
   if (strategy === "Breakout retest") {
     return withShape(base, { previousClose: 106, previousHigh: 106.4, latestOpen: 105.4, latestHigh: 106.8, latestLow: 105.2, latestClose: 106.2, ...shape });
@@ -611,6 +614,11 @@ function mirrorFixture(fixture, strategy) {
     high: mirrorPrice(item.low),
     low: mirrorPrice(item.high)
   }));
+  const mirroredSmcState = fixture.smcState
+    ? strategy === "Liquidity sweep reversal"
+      ? analyzeSmartMoneyConcepts(candles)
+      : { liquiditySweep: { ...fixture.smcState.liquiditySweep, direction: "short" } }
+    : null;
   return {
     ...fixture,
     direction: "short",
@@ -623,7 +631,7 @@ function mirrorFixture(fixture, strategy) {
     supportStrength: fixture.resistanceStrength,
     resistanceStrength: fixture.supportStrength,
     regimeLabel: fixture.regimeLabel === "Trend Up" ? "Trend Down" : fixture.regimeLabel,
-    smcState: fixture.smcState ? { liquiditySweep: { ...fixture.smcState.liquiditySweep, direction: "short" } } : null,
+    smcState: mirroredSmcState,
     advancedStructure: fixture.advancedStructure ? { vwap: { event: "Rejection" } } : null,
     confluenceContext: fixture.confluenceContext ? {
       higherTimeframes: [{ available: true, regime: { preferredDirection: "short" } }]

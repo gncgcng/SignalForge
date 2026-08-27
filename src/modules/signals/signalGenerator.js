@@ -4,7 +4,8 @@ import { analyzeMarketRegime } from "../market-data/marketRegimeService.js";
 import { scoreMultiTimeframeConfluence } from "../market-data/multiTimeframeService.js";
 import {
   analyzeSmartMoneyConcepts,
-  evaluateSmcConfluence
+  evaluateSmcConfluence,
+  LIQUIDITY_SWEEP_REVERSAL_MAX_AGE_CANDLES
 } from "../market-data/smartMoneyConceptsService.js";
 import {
   buildDynamicRiskPlan,
@@ -343,7 +344,9 @@ function validateCandidate(
   );
   const strategyEvidence = setupType === "Breakout retest"
     ? evaluateBreakoutRetestSetup(candidate.direction, candles, indicators)
-    : null;
+    : setupType === "Liquidity sweep reversal"
+      ? evaluateLiquiditySweepReversalSetup(candidate.direction, candles, indicators, smcState)
+      : null;
   const confluence = scoreMultiTimeframeConfluence(confluenceContext, candidate.direction);
   const smc = evaluateSmcConfluence(smcState, candidate.direction, regime);
   const marketStructure = evaluateAdvancedStructure(
@@ -743,10 +746,9 @@ export function classifySetupType(
   const htfAligned = (confluenceContext?.higherTimeframes || [])
     .filter((item) => item?.available && item.regime?.preferredDirection)
     .filter((item) => item.regime.preferredDirection === direction).length >= 1;
-  const sweptLiquidity = smcState?.liquiditySweep?.confirmed &&
-    smcState.liquiditySweep.direction === direction;
+  const sweptLiquidity = evaluateLiquiditySweepReversalSetup(direction, candles, indicators, smcState);
 
-  if (sweptLiquidity && isDirectionalCandle(latest, direction)) {
+  if (sweptLiquidity.qualified) {
     return "Liquidity sweep reversal";
   }
 
@@ -859,6 +861,65 @@ export function evaluateBreakoutRetestSetup(direction, candles, indicators) {
     heldLevel,
     confirmation,
     invalidationLevel: direction === "long" ? zoneLower : zoneUpper
+  };
+}
+
+export function evaluateLiquiditySweepReversalSetup(direction, candles, indicators, smcState) {
+  const sweep = smcState?.liquiditySweepReversal;
+  const confirmationCandle = candles[candles.length - 1];
+  const atrValue = Number(indicators?.atr14);
+  const sweepCandle = sweep?.sweepCandle;
+  const ageCandles = Number.isInteger(sweep?.sweepIndex)
+    ? candles.length - 1 - sweep.sweepIndex
+    : null;
+  const directionMatches = sweep?.confirmed === true && sweep.direction === direction;
+  const reclaimed = directionMatches && sweep.reclaimed === true;
+  const confirmation = directionMatches && isDirectionalCandle(confirmationCandle, direction) && (direction === "long"
+    ? Number(confirmationCandle?.close) > Number(sweep.level)
+    : Number(confirmationCandle?.close) < Number(sweep.level));
+  const fresh = Number.isInteger(ageCandles) &&
+    ageCandles >= 0 &&
+    ageCandles <= LIQUIDITY_SWEEP_REVERSAL_MAX_AGE_CANDLES;
+  const sweepExtreme = direction === "long"
+    ? Number(sweepCandle?.low)
+    : Number(sweepCandle?.high);
+  const sweepDistanceAtr = directionMatches && Number.isFinite(atrValue) && atrValue > 0
+    ? Math.abs(sweepExtreme - Number(sweep.level)) / atrValue
+    : null;
+  const distanceFromSweepAtr = directionMatches && Number.isFinite(atrValue) && atrValue > 0
+    ? Math.abs(Number(confirmationCandle?.close) - Number(sweepCandle?.close)) / atrValue
+    : null;
+  const reversalMoveAtr = directionMatches && Number.isFinite(atrValue) && atrValue > 0
+    ? (direction === "long"
+        ? Number(confirmationCandle?.close) - sweepExtreme
+        : sweepExtreme - Number(confirmationCandle?.close)) / atrValue
+    : null;
+
+  return {
+    strategy: "Liquidity sweep reversal",
+    direction,
+    qualified: Boolean(
+      directionMatches &&
+      reclaimed &&
+      fresh &&
+      confirmation &&
+      !sweep?.ambiguous &&
+      Number.isFinite(atrValue) &&
+      atrValue > 0
+    ),
+    ambiguous: Boolean(sweep?.ambiguous),
+    liquidityLevel: directionMatches ? Number(sweep.level) : null,
+    liquiditySide: direction === "long" ? "downside" : "upside",
+    referenceSwing: directionMatches ? sweep.referenceSwing || null : null,
+    sweepCandle: directionMatches ? serializeStrategyCandle(sweepCandle) : null,
+    sweepDistanceAtr,
+    reclaimed,
+    confirmationCandle: serializeStrategyCandle(confirmationCandle),
+    confirmationDirection: confirmation ? direction : null,
+    ageCandles,
+    distanceFromSweepAtr,
+    reversalMoveAtr,
+    invalidationLevel: directionMatches ? sweepExtreme : null
   };
 }
 

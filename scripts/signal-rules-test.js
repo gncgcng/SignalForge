@@ -5,6 +5,7 @@ import {
 } from "../src/modules/signals/signalGenerator.js";
 import { calculateSignalStats } from "../src/modules/signals/signalOutcomeService.js";
 import { rankSetups } from "../src/modules/signals/signalService.js";
+import { analyzeSmartMoneyConcepts } from "../src/modules/market-data/smartMoneyConceptsService.js";
 
 function makeFlatCandles() {
   const candles = [];
@@ -106,6 +107,15 @@ function classifyFixture(overrides = {}) {
   );
 }
 
+const liquiditySweepCandles = makeStrategyCandles({
+  previousClose: 101,
+  latestOpen: 100.8,
+  latestHigh: 102,
+  latestLow: 94.5,
+  latestClose: 101.8
+});
+const liquiditySweepState = analyzeSmartMoneyConcepts(liquiditySweepCandles);
+
 const strategyTypes = {
   trendContinuation: classifyFixture({
     candleShape: { previousClose: 103, latestOpen: 103, latestLow: 102.4, latestClose: 104.1 },
@@ -139,8 +149,8 @@ const strategyTypes = {
     candleShape: { previousClose: 104.5, latestOpen: 104.8, latestLow: 104.6, latestHigh: 107, latestClose: 106.4 }
   }),
   liquiditySweepReversal: classifyFixture({
-    candleShape: { previousClose: 101, latestOpen: 100.8, latestLow: 94.5, latestClose: 101.8 },
-    smcState: { liquiditySweep: { confirmed: true, direction: "long" } }
+    candles: liquiditySweepCandles,
+    smcState: liquiditySweepState
   }),
   vwapReclaim: classifyFixture({
     candleShape: { previousClose: 103, latestOpen: 103, latestLow: 102, latestClose: 103.6 },

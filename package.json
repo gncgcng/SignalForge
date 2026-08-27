@@ -73,6 +73,8 @@
     "smoke": "node scripts/smoke-test.js",
     "test:signals": "node scripts/signal-rules-test.js",
     "test:breakout-retest": "node scripts/breakout-retest-test.js",
+    "test:liquidity-sweep-reversal": "node scripts/liquidity-sweep-reversal-test.js",
+    "analyze:liquidity-sweep-replay": "node scripts/liquidity-sweep-reversal-historical-replay.js",
     "analyze:breakout-retest-replay": "node scripts/breakout-retest-historical-replay.js",
     "test:strategy-correctness-audit": "node scripts/strategy-correctness-audit-test.js",
     "test:signal-accuracy": "node scripts/signal-accuracy-test.js",
