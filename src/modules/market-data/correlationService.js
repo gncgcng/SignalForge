@@ -1,4 +1,4 @@
-import { getCachedOhlcv, getOhlcv, getPair } from "./marketDataService.js";
+import { getCachedOhlcv, getPair, getStrategyOhlcv } from "./marketDataService.js";
 
 export const correlationSymbols = [
   "BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "XAU/USD", "XAG/USD", "WTI"
@@ -62,7 +62,7 @@ function enrichWithCachedCommodities(snapshot, timeframe) {
   const series = { ...(snapshot.seriesBySymbol || {}) };
   let changed = false;
   for (const symbol of correlationSymbols.filter((item) => getPair(item)?.category === "Commodities")) {
-    const cached = getCachedOhlcv(symbol, timeframe);
+    const cached = getCachedOhlcv(symbol, timeframe, { completedOnly: true });
     if (cached?.candles?.length >= 25 && !series[symbol]) {
       series[symbol] = cached.candles;
       changed = true;
@@ -153,7 +153,7 @@ async function loadSnapshot(timeframe) {
   const series = {};
   const eagerSymbols = correlationSymbols.filter((symbol) => getPair(symbol)?.category === "Crypto");
   const settled = await Promise.allSettled(
-    eagerSymbols.map((symbol) => getOhlcv(symbol, timeframe))
+    eagerSymbols.map((symbol) => getStrategyOhlcv(symbol, timeframe))
   );
   settled.forEach((result, index) => {
     if (result.status === "fulfilled" && result.value.candles.length >= 25) {
@@ -161,7 +161,7 @@ async function loadSnapshot(timeframe) {
     }
   });
   for (const symbol of correlationSymbols.filter((item) => getPair(item)?.category === "Commodities")) {
-    const cached = getCachedOhlcv(symbol, timeframe);
+    const cached = getCachedOhlcv(symbol, timeframe, { completedOnly: true });
     if (cached?.candles?.length >= 25) series[symbol] = cached.candles;
   }
   return buildCorrelationSnapshot(series, timeframe);

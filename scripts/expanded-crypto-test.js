@@ -62,11 +62,14 @@ globalThis.fetch = async (url) => {
     });
   }
 
-  const now = Math.floor(Date.now() / 1000);
-  const candles = Array.from({ length: 120 }, (_, index) => {
-    const price = 100 + index * 0.1;
-    return [now - index * 300, price - 0.5, price + 0.5, price, price + 0.2, 1000 + index];
-  });
+  const granularity = Number(requestUrl.searchParams.get("granularity"));
+  const start = Math.ceil(new Date(requestUrl.searchParams.get("start")).getTime() / 1000 / granularity) * granularity;
+  const end = Math.floor(new Date(requestUrl.searchParams.get("end")).getTime() / 1000 / granularity) * granularity;
+  const candles = [];
+  for (let time = end; time >= start && candles.length < 300; time -= granularity) {
+    const price = 100 + (time % 86400) / 86400;
+    candles.push([time, price - 0.5, price + 0.5, price, price + 0.2, 1000 + candles.length]);
+  }
   return new Response(JSON.stringify(candles), {
     status: 200,
     headers: { "content-type": "application/json" }

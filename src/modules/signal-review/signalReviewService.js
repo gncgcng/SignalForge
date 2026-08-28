@@ -2,7 +2,7 @@ import { isAdminUser } from "../auth/authService.js";
 import { getReadOnlySignalReviewMarketData } from "../market-data/marketDataService.js";
 import { findReviewableSignal } from "./signalReviewRepository.js";
 
-const timeframeSeconds = Object.freeze({ "5m": 300, "15m": 900, "1h": 3600, "4h": 21600 });
+const timeframeSeconds = Object.freeze({ "5m": 300, "15m": 900, "1h": 3600, "4h": 14400 });
 
 export async function getSignalReview(user, signalId, dependencies = {}) {
   const cleanId = String(signalId || "").trim();

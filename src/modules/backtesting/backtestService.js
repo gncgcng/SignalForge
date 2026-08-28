@@ -1,5 +1,5 @@
 import { analyzeMarketRegime } from "../market-data/marketRegimeService.js";
-import { getOhlcv } from "../market-data/marketDataService.js";
+import { getStrategyOhlcv } from "../market-data/marketDataService.js";
 import { scoreMultiTimeframeConfluence } from "../market-data/multiTimeframeService.js";
 import {
   analyzeSmartMoneyConcepts,
@@ -560,10 +560,10 @@ function hasRoomToTarget(metrics, price, direction, atrValue) {
 }
 
 async function loadHistoricalBundle(symbol, timeframe) {
-  const marketData = await getOhlcv(symbol, timeframe);
+  const marketData = await getStrategyOhlcv(symbol, timeframe);
   const higherTimeframes = timeframeOrder.slice(timeframeOrder.indexOf(timeframe) + 1);
   const settled = await Promise.allSettled(
-    higherTimeframes.map((higherTimeframe) => getOhlcv(symbol, higherTimeframe))
+    higherTimeframes.map((higherTimeframe) => getStrategyOhlcv(symbol, higherTimeframe))
   );
   const higherTimeframeData = {};
   settled.forEach((result, index) => {
@@ -574,7 +574,7 @@ async function loadHistoricalBundle(symbol, timeframe) {
   const correlationSettled = await Promise.allSettled(
     correlationSymbols
       .filter((peer) => peer !== symbol)
-      .map((peer) => getOhlcv(peer, timeframe))
+      .map((peer) => getStrategyOhlcv(peer, timeframe))
   );
   const correlationData = {};
   correlationSettled.forEach((result, index) => {

@@ -25,7 +25,7 @@ import {
 import { isSignalExpired } from "../signals/signalValidityService.js";
 
 const supportedPaperTimeframes = ["5m", "15m", "1h", "4h"];
-const paperTimeframeSeconds = Object.freeze({ "5m": 300, "15m": 900, "1h": 3600, "4h": 21600 });
+const paperTimeframeSeconds = Object.freeze({ "5m": 300, "15m": 900, "1h": 3600, "4h": 14400 });
 
 export async function getPaperPortfolio(user) {
   await updateSignalsForUser(user);

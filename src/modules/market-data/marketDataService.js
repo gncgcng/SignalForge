@@ -4,6 +4,11 @@ import { appConfig } from "../../config/appConfig.js";
 import { analyzeMarketRegime } from "./marketRegimeService.js";
 import { analyzeAdvancedMarketStructure } from "./advancedMarketStructureService.js";
 import {
+  inspectCandleIntervals,
+  normalizeCanonicalCandles,
+  selectCompletedCandles
+} from "./candleIntegrity.js";
+import {
   canUseCryptoTimeframe,
   getCryptoMarketState,
   isCryptoMarketCoolingDown,
@@ -244,7 +249,7 @@ export async function getMarketSnapshot(symbol, timeframe = "15m") {
   };
 }
 
-export async function getOhlcv(symbol, timeframe) {
+export async function getOhlcv(symbol, timeframe, input = {}) {
   const pair = getPair(symbol);
 
   if (!pair) {
@@ -300,11 +305,23 @@ export async function getOhlcv(symbol, timeframe) {
 
   let marketData;
   try {
-    marketData = await provider.getCandles(pair.symbol, timeframe);
+    marketData = await provider.getCandles(pair.symbol, timeframe, input);
   } catch (error) {
     if (isCryptoMarket(pair)) await recordCryptoMarketFailure(pair.symbol, timeframe, error);
     throw error;
   }
+  const canonicalCandles = input.completedOnly
+    ? selectCompletedCandles(marketData.candles, timeframe, { nowMs: input.nowMs })
+    : normalizeCanonicalCandles(marketData.candles);
+  marketData = {
+    ...marketData,
+    candles: canonicalCandles,
+    latestPrice: input.completedOnly && canonicalCandles.length
+      ? canonicalCandles.at(-1).close
+      : marketData.latestPrice,
+    integrity: marketData.integrity || inspectCandleIntervals(canonicalCandles, timeframe),
+    candleContract: input.completedOnly ? "completed_only" : marketData.candleContract || "live_visual"
+  };
   const marketStatus = resolveMarketStatus(pair, timeframe, marketData.candles, marketData.receivedAt);
   if (isCryptoMarket(pair)) {
     if (!Array.isArray(marketData.candles) || marketData.candles.length < 60) {
@@ -337,8 +354,14 @@ export async function getOhlcv(symbol, timeframe) {
     marketStatus,
     lastCandleAt: marketStatus.lastCandleAt,
     cache: marketData.cache,
-    receivedAt: marketData.receivedAt
+    receivedAt: marketData.receivedAt,
+    integrity: marketData.integrity,
+    candleContract: marketData.candleContract
   };
+}
+
+export function getStrategyOhlcv(symbol, timeframe, input = {}) {
+  return getOhlcv(symbol, timeframe, { ...input, completedOnly: true });
 }
 
 export async function getReadOnlySignalReviewMarketData(symbol, timeframe, window = {}) {
@@ -369,7 +392,7 @@ export async function getReadOnlySignalReviewMarketData(symbol, timeframe, windo
   };
 }
 
-export function getCachedOhlcv(symbol, timeframe) {
+export function getCachedOhlcv(symbol, timeframe, input = {}) {
   const pair = getPair(symbol);
 
   if (!pair || !isReadyStatus(pair.status)) {
@@ -383,23 +406,27 @@ export function getCachedOhlcv(symbol, timeframe) {
     return null;
   }
 
+  const candles = input.completedOnly
+    ? selectCompletedCandles(marketData.candles, timeframe, { nowMs: input.nowMs })
+    : normalizeCanonicalCandles(marketData.candles);
   return {
     pair: {
       ...pair,
       lastPrice: marketData.latestPrice,
       change24h: marketData.change24h
     },
-    candles: marketData.candles,
-    regime: analyzeMarketRegime(marketData.candles),
-    advancedStructure: analyzeAdvancedMarketStructure(marketData.candles, {
+    candles,
+    regime: analyzeMarketRegime(candles),
+    advancedStructure: analyzeAdvancedMarketStructure(candles, {
       volumeAvailable: marketData.volumeAvailable !== false
     }),
     source: marketData.source,
     volumeAvailable: marketData.volumeAvailable !== false,
-    marketStatus: resolveMarketStatus(pair, timeframe, marketData.candles, marketData.receivedAt),
-    lastCandleAt: resolveLastCandleAt(marketData.candles),
+    marketStatus: resolveMarketStatus(pair, timeframe, candles, marketData.receivedAt),
+    lastCandleAt: resolveLastCandleAt(candles),
     cache: marketData.cache,
-    receivedAt: marketData.receivedAt
+    receivedAt: marketData.receivedAt,
+    candleContract: input.completedOnly ? "completed_only" : "live_visual"
   };
 }
 

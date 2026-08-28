@@ -40,7 +40,7 @@ const app = readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
 const result = {
   allTimeframesDefined: service.includes('["5m", "15m", "1h", "4h"]'),
   higherTimeframesFetched: service.includes("Promise.allSettled") &&
-    service.includes("getOhlcv(symbol, higherTimeframe)"),
+    service.includes("getStrategyOhlcv(symbol, higherTimeframe)"),
   indicatorsUsed: ["ema20", "ema50", "rsi14", "adx14", "support", "resistance", "structure"]
     .every((metric) => service.includes(metric)),
   badgesCorrect: full.badge === "Full Alignment" &&

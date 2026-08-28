@@ -1,11 +1,11 @@
-import { getOhlcv } from "./marketDataService.js";
+import { getStrategyOhlcv } from "./marketDataService.js";
 import { getMarketIntelligence } from "../intelligence/intelligenceService.js";
 import { getCorrelationContext } from "./correlationService.js";
 
 const timeframeOrder = ["5m", "15m", "1h", "4h"];
 
 export async function getMultiTimeframeMarketData(symbol, timeframe) {
-  const marketData = await getOhlcv(symbol, timeframe);
+  const marketData = await getStrategyOhlcv(symbol, timeframe);
   const [intelligence, correlation] = await Promise.all([
     getMarketIntelligence(new Date()),
     getCorrelationContext(symbol, timeframe).catch((error) => ({
@@ -17,7 +17,7 @@ export async function getMultiTimeframeMarketData(symbol, timeframe) {
   ]);
   const higherTimeframes = timeframeOrder.slice(timeframeOrder.indexOf(timeframe) + 1);
   const results = await Promise.allSettled(
-    higherTimeframes.map((higherTimeframe) => getOhlcv(symbol, higherTimeframe))
+    higherTimeframes.map((higherTimeframe) => getStrategyOhlcv(symbol, higherTimeframe))
   );
   const higher = results.map((result, index) => {
     if (result.status === "fulfilled") {

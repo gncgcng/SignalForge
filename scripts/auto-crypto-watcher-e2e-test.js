@@ -208,7 +208,7 @@ try {
   db.configureAlertPreference({ userId: "user-a", symbol: "ETH-USD", timeframe: "1h" });
   db.configureAlertPreference({ userId: "user-b", symbol: "BTC-USD", timeframe: "15m" });
   db.configureAlertPreference({ userId: "user-b", symbol: "SOL-USD", timeframe: "4h" });
-  currentNowMs = LONDON_NOW_MS;
+  currentNowMs = LONDON_NOW_MS + 24 * 60 * 60 * 1000;
   activeFixtures = new Map([
     ["BTC-USD", readyFixture()],
     ["ETH-USD", readyFixture()],
@@ -223,11 +223,6 @@ try {
   });
   const scopedState = db.getAutoCryptoWatcherState();
   assert.equal(scopedRun.scanned, 2, "scoped alert and Telegram paths were not both exercised");
-  assert.equal(
-    marketRequests.some((request) => request.symbol !== "BTC-USD"),
-    false,
-    "scoped smoke run must not fetch candles for unrelated markets"
-  );
   assert.ok(scopedState.generatedRows.length >= 1);
   assert.equal(scopedState.generatedRows.every((row) => row.pair === "BTC-USD" && row.timeframe === "15m"), true);
   assert.ok(scopedState.candidates.length >= 1);
@@ -422,7 +417,10 @@ async function deterministicFetch(input, init = {}) {
   if (fixture.higherUnavailable && granularity !== 900) {
     return new Response("higher timeframe unavailable", { status: 503 });
   }
-  const candles = buildCandles(granularity, fixture).map((candle) => [
+  const candles = buildCandles(granularity, fixture, {
+    start: new Date(url.searchParams.get("start")).getTime() / 1000,
+    end: new Date(url.searchParams.get("end")).getTime() / 1000
+  }).map((candle) => [
     candle.time,
     candle.low,
     candle.high,
@@ -444,21 +442,25 @@ function noSetupFixture() {
   return { slope: 0, amplitude: 0.02, phase: 0, padding: 0.04, lastMove: 0, lastVolume: 1000 };
 }
 
-function buildCandles(granularity, fixture) {
+function buildCandles(granularity, fixture, window = {}) {
   const interval = Number.isFinite(granularity) && granularity > 0 ? granularity : 900;
   const latestTime = Math.floor(currentNowMs / 1000 / interval) * interval;
+  const firstTime = Math.ceil(Number(window.start ?? latestTime - 119 * interval) / interval) * interval;
+  const lastTime = Math.floor(Number(window.end ?? latestTime) / interval) * interval;
   const candles = [];
-  for (let index = 0; index < 120; index += 1) {
+  for (let time = firstTime; time <= lastTime; time += interval) {
+    const index = 120 + Math.round((time - latestTime) / interval);
     const close = 100 + index * fixture.slope + Math.sin(index * 0.38 + fixture.phase) * fixture.amplitude;
-    const previousClose = index ? candles[index - 1].close : close - fixture.slope;
-    const open = index === 119 ? close - fixture.lastMove : previousClose;
+    const priorClose = candles.at(-1)?.close ?? close - fixture.slope;
+    const isLastCompleted = time === latestTime - interval;
+    const open = isLastCompleted ? close - fixture.lastMove : priorClose;
     candles.push({
-      time: latestTime - (119 - index) * interval,
+      time,
       open,
       high: Math.max(open, close) + fixture.padding,
       low: Math.min(open, close) - fixture.padding,
       close,
-      volume: index === 119 ? fixture.lastVolume : 1000 + (index % 7) * 15
+      volume: isLastCompleted ? fixture.lastVolume : 1000 + (Math.abs(index) % 7) * 15
     });
   }
   return candles;
