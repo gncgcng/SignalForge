@@ -66,7 +66,14 @@ try {
   currentNowMs = LONDON_NOW_MS;
   activeFixtures = new Map([
     ["BTC-USD", readyFixture()],
-    ["ETH-USD", { ...readyFixture(), higherUnavailable: true }],
+    ["ETH-USD", {
+      ...readyFixture(),
+      slope: 0.04,
+      amplitude: 0.25,
+      phase: 2.2,
+      higherUnavailable: true,
+      continuationPause: true
+    }],
     ["SOL-USD", noSetupFixture()],
     ["XRP-USD", { providerFailure: true }]
   ]);
@@ -435,7 +442,14 @@ async function deterministicFetch(input, init = {}) {
 }
 
 function readyFixture() {
-  return { slope: 0.03, amplitude: 0.8, phase: 1.4, padding: 0.144, lastMove: 0.096, lastVolume: 1800 };
+  return {
+    slope: 0.03,
+    amplitude: 0.8,
+    phase: 1.4,
+    padding: 0.144,
+    lastMove: 0.096,
+    lastVolume: 1800
+  };
 }
 
 function noSetupFixture() {
@@ -462,6 +476,38 @@ function buildCandles(granularity, fixture, window = {}) {
       close,
       volume: isLastCompleted ? fixture.lastVolume : 1000 + (Math.abs(index) % 7) * 15
     });
+  }
+  if (fixture.continuationPause) {
+    const continuationIndex = candles.findIndex((candle) => candle.time === latestTime - interval);
+    const pauseStartIndex = continuationIndex - 2;
+    const baseIndex = pauseStartIndex - 1;
+    if (baseIndex >= 0) {
+      const continuationClose = candles[continuationIndex].close;
+      candles[pauseStartIndex] = {
+        ...candles[pauseStartIndex],
+        open: continuationClose - 0.38,
+        high: continuationClose - 0.3,
+        low: continuationClose - 0.42,
+        close: continuationClose - 0.36,
+        volume: 1050
+      };
+      candles[pauseStartIndex + 1] = {
+        ...candles[pauseStartIndex + 1],
+        open: continuationClose - 0.36,
+        high: continuationClose - 0.28,
+        low: continuationClose - 0.4,
+        close: continuationClose - 0.34,
+        volume: 1040
+      };
+      candles[continuationIndex] = {
+        ...candles[continuationIndex],
+        open: continuationClose - 0.25,
+        high: continuationClose + 0.04,
+        low: continuationClose - 0.29,
+        close: continuationClose,
+        volume: fixture.lastVolume
+      };
+    }
   }
   return candles;
 }

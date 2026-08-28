@@ -1,7 +1,10 @@
 import { appConfig } from "../../config/appConfig.js";
 import { createId } from "../../shared/ids.js";
 import { analyzeMarketRegime } from "../market-data/marketRegimeService.js";
-import { scoreMultiTimeframeConfluence } from "../market-data/multiTimeframeService.js";
+import {
+  inferMultiTimeframeDirection,
+  scoreMultiTimeframeConfluence
+} from "../market-data/multiTimeframeService.js";
 import {
   analyzeSmartMoneyConcepts,
   evaluateSmcConfluence,
@@ -24,6 +27,35 @@ import { attachMomentumEntryDiagnostics } from "./momentumEntryDiagnostics.js";
 const minimumCandles = 60;
 const minimumQualityScore = 70;
 export const BREAKOUT_RETEST_TOLERANCE_ATR = 0.35;
+export const SUPPORT_RESISTANCE_RETEST_TOLERANCE_ATR = 0.35;
+export const SUPPORT_RESISTANCE_RETEST_MIN_SEPARATION_ATR = 0.75;
+export const SUPPORT_RESISTANCE_RETEST_MAX_AGE_CANDLES = 1;
+export const SUPPORT_RESISTANCE_RETEST_MIN_LEVEL_STRENGTH = 2;
+export const MEAN_REVERSION_MIN_EXTENSION_ATR = 0.8;
+export const MEAN_REVERSION_STRUCTURE_TOLERANCE_ATR = 1.35;
+export const MEAN_REVERSION_MAX_AGE_CANDLES = 1;
+export const RANGE_BOUNCE_MIN_WIDTH_ATR = 2.5;
+export const RANGE_BOUNCE_INTERACTION_TOLERANCE_ATR = 0.35;
+export const RANGE_BOUNCE_MAX_AGE_CANDLES = 1;
+export const RANGE_BOUNCE_MIN_INSIDE_RATIO = 0.7;
+export const PULLBACK_BOUNCE_MIN_PRIOR_EXTENSION_ATR = 0.8;
+export const PULLBACK_BOUNCE_INTERACTION_TOLERANCE_ATR = 0.35;
+export const PULLBACK_BOUNCE_MIN_CONFIRMATION_MOVE_ATR = 0.25;
+export const PULLBACK_BOUNCE_MAX_AGE_CANDLES = 1;
+export const PULLBACK_BOUNCE_SEQUENCE_CANDLES = 2;
+export const TREND_CONTINUATION_MIN_TREND_STRENGTH = 0.56;
+export const TREND_CONTINUATION_PAUSE_CANDLES = 2;
+export const TREND_CONTINUATION_MAX_PAUSE_RANGE_ATR = 1.25;
+export const TREND_CONTINUATION_MAX_PAUSE_BODY_ATR = 0.35;
+export const TREND_CONTINUATION_MAX_PAUSE_DIRECTIONAL_MOVE_ATR = 0.4;
+export const TREND_CONTINUATION_MIN_BODY_ATR = 0.45;
+export const TREND_CONTINUATION_MIN_BODY_TO_RANGE = 0.55;
+export const TREND_CONTINUATION_MIN_CLOSE_LOCATION = 0.7;
+export const VWAP_PRIOR_DISPLACEMENT_MIN_ATR = 0.15;
+export const VWAP_INTERACTION_TOLERANCE_ATR = 0.15;
+export const VWAP_MIN_CLOSE_BEYOND_ATR = 0.1;
+export const VWAP_MIN_BODY_TO_RANGE = 0.5;
+export const VWAP_MIN_DIRECTIONAL_CLOSE_LOCATION = 0.65;
 // User-facing pattern labels may describe only the trigger candle or two immediately preceding candles.
 export const PATTERN_ASSOCIATION_MAX_AGE_CANDLES = 2;
 
@@ -342,11 +374,33 @@ function validateCandidate(
     advancedStructure,
     confluenceContext
   );
-  const strategyEvidence = setupType === "Breakout retest"
-    ? evaluateBreakoutRetestSetup(candidate.direction, candles, indicators)
+  const strategyEvidence = setupType === "Momentum breakout"
+    ? evaluateMomentumBreakoutSetup(candidate.direction, candles)
+    : setupType === "Breakout retest"
+      ? evaluateBreakoutRetestSetup(candidate.direction, candles, indicators)
     : setupType === "Liquidity sweep reversal"
       ? evaluateLiquiditySweepReversalSetup(candidate.direction, candles, indicators, smcState)
-      : null;
+      : setupType === "Multi-timeframe continuation"
+        ? evaluateMultiTimeframeContinuationSetup(
+            candidate.direction,
+            candles,
+            indicators,
+            regime,
+            confluenceContext
+          )
+      : setupType === "Pullback bounce"
+        ? evaluatePullbackBounceSetup(candidate.direction, candles, indicators, levels, regime)
+      : setupType === "Trend continuation"
+        ? evaluateTrendContinuationSetup(candidate.direction, candles, indicators, regime)
+      : setupType === "VWAP reclaim/rejection"
+        ? evaluateVwapReclaimRejectionSetup(candidate.direction, candles, indicators, advancedStructure)
+      : setupType === "Support/resistance retest"
+        ? evaluateSupportResistanceRetestSetup(candidate.direction, candles, indicators, levels)
+        : setupType === "Mean reversion"
+          ? evaluateMeanReversionSetup(candidate.direction, candles, indicators, levels, regime)
+          : setupType === "Range bounce"
+            ? evaluateRangeBounceSetup(candidate.direction, candles, indicators, levels, regime)
+            : null;
   const confluence = scoreMultiTimeframeConfluence(confluenceContext, candidate.direction);
   const smc = evaluateSmcConfluence(smcState, candidate.direction, regime);
   const marketStructure = evaluateAdvancedStructure(
@@ -725,27 +779,27 @@ export function classifySetupType(
   confluenceContext = null
 ) {
   const latest = candles[candles.length - 1];
-  const previous = candles[candles.length - 2];
-  const atrValue = indicators.atr14;
   const aligned = direction === "long"
     ? latest.close > indicators.ema20 && indicators.ema20 > indicators.ema50
     : latest.close < indicators.ema20 && indicators.ema20 < indicators.ema50;
-  const nearEma20 = Math.abs(latest.close - indicators.ema20) <= atrValue * 0.8;
-  const activeLevel = direction === "long" ? levels.nearestSupport : levels.nearestResistance;
-  const nearLevel = activeLevel && Math.abs(latest.close - activeLevel.price) <= atrValue * 1.35;
-  const priorWindow = candles.slice(-24, -3);
-  const priorHigh = Math.max(...priorWindow.map((candle) => candle.high));
-  const priorLow = Math.min(...priorWindow.map((candle) => candle.low));
-  const directionalBreakout = direction === "long"
-    ? previous.close <= priorHigh && latest.close > priorHigh && latest.close > latest.open
-    : previous.close >= priorLow && latest.close < priorLow && latest.close < latest.open;
+  const momentumBreakout = evaluateMomentumBreakoutSetup(direction, candles);
   const breakoutRetest = evaluateBreakoutRetestSetup(direction, candles, indicators);
-  const activeVwap = advancedStructure?.vwap;
-  const vwapEvent = activeVwap?.event === "Reclaim" && direction === "long" ||
-    activeVwap?.event === "Rejection" && direction === "short";
-  const htfAligned = (confluenceContext?.higherTimeframes || [])
-    .filter((item) => item?.available && item.regime?.preferredDirection)
-    .filter((item) => item.regime.preferredDirection === direction).length >= 1;
+  const supportResistanceRetest = evaluateSupportResistanceRetestSetup(
+    direction,
+    candles,
+    indicators,
+    levels
+  );
+  const pullbackBounce = evaluatePullbackBounceSetup(direction, candles, indicators, levels, regime);
+  const trendContinuation = evaluateTrendContinuationSetup(direction, candles, indicators, regime);
+  const vwapSetup = evaluateVwapReclaimRejectionSetup(direction, candles, indicators, advancedStructure);
+  const multiTimeframeContinuation = evaluateMultiTimeframeContinuationSetup(
+    direction,
+    candles,
+    indicators,
+    regime,
+    confluenceContext
+  );
   const sweptLiquidity = evaluateLiquiditySweepReversalSetup(direction, candles, indicators, smcState);
 
   if (sweptLiquidity.qualified) {
@@ -756,44 +810,316 @@ export function classifySetupType(
     return "Breakout retest";
   }
 
-  if (directionalBreakout && aligned && latest.volume >= indicators.volumeMa20 * 1.02) {
+  if (momentumBreakout.qualified && aligned && latest.volume >= indicators.volumeMa20 * 1.02) {
     return "Momentum breakout";
   }
 
-  if (vwapEvent && isDirectionalCandle(latest, direction)) {
+  if (vwapSetup.qualified) {
     return "VWAP reclaim/rejection";
   }
 
-  if (htfAligned && aligned && isDirectionalCandle(latest, direction)) {
+  if (multiTimeframeContinuation.passed) {
     return "Multi-timeframe continuation";
   }
 
-  if (aligned && nearEma20 && isDirectionalCandle(latest, direction)) {
+  if (pullbackBounce.qualified) {
     return "Pullback bounce";
   }
 
-  if (aligned && nearLevel && isDirectionalCandle(latest, direction)) {
+  if (aligned && supportResistanceRetest.qualified) {
     return "Support/resistance retest";
   }
 
-  if (aligned && regime.trendStrength >= 0.56 && isDirectionalCandle(latest, direction)) {
+  if (trendContinuation.qualified) {
     return "Trend continuation";
   }
 
-  const levelStrength = direction === "long" ? levels.supportStrength : levels.resistanceStrength;
-  const reversalRsi = direction === "long"
-    ? indicators.rsi14 >= 32 && indicators.rsi14 <= 48
-    : indicators.rsi14 >= 52 && indicators.rsi14 <= 68;
+  const rangeBounce = evaluateRangeBounceSetup(direction, candles, indicators, levels, regime);
+  const meanReversion = evaluateMeanReversionSetup(direction, candles, indicators, levels, regime);
 
-  if (regime.label === "Range" && levelStrength >= 2 && nearLevel && isDirectionalCandle(latest, direction)) {
+  if (rangeBounce.qualified) {
     return "Range bounce";
   }
 
-  if (levelStrength >= 2 && reversalRsi && nearLevel) {
+  if (meanReversion.qualified) {
     return "Mean reversion";
   }
 
   return null;
+}
+
+export function evaluateMomentumBreakoutSetup(direction, candles) {
+  const candleCount = Array.isArray(candles) ? candles.length : 0;
+  const referenceWindowStartIndex = candleCount - 24;
+  const referenceWindowEndIndex = candleCount - 4;
+  const triggerIndex = candleCount - 1;
+  const triggerCandle = candles?.[triggerIndex];
+  const priorWindow = Array.isArray(candles) ? candles.slice(-24, -3) : [];
+  const interveningCandles = Array.isArray(candles) ? candles.slice(-3, -1) : [];
+  const referenceValues = priorWindow.map((candle) => Number(
+    direction === "long" ? candle?.high : candle?.low
+  ));
+  const referenceLevel = referenceValues.length && referenceValues.every(Number.isFinite)
+    ? direction === "long" ? Math.max(...referenceValues) : Math.min(...referenceValues)
+    : null;
+  const interveningCloseMinus3 = Number(candles?.[candleCount - 3]?.close);
+  const interveningCloseMinus2 = Number(candles?.[candleCount - 2]?.close);
+  const baseEvidence = {
+    strategy: "Momentum breakout",
+    direction,
+    qualified: false,
+    referenceWindowStartIndex,
+    referenceWindowEndIndex,
+    referenceLevel,
+    interveningCloseMinus3: Number.isFinite(interveningCloseMinus3) ? interveningCloseMinus3 : null,
+    interveningCloseMinus2: Number.isFinite(interveningCloseMinus2) ? interveningCloseMinus2 : null,
+    priorBreakoutDetected: false,
+    breakoutFresh: false,
+    triggerIndex
+  };
+
+  if (
+    !["long", "short"].includes(direction) ||
+    !triggerCandle ||
+    !Number.isFinite(referenceLevel) ||
+    interveningCandles.length !== 2 ||
+    !Number.isFinite(interveningCloseMinus3) ||
+    !Number.isFinite(interveningCloseMinus2)
+  ) {
+    return baseEvidence;
+  }
+
+  const priorBreakoutDetected = interveningCandles.some((candle) => direction === "long"
+    ? Number(candle.close) > referenceLevel
+    : Number(candle.close) < referenceLevel
+  );
+  const triggerBreakout = direction === "long"
+    ? Number(triggerCandle.close) > referenceLevel && Number(triggerCandle.close) > Number(triggerCandle.open)
+    : Number(triggerCandle.close) < referenceLevel && Number(triggerCandle.close) < Number(triggerCandle.open);
+  const breakoutFresh = !priorBreakoutDetected && triggerBreakout;
+
+  return {
+    ...baseEvidence,
+    qualified: breakoutFresh,
+    priorBreakoutDetected,
+    breakoutFresh
+  };
+}
+
+export function evaluateVwapReclaimRejectionSetup(direction, candles, indicators, advancedStructure) {
+  const latestIndex = Array.isArray(candles) ? candles.length - 1 : -1;
+  const previousIndex = latestIndex - 1;
+  const interactionCandle = candles?.[latestIndex];
+  const previousCandle = candles?.[previousIndex];
+  const vwapContext = advancedStructure?.vwap;
+  const vwap = Number(vwapContext?.session?.value);
+  const previousVwap = Number(vwapContext?.previousVwap);
+  const atrValue = Number(indicators?.atr14);
+  const expectedEvent = direction === "long" ? "Reclaim" : "Rejection";
+  const baseEvidence = {
+    strategy: "VWAP reclaim/rejection",
+    direction,
+    qualified: false,
+    sessionId: vwapContext?.session?.id || null,
+    vwap: Number.isFinite(vwap) ? vwap : null,
+    previousVwap: Number.isFinite(previousVwap) ? previousVwap : null,
+    sameSession: vwapContext?.sameSession === true,
+    priorDistanceFromVwapAtr: null,
+    interactionCandle: serializeStrategyCandle(interactionCandle),
+    interactionDistanceAtr: null,
+    interactionToleranceAtr: VWAP_INTERACTION_TOLERANCE_ATR,
+    closeBeyondVwapAtr: null,
+    bodyToRangeRatio: null,
+    directionalCloseLocation: null,
+    acceptedNewSide: false,
+    confirmationCandle: serializeStrategyCandle(interactionCandle),
+    ageCandles: 0,
+    invalidationLevel: null
+  };
+
+  if (
+    !["long", "short"].includes(direction) ||
+    !interactionCandle ||
+    !previousCandle ||
+    !Number.isFinite(vwap) ||
+    !Number.isFinite(previousVwap) ||
+    !Number.isFinite(atrValue) ||
+    atrValue <= 0 ||
+    vwapContext?.sameSession !== true ||
+    vwapContext?.event !== expectedEvent
+  ) {
+    return baseEvidence;
+  }
+
+  const priorDistanceFromVwapAtr = direction === "long"
+    ? (previousVwap - Number(previousCandle.close)) / atrValue
+    : (Number(previousCandle.close) - previousVwap) / atrValue;
+  const tolerance = atrValue * VWAP_INTERACTION_TOLERANCE_ATR;
+  const interactionLow = Number(interactionCandle.low);
+  const interactionHigh = Number(interactionCandle.high);
+  const interactedWithVwap = interactionLow <= vwap + tolerance && interactionHigh >= vwap - tolerance;
+  const interactionDistanceAtr = interactionLow <= vwap && interactionHigh >= vwap
+    ? 0
+    : Math.min(Math.abs(interactionLow - vwap), Math.abs(interactionHigh - vwap)) / atrValue;
+  const closeBeyondVwapAtr = direction === "long"
+    ? (Number(interactionCandle.close) - vwap) / atrValue
+    : (vwap - Number(interactionCandle.close)) / atrValue;
+  const candleRange = interactionHigh - interactionLow;
+  const candleBody = Math.abs(Number(interactionCandle.close) - Number(interactionCandle.open));
+  const bodyToRangeRatio = candleRange > 0 ? candleBody / candleRange : 0;
+  const directionalCloseLocation = candleRange > 0
+    ? direction === "long"
+      ? (Number(interactionCandle.close) - interactionLow) / candleRange
+      : (interactionHigh - Number(interactionCandle.close)) / candleRange
+    : 0;
+  const acceptedNewSide = closeBeyondVwapAtr >= VWAP_MIN_CLOSE_BEYOND_ATR;
+  const qualified = priorDistanceFromVwapAtr >= VWAP_PRIOR_DISPLACEMENT_MIN_ATR &&
+    interactedWithVwap &&
+    acceptedNewSide &&
+    isDirectionalCandle(interactionCandle, direction) &&
+    bodyToRangeRatio >= VWAP_MIN_BODY_TO_RANGE &&
+    directionalCloseLocation >= VWAP_MIN_DIRECTIONAL_CLOSE_LOCATION;
+
+  return {
+    ...baseEvidence,
+    qualified,
+    priorDistanceFromVwapAtr,
+    interactionDistanceAtr,
+    closeBeyondVwapAtr,
+    bodyToRangeRatio,
+    directionalCloseLocation,
+    acceptedNewSide,
+    invalidationLevel: direction === "long" ? interactionLow : interactionHigh
+  };
+}
+
+export function evaluateTrendContinuationSetup(direction, candles, indicators, regime) {
+  const atrValue = Number(indicators?.atr14);
+  const ema20 = Number(indicators?.ema20);
+  const ema50 = Number(indicators?.ema50);
+  const trendStrength = Number(regime?.trendStrength);
+  const requiredRegime = direction === "long" ? "Trend Up" : "Trend Down";
+  const latestIndex = Array.isArray(candles) ? candles.length - 1 : -1;
+  const pauseStartIndex = latestIndex - TREND_CONTINUATION_PAUSE_CANDLES;
+  const pauseEndIndex = latestIndex - 1;
+  const continuationCandle = candles?.[latestIndex];
+  const baseEvidence = {
+    strategy: "Trend continuation",
+    direction,
+    qualified: false,
+    regime: regime?.label || null,
+    trendStrength: Number.isFinite(trendStrength) ? trendStrength : null,
+    ema20: Number.isFinite(ema20) ? ema20 : null,
+    ema50: Number.isFinite(ema50) ? ema50 : null,
+    pauseStartIndex,
+    pauseEndIndex,
+    pauseRangeAtr: null,
+    pauseBodyAtr: null,
+    pauseDirectionalMoveAtr: null,
+    pauseOverlap: false,
+    compactPause: false,
+    continuationCandle: serializeStrategyCandle(continuationCandle),
+    continuationBodyAtr: null,
+    bodyToRangeRatio: null,
+    directionalCloseLocation: null,
+    brokePauseRange: false,
+    volumeRatio: null,
+    trendHeld: false,
+    invalidationLevel: null
+  };
+
+  if (
+    !["long", "short"].includes(direction) ||
+    !Array.isArray(candles) ||
+    candles.length < TREND_CONTINUATION_PAUSE_CANDLES + 3 ||
+    regime?.label !== requiredRegime ||
+    !Number.isFinite(trendStrength) ||
+    trendStrength < TREND_CONTINUATION_MIN_TREND_STRENGTH ||
+    !Number.isFinite(atrValue) ||
+    atrValue <= 0 ||
+    !Number.isFinite(ema20) ||
+    !Number.isFinite(ema50) ||
+    !continuationCandle
+  ) {
+    return baseEvidence;
+  }
+
+  const emaAligned = direction === "long"
+    ? Number(continuationCandle.close) > ema20 && ema20 > ema50
+    : Number(continuationCandle.close) < ema20 && ema20 < ema50;
+  if (!emaAligned) return baseEvidence;
+
+  const pauseCandles = candles.slice(pauseStartIndex, latestIndex);
+  if (pauseCandles.length !== TREND_CONTINUATION_PAUSE_CANDLES) return baseEvidence;
+
+  const ema20ByIndex = deriveRecentEmaSeries(candles, ema20, 20);
+  const ema50ByIndex = deriveRecentEmaSeries(candles, ema50, 50);
+  const pauseHigh = Math.max(...pauseCandles.map((candle) => Number(candle.high)));
+  const pauseLow = Math.min(...pauseCandles.map((candle) => Number(candle.low)));
+  const pauseRangeAtr = (pauseHigh - pauseLow) / atrValue;
+  const pauseBodyAtr = pauseCandles.reduce(
+    (sum, candle) => sum + Math.abs(Number(candle.close) - Number(candle.open)) / atrValue,
+    0
+  ) / pauseCandles.length;
+  const pauseDirectionalMoveAtr = Math.abs(
+    Number(pauseCandles.at(-1).close) - Number(pauseCandles[0].open)
+  ) / atrValue;
+  const overlapHigh = Math.min(...pauseCandles.map((candle) => Number(candle.high)));
+  const overlapLow = Math.max(...pauseCandles.map((candle) => Number(candle.low)));
+  const pauseOverlap = overlapHigh >= overlapLow;
+  const compactPause = pauseOverlap &&
+    pauseRangeAtr <= TREND_CONTINUATION_MAX_PAUSE_RANGE_ATR &&
+    pauseBodyAtr <= TREND_CONTINUATION_MAX_PAUSE_BODY_ATR &&
+    pauseDirectionalMoveAtr <= TREND_CONTINUATION_MAX_PAUSE_DIRECTIONAL_MOVE_ATR;
+  const trendHeld = pauseCandles.every((candle, offset) => {
+    const index = pauseStartIndex + offset;
+    const candleEma20 = ema20ByIndex[index];
+    const candleEma50 = ema50ByIndex[index];
+    if (!Number.isFinite(candleEma20) || !Number.isFinite(candleEma50)) return false;
+    return direction === "long"
+      ? Number(candle.close) > candleEma20 && Number(candle.low) > candleEma50 && candleEma20 > candleEma50
+      : Number(candle.close) < candleEma20 && Number(candle.high) < candleEma50 && candleEma20 < candleEma50;
+  });
+
+  const candleRange = Number(continuationCandle.high) - Number(continuationCandle.low);
+  const candleBody = Math.abs(Number(continuationCandle.close) - Number(continuationCandle.open));
+  const continuationBodyAtr = candleBody / atrValue;
+  const bodyToRangeRatio = candleRange > 0 ? candleBody / candleRange : 0;
+  const directionalCloseLocation = candleRange > 0
+    ? direction === "long"
+      ? (Number(continuationCandle.close) - Number(continuationCandle.low)) / candleRange
+      : (Number(continuationCandle.high) - Number(continuationCandle.close)) / candleRange
+    : 0;
+  const brokePauseRange = direction === "long"
+    ? Number(continuationCandle.close) > pauseHigh
+    : Number(continuationCandle.close) < pauseLow;
+  const volume = Number(continuationCandle.volume);
+  const volumeMa20 = Number(indicators?.volumeMa20);
+  const volumeRatio = Number.isFinite(volume) && Number.isFinite(volumeMa20) && volumeMa20 > 0
+    ? volume / volumeMa20
+    : null;
+  const expansionConfirmed = isDirectionalCandle(continuationCandle, direction) &&
+    continuationBodyAtr >= TREND_CONTINUATION_MIN_BODY_ATR &&
+    bodyToRangeRatio >= TREND_CONTINUATION_MIN_BODY_TO_RANGE &&
+    directionalCloseLocation >= TREND_CONTINUATION_MIN_CLOSE_LOCATION &&
+    brokePauseRange;
+
+  return {
+    ...baseEvidence,
+    qualified: compactPause && trendHeld && expansionConfirmed,
+    pauseRangeAtr,
+    pauseBodyAtr,
+    pauseDirectionalMoveAtr,
+    pauseOverlap,
+    compactPause,
+    continuationBodyAtr,
+    bodyToRangeRatio,
+    directionalCloseLocation,
+    brokePauseRange,
+    volumeRatio,
+    trendHeld,
+    invalidationLevel: direction === "long" ? pauseLow : pauseHigh
+  };
 }
 
 export function evaluateBreakoutRetestSetup(direction, candles, indicators) {
@@ -921,6 +1247,735 @@ export function evaluateLiquiditySweepReversalSetup(direction, candles, indicato
     reversalMoveAtr,
     invalidationLevel: directionMatches ? sweepExtreme : null
   };
+}
+
+const multiTimeframeAgreementRules = {
+  "5m": { expected: ["15m", "1h", "4h"], minimumAligned: 2, label: "at_least_2_aligned_no_opposition" },
+  "15m": { expected: ["1h", "4h"], minimumAligned: 2, label: "1h_and_4h_aligned" },
+  "1h": { expected: ["4h"], minimumAligned: 1, label: "4h_aligned" },
+  "4h": { expected: [], minimumAligned: Number.POSITIVE_INFINITY, label: "higher_timeframe_required" }
+};
+
+export function evaluateMultiTimeframeContinuationSetup(
+  direction,
+  candles,
+  indicators,
+  regime,
+  confluenceContext
+) {
+  const baseTimeframe = confluenceContext?.lowerTimeframe || null;
+  const rule = multiTimeframeAgreementRules[baseTimeframe] || null;
+  const latest = candles[candles.length - 1];
+  const baseRegimeDirection = regime?.preferredDirection === "long" || regime?.label === "Trend Up"
+    ? "long"
+    : regime?.preferredDirection === "short" || regime?.label === "Trend Down"
+      ? "short"
+      : "neutral";
+  const baseEmaAligned = direction === "long"
+    ? latest?.close > indicators?.ema20 && indicators?.ema20 > indicators?.ema50
+    : latest?.close < indicators?.ema20 && indicators?.ema20 < indicators?.ema50;
+  const baseDirectionalCandle = Boolean(latest && isDirectionalCandle(latest, direction));
+  const baseContinuation = baseRegimeDirection === direction && baseEmaAligned && baseDirectionalCandle;
+  const supplied = new Map(
+    (confluenceContext?.higherTimeframes || []).map((item) => [item?.timeframe, item])
+  );
+  const higherTimeframes = (rule?.expected || []).map((timeframe) => {
+    const item = supplied.get(timeframe);
+    if (!item?.available) {
+      return { timeframe, state: "unavailable", direction: null, strength: null };
+    }
+    const higherDirection = inferMultiTimeframeDirection(item.regime);
+    return {
+      timeframe,
+      state: higherDirection === direction
+        ? "aligned"
+        : higherDirection === "neutral"
+          ? "neutral"
+          : "opposing",
+      direction: higherDirection,
+      strength: finiteOrNull(item.regime?.trendStrength)
+    };
+  });
+  const alignedCount = higherTimeframes.filter((item) => item.state === "aligned").length;
+  const opposingCount = higherTimeframes.filter((item) => item.state === "opposing").length;
+  const neutralCount = higherTimeframes.filter((item) => item.state === "neutral").length;
+  const broadest = higherTimeframes.at(-1) || null;
+  const passed = Boolean(
+    rule &&
+    rule.expected.length > 0 &&
+    baseContinuation &&
+    alignedCount >= rule.minimumAligned &&
+    opposingCount === 0
+  );
+
+  return {
+    strategy: "Multi-timeframe continuation",
+    baseTimeframe,
+    baseDirection: direction,
+    baseRegimeDirection,
+    baseContinuation,
+    higherTimeframes,
+    alignedCount,
+    opposingCount,
+    neutralCount,
+    unavailableCount: higherTimeframes.filter((item) => item.state === "unavailable").length,
+    broadestTimeframeDirection: broadest?.direction || null,
+    agreementRule: rule?.label || "unsupported_base_timeframe",
+    passed
+  };
+}
+
+function finiteOrNull(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+export function evaluatePullbackBounceSetup(direction, candles, indicators, levels, regime) {
+  const atrValue = Number(indicators?.atr14);
+  const ema20 = Number(indicators?.ema20);
+  const ema50 = Number(indicators?.ema50);
+  const trendRegime = direction === "long" ? "Trend Up" : "Trend Down";
+  const trendStrength = Number(regime?.trendStrength);
+  const activeLevel = direction === "long" ? levels?.nearestSupport : levels?.nearestResistance;
+  const activeLevelPrice = Number(activeLevel?.price);
+  const activeLevelStrength = Number(direction === "long" ? levels?.supportStrength : levels?.resistanceStrength);
+  const nearbyStructuralLevel = Number.isFinite(activeLevelPrice) &&
+    Number.isFinite(atrValue) && atrValue > 0 &&
+    Math.abs(activeLevelPrice - ema20) / atrValue <= 1
+    ? {
+        type: direction === "long" ? "support" : "resistance",
+        price: activeLevelPrice,
+        strength: Number.isFinite(activeLevelStrength) ? activeLevelStrength : null,
+        distanceAtr: Math.abs(activeLevelPrice - ema20) / atrValue
+      }
+    : null;
+  const baseEvidence = {
+    strategy: "Pullback bounce",
+    direction,
+    qualified: false,
+    trendRegime: regime?.label || null,
+    trendStrength: Number.isFinite(trendStrength) ? trendStrength : null,
+    ema20: Number.isFinite(ema20) ? ema20 : null,
+    ema50: Number.isFinite(ema50) ? ema50 : null,
+    emaSeparationAtr: Number.isFinite(atrValue) && atrValue > 0 && Number.isFinite(ema20) && Number.isFinite(ema50)
+      ? Math.abs(ema20 - ema50) / atrValue
+      : null,
+    priorExtensionAtr: null,
+    priorExtensionIndex: null,
+    priorExtensionTime: null,
+    pullbackStartIndex: null,
+    pullbackEndIndex: null,
+    pullbackDirection: direction === "long" ? "down" : "up",
+    pullbackDepthAtr: null,
+    interactionCandle: null,
+    interactionEma20: null,
+    interactionEma50: null,
+    interactionDistanceAtr: null,
+    pullbackToleranceAtr: PULLBACK_BOUNCE_INTERACTION_TOLERANCE_ATR,
+    heldTrendSupport: false,
+    ambiguousEmaCross: false,
+    confirmationCandle: null,
+    confirmationDirection: null,
+    confirmationMoveAtr: null,
+    movedAwayFromEma: false,
+    ageCandles: null,
+    nearbyStructuralLevel,
+    invalidationLevel: null
+  };
+
+  const latest = candles?.at?.(-1);
+  const emaAligned = direction === "long"
+    ? Number(latest?.close) > ema20 && ema20 > ema50
+    : Number(latest?.close) < ema20 && ema20 < ema50;
+  if (
+    !["long", "short"].includes(direction) ||
+    !Array.isArray(candles) ||
+    candles.length < PULLBACK_BOUNCE_SEQUENCE_CANDLES + 4 ||
+    regime?.label !== trendRegime ||
+    !Number.isFinite(trendStrength) ||
+    trendStrength <= 0 ||
+    !Number.isFinite(atrValue) ||
+    atrValue <= 0 ||
+    !Number.isFinite(ema20) ||
+    !Number.isFinite(ema50) ||
+    !emaAligned
+  ) {
+    return baseEvidence;
+  }
+
+  const latestIndex = candles.length - 1;
+  const interactionIndexes = [latestIndex, latestIndex - 1];
+  const tolerance = atrValue * PULLBACK_BOUNCE_INTERACTION_TOLERANCE_ATR;
+  const ema20ByIndex = deriveRecentEmaSeries(candles, ema20, 20);
+  const ema50ByIndex = deriveRecentEmaSeries(candles, ema50, 50);
+  const trendDistance = (price, reference) => direction === "long"
+    ? Number(price) - Number(reference)
+    : Number(reference) - Number(price);
+
+  const evaluateInteraction = (interactionIndex) => {
+    const extensionIndex = interactionIndex - PULLBACK_BOUNCE_SEQUENCE_CANDLES - 1;
+    const pullbackStartIndex = extensionIndex + 1;
+    const pullbackEndIndex = interactionIndex - 1;
+    const extensionCandle = candles[extensionIndex];
+    const pullbackCandles = candles.slice(pullbackStartIndex, interactionIndex);
+    const interactionCandle = candles[interactionIndex];
+    const confirmationCandle = candles[latestIndex];
+    const extensionEma20 = ema20ByIndex[extensionIndex];
+    const pullbackEma20 = ema20ByIndex.slice(pullbackStartIndex, interactionIndex);
+    const interactionEma20 = ema20ByIndex[interactionIndex];
+    const interactionEma50 = ema50ByIndex[interactionIndex];
+    const confirmationEma20 = ema20ByIndex[latestIndex];
+    const ageCandles = latestIndex - interactionIndex;
+    if (
+      !extensionCandle ||
+      pullbackCandles.length !== PULLBACK_BOUNCE_SEQUENCE_CANDLES ||
+      !interactionCandle ||
+      !Number.isFinite(extensionEma20) ||
+      pullbackEma20.some((value) => !Number.isFinite(value)) ||
+      !Number.isFinite(interactionEma20) ||
+      !Number.isFinite(interactionEma50) ||
+      !Number.isFinite(confirmationEma20)
+    ) {
+      return baseEvidence;
+    }
+
+    const extensionExtreme = direction === "long"
+      ? Number(extensionCandle.high)
+      : Number(extensionCandle.low);
+    const priorExtensionAtr = trendDistance(extensionExtreme, extensionEma20) / atrValue;
+    const pullbackCloseDistances = [
+      trendDistance(extensionCandle.close, extensionEma20),
+      ...pullbackCandles.map((candle, index) => trendDistance(candle.close, pullbackEma20[index]))
+    ];
+    const closesProgressTowardEma = pullbackCloseDistances.every((distance, index) => (
+      index === 0 || distance >= 0 && distance < pullbackCloseDistances[index - 1]
+    ));
+    const countertrendDirection = direction === "long" ? "short" : "long";
+    const countertrendSequence = pullbackCandles.every((candle) =>
+      isDirectionalCandle(candle, countertrendDirection)
+    ) && closesProgressTowardEma;
+    const interactionExtreme = direction === "long"
+      ? Number(interactionCandle.low)
+      : Number(interactionCandle.high);
+    const interactionDistanceAtr = Math.abs(interactionExtreme - interactionEma20) / atrValue;
+    const interactedWithEma = interactionExtreme >= interactionEma20 - tolerance &&
+      interactionExtreme <= interactionEma20 + tolerance;
+    const interactionClosedOnTrendSide = direction === "long"
+      ? Number(interactionCandle.close) >= interactionEma20
+      : Number(interactionCandle.close) <= interactionEma20;
+    const ambiguousEmaCross = direction === "long"
+      ? interactionExtreme <= interactionEma50
+      : interactionExtreme >= interactionEma50;
+    const heldTrendSupport = interactedWithEma && interactionClosedOnTrendSide && !ambiguousEmaCross;
+    const confirmationOnTrendSide = direction === "long"
+      ? Number(confirmationCandle.close) > confirmationEma20
+      : Number(confirmationCandle.close) < confirmationEma20;
+    const confirmationMove = interactionIndex === latestIndex
+      ? trendDistance(interactionCandle.close, interactionEma20) -
+        Math.max(0, trendDistance(interactionCandle.open, interactionEma20))
+      : trendDistance(confirmationCandle.close, confirmationEma20) -
+        Math.max(0, trendDistance(interactionCandle.close, interactionEma20));
+    const confirmationMoveAtr = confirmationMove / atrValue;
+    const sameCandleBounce = interactionIndex === latestIndex &&
+      isDirectionalCandle(interactionCandle, direction) &&
+      confirmationMoveAtr >= PULLBACK_BOUNCE_MIN_CONFIRMATION_MOVE_ATR;
+    const followingCandleBounce = interactionIndex !== latestIndex &&
+      isDirectionalCandle(confirmationCandle, direction) &&
+      confirmationMoveAtr >= PULLBACK_BOUNCE_MIN_CONFIRMATION_MOVE_ATR;
+    const movedAwayFromEma = sameCandleBounce || followingCandleBounce;
+    const pullbackDepthAtr = direction === "long"
+      ? (extensionExtreme - interactionExtreme) / atrValue
+      : (interactionExtreme - extensionExtreme) / atrValue;
+    const qualified = priorExtensionAtr >= PULLBACK_BOUNCE_MIN_PRIOR_EXTENSION_ATR &&
+      countertrendSequence &&
+      interactedWithEma &&
+      heldTrendSupport &&
+      confirmationOnTrendSide &&
+      movedAwayFromEma &&
+      ageCandles <= PULLBACK_BOUNCE_MAX_AGE_CANDLES;
+
+    return {
+      ...baseEvidence,
+      qualified,
+      priorExtensionAtr,
+      priorExtensionIndex: extensionIndex,
+      priorExtensionTime: extensionCandle.time ?? extensionCandle.timestamp ?? null,
+      pullbackStartIndex,
+      pullbackEndIndex,
+      pullbackDepthAtr,
+      interactionCandle: serializeStrategyCandle(interactionCandle),
+      interactionEma20,
+      interactionEma50,
+      interactionDistanceAtr,
+      heldTrendSupport,
+      ambiguousEmaCross,
+      confirmationCandle: serializeStrategyCandle(confirmationCandle),
+      confirmationDirection: movedAwayFromEma ? direction : null,
+      confirmationMoveAtr,
+      movedAwayFromEma,
+      ageCandles,
+      invalidationLevel: interactionExtreme
+    };
+  };
+
+  const evaluations = interactionIndexes.map(evaluateInteraction);
+  return evaluations.find((evaluation) => evaluation.qualified) || evaluations[0];
+}
+
+function deriveRecentEmaSeries(candles, latestEma, period) {
+  const output = Array(candles.length).fill(null);
+  const multiplier = 2 / (period + 1);
+  const inverseMultiplier = 1 - multiplier;
+  output[candles.length - 1] = latestEma;
+  for (let index = candles.length - 2; index >= 0; index -= 1) {
+    const nextEma = output[index + 1];
+    const nextClose = Number(candles[index + 1]?.close);
+    if (!Number.isFinite(nextEma) || !Number.isFinite(nextClose)) break;
+    output[index] = (nextEma - multiplier * nextClose) / inverseMultiplier;
+  }
+  return output;
+}
+
+export function evaluateSupportResistanceRetestSetup(direction, candles, indicators, levels) {
+  const atrValue = Number(indicators?.atr14);
+  const levelType = direction === "long" ? "support" : "resistance";
+  const level = direction === "long" ? levels?.nearestSupport : levels?.nearestResistance;
+  const levelStrength = Number(direction === "long" ? levels?.supportStrength : levels?.resistanceStrength);
+  const levelPrice = Number(level?.price);
+  const baseEvidence = {
+    strategy: "Support/resistance retest",
+    direction,
+    qualified: false,
+    levelType,
+    levelPrice: Number.isFinite(levelPrice) ? levelPrice : null,
+    levelStrength: Number.isFinite(levelStrength) ? levelStrength : null,
+    levelAgeCandles: null,
+    priorSeparationAtr: null,
+    interactionCandle: null,
+    interactionDistanceAtr: null,
+    toleranceAtr: SUPPORT_RESISTANCE_RETEST_TOLERANCE_ATR,
+    heldLevel: false,
+    confirmationCandle: null,
+    confirmationDirection: null,
+    ageCandles: null,
+    invalidationLevel: null,
+    levelPredatesInteraction: false,
+    priorSeparated: false
+  };
+
+  if (
+    !["long", "short"].includes(direction) ||
+    !Array.isArray(candles) ||
+    candles.length < 4 ||
+    !Number.isFinite(atrValue) ||
+    atrValue <= 0 ||
+    !Number.isFinite(levelPrice) ||
+    !Number.isFinite(levelStrength) ||
+    levelStrength < SUPPORT_RESISTANCE_RETEST_MIN_LEVEL_STRENGTH ||
+    level?.time == null
+  ) {
+    return baseEvidence;
+  }
+
+  const levelIndex = candles.findIndex((candle) => sameCandleTime(candle.time ?? candle.timestamp, level.time));
+  if (levelIndex < 0) return baseEvidence;
+
+  const latestIndex = candles.length - 1;
+  const interactionIndexes = [latestIndex, latestIndex - 1];
+  for (const interactionIndex of interactionIndexes) {
+    const interactionCandle = candles[interactionIndex];
+    const confirmationCandle = interactionIndex === latestIndex
+      ? interactionCandle
+      : candles[latestIndex];
+    const ageCandles = latestIndex - interactionIndex;
+    const levelPredatesInteraction = levelIndex <= interactionIndex - 3;
+    if (!levelPredatesInteraction || ageCandles > SUPPORT_RESISTANCE_RETEST_MAX_AGE_CANDLES) continue;
+
+    const separationWindow = candles.slice(levelIndex + 2, interactionIndex);
+    const separationDistances = separationWindow.map((candle) => direction === "long"
+      ? (Number(candle.close) - levelPrice) / atrValue
+      : (levelPrice - Number(candle.close)) / atrValue
+    );
+    const priorSeparationAtr = separationDistances.length
+      ? Math.max(...separationDistances)
+      : Number.NEGATIVE_INFINITY;
+    const priorSeparated = priorSeparationAtr >= SUPPORT_RESISTANCE_RETEST_MIN_SEPARATION_ATR;
+    const interactionExtreme = direction === "long"
+      ? Number(interactionCandle.low)
+      : Number(interactionCandle.high);
+    const interactionDistanceAtr = Math.abs(interactionExtreme - levelPrice) / atrValue;
+    const zoneTolerance = atrValue * SUPPORT_RESISTANCE_RETEST_TOLERANCE_ATR;
+    const interacted = interactionExtreme >= levelPrice - zoneTolerance &&
+      interactionExtreme <= levelPrice + zoneTolerance;
+    const heldLevel = interacted && (direction === "long"
+      ? Number(interactionCandle.close) >= levelPrice
+      : Number(interactionCandle.close) <= levelPrice);
+    const confirmation = heldLevel &&
+      isDirectionalCandle(confirmationCandle, direction) &&
+      (direction === "long"
+        ? Number(confirmationCandle.close) >= levelPrice
+        : Number(confirmationCandle.close) <= levelPrice);
+    const qualified = priorSeparated && heldLevel && confirmation;
+
+    if (qualified) {
+      return {
+        ...baseEvidence,
+        qualified: true,
+        levelAgeCandles: interactionIndex - levelIndex,
+        priorSeparationAtr,
+        interactionCandle: serializeStrategyCandle(interactionCandle),
+        interactionDistanceAtr,
+        heldLevel,
+        confirmationCandle: serializeStrategyCandle(confirmationCandle),
+        confirmationDirection: direction,
+        ageCandles,
+        invalidationLevel: interactionExtreme,
+        levelPredatesInteraction,
+        priorSeparated
+      };
+    }
+  }
+
+  const interactionIndex = latestIndex;
+  const interactionCandle = candles[interactionIndex];
+  const levelPredatesInteraction = levelIndex <= interactionIndex - 3;
+  const separationWindow = levelPredatesInteraction
+    ? candles.slice(levelIndex + 2, interactionIndex)
+    : [];
+  const priorSeparationAtr = separationWindow.length
+    ? Math.max(...separationWindow.map((candle) => direction === "long"
+        ? (Number(candle.close) - levelPrice) / atrValue
+        : (levelPrice - Number(candle.close)) / atrValue
+      ))
+    : null;
+  const interactionExtreme = direction === "long"
+    ? Number(interactionCandle.low)
+    : Number(interactionCandle.high);
+  const interactionDistanceAtr = Math.abs(interactionExtreme - levelPrice) / atrValue;
+  const zoneTolerance = atrValue * SUPPORT_RESISTANCE_RETEST_TOLERANCE_ATR;
+  const interacted = interactionExtreme >= levelPrice - zoneTolerance &&
+    interactionExtreme <= levelPrice + zoneTolerance;
+  const heldLevel = interacted && (direction === "long"
+    ? Number(interactionCandle.close) >= levelPrice
+    : Number(interactionCandle.close) <= levelPrice);
+  const confirmation = heldLevel && isDirectionalCandle(interactionCandle, direction);
+
+  return {
+    ...baseEvidence,
+    levelAgeCandles: levelPredatesInteraction ? interactionIndex - levelIndex : null,
+    priorSeparationAtr,
+    interactionCandle: serializeStrategyCandle(interactionCandle),
+    interactionDistanceAtr,
+    heldLevel,
+    confirmationCandle: serializeStrategyCandle(interactionCandle),
+    confirmationDirection: confirmation ? direction : null,
+    ageCandles: 0,
+    invalidationLevel: interacted ? interactionExtreme : null,
+    levelPredatesInteraction,
+    priorSeparated: Number(priorSeparationAtr) >= SUPPORT_RESISTANCE_RETEST_MIN_SEPARATION_ATR
+  };
+}
+
+export function evaluateMeanReversionSetup(direction, candles, indicators, levels, regime) {
+  const atrValue = Number(indicators?.atr14);
+  const meanReferencePrice = Number(indicators?.ema20);
+  const rsi = Number(indicators?.rsi14);
+  const structuralLevel = direction === "long" ? levels?.nearestSupport : levels?.nearestResistance;
+  const structuralLevelPrice = Number(structuralLevel?.price);
+  const levelStrength = Number(direction === "long" ? levels?.supportStrength : levels?.resistanceStrength);
+  const rsiSupported = direction === "long"
+    ? rsi >= 32 && rsi <= 48
+    : rsi >= 52 && rsi <= 68;
+  const regimeAllowed = !["Trend Up", "Trend Down", "Breakout"].includes(regime?.label);
+  const baseEvidence = {
+    strategy: "Mean reversion",
+    direction,
+    qualified: false,
+    meanReferenceType: "EMA20",
+    meanReferencePrice: Number.isFinite(meanReferencePrice) ? meanReferencePrice : null,
+    distanceFromMeanAtr: null,
+    currentDistanceFromMeanAtr: null,
+    rsi: Number.isFinite(rsi) ? rsi : null,
+    rsiSupported,
+    structuralLevel: Number.isFinite(structuralLevelPrice) ? structuralLevelPrice : null,
+    levelStrength: Number.isFinite(levelStrength) ? levelStrength : null,
+    reversalCandle: null,
+    movedTowardMean: false,
+    confirmationCandle: null,
+    confirmationDirection: null,
+    ageCandles: null,
+    invalidationLevel: null,
+    regimeAllowed
+  };
+
+  if (
+    !["long", "short"].includes(direction) ||
+    !Array.isArray(candles) ||
+    candles.length < 2 ||
+    !Number.isFinite(atrValue) ||
+    atrValue <= 0 ||
+    !Number.isFinite(meanReferencePrice) ||
+    !Number.isFinite(rsi) ||
+    !Number.isFinite(structuralLevelPrice) ||
+    !Number.isFinite(levelStrength) ||
+    levelStrength < 2 ||
+    !rsiSupported ||
+    !regimeAllowed
+  ) {
+    return baseEvidence;
+  }
+
+  const latestIndex = candles.length - 1;
+  const latest = candles[latestIndex];
+  const currentDistanceFromMeanAtr = Math.abs(Number(latest.close) - meanReferencePrice) / atrValue;
+  const latestRemainsBeforeMean = direction === "long"
+    ? Number(latest.close) < meanReferencePrice
+    : Number(latest.close) > meanReferencePrice;
+  const reversalIndexes = [latestIndex, latestIndex - 1];
+
+  for (const reversalIndex of reversalIndexes) {
+    const reversalCandle = candles[reversalIndex];
+    const confirmationCandle = latest;
+    const ageCandles = latestIndex - reversalIndex;
+    if (ageCandles > MEAN_REVERSION_MAX_AGE_CANDLES) continue;
+
+    const extensionPrice = direction === "long"
+      ? Number(reversalCandle.low)
+      : Number(reversalCandle.high);
+    const distanceFromMeanAtr = direction === "long"
+      ? (meanReferencePrice - extensionPrice) / atrValue
+      : (extensionPrice - meanReferencePrice) / atrValue;
+    const extended = distanceFromMeanAtr >= MEAN_REVERSION_MIN_EXTENSION_ATR;
+    const structureDistanceAtr = Math.abs(extensionPrice - structuralLevelPrice) / atrValue;
+    const interactedWithStructure = structureDistanceAtr <= MEAN_REVERSION_STRUCTURE_TOLERANCE_ATR;
+    const heldStructure = interactedWithStructure && (direction === "long"
+      ? Number(reversalCandle.close) >= structuralLevelPrice
+      : Number(reversalCandle.close) <= structuralLevelPrice);
+    const reversalMovedTowardMean = isDirectionalCandle(reversalCandle, direction) &&
+      Math.abs(meanReferencePrice - Number(reversalCandle.close)) <
+        Math.abs(meanReferencePrice - Number(reversalCandle.open));
+    const followThrough = reversalIndex === latestIndex || (
+      isDirectionalCandle(confirmationCandle, direction) &&
+      Math.abs(meanReferencePrice - Number(confirmationCandle.close)) <
+        Math.abs(meanReferencePrice - Number(reversalCandle.close))
+    );
+    const movedTowardMean = reversalMovedTowardMean && followThrough;
+    const qualified = extended &&
+      heldStructure &&
+      movedTowardMean &&
+      latestRemainsBeforeMean;
+
+    if (qualified) {
+      return {
+        ...baseEvidence,
+        qualified: true,
+        distanceFromMeanAtr,
+        currentDistanceFromMeanAtr,
+        structuralDistanceAtr: structureDistanceAtr,
+        reversalCandle: serializeStrategyCandle(reversalCandle),
+        movedTowardMean,
+        confirmationCandle: serializeStrategyCandle(confirmationCandle),
+        confirmationDirection: direction,
+        ageCandles,
+        invalidationLevel: extensionPrice
+      };
+    }
+  }
+
+  const reversalCandle = latest;
+  const extensionPrice = direction === "long" ? Number(latest.low) : Number(latest.high);
+  const distanceFromMeanAtr = direction === "long"
+    ? (meanReferencePrice - extensionPrice) / atrValue
+    : (extensionPrice - meanReferencePrice) / atrValue;
+  const structureDistanceAtr = Math.abs(extensionPrice - structuralLevelPrice) / atrValue;
+  const movedTowardMean = isDirectionalCandle(latest, direction) &&
+    Math.abs(meanReferencePrice - Number(latest.close)) <
+      Math.abs(meanReferencePrice - Number(latest.open));
+
+  return {
+    ...baseEvidence,
+    distanceFromMeanAtr,
+    currentDistanceFromMeanAtr,
+    structuralDistanceAtr: structureDistanceAtr,
+    reversalCandle: serializeStrategyCandle(latest),
+    movedTowardMean,
+    confirmationCandle: serializeStrategyCandle(latest),
+    confirmationDirection: movedTowardMean ? direction : null,
+    ageCandles: 0,
+    invalidationLevel: extensionPrice
+  };
+}
+
+export function evaluateRangeBounceSetup(direction, candles, indicators, levels, regime) {
+  const atrValue = Number(indicators?.atr14);
+  const rangeLow = Number(levels?.nearestSupport?.price);
+  const rangeHigh = Number(levels?.nearestResistance?.price);
+  const lowerStrength = Number(levels?.supportStrength);
+  const upperStrength = Number(levels?.resistanceStrength);
+  const rangeWidth = rangeHigh - rangeLow;
+  const rangeWidthAtr = rangeWidth / atrValue;
+  const rangeMidpoint = (rangeLow + rangeHigh) / 2;
+  const baseEvidence = {
+    strategy: "Range bounce",
+    direction,
+    qualified: false,
+    rangeLow: Number.isFinite(rangeLow) ? rangeLow : null,
+    rangeHigh: Number.isFinite(rangeHigh) ? rangeHigh : null,
+    rangeMidpoint: Number.isFinite(rangeMidpoint) ? rangeMidpoint : null,
+    rangeWidthAtr: Number.isFinite(rangeWidthAtr) ? rangeWidthAtr : null,
+    lowerStrength: Number.isFinite(lowerStrength) ? lowerStrength : null,
+    upperStrength: Number.isFinite(upperStrength) ? upperStrength : null,
+    rangeLowConfirmationIndex: null,
+    rangeLowConfirmationTime: null,
+    rangeHighConfirmationIndex: null,
+    rangeHighConfirmationTime: null,
+    rangeAgeCandles: null,
+    lowerInteractionCount: 0,
+    upperInteractionCount: 0,
+    recentInsideRatio: null,
+    approachedFromInterior: false,
+    boundaryTested: direction === "long" ? "lower" : "upper",
+    interactionCandle: null,
+    interactionDistanceAtr: null,
+    interactionToleranceAtr: RANGE_BOUNCE_INTERACTION_TOLERANCE_ATR,
+    closedInsideRange: false,
+    ambiguousDualBoundaryTest: false,
+    confirmationCandle: null,
+    confirmationDirection: null,
+    movedTowardInterior: false,
+    ageCandles: null,
+    invalidationLevel: null
+  };
+
+  if (
+    !["long", "short"].includes(direction) ||
+    !Array.isArray(candles) ||
+    candles.length < 6 ||
+    regime?.label !== "Range" ||
+    !Number.isFinite(atrValue) ||
+    atrValue <= 0 ||
+    !Number.isFinite(rangeLow) ||
+    !Number.isFinite(rangeHigh) ||
+    rangeHigh <= rangeLow ||
+    !Number.isFinite(rangeWidthAtr) ||
+    rangeWidthAtr < RANGE_BOUNCE_MIN_WIDTH_ATR ||
+    lowerStrength < 2 ||
+    upperStrength < 2 ||
+    levels?.nearestSupport?.time == null ||
+    levels?.nearestResistance?.time == null
+  ) {
+    return baseEvidence;
+  }
+
+  const rangeLowIndex = candles.findIndex((candle) => sameCandleTime(
+    candle.time ?? candle.timestamp,
+    levels.nearestSupport.time
+  ));
+  const rangeHighIndex = candles.findIndex((candle) => sameCandleTime(
+    candle.time ?? candle.timestamp,
+    levels.nearestResistance.time
+  ));
+  if (rangeLowIndex < 0 || rangeHighIndex < 0) return baseEvidence;
+
+  const latestIndex = candles.length - 1;
+  const interactionIndexes = [latestIndex, latestIndex - 1];
+  const tolerance = atrValue * RANGE_BOUNCE_INTERACTION_TOLERANCE_ATR;
+
+  const evaluateInteraction = (interactionIndex) => {
+    const interactionCandle = candles[interactionIndex];
+    const confirmationCandle = candles[latestIndex];
+    const ageCandles = latestIndex - interactionIndex;
+    const rangeLowConfirmationIndex = rangeLowIndex + 2;
+    const rangeHighConfirmationIndex = rangeHighIndex + 2;
+    const boundariesPredateBounce = rangeLowConfirmationIndex < interactionIndex &&
+      rangeHighConfirmationIndex < interactionIndex;
+    const priorCandle = candles[interactionIndex - 2];
+    const approachCandle = candles[interactionIndex - 1];
+    const priorInside = priorCandle && Number(priorCandle.close) > rangeLow && Number(priorCandle.close) < rangeHigh;
+    const approachInside = approachCandle && Number(approachCandle.close) > rangeLow && Number(approachCandle.close) < rangeHigh;
+    const testedBoundary = direction === "long" ? rangeLow : rangeHigh;
+    const approachedFromInterior = Boolean(
+      priorInside &&
+      approachInside &&
+      Math.abs(Number(approachCandle.close) - testedBoundary) <
+        Math.abs(Number(priorCandle.close) - testedBoundary)
+    );
+    const qualityStart = Math.max(
+      rangeLowConfirmationIndex,
+      rangeHighConfirmationIndex,
+      interactionIndex - 12
+    );
+    const qualityWindow = candles.slice(qualityStart, interactionIndex);
+    const structureWindow = candles.slice(Math.min(rangeLowIndex, rangeHighIndex), interactionIndex);
+    const recentInsideRatio = qualityWindow.length
+      ? qualityWindow.filter((candle) => Number(candle.close) >= rangeLow && Number(candle.close) <= rangeHigh).length /
+        qualityWindow.length
+      : 0;
+    const lowerInteractionCount = structureWindow.filter((candle) =>
+      Math.abs(Number(candle.low) - rangeLow) <= tolerance
+    ).length;
+    const upperInteractionCount = structureWindow.filter((candle) =>
+      Math.abs(Number(candle.high) - rangeHigh) <= tolerance
+    ).length;
+    const lowerTested = Number(interactionCandle.low) >= rangeLow - tolerance &&
+      Number(interactionCandle.low) <= rangeLow + tolerance;
+    const upperTested = Number(interactionCandle.high) >= rangeHigh - tolerance &&
+      Number(interactionCandle.high) <= rangeHigh + tolerance;
+    const ambiguousDualBoundaryTest = lowerTested && upperTested;
+    const boundaryInteracted = direction === "long" ? lowerTested : upperTested;
+    const interactionExtreme = direction === "long"
+      ? Number(interactionCandle.low)
+      : Number(interactionCandle.high);
+    const interactionDistanceAtr = Math.abs(interactionExtreme - testedBoundary) / atrValue;
+    const closedInsideRange = Number(interactionCandle.close) >= rangeLow &&
+      Number(interactionCandle.close) <= rangeHigh;
+    const confirmationInsideRange = Number(confirmationCandle.close) >= rangeLow &&
+      Number(confirmationCandle.close) <= rangeHigh;
+    const sameCandleBounce = interactionIndex === latestIndex &&
+      isDirectionalCandle(interactionCandle, direction) &&
+      Math.abs(Number(interactionCandle.close) - rangeMidpoint) <
+        Math.abs(Number(interactionCandle.open) - rangeMidpoint);
+    const followingCandleBounce = interactionIndex !== latestIndex &&
+      isDirectionalCandle(confirmationCandle, direction) &&
+      Math.abs(Number(confirmationCandle.close) - rangeMidpoint) <
+        Math.abs(Number(interactionCandle.close) - rangeMidpoint);
+    const movedTowardInterior = sameCandleBounce || followingCandleBounce;
+    const qualified = boundariesPredateBounce &&
+      ageCandles <= RANGE_BOUNCE_MAX_AGE_CANDLES &&
+      recentInsideRatio >= RANGE_BOUNCE_MIN_INSIDE_RATIO &&
+      approachedFromInterior &&
+      boundaryInteracted &&
+      !ambiguousDualBoundaryTest &&
+      closedInsideRange &&
+      confirmationInsideRange &&
+      movedTowardInterior;
+
+    return {
+      ...baseEvidence,
+      qualified,
+      rangeLowConfirmationIndex,
+      rangeLowConfirmationTime: candles[rangeLowConfirmationIndex]?.time ?? candles[rangeLowConfirmationIndex]?.timestamp ?? null,
+      rangeHighConfirmationIndex,
+      rangeHighConfirmationTime: candles[rangeHighConfirmationIndex]?.time ?? candles[rangeHighConfirmationIndex]?.timestamp ?? null,
+      rangeAgeCandles: interactionIndex - Math.max(rangeLowConfirmationIndex, rangeHighConfirmationIndex),
+      lowerInteractionCount,
+      upperInteractionCount,
+      recentInsideRatio,
+      approachedFromInterior,
+      interactionCandle: serializeStrategyCandle(interactionCandle),
+      interactionDistanceAtr,
+      closedInsideRange,
+      ambiguousDualBoundaryTest,
+      confirmationCandle: serializeStrategyCandle(confirmationCandle),
+      confirmationDirection: movedTowardInterior ? direction : null,
+      movedTowardInterior,
+      ageCandles,
+      invalidationLevel: interactionExtreme
+    };
+  };
+
+  const evaluations = interactionIndexes.map(evaluateInteraction);
+  return evaluations.find((evaluation) => evaluation.qualified) || evaluations[0];
 }
 
 function serializeStrategyCandle(candle) {

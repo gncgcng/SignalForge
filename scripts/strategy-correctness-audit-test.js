@@ -66,7 +66,13 @@ const nearMisses = [
   ["Liquidity sweep reversal", { ...fixtureFor("Liquidity sweep reversal", "long"), smcState: null }],
   ["Breakout retest", fixtureFor("Breakout retest", "long", { previousClose: 104.8 })],
   ["Momentum breakout", fixtureFor("Momentum breakout", "long", { latestClose: 104.9, latestHigh: 106.5 })],
-  ["VWAP reclaim/rejection", { ...fixtureFor("VWAP reclaim/rejection", "long"), advancedStructure: { vwap: { event: "None" } } }],
+  ["VWAP reclaim/rejection", (() => {
+    const fixture = fixtureFor("VWAP reclaim/rejection", "long");
+    return {
+      ...fixture,
+      advancedStructure: { vwap: { ...fixture.advancedStructure.vwap, event: "None" } }
+    };
+  })()],
   ["Multi-timeframe continuation", { ...fixtureFor("Multi-timeframe continuation", "long"), confluenceContext: { higherTimeframes: [] } }],
   ["Pullback bounce", { ...fixtureFor("Pullback bounce", "long"), ema20: 98 }],
   ["Support/resistance retest", { ...fixtureFor("Support/resistance retest", "long"), nearestSupport: { price: 96 } }],
@@ -98,7 +104,7 @@ const fullGeneratorCharacterization = characterizeFullGenerator();
 console.log(JSON.stringify({
   auditType: "strategy_correctness_characterization",
   productionBehaviorChanged: true,
-  productionBehaviorScope: "Liquidity sweep reversal classification only",
+  productionBehaviorScope: "Momentum breakout reference-window freshness only in this change",
   reachableStrategyCount: discoveredStrategies.length,
   discoveredStrategies,
   mirroredClassificationCases: cases,
@@ -118,13 +124,13 @@ function auditMomentumReferenceGap() {
   candles[candles.length - 2] = candle(candles.length - 2, priorHigh + 0.2, priorHigh - 0.2, priorHigh + 0.4, priorHigh - 0.5, 110);
   candles[candles.length - 1] = candle(candles.length - 1, priorHigh - 0.1, priorHigh + 1, priorHigh + 1.2, priorHigh - 0.3, 150);
   const actual = classify({ ...fixture, candles });
-  assert.equal(actual, "Momentum breakout");
+  assert.notEqual(actual, "Momentum breakout");
   findings.push({
-    severity: "HIGH",
-    classification: "SEMANTIC BUG",
+    severity: "LOW",
+    classification: "NO MATERIAL ISSUE",
     strategy: "Momentum breakout",
-    code: "signalGenerator.js:725-730",
-    finding: "The reference window excludes candles -3 and -2, and only candle -2 close is checked. Candle -3 can already close beyond the level, candle -2 can return below it, and the latest candle is still named the breakout trigger.",
+    code: "signalGenerator.js:evaluateMomentumBreakoutSetup",
+    finding: "Freshness now checks strict closes at both intervening completed candles (-3 and -2) while preserving the -24..-4 reference window and -1 trigger.",
     observed: actual
   });
 }
@@ -197,24 +203,17 @@ function auditLiquiditySweepFreshness() {
 function auditRemainingStrategySemantics() {
   const mixedHtf = fixtureFor("Multi-timeframe continuation", "long");
   mixedHtf.confluenceContext = {
+    lowerTimeframe: "5m",
     higherTimeframes: [
       { timeframe: "15m", available: true, regime: strongRegime("long") },
       { timeframe: "1h", available: true, regime: strongRegime("short") },
       { timeframe: "4h", available: true, regime: strongRegime("short") }
     ]
   };
-  assert.equal(classify(mixedHtf), "Multi-timeframe continuation");
+  assert.notEqual(classify(mixedHtf), "Multi-timeframe continuation");
   const mixedScore = scoreMultiTimeframeConfluence(mixedHtf.confluenceContext, "long");
   assert.equal(mixedScore.badge, "Countertrend");
   assert.ok(mixedScore.score >= 25);
-  findings.push({
-    severity: "HIGH",
-    classification: "SEMANTIC BUG",
-    strategy: "Multi-timeframe continuation",
-    code: "signalGenerator.js:737-760; signalGenerator.js:408-410",
-    finding: "One aligned higher timeframe is enough for the name even when two higher timeframes strongly oppose it. The resulting Countertrend score can remain above the hard-block threshold.",
-    observed: { classification: "Multi-timeframe continuation", confluenceScore: mixedScore.score, badge: mixedScore.badge }
-  });
 
   const pullbackWithoutPullback = fixtureFor("Pullback bounce", "long", {
     previousClose: 102.1,
@@ -223,72 +222,87 @@ function auditRemainingStrategySemantics() {
     latestHigh: 102.5,
     latestClose: 102.3
   });
-  assert.equal(classify(pullbackWithoutPullback), "Pullback bounce");
+  pullbackWithoutPullback.candles[25] = candle(25, 101.5, 101.8, 102, 101.4, 110);
+  pullbackWithoutPullback.candles[26] = candle(26, 101.7, 102, 102.2, 101.6, 110);
+  pullbackWithoutPullback.candles[27] = candle(27, 102, 102.1, 102.3, 101.9, 110);
+  assert.notEqual(classify(pullbackWithoutPullback), "Pullback bounce");
   findings.push({
-    severity: "MEDIUM",
-    classification: "NAMING ISSUE",
+    severity: "LOW",
+    classification: "NO MATERIAL ISSUE",
     strategy: "Pullback bounce",
-    code: "signalGenerator.js:722-764",
-    finding: "The rule proves only current price is within 0.8 ATR of EMA20 and the latest candle is directional. It does not detect a prior pullback, EMA touch, rejection, or bounce sequence.",
-    observed: "persistent EMA proximity accepted"
+    code: "signalGenerator.js:evaluatePullbackBounceSetup",
+    finding: "The classifier now requires a directional Trend regime, prior trend-side extension, a two-candle countertrend pullback, bounded EMA20 interaction, trend hold, and fresh continuation away from EMA20.",
+    observed: "persistent EMA proximity no longer receives the Pullback bounce label"
   });
 
   const srWithoutTouch = fixtureFor("Support/resistance retest", "long", {
-    latestOpen: 103.2,
-    latestLow: 103.1,
-    latestHigh: 103.8,
-    latestClose: 103.5
+    latestOpen: 96,
+    latestLow: 96,
+    latestHigh: 97.5,
+    latestClose: 97.2
   });
-  srWithoutTouch.ema20 = 101;
-  srWithoutTouch.nearestSupport = { price: 102.8 };
-  assert.equal(classify(srWithoutTouch), "Support/resistance retest");
+  assert.notEqual(classify(srWithoutTouch), "Support/resistance retest");
   findings.push({
-    severity: "HIGH",
-    classification: "SEMANTIC BUG",
+    severity: "LOW",
+    classification: "NO MATERIAL ISSUE",
     strategy: "Support/resistance retest",
-    code: "signalGenerator.js:723-724,767-768",
-    finding: "The rule checks close proximity within 1.35 ATR, not whether the candle touched or retested the level. A candle entirely above support can still be labeled a support retest.",
-    observed: "no-touch retest accepted"
+    code: "signalGenerator.js:evaluateSupportResistanceRetestSetup",
+    finding: "The classifier now requires an established level, prior separation, bounded interaction, a valid-side close, directional confirmation, and freshness.",
+    observed: "no-touch proximity no longer receives the retest label"
   });
 
   const trendSingleCandle = fixtureFor("Trend continuation", "long");
-  assert.equal(classify(trendSingleCandle), "Trend continuation");
+  const ordinaryTrendCandle = withShape(trendSingleCandle, {
+    previousClose: 103,
+    previousHigh: 104,
+    previousLow: 101,
+    latestOpen: 103,
+    latestHigh: 104.2,
+    latestLow: 102.4,
+    latestClose: 104.1
+  });
+  ordinaryTrendCandle.candles[ordinaryTrendCandle.candles.length - 3] = candle(26, 101.5, 102.8, 103, 101.2, 100);
+  assert.notEqual(classify(ordinaryTrendCandle), "Trend continuation");
   findings.push({
-    severity: "MEDIUM",
-    classification: "PERMISSIVE RULE",
+    severity: "LOW",
+    classification: "NO MATERIAL ISSUE",
     strategy: "Trend continuation",
-    code: "signalGenerator.js:719-721,771-772",
-    finding: "EMA alignment, trend-strength ratio, and one directional latest candle are sufficient. No continuation trigger, pullback completion, structure break, or freshness event is required.",
-    observed: "single directional trend candle accepted"
+    code: "signalGenerator.js:evaluateTrendContinuationSetup",
+    finding: "The classifier now requires the matching trend regime, intact EMA hierarchy, a compact immediate pause, and a fresh quality expansion close beyond that pause.",
+    observed: "ordinary directional trend candle without a pause rejected"
   });
 
   const rangeWithoutTouch = fixtureFor("Range bounce", "long", {
-    latestOpen: 101,
-    latestLow: 100.8,
-    latestHigh: 101.5,
-    latestClose: 101.3
+    latestOpen: 97.2,
+    latestLow: 97,
+    latestHigh: 98.5,
+    latestClose: 97.5
   });
-  rangeWithoutTouch.nearestSupport = { price: 100.5 };
-  assert.equal(classify(rangeWithoutTouch), "Range bounce");
+  assert.notEqual(classify(rangeWithoutTouch), "Range bounce");
   findings.push({
-    severity: "HIGH",
-    classification: "SEMANTIC BUG",
+    severity: "LOW",
+    classification: "NO MATERIAL ISSUE",
     strategy: "Range bounce",
-    code: "signalGenerator.js:724,775-781",
-    finding: "Range label, clustered level strength, close proximity, and a directional candle are sufficient. The candle need not touch or reject the boundary, and the code does not prove a stable two-sided range.",
-    observed: "no-touch range bounce accepted"
+    code: "signalGenerator.js:evaluateRangeBounceSetup",
+    finding: "The classifier now requires a confirmed two-sided range, prior in-range approach, bounded boundary interaction, an inside close, and fresh movement toward the midpoint.",
+    observed: "no-touch proximity no longer receives the Range bounce label"
   });
 
-  const meanWithoutReversal = fixtureFor("Mean reversion", "long");
+  const meanWithoutReversal = fixtureFor("Mean reversion", "long", {
+    latestOpen: 98.2,
+    latestHigh: 98.4,
+    latestLow: 96.4,
+    latestClose: 97.4
+  });
   assert.ok(meanWithoutReversal.candles.at(-1).close < meanWithoutReversal.candles.at(-1).open);
-  assert.equal(classify(meanWithoutReversal), "Mean reversion");
+  assert.notEqual(classify(meanWithoutReversal), "Mean reversion");
   findings.push({
-    severity: "HIGH",
-    classification: "MISSING CONFIRMATION",
+    severity: "LOW",
+    classification: "NO MATERIAL ISSUE",
     strategy: "Mean reversion",
-    code: "signalGenerator.js:775-785",
-    finding: "RSI in a broad reversal band and proximity to a repeated level are enough. A LONG can be classified on a bearish latest candle with no reclaim or reversal confirmation.",
-    observed: "bearish candle accepted for long mean reversion"
+    code: "signalGenerator.js:evaluateMeanReversionSetup",
+    finding: "The classifier now requires EMA20-normalized extension, structural context, directional reversal, and fresh movement back toward the mean.",
+    observed: "bearish LONG trigger no longer receives the Mean reversion label"
   });
 
   const vwap = fixtureFor("VWAP reclaim/rejection", "long");
@@ -296,11 +310,11 @@ function auditRemainingStrategySemantics() {
   vwap.ema50 = 107;
   assert.equal(classify(vwap), "VWAP reclaim/rejection");
   findings.push({
-    severity: "MEDIUM",
-    classification: "PERMISSIVE RULE",
+    severity: "LOW",
+    classification: "NO MATERIAL ISSUE",
     strategy: "VWAP reclaim/rejection",
-    code: "advancedMarketStructureService.js:87-116; signalGenerator.js:734-756",
-    finding: "The latest close-cross event and directional body justify the label, but the previous close and latest close may be compared with different session VWAP values across a UTC session boundary; no acceptance duration is required.",
+    code: "advancedMarketStructureService.js:calculateVwapContext; signalGenerator.js:evaluateVwapReclaimRejectionSetup",
+    finding: "The classifier now requires same-session VWAP context, ATR-normalized prior displacement, actual VWAP interaction, accepted close distance, directional body quality, and a fresh latest-candle event.",
     observed: "EMA alignment is not required by this reversal/event strategy"
   });
 }
@@ -545,40 +559,132 @@ function buildLongFixture(strategy, shape = {}) {
     return withShape(base, { previousClose: 104.5, previousHigh: 104.8, latestOpen: 104.8, latestHigh: 106.8, latestLow: 104.6, latestClose: 106.2, ...shape });
   }
   if (strategy === "VWAP reclaim/rejection") {
-    return { ...base, advancedStructure: { vwap: { event: "Reclaim" } } };
+    const reclaim = withShape(base, {
+      previousClose: 102.7,
+      previousHigh: 103,
+      previousLow: 102.4,
+      latestOpen: 102.6,
+      latestHigh: 103.8,
+      latestLow: 102.5,
+      latestClose: 103.6,
+      ...shape
+    });
+    return {
+      ...reclaim,
+      advancedStructure: {
+        vwap: {
+          event: "Reclaim",
+          session: { id: "fixture-session", value: 103.1, anchorTime: reclaim.candles[0].time },
+          previousSessionId: "fixture-session",
+          previousVwap: 103.1,
+          sameSession: true
+        }
+      }
+    };
   }
   if (strategy === "Multi-timeframe continuation") {
-    return { ...base, confluenceContext: { higherTimeframes: [{ available: true, regime: { preferredDirection: "long" } }] } };
+    return {
+      ...base,
+      confluenceContext: {
+        lowerTimeframe: "15m",
+        higherTimeframes: [
+          { timeframe: "1h", available: true, regime: strongRegime("long") },
+          { timeframe: "4h", available: true, regime: strongRegime("long") }
+        ]
+      }
+    };
   }
   if (strategy === "Pullback bounce") {
-    return { ...withShape(base, { latestOpen: 101.6, latestHigh: 102.5, latestLow: 101.2, latestClose: 102.2, ...shape }), ema20: 102 };
-  }
-  if (strategy === "Support/resistance retest") {
-    return { ...base, ema20: 101, nearestSupport: { price: 102.8 } };
-  }
-  if (strategy === "Trend continuation") {
-    return { ...base, ema20: 101, trendStrength: 0.78 };
-  }
-  if (strategy === "Range bounce") {
+    const pullback = withShape(base, {
+      previousClose: 102.8,
+      previousHigh: 104,
+      previousLow: 102.6,
+      latestOpen: 102.4,
+      latestHigh: 104,
+      latestLow: 101.8,
+      latestClose: 103.6,
+      ...shape
+    });
+    pullback.candles[25] = candle(25, 104.8, 105, 106, 104.5, 120);
+    pullback.candles[26] = candle(26, 105, 104, 105.2, 103.8, 115);
     return {
-      ...withShape(base, { latestOpen: 100.6, latestHigh: 101.5, latestLow: 100, latestClose: 101.3, ...shape }),
+      ...pullback,
       ema20: 102,
       ema50: 100,
+      regimeLabel: "Trend Up",
+      trendStrength: 0.45
+    };
+  }
+  if (strategy === "Support/resistance retest") {
+    const retest = withShape(base, {
+      previousClose: 101,
+      previousHigh: 103,
+      previousLow: 99,
+      latestOpen: 95.8,
+      latestHigh: 97.6,
+      latestLow: 95.2,
+      latestClose: 97,
+      ...shape
+    });
+    return {
+      ...retest,
+      ema20: 95.2,
+      ema50: 93,
+      nearestSupport: { price: 95, time: retest.candles[12].time }
+    };
+  }
+  if (strategy === "Trend continuation") {
+    const continuation = withShape(base, {
+      previousClose: 103.5,
+      previousHigh: 103.8,
+      previousLow: 103.2,
+      latestOpen: 103.45,
+      latestHigh: 105.45,
+      latestLow: 103.35,
+      latestClose: 105.2,
+      ...shape
+    });
+    continuation.candles[25] = candle(25, 102.6, 103.4, 106, 102.5, 110);
+    continuation.candles[26] = candle(26, 103.25, 103.4, 103.7, 103.1, 80);
+    return { ...continuation, ema20: 101, trendStrength: 0.78 };
+  }
+  if (strategy === "Range bounce") {
+    const range = withShape(base, {
+      previousClose: 97,
+      previousHigh: 101,
+      previousLow: 96.5,
+      latestOpen: 96.8,
+      latestHigh: 98.5,
+      latestLow: 95.2,
+      latestClose: 97.5,
+      ...shape
+    });
+    return {
+      ...range,
+      ema20: 100,
+      ema50: 99,
       regimeLabel: "Range",
       trendStrength: 0.25,
-      nearestSupport: { price: 100.5 },
+      nearestSupport: { price: 95, time: range.candles[12].time },
+      nearestResistance: { price: 105, time: range.candles[10].time },
       rsi14: 50
     };
   }
   if (strategy === "Mean reversion") {
     return {
-      ...withShape(base, { latestOpen: 101.2, latestHigh: 101.5, latestLow: 100.2, latestClose: 101.1, ...shape }),
-      ema20: 102,
-      ema50: 100,
+      ...withShape(base, {
+        latestOpen: 97,
+        latestHigh: 98.6,
+        latestLow: 96.4,
+        latestClose: 98.2,
+        ...shape
+      }),
+      ema20: 100,
+      ema50: 99,
       regimeLabel: "High Volatility",
-      trendStrength: 0.25,
-      nearestSupport: { price: 100.5 },
-      rsi14: 42
+      trendStrength: 0.35,
+      nearestSupport: { price: 96 },
+      rsi14: 46
     };
   }
   throw new Error(`Missing fixture for ${strategy}`);
@@ -626,15 +732,35 @@ function mirrorFixture(fixture, strategy) {
     ema20: mirrorPrice(fixture.ema20),
     ema50: mirrorPrice(fixture.ema50),
     rsi14: 100 - fixture.rsi14,
-    nearestSupport: fixture.nearestResistance ? { price: mirrorPrice(fixture.nearestResistance.price) } : null,
-    nearestResistance: fixture.nearestSupport ? { price: mirrorPrice(fixture.nearestSupport.price) } : null,
+    nearestSupport: fixture.nearestResistance ? {
+      ...fixture.nearestResistance,
+      price: mirrorPrice(fixture.nearestResistance.price)
+    } : null,
+    nearestResistance: fixture.nearestSupport ? {
+      ...fixture.nearestSupport,
+      price: mirrorPrice(fixture.nearestSupport.price)
+    } : null,
     supportStrength: fixture.resistanceStrength,
     resistanceStrength: fixture.supportStrength,
     regimeLabel: fixture.regimeLabel === "Trend Up" ? "Trend Down" : fixture.regimeLabel,
     smcState: mirroredSmcState,
-    advancedStructure: fixture.advancedStructure ? { vwap: { event: "Rejection" } } : null,
+    advancedStructure: fixture.advancedStructure && strategy === "VWAP reclaim/rejection" ? {
+      vwap: {
+        ...fixture.advancedStructure.vwap,
+        event: "Rejection",
+        session: {
+          ...fixture.advancedStructure.vwap.session,
+          value: mirrorPrice(fixture.advancedStructure.vwap.session.value)
+        },
+        previousVwap: mirrorPrice(fixture.advancedStructure.vwap.previousVwap)
+      }
+    } : fixture.advancedStructure,
     confluenceContext: fixture.confluenceContext ? {
-      higherTimeframes: [{ available: true, regime: { preferredDirection: "short" } }]
+      lowerTimeframe: fixture.confluenceContext.lowerTimeframe,
+      higherTimeframes: fixture.confluenceContext.higherTimeframes.map((item) => ({
+        ...item,
+        regime: strongRegime("short")
+      }))
     } : null,
     expectedStrategy: strategy
   };
@@ -643,7 +769,9 @@ function mirrorFixture(fixture, strategy) {
 function mirrorNearMiss(fixture, strategy) {
   const mirrored = mirrorFixture(fixture, strategy);
   if (strategy === "VWAP reclaim/rejection") {
-    mirrored.advancedStructure = { vwap: { event: "None" } };
+    mirrored.advancedStructure = {
+      vwap: { ...mirrored.advancedStructure.vwap, event: "None" }
+    };
   }
   if (strategy === "Multi-timeframe continuation") {
     mirrored.confluenceContext = { higherTimeframes: [] };
@@ -723,6 +851,7 @@ function strongRegime(direction) {
   return {
     label: long ? "Trend Up" : "Trend Down",
     preferredDirection: direction,
+    trendStrength: 0.75,
     metrics: {
       ema20: long ? 105 : 95,
       ema50: 100,

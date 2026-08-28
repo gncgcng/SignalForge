@@ -115,16 +115,68 @@ const liquiditySweepCandles = makeStrategyCandles({
   latestClose: 101.8
 });
 const liquiditySweepState = analyzeSmartMoneyConcepts(liquiditySweepCandles);
+const pullbackBounceCandles = makeStrategyCandles({
+  previousClose: 102.8,
+  latestOpen: 102.4,
+  latestHigh: 104,
+  latestLow: 101.8,
+  latestClose: 103.6
+});
+pullbackBounceCandles[25] = {
+  ...pullbackBounceCandles[25],
+  open: 104.8,
+  high: 106,
+  low: 104.5,
+  close: 105
+};
+pullbackBounceCandles[26] = {
+  ...pullbackBounceCandles[26],
+  open: 105,
+  high: 105.2,
+  low: 103.8,
+  close: 104
+};
+const trendContinuationCandles = makeStrategyCandles({
+  previousClose: 103.5,
+  previousHigh: 103.8,
+  previousLow: 103.2,
+  latestOpen: 103.45,
+  latestHigh: 105.45,
+  latestLow: 103.35,
+  latestClose: 105.2
+});
+trendContinuationCandles[25] = {
+  ...trendContinuationCandles[25],
+  high: 106
+};
+trendContinuationCandles[26] = {
+  ...trendContinuationCandles[26],
+  open: 103.25,
+  high: 103.7,
+  low: 103.1,
+  close: 103.4,
+  volume: 80
+};
+trendContinuationCandles[27] = {
+  ...trendContinuationCandles[27],
+  open: 103.4,
+  high: 103.8,
+  low: 103.2,
+  close: 103.5,
+  volume: 75
+};
 
 const strategyTypes = {
   trendContinuation: classifyFixture({
-    candleShape: { previousClose: 103, latestOpen: 103, latestLow: 102.4, latestClose: 104.1 },
+    candles: trendContinuationCandles,
+    ema20: 101,
     nearestSupport: { price: 98 },
     trendStrength: 0.78
   }),
   pullbackBounce: classifyFixture({
-    candleShape: { previousClose: 102, latestOpen: 101.6, latestLow: 101, latestClose: 102.2 },
+    candles: pullbackBounceCandles,
     ema20: 102,
+    ema50: 100,
     nearestSupport: { price: 97 },
     trendStrength: 0.5
   }),
@@ -133,17 +185,28 @@ const strategyTypes = {
   }),
   rangeBounce: classifyFixture({
     regimeLabel: "Range",
-    candleShape: { previousClose: 100, latestOpen: 100.6, latestLow: 100, latestClose: 101.3 },
-    nearestSupport: { price: 100.5 },
+    candleShape: {
+      previousClose: 97,
+      previousHigh: 101,
+      previousLow: 96.5,
+      latestOpen: 96.8,
+      latestHigh: 98.5,
+      latestLow: 95.2,
+      latestClose: 97.5
+    },
+    nearestSupport: { price: 95, time: makeStrategyCandles()[12].time },
+    nearestResistance: { price: 105, time: makeStrategyCandles()[10].time },
     rsi14: 50,
     trendStrength: 0.25
   }),
   meanReversion: classifyFixture({
-    regimeLabel: "Range",
-    candleShape: { previousClose: 100, latestOpen: 101.2, latestLow: 100.2, latestClose: 101.1 },
-    nearestSupport: { price: 100.5 },
-    rsi14: 42,
-    trendStrength: 0.25
+    regimeLabel: "High Volatility",
+    candleShape: { previousClose: 100, latestOpen: 97, latestHigh: 98.6, latestLow: 96.4, latestClose: 98.2 },
+    ema20: 100,
+    ema50: 99,
+    nearestSupport: { price: 96 },
+    rsi14: 46,
+    trendStrength: 0.35
   }),
   momentumBreakout: classifyFixture({
     candleShape: { previousClose: 104.5, latestOpen: 104.8, latestLow: 104.6, latestHigh: 107, latestClose: 106.4 }
@@ -153,15 +216,30 @@ const strategyTypes = {
     smcState: liquiditySweepState
   }),
   vwapReclaim: classifyFixture({
-    candleShape: { previousClose: 103, latestOpen: 103, latestLow: 102, latestClose: 103.6 },
-    advancedStructure: { vwap: { event: "Reclaim" } },
+    candleShape: {
+      previousClose: 102.7,
+      latestOpen: 102.6,
+      latestHigh: 103.8,
+      latestLow: 102.5,
+      latestClose: 103.6
+    },
+    advancedStructure: {
+      vwap: {
+        event: "Reclaim",
+        session: { id: "2026-02-02", value: 103.1, anchorTime: makeStrategyCandles()[0].time },
+        previousSessionId: "2026-02-02",
+        previousVwap: 103.1,
+        sameSession: true
+      }
+    },
     trendStrength: 0.4,
     nearestSupport: { price: 98 }
   }),
   supportResistanceRetest: classifyFixture({
-    candleShape: { previousClose: 103, latestOpen: 103.2, latestLow: 102.7, latestClose: 103.8 },
-    ema20: 101,
-    nearestSupport: { price: 102.8 },
+    candleShape: { previousClose: 101, latestOpen: 95.8, latestHigh: 97.6, latestLow: 95.2, latestClose: 97 },
+    ema20: 95.2,
+    ema50: 93,
+    nearestSupport: { price: 95, time: makeStrategyCandles()[12].time },
     trendStrength: 0.45
   }),
   multiTimeframeContinuation: classifyFixture({
@@ -169,8 +247,10 @@ const strategyTypes = {
     nearestSupport: { price: 98 },
     trendStrength: 0.45,
     confluenceContext: {
+      lowerTimeframe: "15m",
       higherTimeframes: [
-        { available: true, regime: { preferredDirection: "long" } }
+        { timeframe: "1h", available: true, regime: { preferredDirection: "long" } },
+        { timeframe: "4h", available: true, regime: { preferredDirection: "long" } }
       ]
     }
   }),

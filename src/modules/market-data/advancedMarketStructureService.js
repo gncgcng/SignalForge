@@ -84,7 +84,7 @@ export function evaluateAdvancedStructure(structure, direction, latestPrice, reg
   };
 }
 
-function calculateVwapContext(candles) {
+export function calculateVwapContext(candles) {
   const latest = candles.at(-1);
   const latestDay = utcDay(latest.time);
   const sessionCandles = candles.filter((candle) => utcDay(candle.time) === latestDay);
@@ -93,20 +93,26 @@ function calculateVwapContext(candles) {
   const sessionValue = weightedVwap(sessionCandles);
   const anchoredValue = weightedVwap(anchoredCandles);
   const previous = candles.at(-2);
+  const previousDay = utcDay(previous.time);
+  const sameSession = previousDay === latestDay;
   const priorSessionCandles = candles
-    .filter((candle) => candle.time <= previous.time && utcDay(candle.time) === utcDay(previous.time));
+    .filter((candle) => candle.time <= previous.time && utcDay(candle.time) === previousDay);
   const priorVwap = weightedVwap(priorSessionCandles);
-  const event = previous.close <= priorVwap && latest.close > sessionValue
+  const event = sameSession && previous.close <= priorVwap && latest.close > sessionValue
     ? "Reclaim"
-    : previous.close >= priorVwap && latest.close < sessionValue
+    : sameSession && previous.close >= priorVwap && latest.close < sessionValue
       ? "Rejection"
       : "None";
 
   return {
     session: {
+      id: latestDay,
       value: round(sessionValue),
       anchorTime: sessionCandles[0]?.time || latest.time
     },
+    previousSessionId: previousDay,
+    previousVwap: round(priorVwap),
+    sameSession,
     anchored: {
       value: round(anchoredValue),
       anchorTime: candles[anchorIndex]?.time || candles[0].time,

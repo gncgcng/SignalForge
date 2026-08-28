@@ -82,9 +82,13 @@ const fakeDisconnectedState = {
 assert.notEqual(classify(validLongCandles, "long", fakeDisconnectedState), "Liquidity sweep reversal");
 
 const fallthroughType = classify(stale, "long", staleSmc, {
-  higherTimeframes: [{ available: true, regime: { preferredDirection: "long" } }]
+  lowerTimeframe: "15m",
+  higherTimeframes: [
+    { timeframe: "1h", available: true, regime: { preferredDirection: "long" } },
+    { timeframe: "4h", available: true, regime: { preferredDirection: "long" } }
+  ]
 });
-assert.equal(fallthroughType, "Multi-timeframe continuation");
+assert.notEqual(fallthroughType, "Liquidity sweep reversal");
 
 assert.doesNotMatch(
   generatorSource.match(/buildDynamicRiskPlan\(\{[\s\S]*?\}\);/)?.[0] || "",

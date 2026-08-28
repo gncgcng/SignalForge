@@ -73,7 +73,11 @@ assert.equal(longEvidence.breakoutCandle.time, cleanLong.at(-2).time);
 assert.equal(longEvidence.retestCandle.time, cleanLong.at(-1).time);
 
 const continuationType = classify(noRetest, "long", {
-  higherTimeframes: [{ available: true, regime: { preferredDirection: "long" } }]
+  lowerTimeframe: "15m",
+  higherTimeframes: [
+    { timeframe: "1h", available: true, regime: { preferredDirection: "long" } },
+    { timeframe: "4h", available: true, regime: { preferredDirection: "long" } }
+  ]
 });
 assert.equal(continuationType, "Multi-timeframe continuation", "failed retests must continue through the ordered classifier");
 

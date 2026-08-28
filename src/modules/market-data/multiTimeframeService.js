@@ -40,7 +40,7 @@ export async function getMultiTimeframeMarketData(symbol, timeframe) {
     lowerTimeframeRegime: marketData.regime,
     higherTimeframes: higher
   };
-  const displayDirection = inferDirection(marketData.regime);
+  const displayDirection = inferMultiTimeframeDirection(marketData.regime);
 
   return {
     ...marketData,
@@ -70,7 +70,7 @@ export function scoreMultiTimeframeConfluence(context, direction) {
 
   const scored = available.map((item) => ({
     ...item,
-    trend: inferDirection(item.regime),
+    trend: inferMultiTimeframeDirection(item.regime),
     score: scoreTimeframe(item.regime, direction)
   }));
   const score = Math.round(scored.reduce((sum, item) => sum + item.score, 0) / scored.length);
@@ -117,7 +117,7 @@ export function scoreMultiTimeframeConfluence(context, direction) {
 
 function scoreTimeframe(regime, direction) {
   const metrics = regime?.metrics || {};
-  const trend = inferDirection(regime);
+  const trend = inferMultiTimeframeDirection(regime);
   let score = trend === direction ? 30 : trend === "neutral" ? 15 : 0;
 
   const emaDirection = metrics.ema20 > metrics.ema50 ? "long" : metrics.ema20 < metrics.ema50 ? "short" : "neutral";
@@ -147,7 +147,7 @@ function scoreTimeframe(regime, direction) {
   return Math.max(0, Math.min(100, score));
 }
 
-function inferDirection(regime) {
+export function inferMultiTimeframeDirection(regime) {
   if (regime?.preferredDirection === "long" || regime?.label === "Trend Up") return "long";
   if (regime?.preferredDirection === "short" || regime?.label === "Trend Down") return "short";
   const metrics = regime?.metrics || {};
