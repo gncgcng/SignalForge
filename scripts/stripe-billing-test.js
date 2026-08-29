@@ -9,6 +9,7 @@ import {
 
 const migration = readFileSync(new URL("../migrations/013_stripe_billing.sql", import.meta.url), "utf8");
 const repositories = readFileSync(new URL("../src/db/repositories.js", import.meta.url), "utf8");
+const signalCreditLedger = readFileSync(new URL("../src/modules/credits/signalCreditLedgerRepository.js", import.meta.url), "utf8");
 const signals = readFileSync(new URL("../src/modules/signals/signalService.js", import.meta.url), "utf8");
 const stripe = readFileSync(
   new URL("../src/modules/subscriptions/stripeService.js", import.meta.url),
@@ -54,8 +55,9 @@ const result = {
     migration.includes("CREATE TABLE IF NOT EXISTS stripe_webhook_events") &&
     !migration.includes("DELETE FROM users"),
   separateCreditLedgers: repositories.includes("consumeDiscoveryCredits") &&
-    repositories.includes("unlock_credits_balance = unlock_credits_balance - 1") &&
-    repositories.includes("lifetime_unlocks_used = lifetime_unlocks_used + 1"),
+    repositories.includes("consumeSignalUnlockCredit") &&
+    signalCreditLedger.includes("unlock_credits_balance = c.unlock_credits_balance - 1") &&
+    signalCreditLedger.includes("lifetime_unlocks_used = c.lifetime_unlocks_used + 1"),
   noSetupNoCharge: signals.includes("const quantity = result.publicResult.valid ? 1 : 0") &&
     signals.includes("recordDiscoveryUsage(user, quantity, scanKey)") &&
     signals.includes("result.publicResult.valid ? 1 : 0, scanKey"),

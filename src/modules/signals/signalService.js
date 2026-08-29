@@ -2,6 +2,7 @@ import {
   cacheScanResult,
   findCachedScanAllSetup,
   findActiveDuplicateSignal,
+  findUserById,
   findSignalBySetupKey,
   findTelegramNotificationPayload,
   getLearningContextForSignal,
@@ -1272,11 +1273,15 @@ export function rankSetups(setups) {
 
 export async function listUserSignals(user) {
   await updateSignalsForUser(user);
-  const signals = await listSignalsByUser(user.id);
+  const [signals, refreshedUser] = await Promise.all([
+    listSignalsByUser(user.id),
+    findUserById(user.id)
+  ]);
 
   return {
     signals: signals.map(toUserSignal),
-    stats: calculateSignalStats(signals)
+    stats: calculateSignalStats(signals),
+    subscription: getSubscriptionSummary(refreshedUser || user)
   };
 }
 

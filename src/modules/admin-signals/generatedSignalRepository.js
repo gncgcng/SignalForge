@@ -1,5 +1,6 @@
 import { query } from "../../db/client.js";
 import { createId } from "../../shared/ids.js";
+import { calculateStrategyRiskShadowDiagnostics } from "../signals/strategyRiskShadowDiagnostics.js";
 
 const terminalPriority = Object.freeze({ "Hit TP": 6, "Hit SL": 5, "Manually closed": 4, Expired: 3, Active: 2 });
 const terminalOutcomeStatuses = new Set(["Hit TP", "Hit SL", "Expired"]);
@@ -77,7 +78,7 @@ export async function upsertGeneratedSignal(signal, context = {}) {
     JSON.stringify({ passed: signal.validationPassed !== false, score: signal.validationScore ?? 100, reasons: signal.rejectedReasons || [] }),
     JSON.stringify(signal.rejectedReasons || pattern?.warnings || []),
     JSON.stringify(signal.signalQuality || {}),
-    JSON.stringify(toFullAnalysis(signal)),
+    JSON.stringify(toFullAnalysis(signal, { source })),
     signal.resultReason || signal.statusReason || signal.indicators?.generatedQualityBlockReason || null,
     signal.generatedAt || new Date()
   ]);
@@ -297,7 +298,32 @@ export function buildGeneratedSignalKey(signal) {
   return [signal.symbol, signal.timeframe, signal.direction, signal.setupType, Number(signal.entryPrice).toPrecision(10), Math.floor(created / windowMs)].join(":").toLowerCase();
 }
 
-function toFullAnalysis(signal) { return { reasoning: signal.reasoning, confirmations: signal.confirmations || [], indicators: signal.indicators || {}, analyst: signal.analyst || null, marketStructure: signal.marketStructure || null, smc: signal.smc || null, confluence: signal.confluence || null, riskPlan: signal.riskPlan || null, patternContext: signal.patternContext || signal.indicators?.patternContext || null }; }
+function toFullAnalysis(signal, context = {}) {
+  const productionReady = signal.resultType === "ready_signal" &&
+    signal.validationPassed !== false &&
+    String(signal.status || "Active") === "Active" &&
+    ["manual_scan", "auto_crypto_watcher", "telegram_alert", "candidate_promotion"].includes(context.source);
+  const strategyRiskShadowDiagnostics = productionReady
+    ? calculateStrategyRiskShadowDiagnostics(signal, context)
+    : null;
+  const baseAnalysis = {
+    reasoning: signal.reasoning,
+    confirmations: signal.confirmations || [],
+    indicators: signal.indicators || {},
+    analyst: signal.analyst || null,
+    marketStructure: signal.marketStructure || null,
+    smc: signal.smc || null,
+    confluence: signal.confluence || null,
+    riskPlan: signal.riskPlan || null,
+    patternContext: signal.patternContext || signal.indicators?.patternContext || null
+  };
+  return strategyRiskShadowDiagnostics
+    ? {
+      ...baseAnalysis,
+      indicators: { ...baseAnalysis.indicators, strategyRiskShadowDiagnostics }
+    }
+    : baseAnalysis;
+}
 function normalizeSource(source) { return ["manual_scan","auto_crypto_watcher","telegram_alert","candidate_promotion","backtest_shadow","admin_test","legacy_saved_signal","legacy_unlocked_signal"].includes(source) ? source : "manual_scan"; }
 function finiteOrNull(value) { const number = Number(value); return Number.isFinite(number) ? number : null; }
 function displayPair(symbol) { return String(symbol || "").toUpperCase().replace(/[-/]/g, ""); }

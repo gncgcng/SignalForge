@@ -1,0 +1,55 @@
+warning: in the working copy of 'src/modules/admin-signals/generatedSignalRepository.js', LF will be replaced by CRLF the next time Git touches it
+[1mdiff --git a/src/modules/admin-signals/generatedSignalRepository.js b/src/modules/admin-signals/generatedSignalRepository.js[m
+[1mindex 7a53a93..b9d4b43 100644[m
+[1m--- a/src/modules/admin-signals/generatedSignalRepository.js[m
+[1m+++ b/src/modules/admin-signals/generatedSignalRepository.js[m
+[36m@@ -1,5 +1,6 @@[m
+ import { query } from "../../db/client.js";[m
+ import { createId } from "../../shared/ids.js";[m
+[32m+[m[32mimport { calculateStrategyRiskShadowDiagnostics } from "../signals/strategyRiskShadowDiagnostics.js";[m
+ [m
+ const terminalPriority = Object.freeze({ "Hit TP": 6, "Hit SL": 5, "Manually closed": 4, Expired: 3, Active: 2 });[m
+ const terminalOutcomeStatuses = new Set(["Hit TP", "Hit SL", "Expired"]);[m
+[36m@@ -77,7 +78,7 @@[m [mexport async function upsertGeneratedSignal(signal, context = {}) {[m
+     JSON.stringify({ passed: signal.validationPassed !== false, score: signal.validationScore ?? 100, reasons: signal.rejectedReasons || [] }),[m
+     JSON.stringify(signal.rejectedReasons || pattern?.warnings || []),[m
+     JSON.stringify(signal.signalQuality || {}),[m
+[31m-    JSON.stringify(toFullAnalysis(signal)),[m
+[32m+[m[32m    JSON.stringify(toFullAnalysis(signal, { source })),[m
+     signal.resultReason || signal.statusReason || signal.indicators?.generatedQualityBlockReason || null,[m
+     signal.generatedAt || new Date()[m
+   ]);[m
+[36m@@ -297,7 +298,32 @@[m [mexport function buildGeneratedSignalKey(signal) {[m
+   return [signal.symbol, signal.timeframe, signal.direction, signal.setupType, Number(signal.entryPrice).toPrecision(10), Math.floor(created / windowMs)].join(":").toLowerCase();[m
+ }[m
+ [m
+[31m-function toFullAnalysis(signal) { return { reasoning: signal.reasoning, confirmations: signal.confirmations || [], indicators: signal.indicators || {}, analyst: signal.analyst || null, marketStructure: signal.marketStructure || null, smc: signal.smc || null, confluence: signal.confluence || null, riskPlan: signal.riskPlan || null, patternContext: signal.patternContext || signal.indicators?.patternContext || null }; }[m
+[32m+[m[32mfunction toFullAnalysis(signal, context = {}) {[m
+[32m+[m[32m  const productionReady = signal.resultType === "ready_signal" &&[m
+[32m+[m[32m    signal.validationPassed !== false &&[m
+[32m+[m[32m    String(signal.status || "Active") === "Active" &&[m
+[32m+[m[32m    ["manual_scan", "auto_crypto_watcher", "telegram_alert", "candidate_promotion"].includes(context.source);[m
+[32m+[m[32m  const strategyRiskShadowDiagnostics = productionReady[m
+[32m+[m[32m    ? calculateStrategyRiskShadowDiagnostics(signal, context)[m
+[32m+[m[32m    : null;[m
+[32m+[m[32m  const baseAnalysis = {[m
+[32m+[m[32m    reasoning: signal.reasoning,[m
+[32m+[m[32m    confirmations: signal.confirmations || [],[m
+[32m+[m[32m    indicators: signal.indicators || {},[m
+[32m+[m[32m    analyst: signal.analyst || null,[m
+[32m+[m[32m    marketStructure: signal.marketStructure || null,[m
+[32m+[m[32m    smc: signal.smc || null,[m
+[32m+[m[32m    confluence: signal.confluence || null,[m
+[32m+[m[32m    riskPlan: signal.riskPlan || null,[m
+[32m+[m[32m    patternContext: signal.patternContext || signal.indicators?.patternContext || null[m
+[32m+[m[32m  };[m
+[32m+[m[32m  return strategyRiskShadowDiagnostics[m
+[32m+[m[32m    ? {[m
+[32m+[m[32m      ...baseAnalysis,[m
+[32m+[m[32m      indicators: { ...baseAnalysis.indicators, strategyRiskShadowDiagnostics }[m
+[32m+[m[32m    }[m
+[32m+[m[32m    : baseAnalysis;[m
+[32m+[m[32m}[m
+ function normalizeSource(source) { return ["manual_scan","auto_crypto_watcher","telegram_alert","candidate_promotion","backtest_shadow","admin_test","legacy_saved_signal","legacy_unlocked_signal"].includes(source) ? source : "manual_scan"; }[m
+ function finiteOrNull(value) { const number = Number(value); return Number.isFinite(number) ? number : null; }[m
+ function displayPair(symbol) { return String(symbol || "").toUpperCase().replace(/[-/]/g, ""); }[m

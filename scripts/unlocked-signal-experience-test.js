@@ -5,6 +5,10 @@ const app = readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
 const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
 const css = readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
 const repositories = readFileSync(new URL("../src/db/repositories.js", import.meta.url), "utf8");
+const unlockRepository = repositories.slice(
+  repositories.indexOf("export async function saveUnlockedSignal"),
+  repositories.indexOf("export async function findActiveDuplicateSignal")
+);
 const paperMigration = readFileSync(new URL("../migrations/009_paper_trades.sql", import.meta.url), "utf8");
 
 const revealFunction = app.slice(
@@ -39,9 +43,9 @@ const checks = {
     paperMigration.includes("UNIQUE (user_id, saved_signal_id)") &&
     repositories.includes("ON CONFLICT (user_id, saved_signal_id) DO NOTHING"),
   duplicateUnlockProtected:
-    repositories.includes("pg_advisory_xact_lock") &&
-    repositories.includes("mapped.alreadyUnlocked = true") &&
-    repositories.indexOf("if (existing.rows[0])") < repositories.indexOf("unlock_credits_balance = unlock_credits_balance - 1"),
+    unlockRepository.includes("pg_advisory_xact_lock") &&
+    unlockRepository.includes("mapped.alreadyUnlocked = true") &&
+    unlockRepository.indexOf("if (existing.rows[0])") < unlockRepository.indexOf("consumeSignalUnlockCredit"),
   telegramExactSignal:
     app.includes('source: "telegram"') &&
     app.includes("state.unlockedRevealSignalId = unlockedSignal.id") &&

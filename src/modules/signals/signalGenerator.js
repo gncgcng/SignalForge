@@ -875,7 +875,8 @@ export function evaluateMomentumBreakoutSetup(direction, candles) {
     interveningCloseMinus2: Number.isFinite(interveningCloseMinus2) ? interveningCloseMinus2 : null,
     priorBreakoutDetected: false,
     breakoutFresh: false,
-    triggerIndex
+    triggerIndex,
+    triggerCandle: serializeStrategyCandle(triggerCandle)
   };
 
   if (

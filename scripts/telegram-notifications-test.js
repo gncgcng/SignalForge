@@ -13,6 +13,11 @@ const { sendTelegramMessage } = await import("../src/modules/notifications/teleg
 
 const migration = readFileSync(new URL("../migrations/005_telegram_notifications.sql", import.meta.url), "utf8");
 const repositories = readFileSync(new URL("../src/db/repositories.js", import.meta.url), "utf8");
+const signalCreditLedger = readFileSync(new URL("../src/modules/credits/signalCreditLedgerRepository.js", import.meta.url), "utf8");
+const unlockRepository = repositories.slice(
+  repositories.indexOf("export async function saveUnlockedSignal"),
+  repositories.indexOf("export async function findActiveDuplicateSignal")
+);
 const signalController = readFileSync(new URL("../src/modules/signals/signalController.js", import.meta.url), "utf8");
 const app = readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
 const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
@@ -164,10 +169,11 @@ const result = {
     repositories.includes("findTelegramNotificationPayload") &&
     repositories.includes("saveUnlockedSignal"),
   telegramUnlockChargesOneCreditThroughIdempotentSave:
-    repositories.indexOf("if (existing.rows[0])") < repositories.indexOf("unlock_credits_balance = unlock_credits_balance - 1") &&
-    repositories.includes("SELECT pg_advisory_xact_lock") &&
-    repositories.includes("mapped.alreadyUnlocked = true") &&
-    repositories.includes("unlock_credits_balance = unlock_credits_balance - 1"),
+    unlockRepository.indexOf("if (existing.rows[0])") < unlockRepository.indexOf("consumeSignalUnlockCredit") &&
+    unlockRepository.includes("SELECT pg_advisory_xact_lock") &&
+    unlockRepository.includes("mapped.alreadyUnlocked = true") &&
+    signalCreditLedger.includes("unlock_credits_balance = c.unlock_credits_balance - 1") &&
+    signalCreditLedger.includes("ON CONFLICT (idempotency_key) DO NOTHING"),
   duplicateTelegramUnlockDoesNotDoubleCharge:
     repositories.includes("WHERE s.user_id = $1 AND s.setup_key = $2 LIMIT 1") &&
     repositories.includes("return mapped;") &&

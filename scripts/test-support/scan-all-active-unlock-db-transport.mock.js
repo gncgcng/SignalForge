@@ -6,6 +6,7 @@ import {
 
 const savedSignals = new Map();
 const users = new Map();
+const creditTransactions = new Set();
 
 const unlockState = {
   creditDebits: 0,
@@ -16,6 +17,7 @@ export function resetActiveScanUnlockTransport() {
   resetReadySignalTransport();
   savedSignals.clear();
   users.clear();
+  creditTransactions.clear();
   unlockState.creditDebits = 0;
   unlockState.savedSignalInserts = 0;
 }
@@ -57,6 +59,15 @@ export async function query(sql, params = []) {
   }
   if (normalized.includes("insert into unlocked_signals") || normalized.includes("insert into signal_outcomes")) {
     return { rows: [] };
+  }
+  if (normalized.includes("with charge_transaction as") && normalized.includes("insert into signal_credit_transactions")) {
+    const idempotencyKey = params[1];
+    const user = users.get(params[2]);
+    if (!user || user.unlock_credits_balance <= 0 || creditTransactions.has(idempotencyKey)) return { rows: [] };
+    creditTransactions.add(idempotencyKey);
+    user.unlock_credits_balance -= 1;
+    unlockState.creditDebits += 1;
+    return { rows: [{ user_id: params[2], unlock_credits_balance: user.unlock_credits_balance }] };
   }
   if (normalized.includes("update credit_balances") && normalized.includes("unlock_credits_balance = unlock_credits_balance - 1")) {
     const user = users.get(params[0]);

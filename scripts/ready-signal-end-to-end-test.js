@@ -205,6 +205,13 @@ function assertPersistence(persistence, signal) {
   assert.equal(new Date(row.valid_until).toISOString(), new Date(signal.validUntil).toISOString());
   assert.deepEqual(row.confidence_calibration, signal.confidenceCalibration || {});
   assert.equal(row.full_analysis.reasoning, signal.reasoning);
+  const strategyRiskShadow = row.full_analysis.indicators?.strategyRiskShadowDiagnostics;
+  assert.equal(strategyRiskShadow?.version, "strategy_risk_shadow_v1");
+  assert.equal(strategyRiskShadow?.invalidationStatus, "MISSING");
+  assert.equal(strategyRiskShadow?.productionPlan?.entry, signal.entryPrice);
+  assert.equal(strategyRiskShadow?.productionPlan?.stopLoss, signal.stopLoss);
+  assert.equal(strategyRiskShadow?.productionPlan?.takeProfit, signal.takeProfit);
+  assert.equal(strategyRiskShadow?.productionPlan?.riskReward, signal.riskRewardRatio);
   assert.equal(row.source, "auto_crypto_watcher");
   assert.deepEqual(row.source_history.sort(), ["auto_crypto_watcher", "candidate_promotion"]);
 }

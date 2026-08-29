@@ -1,5 +1,9 @@
 import { appConfig } from "../config/appConfig.js";
 import { createId } from "../shared/ids.js";
+import {
+  consumeSignalUnlockCredit,
+  refundSignalCreditForTerminalOutcome
+} from "../modules/credits/signalCreditLedgerRepository.js";
 import { query, transaction } from "./client.js";
 
 export async function findUserByEmail(email) {
@@ -1856,16 +1860,17 @@ export async function saveUnlockedSignal(userId, signal) {
     `, [signal.id]);
 
     if (billing.role !== "tester") {
-      await client.query(`
-        UPDATE credit_balances
-        SET unlock_credits_balance = unlock_credits_balance - 1,
-          lifetime_unlocks_used = lifetime_unlocks_used + 1,
-          trial_signals_used = trial_signals_used + CASE
-            WHEN (SELECT plan FROM users WHERE id = $1) = 'free' THEN 1 ELSE 0
-          END,
-          updated_at = now()
-        WHERE user_id = $1
-      `, [userId]);
+      const charge = await consumeSignalUnlockCredit(client, {
+        transactionId: createId("sctx"),
+        userId,
+        savedSignalId: signal.id
+      });
+      if (!charge.charged) {
+        const error = new Error("Unlock credit could not be consumed for this signal.");
+        error.code = "UNLOCK_CREDIT_TRANSACTION_FAILED";
+        error.statusCode = 409;
+        throw error;
+      }
       await client.query(`
         UPDATE users
         SET trial_signals_used = trial_signals_used + CASE WHEN plan = 'free' THEN 1 ELSE 0 END,
@@ -2123,6 +2128,12 @@ export async function expireActiveSignalsPastValidity() {
     `);
     const ids = expired.rows.map((row) => row.id);
     if (!ids.length) return [];
+    for (const savedSignalId of ids) {
+      await refundSignalCreditForTerminalOutcome(client, {
+        savedSignalId,
+        status: "Expired"
+      });
+    }
     const result = await client.query(
       signalSelectSql("WHERE s.id = ANY($1::text[])"),
       [ids]
@@ -2132,28 +2143,35 @@ export async function expireActiveSignalsPastValidity() {
 }
 
 export async function updateSignalOutcome(signal) {
-  await query(`
-    INSERT INTO signal_outcomes (
-      saved_signal_id, status, status_reason, resolved_at, last_tracking_error,
-      last_tracking_attempt_at, updated_at
-    )
-    VALUES ($1,$2,$3,$4,$5,$6,now())
-    ON CONFLICT (saved_signal_id)
-    DO UPDATE SET
-      status = EXCLUDED.status,
-      status_reason = EXCLUDED.status_reason,
-      resolved_at = EXCLUDED.resolved_at,
-      last_tracking_error = EXCLUDED.last_tracking_error,
-      last_tracking_attempt_at = EXCLUDED.last_tracking_attempt_at,
-      updated_at = now()
-  `, [
-    signal.id,
-    signal.status || "Active",
-    signal.statusReason || null,
-    signal.resolvedAt || null,
-    signal.lastTrackingError || null,
-    signal.lastTrackingAttemptAt || null
-  ]);
+  return transaction(async (client) => {
+    const outcome = await client.query(`
+      INSERT INTO signal_outcomes (
+        saved_signal_id, status, status_reason, resolved_at, last_tracking_error,
+        last_tracking_attempt_at, updated_at
+      )
+      VALUES ($1,$2,$3,$4,$5,$6,now())
+      ON CONFLICT (saved_signal_id)
+      DO UPDATE SET
+        status = EXCLUDED.status,
+        status_reason = EXCLUDED.status_reason,
+        resolved_at = EXCLUDED.resolved_at,
+        last_tracking_error = EXCLUDED.last_tracking_error,
+        last_tracking_attempt_at = EXCLUDED.last_tracking_attempt_at,
+        updated_at = now()
+      RETURNING status
+    `, [
+      signal.id,
+      signal.status || "Active",
+      signal.statusReason || null,
+      signal.resolvedAt || null,
+      signal.lastTrackingError || null,
+      signal.lastTrackingAttemptAt || null
+    ]);
+    await refundSignalCreditForTerminalOutcome(client, {
+      savedSignalId: signal.id,
+      status: outcome.rows[0]?.status || signal.status || "Active"
+    });
+  });
 }
 
 export async function saveSignalSnapshot(userId, signalId, snapshot) {

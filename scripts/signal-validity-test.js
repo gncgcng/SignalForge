@@ -81,7 +81,7 @@ assert.match(repository, /o\.status = 'Active'[\s\S]*s\.valid_until <= now\(\)/)
 assert.match(repository, /COALESCE\(o\.status, 'Active'\) = 'Active'[\s\S]*s\.valid_until > now\(\)/);
 assert.match(repository, /SET expired_at = COALESCE/);
 const unlockTransaction = repository.slice(repository.indexOf("export async function saveUnlockedSignal"), repository.indexOf("export async function listSignalsByUser"));
-assert.ok(unlockTransaction.indexOf("if (!signal.validUntil") < unlockTransaction.indexOf("unlock_credits_balance = unlock_credits_balance - 1"));
+assert.ok(unlockTransaction.indexOf("if (!signal.validUntil") < unlockTransaction.indexOf("consumeSignalUnlockCredit"));
 assert.match(signalService, /assertSignalFresh/);
 assert.match(outcomeService, /\[signals\] expired=\$\{expiredSignals\.length\}/);
 assert.doesNotMatch(appConfig, /SIGNAL_EXPIRATION_HOURS|expirationHours/);

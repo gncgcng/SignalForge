@@ -4088,8 +4088,12 @@ async function loadSubscription() {
 }
 
 async function loadSignals() {
-  const { signals } = await api.request("/api/signals");
+  const { signals, subscription } = await api.request("/api/signals");
   state.signals = (signals || []).map(normalizeSignal);
+  if (subscription) {
+    state.subscription = subscription;
+    renderSubscription();
+  }
   state.signalStats = getSignalSummary(state.signals);
   logSignalHistoryDiagnostics("loaded");
   renderSignals();
