@@ -1,6 +1,7 @@
 import { query } from "../../db/client.js";
 import { createId } from "../../shared/ids.js";
 import { calculateStrategyRiskShadowDiagnostics } from "../signals/strategyRiskShadowDiagnostics.js";
+import { calculateMomentum1hWatchDiagnostics } from "../signals/momentum1hWatchDiagnostics.js";
 
 const terminalPriority = Object.freeze({ "Hit TP": 6, "Hit SL": 5, "Manually closed": 4, Expired: 3, Active: 2 });
 const terminalOutcomeStatuses = new Set(["Hit TP", "Hit SL", "Expired"]);
@@ -306,6 +307,9 @@ function toFullAnalysis(signal, context = {}) {
   const strategyRiskShadowDiagnostics = productionReady
     ? calculateStrategyRiskShadowDiagnostics(signal, context)
     : null;
+  const momentum1hWatchDiagnostics = productionReady
+    ? calculateMomentum1hWatchDiagnostics(signal)
+    : null;
   const baseAnalysis = {
     reasoning: signal.reasoning,
     confirmations: signal.confirmations || [],
@@ -317,10 +321,14 @@ function toFullAnalysis(signal, context = {}) {
     riskPlan: signal.riskPlan || null,
     patternContext: signal.patternContext || signal.indicators?.patternContext || null
   };
-  return strategyRiskShadowDiagnostics
+  const shadowDiagnostics = {
+    ...(strategyRiskShadowDiagnostics ? { strategyRiskShadowDiagnostics } : {}),
+    ...(momentum1hWatchDiagnostics ? { momentum1hWatchDiagnostics } : {})
+  };
+  return Object.keys(shadowDiagnostics).length
     ? {
       ...baseAnalysis,
-      indicators: { ...baseAnalysis.indicators, strategyRiskShadowDiagnostics }
+      indicators: { ...baseAnalysis.indicators, ...shadowDiagnostics }
     }
     : baseAnalysis;
 }

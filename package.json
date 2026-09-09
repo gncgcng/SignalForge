@@ -156,7 +156,11 @@
     "report:momentum-breakout-prospective": "node scripts/momentum-breakout-prospective-report.js",
     "test:momentum-breakout-prospective-diagnostics": "node scripts/momentum-breakout-prospective-diagnostics-test.js",
     "report:forward-shadow-cohort": "node scripts/forward-shadow-cohort-report.js",
-    "test:forward-shadow-cohort": "node scripts/forward-shadow-cohort-report-test.js"
+    "test:forward-shadow-cohort": "node scripts/forward-shadow-cohort-report-test.js",
+    "audit:production-performance-regression": "node scripts/production-performance-regression-audit.js",
+    "audit:post-fix-production-forensic-replay": "node scripts/post-fix-production-forensic-replay.js",
+    "report:prospective-1h-momentum-watch": "node scripts/prospective-1h-momentum-watch-report.js",
+    "test:prospective-1h-momentum-watch": "node scripts/prospective-1h-momentum-watch-test.js"
   },
   "dependencies": {
     "pg": "^8.13.1"

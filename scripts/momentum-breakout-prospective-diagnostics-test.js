@@ -188,10 +188,11 @@ const productionReferences = await findProductionReferences(resolve("src"), "mom
 assert.deepEqual(
   productionReferences.map((file) => file.replaceAll("\\", "/")).sort(),
   [
+    resolve("src/modules/signals/momentum1hWatchDiagnostics.js").replaceAll("\\", "/"),
     resolve("src/modules/signals/momentumEntryDiagnostics.js").replaceAll("\\", "/"),
     resolve("src/modules/signals/signalGenerator.js").replaceAll("\\", "/")
   ].sort(),
-  "No production decision service may read Momentum shadow diagnostics"
+  "Only generation and observational diagnostic modules may read Momentum shadow diagnostics"
 );
 
 console.log(JSON.stringify({
