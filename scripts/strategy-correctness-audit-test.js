@@ -98,7 +98,7 @@ const fullGeneratorCharacterization = characterizeFullGenerator();
 console.log(JSON.stringify({
   auditType: "strategy_correctness_characterization",
   productionBehaviorChanged: true,
-  productionBehaviorScope: "Liquidity sweep reversal classification only",
+  productionBehaviorScope: "Liquidity sweep reversal and Multi-timeframe continuation classification only",
   reachableStrategyCount: discoveredStrategies.length,
   discoveredStrategies,
   mirroredClassificationCases: cases,
@@ -197,24 +197,17 @@ function auditLiquiditySweepFreshness() {
 function auditRemainingStrategySemantics() {
   const mixedHtf = fixtureFor("Multi-timeframe continuation", "long");
   mixedHtf.confluenceContext = {
+    lowerTimeframe: "5m",
     higherTimeframes: [
       { timeframe: "15m", available: true, regime: strongRegime("long") },
       { timeframe: "1h", available: true, regime: strongRegime("short") },
       { timeframe: "4h", available: true, regime: strongRegime("short") }
     ]
   };
-  assert.equal(classify(mixedHtf), "Multi-timeframe continuation");
+  assert.notEqual(classify(mixedHtf), "Multi-timeframe continuation");
   const mixedScore = scoreMultiTimeframeConfluence(mixedHtf.confluenceContext, "long");
   assert.equal(mixedScore.badge, "Countertrend");
   assert.ok(mixedScore.score >= 25);
-  findings.push({
-    severity: "HIGH",
-    classification: "SEMANTIC BUG",
-    strategy: "Multi-timeframe continuation",
-    code: "signalGenerator.js:737-760; signalGenerator.js:408-410",
-    finding: "One aligned higher timeframe is enough for the name even when two higher timeframes strongly oppose it. The resulting Countertrend score can remain above the hard-block threshold.",
-    observed: { classification: "Multi-timeframe continuation", confluenceScore: mixedScore.score, badge: mixedScore.badge }
-  });
 
   const pullbackWithoutPullback = fixtureFor("Pullback bounce", "long", {
     previousClose: 102.1,
@@ -548,7 +541,16 @@ function buildLongFixture(strategy, shape = {}) {
     return { ...base, advancedStructure: { vwap: { event: "Reclaim" } } };
   }
   if (strategy === "Multi-timeframe continuation") {
-    return { ...base, confluenceContext: { higherTimeframes: [{ available: true, regime: { preferredDirection: "long" } }] } };
+    return {
+      ...base,
+      confluenceContext: {
+        lowerTimeframe: "15m",
+        higherTimeframes: [
+          { timeframe: "1h", available: true, regime: strongRegime("long") },
+          { timeframe: "4h", available: true, regime: strongRegime("long") }
+        ]
+      }
+    };
   }
   if (strategy === "Pullback bounce") {
     return { ...withShape(base, { latestOpen: 101.6, latestHigh: 102.5, latestLow: 101.2, latestClose: 102.2, ...shape }), ema20: 102 };
@@ -634,7 +636,11 @@ function mirrorFixture(fixture, strategy) {
     smcState: mirroredSmcState,
     advancedStructure: fixture.advancedStructure ? { vwap: { event: "Rejection" } } : null,
     confluenceContext: fixture.confluenceContext ? {
-      higherTimeframes: [{ available: true, regime: { preferredDirection: "short" } }]
+      lowerTimeframe: fixture.confluenceContext.lowerTimeframe,
+      higherTimeframes: fixture.confluenceContext.higherTimeframes.map((item) => ({
+        ...item,
+        regime: strongRegime("short")
+      }))
     } : null,
     expectedStrategy: strategy
   };
@@ -723,6 +729,7 @@ function strongRegime(direction) {
   return {
     label: long ? "Trend Up" : "Trend Down",
     preferredDirection: direction,
+    trendStrength: 0.75,
     metrics: {
       ema20: long ? 105 : 95,
       ema50: 100,

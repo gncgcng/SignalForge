@@ -169,8 +169,10 @@ const strategyTypes = {
     nearestSupport: { price: 98 },
     trendStrength: 0.45,
     confluenceContext: {
+      lowerTimeframe: "15m",
       higherTimeframes: [
-        { available: true, regime: { preferredDirection: "long" } }
+        { timeframe: "1h", available: true, regime: { preferredDirection: "long" } },
+        { timeframe: "4h", available: true, regime: { preferredDirection: "long" } }
       ]
     }
   }),

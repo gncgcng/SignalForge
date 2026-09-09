@@ -1,7 +1,10 @@
 import { appConfig } from "../../config/appConfig.js";
 import { createId } from "../../shared/ids.js";
 import { analyzeMarketRegime } from "../market-data/marketRegimeService.js";
-import { scoreMultiTimeframeConfluence } from "../market-data/multiTimeframeService.js";
+import {
+  inferMultiTimeframeDirection,
+  scoreMultiTimeframeConfluence
+} from "../market-data/multiTimeframeService.js";
 import {
   analyzeSmartMoneyConcepts,
   evaluateSmcConfluence,
@@ -346,7 +349,15 @@ function validateCandidate(
     ? evaluateBreakoutRetestSetup(candidate.direction, candles, indicators)
     : setupType === "Liquidity sweep reversal"
       ? evaluateLiquiditySweepReversalSetup(candidate.direction, candles, indicators, smcState)
-      : null;
+      : setupType === "Multi-timeframe continuation"
+        ? evaluateMultiTimeframeContinuationSetup(
+            candidate.direction,
+            candles,
+            indicators,
+            regime,
+            confluenceContext
+          )
+        : null;
   const confluence = scoreMultiTimeframeConfluence(confluenceContext, candidate.direction);
   const smc = evaluateSmcConfluence(smcState, candidate.direction, regime);
   const marketStructure = evaluateAdvancedStructure(
@@ -743,9 +754,13 @@ export function classifySetupType(
   const activeVwap = advancedStructure?.vwap;
   const vwapEvent = activeVwap?.event === "Reclaim" && direction === "long" ||
     activeVwap?.event === "Rejection" && direction === "short";
-  const htfAligned = (confluenceContext?.higherTimeframes || [])
-    .filter((item) => item?.available && item.regime?.preferredDirection)
-    .filter((item) => item.regime.preferredDirection === direction).length >= 1;
+  const multiTimeframeContinuation = evaluateMultiTimeframeContinuationSetup(
+    direction,
+    candles,
+    indicators,
+    regime,
+    confluenceContext
+  );
   const sweptLiquidity = evaluateLiquiditySweepReversalSetup(direction, candles, indicators, smcState);
 
   if (sweptLiquidity.qualified) {
@@ -764,7 +779,7 @@ export function classifySetupType(
     return "VWAP reclaim/rejection";
   }
 
-  if (htfAligned && aligned && isDirectionalCandle(latest, direction)) {
+  if (multiTimeframeContinuation.passed) {
     return "Multi-timeframe continuation";
   }
 
@@ -921,6 +936,87 @@ export function evaluateLiquiditySweepReversalSetup(direction, candles, indicato
     reversalMoveAtr,
     invalidationLevel: directionMatches ? sweepExtreme : null
   };
+}
+
+const multiTimeframeAgreementRules = {
+  "5m": { expected: ["15m", "1h", "4h"], minimumAligned: 2, label: "at_least_2_aligned_no_opposition" },
+  "15m": { expected: ["1h", "4h"], minimumAligned: 2, label: "1h_and_4h_aligned" },
+  "1h": { expected: ["4h"], minimumAligned: 1, label: "4h_aligned" },
+  "4h": { expected: [], minimumAligned: Number.POSITIVE_INFINITY, label: "higher_timeframe_required" }
+};
+
+export function evaluateMultiTimeframeContinuationSetup(
+  direction,
+  candles,
+  indicators,
+  regime,
+  confluenceContext
+) {
+  const baseTimeframe = confluenceContext?.lowerTimeframe || null;
+  const rule = multiTimeframeAgreementRules[baseTimeframe] || null;
+  const latest = candles[candles.length - 1];
+  const baseRegimeDirection = regime?.preferredDirection === "long" || regime?.label === "Trend Up"
+    ? "long"
+    : regime?.preferredDirection === "short" || regime?.label === "Trend Down"
+      ? "short"
+      : "neutral";
+  const baseEmaAligned = direction === "long"
+    ? latest?.close > indicators?.ema20 && indicators?.ema20 > indicators?.ema50
+    : latest?.close < indicators?.ema20 && indicators?.ema20 < indicators?.ema50;
+  const baseDirectionalCandle = Boolean(latest && isDirectionalCandle(latest, direction));
+  const baseContinuation = baseRegimeDirection === direction && baseEmaAligned && baseDirectionalCandle;
+  const supplied = new Map(
+    (confluenceContext?.higherTimeframes || []).map((item) => [item?.timeframe, item])
+  );
+  const higherTimeframes = (rule?.expected || []).map((timeframe) => {
+    const item = supplied.get(timeframe);
+    if (!item?.available) {
+      return { timeframe, state: "unavailable", direction: null, strength: null };
+    }
+    const higherDirection = inferMultiTimeframeDirection(item.regime);
+    return {
+      timeframe,
+      state: higherDirection === direction
+        ? "aligned"
+        : higherDirection === "neutral"
+          ? "neutral"
+          : "opposing",
+      direction: higherDirection,
+      strength: finiteOrNull(item.regime?.trendStrength)
+    };
+  });
+  const alignedCount = higherTimeframes.filter((item) => item.state === "aligned").length;
+  const opposingCount = higherTimeframes.filter((item) => item.state === "opposing").length;
+  const neutralCount = higherTimeframes.filter((item) => item.state === "neutral").length;
+  const broadest = higherTimeframes.at(-1) || null;
+  const passed = Boolean(
+    rule &&
+    rule.expected.length > 0 &&
+    baseContinuation &&
+    alignedCount >= rule.minimumAligned &&
+    opposingCount === 0
+  );
+
+  return {
+    strategy: "Multi-timeframe continuation",
+    baseTimeframe,
+    baseDirection: direction,
+    baseRegimeDirection,
+    baseContinuation,
+    higherTimeframes,
+    alignedCount,
+    opposingCount,
+    neutralCount,
+    unavailableCount: higherTimeframes.filter((item) => item.state === "unavailable").length,
+    broadestTimeframeDirection: broadest?.direction || null,
+    agreementRule: rule?.label || "unsupported_base_timeframe",
+    passed
+  };
+}
+
+function finiteOrNull(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
 }
 
 function serializeStrategyCandle(candle) {

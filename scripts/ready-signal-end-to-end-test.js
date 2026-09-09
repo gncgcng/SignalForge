@@ -248,7 +248,10 @@ async function deterministicFetch(input) {
     throw new Error(`Unexpected network boundary request: ${url.href}`);
   }
   const granularity = Number(url.searchParams.get("granularity"));
-  const candles = buildFixedCandles(granularity).map((candle) => [
+  const candles = buildFixedCandles(granularity, {
+    start: new Date(url.searchParams.get("start")).getTime() / 1000,
+    end: new Date(url.searchParams.get("end")).getTime() / 1000
+  }).map((candle) => [
     candle.time,
     candle.low,
     candle.high,
@@ -262,22 +265,26 @@ async function deterministicFetch(input) {
   });
 }
 
-function buildFixedCandles(granularity) {
+function buildFixedCandles(granularity, window = {}) {
   const interval = Number.isFinite(granularity) && granularity > 0 ? granularity : 900;
-  const latestTime = Math.floor(FIXED_NOW_MS / 1000 / interval) * interval;
+  const latestTime = Math.floor(currentNowMs / 1000 / interval) * interval;
+  const firstTime = Math.ceil(Number(window.start ?? latestTime - 119 * interval) / interval) * interval;
+  const lastTime = Math.floor(Number(window.end ?? latestTime) / interval) * interval;
   const candles = [];
-  for (let index = 0; index < 120; index += 1) {
+  for (let time = firstTime; time <= lastTime; time += interval) {
+    const index = 120 + Math.round((time - latestTime) / interval);
     const close = 100 + index * 0.03 + Math.sin(index * 0.38 + 1.4) * 0.8;
-    const previousClose = index ? candles[index - 1].close : close - 0.03;
-    const open = index === 119 ? close - 0.096 : previousClose;
+    const previousClose = candles.at(-1)?.close ?? close - 0.03;
+    const isLastCompleted = time === latestTime - interval;
+    const open = isLastCompleted ? close - 0.096 : previousClose;
     const padding = 0.144;
     candles.push({
-      time: latestTime - (119 - index) * interval,
+      time,
       open,
       high: Math.max(open, close) + padding,
       low: Math.min(open, close) - padding,
       close,
-      volume: index === 119 ? 1800 : 1000 + (index % 7) * 15
+      volume: isLastCompleted ? 1800 : 1000 + (Math.abs(index) % 7) * 15
     });
   }
   return candles;
