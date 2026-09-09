@@ -1,4 +1,4 @@
-const CACHE_VERSION = "signalforge-static-v33-auth-debug-001";
+const CACHE_VERSION = "signalforge-static-v34-signal-desk-001";
 const OFFLINE_URL = "/offline.html";
 const CRITICAL_ASSET_PATHS = new Set([
   "/index.html",
@@ -8,6 +8,7 @@ const CRITICAL_ASSET_PATHS = new Set([
   "/signalFilters.js",
   "/signalValidity.js",
   "/riskCalculator.js",
+  "/paperChartUtils.js",
   "/styles.css"
 ]);
 const STATIC_ASSETS = [
@@ -20,6 +21,7 @@ const STATIC_ASSETS = [
   "/signalFilters.js",
   "/signalValidity.js",
   "/riskCalculator.js",
+  "/paperChartUtils.js",
   "/manifest.json",
   OFFLINE_URL,
   "/icons/favicon-16x16.png",

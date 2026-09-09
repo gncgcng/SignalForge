@@ -53,6 +53,13 @@ const result = {
     serviceWorker.includes('"/styles.css"') &&
     serviceWorker.includes('"/app.js"') &&
     serviceWorker.includes('"/manifest.json"'),
+  deployedJavascriptIsNetworkFirst:
+    serviceWorker.includes("if (request.mode === \"navigate\")") &&
+    serviceWorker.includes("if (CRITICAL_ASSET_PATHS.has(url.pathname))") &&
+    serviceWorker.includes('fetch(request, { cache: "no-store" })') &&
+    serviceWorker.includes('const CACHE_VERSION = "signalforge-static-v34-signal-desk-001"') &&
+    html.includes('/app.js?v=SIGNAL-DESK-001') &&
+    html.includes('var buildVersion = "SIGNAL-DESK-001"'),
   authenticatedApisNeverCached:
     serviceWorker.includes('url.pathname.startsWith("/api/")') &&
     serviceWorker.includes('request.method !== "GET"'),

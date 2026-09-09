@@ -7,7 +7,7 @@ const css = readFileSync(new URL("../public/styles.css", import.meta.url), "utf8
 const server = readFileSync(new URL("../src/server.js", import.meta.url), "utf8");
 const config = readFileSync(new URL("../src/config/appConfig.js", import.meta.url), "utf8");
 
-assert.match(html, /SignalForge build:\s*<strong>AUTH-DEBUG-001<\/strong>/);
+assert.match(html, /SignalForge build:\s*<strong>SIGNAL-DESK-001<\/strong>/);
 assert.match(html, /id="debug-build-page"/);
 assert.match(html, /id="clear-session-page"/);
 assert.match(html, /Session cleared/);
@@ -29,7 +29,7 @@ assert.match(server, /url\.pathname === "\/api\/debug\/ping"/);
 assert.match(server, /message: "SignalForge backend is running"/);
 assert.match(server, /build: appConfig\.debugBuildMarker/);
 assert.match(server, /env: appConfig\.nodeEnv/);
-assert.match(config, /debugBuildMarker: "AUTH-DEBUG-001"/);
+assert.match(config, /debugBuildMarker: "SIGNAL-DESK-001"/);
 
 for (const forbidden of ["DATABASE_URL", "STRIPE_SECRET_KEY", "TELEGRAM_BOT_TOKEN", "password"]) {
   const pingBlock = server.slice(server.indexOf('url.pathname === "/api/debug/ping"'), server.indexOf("// Static boot assets"));

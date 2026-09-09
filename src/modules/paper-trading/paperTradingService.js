@@ -5,6 +5,7 @@ import {
   createPaperTrade,
   expirePendingPaperOrders,
   fillPaperOrder,
+  findPaperAccount,
   findPaperOrder,
   findSignalById,
   getPaperAccount,
@@ -75,19 +76,22 @@ export async function enterPaperTrade(user, signalId, input = {}) {
 export async function getPaperTradingTerminal(user, input = {}) {
   const symbol = String(input.symbol || "BTC-USD");
   const timeframe = supportedPaperTimeframes.includes(input.timeframe) ? input.timeframe : "15m";
+  const reviewOnly = input.reviewOnly === true;
   let marketData = null;
   let marketError = null;
-  await expirePendingPaperOrders(user.id);
+  if (!reviewOnly) await expirePendingPaperOrders(user.id);
 
-  try {
-    marketData = await getOhlcv(symbol, timeframe);
-    await syncPaperOrders(user.id, symbol, marketData.candles);
-  } catch (error) {
-    marketError = error.message;
+  if (!reviewOnly) {
+    try {
+      marketData = await getOhlcv(symbol, timeframe);
+      await syncPaperOrders(user.id, symbol, marketData.candles);
+    } catch (error) {
+      marketError = error.message;
+    }
   }
 
   const [account, orders] = await Promise.all([
-    getPaperAccount(user.id),
+    reviewOnly ? findPaperAccount(user.id) : getPaperAccount(user.id),
     listPaperOrders(user.id)
   ]);
   const latestPrices = new Map();

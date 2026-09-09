@@ -156,6 +156,111 @@ export async function getCandlesFromCoinbase(symbol, timeframe) {
   }
 }
 
+export async function getHistoricalCandlesFromCoinbase(symbol, timeframe, input = {}) {
+  const granularity = granularityByTimeframe[timeframe];
+  const from = new Date(input.from);
+  const to = new Date(input.to);
+  const maxCandles = Math.min(2400, Math.max(60, Number(input.maxCandles || 1200)));
+  if (!granularity || !Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime()) || from >= to) {
+    throw new MarketDataProviderError("Invalid historical candle request.", {
+      statusCode: 400,
+      code: "INVALID_HISTORICAL_WINDOW"
+    });
+  }
+
+  const expectedCandles = Math.ceil((to.getTime() - from.getTime()) / (granularity * 1000));
+  if (expectedCandles > maxCandles) {
+    throw new MarketDataProviderError("Historical signal window is larger than the safe review limit.", {
+      statusCode: 400,
+      code: "HISTORICAL_WINDOW_TOO_LARGE"
+    });
+  }
+
+  const candleMap = new Map();
+  const pageSpanMs = granularity * 299 * 1000;
+  let cursor = from.getTime();
+  while (cursor <= to.getTime()) {
+    const pageEnd = Math.min(to.getTime(), cursor + pageSpanMs);
+    const url = new URL(`/products/${encodeURIComponent(symbol)}/candles`, appConfig.marketData.baseUrl);
+    url.searchParams.set("granularity", String(granularity));
+    url.searchParams.set("start", new Date(cursor).toISOString());
+    url.searchParams.set("end", new Date(pageEnd).toISOString());
+    for (const candle of await fetchHistoricalCandlePage(url)) candleMap.set(candle.time, candle);
+    cursor = pageEnd + granularity * 1000;
+  }
+
+  const candles = [...candleMap.values()].sort((a, b) => a.time - b.time);
+  if (!candles.length) {
+    throw new MarketDataProviderError("Historical chart data is unavailable for this signal.", {
+      statusCode: 404,
+      code: "EMPTY_HISTORICAL_CANDLES"
+    });
+  }
+  const latestPrice = Number(candles.at(-1).close);
+  const comparison = candles[Math.max(0, candles.length - Math.ceil(86400 / granularity) - 1)]?.close;
+  return {
+    candles,
+    latestPrice,
+    change24h: Number(comparison) ? ((latestPrice - Number(comparison)) / Number(comparison)) * 100 : 0,
+    source: "Coinbase Exchange historical candles",
+    volumeAvailable: true,
+    receivedAt: new Date().toISOString(),
+    cache: "review"
+  };
+}
+
+async function fetchHistoricalCandlePage(url) {
+  const controller = new AbortController();
+  await acquireRequestSlot();
+  const timeout = setTimeout(() => controller.abort(), appConfig.marketData.requestTimeoutMs);
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: { accept: "application/json", "user-agent": "SignalForge/0.1" }
+    });
+    if (response.status === 429) {
+      throw new MarketDataProviderError("Market data rate limit reached. Please retry later.", {
+        statusCode: 429,
+        code: "RATE_LIMITED"
+      });
+    }
+    if (!response.ok) {
+      throw new MarketDataProviderError(`Historical market data provider returned ${response.status}.`, {
+        statusCode: response.status,
+        code: response.status === 400 || response.status === 404
+          ? "PROVIDER_UNSUPPORTED_MARKET"
+          : "PROVIDER_RESPONSE_ERROR"
+      });
+    }
+    const raw = await response.json();
+    if (!Array.isArray(raw)) {
+      throw new MarketDataProviderError("Historical market data response was malformed.", {
+        statusCode: 502,
+        code: "BAD_CANDLES"
+      });
+    }
+    return raw.map(([time, low, high, open, close, volume]) => ({
+      time: Number(time),
+      open: Number(open),
+      high: Number(high),
+      low: Number(low),
+      close: Number(close),
+      volume: Number(volume)
+    })).filter((candle) => [candle.time, candle.open, candle.high, candle.low, candle.close, candle.volume].every(Number.isFinite));
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new MarketDataProviderError("Historical market data request timed out.", {
+        statusCode: 504,
+        code: "PROVIDER_TIMEOUT"
+      });
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+    releaseRequestSlot();
+  }
+}
+
 export async function getProductsFromCoinbase() {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), appConfig.marketData.requestTimeoutMs);
@@ -300,5 +405,14 @@ export const coinbaseMarketDataProvider = {
     }
 
     return getCandlesFromCoinbase(symbol, timeframe);
+  },
+  async getHistoricalCandles(symbol, timeframe, input) {
+    if (!this.supports(symbol, timeframe)) {
+      throw new MarketDataProviderError(`Coinbase does not support ${symbol} on ${timeframe}.`, {
+        statusCode: 400,
+        code: "PROVIDER_UNSUPPORTED_MARKET"
+      });
+    }
+    return getHistoricalCandlesFromCoinbase(symbol, timeframe, input);
   }
 };

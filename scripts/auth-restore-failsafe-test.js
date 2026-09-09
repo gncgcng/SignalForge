@@ -190,7 +190,7 @@ const checks = {
     app.includes("showAuthRestoreFailure(error)") &&
     app.includes("handleStartupFailure"),
   networkFailureDoesNotLoop:
-    app.includes("throw error;\n  }\n}\n\nfunction isPermanentRestoreFailure") &&
+    /throw error;\r?\n  }\r?\n}\r?\n\r?\nfunction isPermanentRestoreFailure/.test(app) &&
     app.includes("Startup session restore failed before login state was confirmed"),
   timeoutRecovery:
     app.includes("const AUTH_RESTORE_TIMEOUT_MS = 8000") &&
@@ -233,7 +233,7 @@ const checks = {
     styles.includes("@media (max-width: 480px)") &&
     styles.includes("width: min(calc(100vw - 32px), 480px)"),
   pwaReceivesFix:
-    worker.includes('const CACHE_VERSION = "signalforge-static-v33-auth-debug-001"') &&
+    worker.includes('const CACHE_VERSION = "signalforge-static-v34-signal-desk-001"') &&
     worker.includes('"/auth-bootstrap.js"') &&
     worker.includes("CRITICAL_ASSET_PATHS") &&
     worker.includes('fetch(request, { cache: "no-store" })'),

@@ -1,0 +1,239 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import {
+  applyCalibrationContext,
+  analyzeConfidenceBucketCalibration,
+  bestGroups,
+  breakEvenWinRate,
+  calculateClosedWinRate,
+  calculateGroupStatus,
+  calculateQualityAdjustedScore,
+  calibrationStatusForGroup,
+  sampleSizeStatusForGroup,
+  underconfidentWinners
+} from "../src/modules/signals/signalConfidenceCalibrationService.js";
+
+const service = readFileSync("src/modules/signals/signalConfidenceCalibrationService.js", "utf8");
+const signalService = readFileSync("src/modules/signals/signalService.js", "utf8");
+const autoScanService = readFileSync("src/modules/alerts/autoScanService.js", "utf8");
+const repository = readFileSync("src/modules/admin-signals/generatedSignalRepository.js", "utf8");
+const controller = readFileSync("src/modules/admin-signals/generatedSignalController.js", "utf8");
+const app = readFileSync("public/app.js", "utf8");
+const html = readFileSync("public/index.html", "utf8");
+const migration = readFileSync("migrations/050_signal_confidence_calibration.sql", "utf8");
+const calibratedMigration = readFileSync("migrations/053_generated_signal_calibrated_confidence.sql", "utf8");
+const quality = readFileSync("src/modules/signals/signalQualityService.js", "utf8");
+
+assert.equal(breakEvenWinRate(2.42), 29.2, "break-even win rate should use 1 / (1 + average RR)");
+assert.equal(calculateClosedWinRate(18, 59), 23.4, "expired signals must be excluded from normal win rate");
+assert.ok(calculateQualityAdjustedScore({ hitTp: 18, hitSl: 59, expired: 17 }) < calculateQualityAdjustedScore({ hitTp: 18, hitSl: 59, expired: 0 }), "expired signals should reduce quality score");
+
+const poorStrategy = calculateGroupStatus({
+  closedSignals: 20,
+  hitTp: 4,
+  hitSl: 16,
+  totalSignals: 26,
+  expiredRate: 23,
+  winRate: 20,
+  breakEvenWinRate: 33.3,
+  estimatedExpectancy: -0.35,
+  confidenceGap: 68
+});
+assert.equal(poorStrategy.status, "reduced_confidence");
+assert.equal(poorStrategy.penalty, -10);
+
+const veryPoor = calculateGroupStatus({
+  closedSignals: 28,
+  hitTp: 4,
+  hitSl: 22,
+  totalSignals: 31,
+  expiredRate: 16,
+  winRate: 15.4,
+  breakEvenWinRate: 31,
+  estimatedExpectancy: -0.55,
+  confidenceGap: 70
+});
+assert.equal(veryPoor.status, "quarantined");
+assert.equal(veryPoor.confidenceCap, 68);
+
+const baseSignal = {
+  symbol: "BTC-USD",
+  timeframe: "15m",
+  direction: "long",
+  setupType: "Breakout Retest",
+  confidenceScore: 91,
+  riskRewardRatio: 1.8,
+  alignmentBadge: "Partial Alignment",
+  indicators: { regime: "Range", readinessScore: 84 },
+  confirmations: [{ name: "Volume", passed: false }]
+};
+
+const noHistory = applyCalibrationContext(baseSignal, { noHistory: true, groups: [] });
+assert.equal(noHistory.confidenceScore, 91, "historical diagnostics must not change live confidence");
+assert.equal(noHistory.confidenceCalibration.rawSetupScore, 91);
+assert.equal(noHistory.confidenceCalibration.calibratedConfidence, 91);
+assert.equal(noHistory.confidenceCalibration.version, "calibration_v2");
+assert.equal(noHistory.confidenceCalibration.mode, "diagnostic_only");
+assert.ok(noHistory.indicators.confidenceCalibration.caps.some((item) => item.cap === 85));
+assert.ok(noHistory.indicators.confidenceCalibration.caps.some((item) => item.cap === 80));
+assert.ok(noHistory.indicators.confidenceCalibration.caps.some((item) => item.cap === 72));
+
+const underperforming = applyCalibrationContext({ ...baseSignal, confidenceScore: 92, indicators: { readinessScore: 95 }, alignmentBadge: "Full Alignment", confirmations: [{ name: "Volume", passed: true }] }, {
+  noHistory: false,
+  groups: [
+    { groupKey: "strategy:breakout-retest", groupType: "strategy", groupValue: "Breakout Retest", closedSignals: 20, winRate: 20, breakEvenWinRate: 33, estimatedExpectancy: -0.4, expiredRate: 20, status: "reduced_confidence", penalty: -10 },
+    { groupKey: "pair_timeframe:btc-usd:15m", groupType: "pair_timeframe", groupValue: "BTC-USD:15m", closedSignals: 20, winRate: 20, breakEvenWinRate: 33, estimatedExpectancy: -0.4, expiredRate: 20, status: "reduced_confidence", penalty: -10 }
+  ]
+});
+assert.equal(underperforming.confidenceScore, 92, "historical underperformance must not change live confidence");
+assert.equal(underperforming.confidenceCalibration.suggestedCalibratedConfidence, 68);
+assert.ok(underperforming.confidenceCalibration.penalties.length >= 2);
+
+const blocked = applyCalibrationContext({ ...baseSignal, confidenceScore: 90, riskRewardRatio: 2.4, indicators: { readinessScore: 95 }, alignmentBadge: "Full Alignment", confirmations: [{ name: "Volume", passed: true }] }, {
+  noHistory: false,
+  groups: [{ groupKey: "strategy:bad", groupType: "strategy", groupValue: "Bad Strategy", closedSignals: 25, status: "quarantined", penalty: -15, confidenceCap: 72 }]
+});
+assert.equal(blocked.indicators.confidenceCalibration.blocked, false, "historical quarantine is diagnostic-only");
+assert.equal(blocked.indicators.confidenceCalibration.status, "active");
+assert.equal(blocked.indicators.confidenceCalibration.diagnosticStatus, "quarantined");
+
+const invalidConfidence = applyCalibrationContext({ ...baseSignal, confidenceScore: null }, { noHistory: true, groups: [] });
+assert.equal(invalidConfidence.confidenceScore, null);
+assert.equal(invalidConfidence.confidenceCalibration.status, "calibration_error");
+assert.equal(invalidConfidence.confidenceCalibration.errorCode, "invalid_raw_confidence");
+assert.equal(invalidConfidence.confidenceCalibration.technicalError, true);
+
+const sampleGroups = [
+  { groupKey: "strategy:tiny", groupType: "strategy", groupValue: "Tiny Winner", closedSignals: 3, winRate: 100, breakEvenWinRate: 30, estimatedExpectancy: 2.1, expiredRate: 0, confidenceGap: -10 },
+  { groupKey: "strategy:steady", groupType: "strategy", groupValue: "Steady Retest", closedSignals: 30, winRate: 48, breakEvenWinRate: 28, estimatedExpectancy: 0.52, expiredRate: 5, confidenceGap: 2 },
+  { groupKey: "strategy:hot", groupType: "strategy", groupValue: "Hot But Smaller", closedSignals: 7, winRate: 70, breakEvenWinRate: 35, estimatedExpectancy: 0.32, expiredRate: 0, confidenceGap: -8 }
+];
+assert.equal(bestGroups(sampleGroups, "strategy")[0].groupValue, "Steady Retest", "best sorting must prioritize expectancy and sample size, not tiny 100% records");
+assert.ok(!bestGroups(sampleGroups, "strategy").some((group) => group.groupValue === "Tiny Winner"), "best groups require at least 5 closed samples");
+assert.equal(underconfidentWinners([
+  { groupKey: "strategy:under", groupType: "strategy", groupValue: "Undertrusted", closedSignals: 12, winRate: 50, breakEvenWinRate: 30, estimatedExpectancy: 0.4, averageConfidence: 72, expiredRate: 4, confidenceGap: 22 },
+  { groupKey: "strategy:trusted", groupType: "strategy", groupValue: "Already Trusted", closedSignals: 12, winRate: 50, breakEvenWinRate: 30, estimatedExpectancy: 0.4, averageConfidence: 88, expiredRate: 4, confidenceGap: -38 }
+])[0].groupValue, "Undertrusted");
+
+const recovered = applyCalibrationContext({
+  ...baseSignal,
+  confidenceScore: 90,
+  riskRewardRatio: 2.4,
+  alignmentBadge: "Full Alignment",
+  confluenceScore: 82,
+  indicators: { regime: "Trend Up", readinessScore: 95, entryQuality: "excellent" },
+  entryQuality: "excellent",
+  confirmations: [{ name: "Volume", passed: true }]
+}, {
+  noHistory: true,
+  groups: [{ groupKey: "strategy:steady", groupType: "strategy", groupValue: "Steady Retest", closedSignals: 30, winRate: 48, breakEvenWinRate: 28, estimatedExpectancy: 0.52, expiredRate: 5, confidenceCapLift: 5, status: "active" }]
+});
+assert.equal(recovered.confidenceScore, 90, "broad history must not cap live confidence");
+assert.equal(recovered.confidenceCalibration.suggestedCalibratedConfidence, 88);
+assert.ok(recovered.indicators.confidenceCalibration.caps.some((item) => item.cap === 88));
+
+const exactRecovered = applyCalibrationContext({
+  ...baseSignal,
+  generationSource: "manual_scan",
+  confidenceScore: 94,
+  riskRewardRatio: 2.4,
+  alignmentBadge: "Full Alignment",
+  confluenceScore: 82,
+  indicators: { regime: "Trend Up", readinessScore: 95, entryQuality: "excellent", generationSource: "manual_scan" },
+  entryQuality: "excellent",
+  confirmations: [{ name: "Volume", passed: true }]
+}, {
+  noHistory: false,
+  groups: [{
+    groupKey: "source_strategy_timeframe:manual-scan:breakout-retest:15m",
+    groupType: "source_strategy_timeframe",
+    groupValue: "manual_scan:Breakout Retest:15m",
+    closedSignals: 24,
+    winRate: 54,
+    breakEvenWinRate: 32,
+    estimatedExpectancy: 0.42,
+    expiredRate: 4,
+    confidenceCapLift: 5,
+    status: "active"
+  }]
+});
+assert.equal(exactRecovered.confidenceScore, 94, "exact historical performance remains diagnostic-only");
+assert.equal(exactRecovered.confidenceCalibration.suggestedCalibratedConfidence, 88);
+assert.ok(exactRecovered.indicators.confidenceCalibration.caps.some((item) => item.cap === 88));
+
+const invertedBuckets = analyzeConfidenceBucketCalibration([
+  { groupKey: "confidence_bucket:70-79", groupType: "confidence_bucket", groupValue: "70-79", closedSignals: 12, winRate: 45, breakEvenWinRate: 30, estimatedExpectancy: 0.25, expiredRate: 5, confidenceGap: 30 },
+  { groupKey: "confidence_bucket:80-89", groupType: "confidence_bucket", groupValue: "80-89", closedSignals: 12, winRate: 35, breakEvenWinRate: 30, estimatedExpectancy: 0.05, expiredRate: 5, confidenceGap: 50 },
+  { groupKey: "confidence_bucket:90-100", groupType: "confidence_bucket", groupValue: "90-100", closedSignals: 12, winRate: 20, breakEvenWinRate: 30, estimatedExpectancy: -0.4, expiredRate: 12, confidenceGap: 72 }
+]);
+assert.equal(invertedBuckets.active, true);
+assert.match(invertedBuckets.message, /higher confidence buckets are not outperforming lower buckets/i);
+assert.equal(invertedBuckets.worstBucket.groupValue, "90-100");
+assert.equal(sampleSizeStatusForGroup({ closedSignals: 9 }), "Small sample size. Do not trust this result yet.");
+assert.equal(sampleSizeStatusForGroup({ closedSignals: 12 }), "Early data. Calibration may change.");
+assert.equal(calibrationStatusForGroup({ closedSignals: 12, winRate: 20, breakEvenWinRate: 30, estimatedExpectancy: -0.2 }), "Overconfident");
+
+const stillCappedByRules = applyCalibrationContext({
+  ...baseSignal,
+  confidenceScore: 90,
+  riskRewardRatio: 2.4,
+  alignmentBadge: "Full Alignment",
+  confluenceScore: 82,
+  indicators: { regime: "Trend Up", readinessScore: 95, entryQuality: "excellent" },
+  entryQuality: "excellent",
+  confirmations: [{ name: "Volume", passed: false }]
+}, {
+  noHistory: true,
+  groups: [{ groupKey: "strategy:steady", groupType: "strategy", groupValue: "Steady Retest", closedSignals: 30, winRate: 48, breakEvenWinRate: 28, estimatedExpectancy: 0.52, expiredRate: 5, confidenceCapLift: 5, status: "active" }]
+});
+assert.equal(stillCappedByRules.confidenceScore, 90, "diagnostic caps must not alter live confidence");
+assert.equal(stillCappedByRules.confidenceCalibration.suggestedCalibratedConfidence, 80);
+
+assert.match(migration, /CREATE TABLE IF NOT EXISTS signal_performance_groups/);
+assert.match(migration, /CREATE TABLE IF NOT EXISTS signal_confidence_adjustments/);
+assert.match(migration, /CREATE TABLE IF NOT EXISTS signal_strategy_statuses/);
+assert.match(migration, /ADD COLUMN IF NOT EXISTS original_confidence/);
+assert.match(migration, /ADD COLUMN IF NOT EXISTS confidence_calibration/);
+assert.match(calibratedMigration, /ADD COLUMN IF NOT EXISTS calibrated_confidence/);
+assert.match(calibratedMigration, /ADD COLUMN IF NOT EXISTS confidence_version/);
+assert.match(calibratedMigration, /ADD COLUMN IF NOT EXISTS calibration_reason/);
+
+assert.match(service, /status = 'Hit TP' THEN risk_reward WHEN status = 'Hit SL' THEN -1 WHEN status = 'Expired' THEN -0\.35/);
+assert.match(service, /Historical performance is diagnostic only/);
+assert.match(service, /HIGH_CONFIDENCE_EXPECTANCY_CAP = 88/);
+assert.match(service, /EXACT_SOURCE_STRATEGY_TIMEFRAME_MIN_CLOSED = 20/);
+assert.match(service, /source_strategy_timeframe/);
+assert.match(service, /analyzeConfidenceBucketCalibration/);
+assert.match(service, /CONFIDENCE_WARNING_COPY/);
+assert.match(signalService, /isSignalBlockedByCalibration/);
+assert.match(signalService, /Confidence calibration failed because the raw confidence is invalid/);
+assert.match(signalService, /generationSource/);
+assert.doesNotMatch(signalService, /generationSource: "candidate_promotion"/);
+assert.match(autoScanService, /calibrateTelegramAlertSetup/);
+assert.doesNotMatch(autoScanService, /applyConfidenceCalibration/);
+assert.match(autoScanService, /preserveDownstreamConfidence/);
+assert.match(repository, /recordGeneratedSignalConfidenceAdjustment/);
+assert.match(repository, /calibrated_confidence/);
+assert.match(repository, /confidence_version/);
+assert.match(repository, /calibration_reason/);
+assert.match(controller, /\/api\/admin\/signals\/quality\/status/);
+assert.match(app, /admin-signal-quality-panel/);
+assert.match(app, /Best strategies/);
+assert.match(app, /Best pair\/timeframes/);
+assert.match(app, /Underconfident winners/);
+assert.match(app, /Trust more/);
+assert.match(app, /Increase confidence carefully/);
+assert.match(app, /data-signal-quality-status="quarantined"/);
+assert.match(app, /Original confidence/);
+assert.match(app, /Raw setup score/);
+assert.match(app, /Calibrated confidence/);
+assert.match(app, /Quality Calibration Summary/);
+assert.match(html, /admin-signal-quality-panel/);
+assert.match(service, /function bestGroupSort/);
+assert.match(service, /underconfidentWinners/);
+assert.match(service, /capRecovery/);
+assert.match(service, /Strong performer/);
+assert.match(signalService, /confidenceCalibration: undefined/);
+assert.match(quality, /Historical performance is diagnostic only/);
+
+console.log("Signal confidence calibration, loss analysis, quarantine, admin diagnostics, and privacy tests passed.");
