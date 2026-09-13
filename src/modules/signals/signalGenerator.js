@@ -26,6 +26,7 @@ import { attachMomentumEntryDiagnostics } from "./momentumEntryDiagnostics.js";
 
 const minimumCandles = 60;
 const minimumQualityScore = 70;
+export const VOLUME_CONFIRMATION_MULTIPLIER = 1.05;
 export const BREAKOUT_RETEST_TOLERANCE_ATR = 0.35;
 export const SUPPORT_RESISTANCE_RETEST_TOLERANCE_ATR = 0.35;
 export const SUPPORT_RESISTANCE_RETEST_MIN_SEPARATION_ATR = 0.75;
@@ -810,7 +811,7 @@ export function classifySetupType(
     return "Breakout retest";
   }
 
-  if (momentumBreakout.qualified && aligned && latest.volume >= indicators.volumeMa20 * 1.02) {
+  if (momentumBreakout.qualified && aligned && latest.volume >= indicators.volumeMa20 * VOLUME_CONFIRMATION_MULTIPLIER) {
     return "Momentum breakout";
   }
 
@@ -2303,7 +2304,7 @@ function volumeConfirmation(latest, indicators, volumeAvailable) {
 
   return confirmation(
     "Volume",
-    latest.volume >= indicators.volumeMa20 * 1.05,
+    latest.volume >= indicators.volumeMa20 * VOLUME_CONFIRMATION_MULTIPLIER,
     `Latest volume is ${formatNumber(latest.volume)} versus ${formatNumber(indicators.volumeMa20)} volume MA.`
   );
 }
