@@ -23,6 +23,7 @@ import {
 } from "../analyst/signalAnalystService.js";
 import { detectChartPatterns } from "../patterns/patternDetector.js";
 import { attachMomentumEntryDiagnostics } from "./momentumEntryDiagnostics.js";
+import { calculateCrossStrategyWatchDiagnostics } from "./crossStrategyWatchDiagnostics.js";
 
 const minimumCandles = 60;
 const minimumQualityScore = 70;
@@ -144,6 +145,7 @@ export function generateMarketDataSetup(marketData, timeframe, options = {}) {
     );
   }
   const analyst = buildSignalAnalystReport(bestCase, options.analystProfile);
+  const crossStrategyWatchDiagnostics = safeCrossStrategyWatchDiagnostics(bestCase, options.analystProfile);
   const entryPrice = roundPrice(bestCase.entry);
   const stopLoss = roundPrice(bestCase.stopLoss);
   const takeProfit = roundPrice(bestCase.takeProfit);
@@ -202,7 +204,10 @@ export function generateMarketDataSetup(marketData, timeframe, options = {}) {
       analyst,
       reasoning: analyst.summary,
       confirmations: bestCase.confirmations,
-      indicators: buildSerializedIndicators(),
+      indicators: {
+        ...buildSerializedIndicators(),
+        ...(crossStrategyWatchDiagnostics ? { crossStrategyWatchDiagnostics } : {})
+      },
       generatedAt: new Date().toISOString(),
       marketSource: marketData.source
     },
@@ -217,6 +222,21 @@ export function generateMarketDataSetup(marketData, timeframe, options = {}) {
       indicators: buildSerializedIndicators()
     }
   };
+}
+
+// cross_strategy_watch_v1 is observational-only: a malformed candidate or missing
+// profile data here must never prevent a normal signal from being returned.
+function safeCrossStrategyWatchDiagnostics(candidate, analystProfile) {
+  try {
+    return calculateCrossStrategyWatchDiagnostics({
+      candidate,
+      minimumQuality: getStrategyRules(candidate.setupType, candidate.direction, candidate.confirmations).minimumQuality,
+      profile: analystProfile,
+      generatedAt: new Date().toISOString()
+    });
+  } catch {
+    return null;
+  }
 }
 
 function evaluateCryptoLong(latest, indicators, levels, volumeAvailable) {

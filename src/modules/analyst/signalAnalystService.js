@@ -60,6 +60,45 @@ export function calculateAdaptiveQualityAdjustment(candidate, profile) {
   };
 }
 
+// Diagnostic-only restoration of the pre-49ba207 logic. Never call this from
+// validateCandidate or let its output influence qualityScore/valid -- it exists
+// solely so cross_strategy_watch_v1 can log what the old loop would have done.
+export function calculateAdaptiveQualityAdjustmentShadow(candidate, profile) {
+  if (!profile?.adaptive) {
+    return {
+      adjustment: 0,
+      factors: [],
+      explanation: "Historical adaptation is inactive until factor samples are large enough.",
+      diagnosticOnly: true
+    };
+  }
+
+  const activeKeys = new Set(getCandidateFactorKeys(candidate));
+  const applied = profile.factors
+    .filter((factor) => factor.sampleSufficient && activeKeys.has(factor.key))
+    .map((factor) => ({
+      key: factor.key,
+      label: factor.label,
+      usefulnessScore: factor.usefulnessScore,
+      adjustment: factor.usefulnessScore >= 25 ? 1 : factor.usefulnessScore <= -25 ? -1 : 0
+    }))
+    .filter((factor) => factor.adjustment !== 0);
+  const adjustment = clamp(
+    applied.reduce((sum, factor) => sum + factor.adjustment, 0),
+    -maximumAdaptiveAdjustment,
+    maximumAdaptiveAdjustment
+  );
+
+  return {
+    adjustment,
+    factors: applied,
+    explanation: applied.length
+      ? `Historical factor evidence would have adjusted quality by ${adjustment >= 0 ? "+" : ""}${adjustment} points.`
+      : "No statistically mature historical factor would have changed this setup's quality.",
+    diagnosticOnly: true
+  };
+}
+
 export function buildSignalAnalystReport(candidate, profile = null) {
   const strengths = [];
   const weaknesses = [];
