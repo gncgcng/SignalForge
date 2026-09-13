@@ -91,6 +91,18 @@ export function assertSignupVelocity(velocity) {
   }
 }
 
+// Thresholds are a starting point: 8 failed attempts per email / 20 per IP in a 15-minute
+// window tolerates real users mistyping a password a few times while still meaningfully
+// slowing an automated attack. Revisit once real traffic patterns are visible.
+export function assertLoginVelocity(velocity) {
+  if (velocity.failuresByEmail15m >= 8) {
+    throw rateLimitError("Too many failed login attempts for this account. Please try again in 15 minutes.");
+  }
+  if (velocity.failuresByIp15m >= 20) {
+    throw rateLimitError("Too many failed login attempts from this network. Please try again in 15 minutes.");
+  }
+}
+
 function getClientIp(req) {
   const forwarded = String(req?.headers?.["x-forwarded-for"] || "")
     .split(",")[0]
@@ -105,7 +117,7 @@ function normalizeDeviceFingerprint(value) {
   return fingerprint.length >= 16 && fingerprint.length <= 200;
 }
 
-function hashIdentifier(value) {
+export function hashIdentifier(value) {
   return createHmac("sha256", appConfig.abuseProtection.hashSecret)
     .update(value)
     .digest("hex");

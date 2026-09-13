@@ -1104,6 +1104,33 @@ export async function getSignupVelocity(ipHash) {
   };
 }
 
+export async function recordLoginAttempt({ emailHash, ipHash, successful }) {
+  await query(`
+    INSERT INTO login_attempts (id, email_hash, ip_hash, successful)
+    VALUES ($1, $2, $3, $4)
+  `, [createId("login"), emailHash, ipHash, successful]);
+}
+
+export async function getLoginAttemptVelocity({ emailHash, ipHash }) {
+  const result = await query(`
+    SELECT
+      COUNT(*) FILTER (
+        WHERE email_hash = $1 AND successful = false AND created_at >= now() - interval '15 minutes'
+      ) AS failures_by_email_15m,
+      COUNT(*) FILTER (
+        WHERE ip_hash = $2 AND successful = false AND created_at >= now() - interval '15 minutes'
+      ) AS failures_by_ip_15m
+    FROM login_attempts
+    WHERE created_at >= now() - interval '15 minutes'
+      AND (email_hash = $1 OR ip_hash = $2)
+  `, [emailHash, ipHash]);
+  const row = result.rows[0] || {};
+  return {
+    failuresByEmail15m: Number(row.failures_by_email_15m || 0),
+    failuresByIp15m: Number(row.failures_by_ip_15m || 0)
+  };
+}
+
 export async function getDeviceTrialHistory(deviceHash) {
   if (!deviceHash) return null;
   const result = await query(`

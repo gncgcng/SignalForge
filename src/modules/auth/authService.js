@@ -12,8 +12,10 @@ import {
   findUserByEmail,
   findUserByUsername,
   getDeviceTrialHistory,
+  getLoginAttemptVelocity,
   getSignupVelocity,
   markAuthRestoreTokenUsed,
+  recordLoginAttempt,
   recordSignupAttempt,
   refreshSession,
   resetPasswordWithToken,
@@ -24,10 +26,12 @@ import {
 } from "../../db/repositories.js";
 import { isDemoOrTesterIdentity } from "./authPolicy.js";
 import {
+  assertLoginVelocity,
   assertSignupVelocity,
   calculateSignupAbuseScore,
   getEmailDomain,
   getSignupContext,
+  hashIdentifier,
   isDisposableEmail
 } from "./abuseProtectionService.js";
 import {
@@ -128,9 +132,18 @@ export async function registerOrLogin({
     if (existing.accountStatus && existing.accountStatus !== "active") {
       throw invalidCredentialsError();
     }
+
+    const emailHash = hashIdentifier(`email:${normalizedEmail}`);
+    const ipHash = getSignupContext(req, deviceFingerprint).ipHash;
+    const velocity = await getLoginAttemptVelocity({ emailHash, ipHash });
+    assertLoginVelocity(velocity);
+
     console.info("[auth] login:password_check:start");
     const passwordValid = isValidPassword(password, existing.password);
     console.info(`[auth] login:password_check:valid=${passwordValid}`);
+
+    await recordLoginAttempt({ emailHash, ipHash, successful: passwordValid });
+
     if (!passwordValid) {
       throw invalidCredentialsError();
     }

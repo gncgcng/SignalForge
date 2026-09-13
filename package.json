@@ -35,6 +35,7 @@
     "auth:smoke": "node scripts/auth-smoke-test.js",
     "repair:admin": "node scripts/repair-admin-account.js",
     "test:anti-abuse": "node scripts/anti-abuse-test.js",
+    "test:login-rate-limit": "node scripts/login-rate-limit-test.js",
     "test:stripe-billing": "node scripts/stripe-billing-test.js",
     "test:stripe-config": "node scripts/stripe-config-test.js",
     "test:stripe-mode": "node scripts/stripe-mode-test.js",
