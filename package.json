@@ -163,7 +163,9 @@
     "report:prospective-1h-momentum-watch": "node scripts/prospective-1h-momentum-watch-report.js",
     "test:prospective-1h-momentum-watch": "node scripts/prospective-1h-momentum-watch-test.js",
     "report:cross-strategy-watch": "node scripts/cross-strategy-watch-report.js",
-    "test:cross-strategy-watch": "node scripts/cross-strategy-watch-test.js"
+    "test:cross-strategy-watch": "node scripts/cross-strategy-watch-test.js",
+    "report:market-regime-diagnostic": "node scripts/market-regime-diagnostic-report.js",
+    "test:market-regime-diagnostic": "node scripts/market-regime-diagnostic-report-test.js"
   },
   "dependencies": {
     "pg": "^8.13.1"
