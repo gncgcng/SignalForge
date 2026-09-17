@@ -1588,8 +1588,8 @@ export async function updateStripeSubscription({
   });
 }
 
-export async function grantUnlockCredits(userId, quantity, externalReference, source) {
-  return transaction(async (client) => {
+export async function grantUnlockCredits(userId, quantity, externalReference, source, existingClient = null) {
+  const run = async (client) => {
     const grant = await client.query(`
       INSERT INTO billing_credit_grants (
         id, user_id, external_reference, source, quantity
@@ -1609,7 +1609,8 @@ export async function grantUnlockCredits(userId, quantity, externalReference, so
       WHERE user_id = $1
     `, [userId, quantity, source]);
     return true;
-  });
+  };
+  return existingClient ? run(existingClient) : transaction(run);
 }
 
 export async function grantSubscriptionEntitlements({
@@ -3140,6 +3141,20 @@ export async function setTelegramNotificationsEnabled(userId, enabled) {
     }
 
     return result.rows[0] ? mapTelegramSettings(result.rows[0]) : null;
+  });
+}
+
+export async function disconnectTelegramSettings(userId) {
+  return transaction(async (client) => {
+    await client.query(`
+      DELETE FROM telegram_notification_settings WHERE user_id = $1
+    `, [userId]);
+    await client.query(`
+      DELETE FROM telegram_notification_queue WHERE user_id = $1 AND status = 'queued'
+    `, [userId]);
+    await client.query(`
+      DELETE FROM telegram_connection_codes WHERE user_id = $1 AND status = 'pending'
+    `, [userId]);
   });
 }
 

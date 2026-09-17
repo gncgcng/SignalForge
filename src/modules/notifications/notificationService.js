@@ -1,5 +1,6 @@
 import { appConfig } from "../../config/appConfig.js";
 import {
+  disconnectTelegramSettings,
   enqueueTelegramNotification,
   getTelegramSettingsByUser,
   listWatchlistByUser,
@@ -48,6 +49,21 @@ export async function updateTelegramSettings(user, input) {
     ...input,
     chatId: current.chatId
   }));
+  return getNotificationSettings(user);
+}
+
+export async function disconnectTelegram(user) {
+  const settings = await getTelegramSettingsByUser(user.id);
+
+  if (settings?.chatId) {
+    try {
+      await sendTelegramMessage(settings.chatId, "SignalForge Telegram notifications disconnected.");
+    } catch (error) {
+      console.warn(`[telegram] disconnect_notice_failed user=${user.id} reason=${error.message}`);
+    }
+  }
+
+  await disconnectTelegramSettings(user.id);
   return getNotificationSettings(user);
 }
 

@@ -2081,6 +2081,14 @@ nav a:hover {
   color: var(--text);
 }
 
+.link-button.danger {
+  color: var(--red);
+}
+
+.link-button.danger:hover {
+  color: var(--text);
+}
+
 .scan-progress {
   display: grid;
   gap: 8px;

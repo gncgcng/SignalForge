@@ -1,6 +1,7 @@
 import { readJson, sendError, sendJson } from "../../shared/http.js";
 import {
   connectTelegram,
+  disconnectTelegram,
   getNotificationSettings,
   sendTelegramTestAlert,
   toggleTelegramNotifications,
@@ -23,6 +24,10 @@ export async function handleNotificationRoutes(req, res, pathname) {
   try {
     if (pathname === "/api/notifications/telegram" && req.method === "GET") {
       return sendJson(res, 200, await getNotificationSettings(req.user));
+    }
+
+    if (pathname === "/api/notifications/telegram" && req.method === "DELETE") {
+      return sendJson(res, 200, await disconnectTelegram(req.user));
     }
 
     if (pathname === "/api/notifications/telegram/connect" && req.method === "POST") {

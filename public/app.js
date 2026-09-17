@@ -396,6 +396,7 @@ const telegramOpenBotLink = document.querySelector("#telegram-open-bot-link");
 const telegramCopyCommand = document.querySelector("#telegram-copy-command");
 const telegramConnectionMessage = document.querySelector("#telegram-connection-message");
 const telegramTestButton = document.querySelector("#telegram-test-button");
+const telegramDisconnectButton = document.querySelector("#telegram-disconnect-button");
 const telegramPreferencesForm = document.querySelector("#telegram-preferences-form");
 const telegramChatId = document.querySelector("#telegram-chat-id");
 const telegramEnabled = document.querySelector("#telegram-enabled");
@@ -2009,6 +2010,25 @@ telegramTestButton.addEventListener("click", async () => {
   } finally {
     telegramTestButton.disabled = false;
     telegramTestButton.textContent = "Send Test Alert";
+  }
+});
+
+telegramDisconnectButton.addEventListener("click", async () => {
+  if (!window.confirm("Disconnect Telegram? You'll stop receiving alerts until you reconnect.")) {
+    return;
+  }
+
+  try {
+    telegramDisconnectButton.disabled = true;
+    telegramDisconnectButton.textContent = "Disconnecting...";
+    state.notifications = await api.request("/api/notifications/telegram", { method: "DELETE" });
+    renderNotifications();
+    telegramStatusLine.textContent = "Telegram disconnected.";
+  } catch (error) {
+    telegramStatusLine.textContent = `Disconnect failed: ${error.message}`;
+  } finally {
+    telegramDisconnectButton.disabled = false;
+    telegramDisconnectButton.textContent = "Disconnect Telegram";
   }
 });
 
@@ -9186,6 +9206,7 @@ function renderNotifications() {
   telegramEnabled.disabled = !connected;
   telegramScope.disabled = !connected;
   telegramTestButton.classList.toggle("hidden", !connected);
+  telegramDisconnectButton.classList.toggle("hidden", !connected);
 
   if (!settings) {
     telegramEnabled.checked = false;
