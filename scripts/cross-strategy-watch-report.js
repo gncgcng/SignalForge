@@ -26,7 +26,7 @@ export function parseCrossStrategyWatchArguments(argv) {
 export function buildCrossStrategyWatchReport(rows, options = {}) {
   if (!Array.isArray(rows)) throw new Error("Cross-strategy watch rows must be an array.");
   const asOf = validDate(options.asOf) || new Date();
-  const observations = deduplicate(rows.map(normalizeRow).filter(isStudyObservation));
+  const observations = buildCrossStrategyWatchObservations(rows);
 
   const strategiesSeen = new Set(observations.map((row) => row.strategy));
   const allStrategies = [...CROSS_STRATEGY_LIST, ...[...strategiesSeen].filter((name) => !CROSS_STRATEGY_LIST.includes(name))];
@@ -61,6 +61,10 @@ export function buildCrossStrategyWatchReport(rows, options = {}) {
       reEnablesAdaptiveAdjustment: false
     }
   };
+}
+
+export function buildCrossStrategyWatchObservations(rows) {
+  return deduplicate(rows.map(normalizeRow).filter(isStudyObservation));
 }
 
 export async function queryCrossStrategyWatchRows(client) {
@@ -109,6 +113,7 @@ function normalizeRow(row) {
     signalId: row?.signal_id ?? row?.signalId ?? null,
     setupKey: row?.setup_key ?? row?.setupKey ?? null,
     strategy: String(row?.strategy ?? diagnostic?.strategy ?? "unknown"),
+    direction: String(row?.direction || "unknown").toLowerCase(),
     status: String(row?.status || "Active"),
     realizedR: finiteOrNull(row?.realized_r ?? row?.realizedR),
     generatedAt,
@@ -126,7 +131,7 @@ function isStudyObservation(row) {
   );
 }
 
-function summarize(rows) {
+export function summarize(rows) {
   const tp = rows.filter((row) => row.status === "Hit TP").length;
   const sl = rows.filter((row) => row.status === "Hit SL").length;
   const expired = rows.filter((row) => row.status === "Expired").length;
