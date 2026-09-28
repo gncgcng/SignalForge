@@ -1,32 +1,32 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
-    <loc>https://signalforge-app.xyz/</loc>
+    <loc>https://signalforge-app.com/</loc>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
   </url>
   <url>
-    <loc>https://signalforge-app.xyz/#features</loc>
+    <loc>https://signalforge-app.com/#features</loc>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://signalforge-app.xyz/#markets-covered</loc>
+    <loc>https://signalforge-app.com/#markets-covered</loc>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://signalforge-app.xyz/#pricing</loc>
+    <loc>https://signalforge-app.com/#pricing</loc>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://signalforge-app.xyz/#affiliate-program</loc>
+    <loc>https://signalforge-app.com/#affiliate-program</loc>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
-    <loc>https://signalforge-app.xyz/#faq</loc>
+    <loc>https://signalforge-app.com/#faq</loc>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>
   </url>

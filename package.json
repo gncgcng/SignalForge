@@ -32,6 +32,7 @@
     "test:auth-actions": "node scripts/auth-actions-test.js",
     "test:auth-diagnostics": "node scripts/auth-diagnostics-test.js",
     "test:deployment-debug": "node scripts/deployment-debug-test.js",
+    "test:legacy-host-redirect": "node scripts/legacy-host-redirect-test.js",
     "auth:smoke": "node scripts/auth-smoke-test.js",
     "repair:admin": "node scripts/repair-admin-account.js",
     "test:anti-abuse": "node scripts/anti-abuse-test.js",

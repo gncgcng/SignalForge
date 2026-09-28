@@ -4,7 +4,7 @@ import vm from "node:vm";
 
 process.env.NODE_ENV = "production";
 process.env.DATABASE_URL = "postgres://user:password@postgres.railway.internal:5432/railway";
-process.env.APP_URL = "https://signalforge-app.xyz";
+process.env.APP_URL = "https://signalforge-app.com";
 
 const app = readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
 const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");

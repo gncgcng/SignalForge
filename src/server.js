@@ -6,6 +6,7 @@ import { appConfig, logEmailConfiguration, logStripeConfiguration } from "./conf
 import { verifyDatabaseConnection } from "./db/client.js";
 import { runPendingMigrations, verifySessionSchema } from "./db/migrations.js";
 import { attachAuth } from "./middleware/authMiddleware.js";
+import { redirectLegacyHost } from "./middleware/legacyHostRedirect.js";
 import { handleAccountDeletionRoutes } from "./modules/account-deletion/accountDeletionController.js";
 import { handleAdminAnalyticsRoutes } from "./modules/admin/analyticsController.js";
 import { handleAdminGeneratedSignalRoutes } from "./modules/admin-signals/generatedSignalController.js";
@@ -52,6 +53,10 @@ const mimeTypes = {
 };
 
 const server = createServer(async (req, res) => {
+  if (redirectLegacyHost(req, res)) {
+    return;
+  }
+
   const url = new URL(req.url, `http://${req.headers.host}`);
 
   if (url.pathname === "/api/debug/ping" && req.method === "GET") {

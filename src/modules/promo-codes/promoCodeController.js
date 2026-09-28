@@ -28,27 +28,47 @@ export async function handlePromoCodeRoutes(req, res, pathname) {
     if (pathname === "/api/admin/promo-codes" && req.method === "POST") {
       const body = await readJson(req);
       const promoCode = await createPromoCode(req.user, body);
-      return sendJson(res, 201, { promoCode });
+      return sendJson(res, 201, { promoCode: toAdminPromoCode(promoCode) });
     }
 
     if (pathname === "/api/admin/promo-codes" && req.method === "GET") {
-      return sendJson(res, 200, { promoCodes: await listPromoCodes() });
+      return sendJson(res, 200, { promoCodes: (await listPromoCodes()).map(toAdminPromoCode) });
     }
 
     const redemptionsMatch = pathname.match(/^\/api\/admin\/promo-codes\/([^/]+)\/redemptions$/);
     if (redemptionsMatch && req.method === "GET") {
-      return sendJson(res, 200, { redemptions: await getPromoCodeRedemptions(redemptionsMatch[1]) });
+      const redemptions = await getPromoCodeRedemptions(redemptionsMatch[1]);
+      return sendJson(res, 200, { redemptions: redemptions.map(({ id, email, redeemedAt }) => ({ id, email, redeemedAt })) });
     }
 
     const detailMatch = pathname.match(/^\/api\/admin\/promo-codes\/([^/]+)$/);
     if (detailMatch && req.method === "PATCH") {
       const body = await readJson(req);
       const promoCode = await setPromoCodeActiveState(detailMatch[1], Boolean(body.active));
-      return sendJson(res, 200, { promoCode });
+      return sendJson(res, 200, { promoCode: toAdminPromoCode(promoCode) });
     }
   } catch (error) {
     return sendError(res, error.statusCode || 400, error.message);
   }
 
   return false;
+}
+
+// Admin responses never carry Stripe object ids or internal user ids; the UI has no use for
+// them and they'd otherwise be visible in the browser's network panel.
+function toAdminPromoCode(promo) {
+  if (!promo) return null;
+  return {
+    id: promo.id,
+    code: promo.code,
+    type: promo.type,
+    maxRedemptions: promo.maxRedemptions,
+    redemptionCount: promo.redemptionCount ?? 0,
+    expiresAt: promo.expiresAt,
+    active: promo.active,
+    createdAt: promo.createdAt,
+    discountPercentOff: promo.discountPercentOff,
+    discountAmountOffCents: promo.discountAmountOffCents,
+    creditQuantity: promo.creditQuantity
+  };
 }

@@ -1,6 +1,6 @@
 process.env.NODE_ENV = "production";
 process.env.DATABASE_URL = "postgres://user:password@postgres.railway.internal:5432/railway";
-process.env.APP_URL = "https://signalforge-app.xyz";
+process.env.APP_URL = "https://signalforge-app.com";
 
 const { appConfig } = await import("../src/config/appConfig.js");
 const { attachAuth } = await import("../src/middleware/authMiddleware.js");
@@ -75,7 +75,7 @@ const result = {
     sessionCookie.includes("HttpOnly") &&
     sessionCookie.includes("Secure") &&
     sessionCookie.includes("Path=/") &&
-    sessionCookie.includes("Domain=signalforge-app.xyz") &&
+    sessionCookie.includes("Domain=signalforge-app.com") &&
     !sessionCookie.includes("Domain=localhost"),
   clearsCurrentCookie: clearCookies.some((cookie) => cookie.startsWith("__Secure-signalforge_session=")),
   clearsLegacyCookie: clearCookies.some((cookie) => cookie.startsWith("__Host-signalforge_session=")) &&

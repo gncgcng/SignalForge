@@ -86,7 +86,7 @@ export const appConfig = {
   affiliate: {
     commissionRate: 0.2,
     minimumPayoutCents: 2500,
-    publicAppUrl: appUrl || "https://signalforge-app.xyz"
+    publicAppUrl: appUrl || "https://signalforge-app.com"
   },
   googleOAuth: {
     enabled: process.env.GOOGLE_AUTH_ENABLED !== "false",
@@ -94,7 +94,7 @@ export const appConfig = {
     clientSecret: process.env.GOOGLE_CLIENT_SECRET || "",
     redirectUri: process.env.GOOGLE_REDIRECT_URI || (
       process.env.NODE_ENV === "production"
-        ? "https://signalforge-app.xyz/api/auth/google/callback"
+        ? "https://signalforge-app.com/api/auth/google/callback"
         : `http://localhost:${Number(process.env.PORT || 4173)}/api/auth/google/callback`
     ),
     authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth",

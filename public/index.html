@@ -7,17 +7,17 @@
     <meta name="theme-color" content="#061B22" />
     <meta name="application-name" content="SignalForge" />
     <meta name="description" content="SignalForge is a crypto trading signal scanner and setup assistant with multi-timeframe analysis, confluence, risk management, Telegram alerts, paper trading, and performance tracking." />
-    <link rel="canonical" href="https://signalforge-app.xyz/" />
+    <link rel="canonical" href="https://signalforge-app.com/" />
     <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://signalforge-app.xyz/" />
+    <meta property="og:url" content="https://signalforge-app.com/" />
     <meta property="og:title" content="SignalForge | Crypto Trading Signal Scanner" />
     <meta property="og:description" content="SignalForge helps traders scan crypto markets for high-probability setups using confluence, risk management, Telegram alerts, paper trading, and performance tracking." />
-    <meta property="og:image" content="https://signalforge-app.xyz/icons/android-chrome-512x512.png" />
+    <meta property="og:image" content="https://signalforge-app.com/icons/android-chrome-512x512.png" />
     <meta property="og:site_name" content="SignalForge" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="SignalForge | Crypto Trading Signal Scanner" />
     <meta name="twitter:description" content="Scan crypto markets for better trading setups with confluence, risk management, Telegram alerts, paper trading, and performance tracking." />
-    <meta name="twitter:image" content="https://signalforge-app.xyz/icons/android-chrome-512x512.png" />
+    <meta name="twitter:image" content="https://signalforge-app.com/icons/android-chrome-512x512.png" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="SignalForge" />
@@ -34,7 +34,7 @@
         "name": "SignalForge",
         "applicationCategory": "FinanceApplication",
         "operatingSystem": "Web, iOS, Android, Desktop",
-        "url": "https://signalforge-app.xyz/",
+        "url": "https://signalforge-app.com/",
         "description": "SignalForge is a crypto trading signal scanner and trading setup assistant with multi-timeframe analysis, confluence, risk management, Telegram alerts, paper trading, and performance tracking.",
         "offers": [
           { "@type": "Offer", "name": "Free", "price": "0", "priceCurrency": "USD" },
@@ -675,6 +675,7 @@
                 <a class="hidden" href="#admin-support" data-view-link="admin-support" id="admin-support-nav-link">Support Tickets</a>
                 <a class="hidden" href="#affiliate-admin" data-view-link="affiliate-admin" id="affiliate-admin-nav-link">Affiliate Admin</a>
                 <a class="hidden" href="#webhook-events" data-view-link="webhook-events" id="webhook-events-nav-link">Webhook Events</a>
+                <a class="hidden" href="#admin-promo-codes" data-view-link="admin-promo-codes" id="admin-promo-codes-nav-link">Promo Codes</a>
               </div>
             </section>
           </nav>
@@ -2206,6 +2207,71 @@
             </article>
           </section>
 
+          <section class="page-view hidden admin-promo-page" id="admin-promo-codes-view" data-view="admin-promo-codes">
+            <div class="section-title">
+              <div>
+                <span class="eyebrow">Administration</span>
+                <h3>Promo codes</h3>
+              </div>
+              <span id="admin-promo-summary">0 codes</span>
+            </div>
+            <article class="panel admin-promo-create">
+              <div>
+                <span class="eyebrow">New code</span>
+                <h3>Create a promo code</h3>
+                <p class="reasoning">Credit codes add unlock credits when a user redeems them in Billing. Discount codes are created in Stripe and entered at checkout.</p>
+              </div>
+              <form id="admin-promo-form" class="admin-promo-form" autocomplete="off" novalidate>
+                <fieldset class="admin-promo-type">
+                  <legend>Type</legend>
+                  <label><input type="radio" name="type" value="credit_grant" checked /> <span>Credit grant</span></label>
+                  <label><input type="radio" name="type" value="stripe_discount" /> <span>Checkout discount</span></label>
+                </fieldset>
+                <label>
+                  Code
+                  <input id="admin-promo-code" name="code" maxlength="40" autocomplete="off" autocapitalize="characters" spellcheck="false" required />
+                </label>
+                <label>
+                  Max redemptions
+                  <input id="admin-promo-max" name="maxRedemptions" type="number" min="1" step="1" inputmode="numeric" required />
+                </label>
+                <label data-promo-fields="credit_grant">
+                  Unlock credits per redemption
+                  <input id="admin-promo-credits" name="creditQuantity" type="number" min="1" step="1" inputmode="numeric" />
+                </label>
+                <div class="admin-promo-discount hidden" data-promo-fields="stripe_discount">
+                  <label>
+                    Percent off
+                    <input id="admin-promo-percent" name="discountPercentOff" type="number" min="1" max="100" step="1" inputmode="numeric" />
+                  </label>
+                  <span class="admin-promo-or">or</span>
+                  <label>
+                    Amount off (USD)
+                    <input id="admin-promo-amount" name="discountAmountOff" type="number" min="0.01" step="0.01" inputmode="decimal" />
+                  </label>
+                </div>
+                <label>
+                  <span>Expires <small>(optional)</small></span>
+                  <input id="admin-promo-expires" name="expiresAt" type="datetime-local" />
+                </label>
+                <div class="admin-promo-actions">
+                  <button type="submit" id="admin-promo-submit">Create code</button>
+                </div>
+              </form>
+              <p class="status-line" id="admin-promo-form-status" aria-live="polite"></p>
+            </article>
+            <article class="analytics-panel">
+              <div class="admin-promo-list" id="admin-promo-list"></div>
+            </article>
+            <article class="panel admin-promo-redemptions hidden" id="admin-promo-redemptions" aria-live="polite">
+              <div class="section-title">
+                <div><span class="eyebrow">Redemptions</span><h3 id="admin-promo-redemptions-title">Code</h3></div>
+                <button class="secondary-button" id="admin-promo-redemptions-close" type="button">Close</button>
+              </div>
+              <div class="admin-promo-redemption-list" id="admin-promo-redemption-list"></div>
+            </article>
+          </section>
+
           <section class="page-view hidden" id="billing-view" data-view="billing">
             <div class="section-title">
               <div>
@@ -2220,6 +2286,21 @@
               <article class="panel"><span>Unlock credits</span><strong id="billing-unlock-credits">3</strong></article>
             </div>
             <p class="status-line" id="billing-status"></p>
+            <article class="panel promo-redeem-panel">
+              <div>
+                <span class="eyebrow">Promo code</span>
+                <h3>Redeem a code</h3>
+                <p class="reasoning">Credit codes add unlock credits to your balance right away. Discount codes are entered at checkout instead.</p>
+              </div>
+              <form id="promo-redeem-form" class="promo-redeem-form" autocomplete="off">
+                <label for="promo-redeem-code">Code</label>
+                <div class="promo-redeem-row">
+                  <input id="promo-redeem-code" name="code" maxlength="40" autocomplete="off" autocapitalize="characters" spellcheck="false" required />
+                  <button type="submit" id="promo-redeem-submit">Redeem</button>
+                </div>
+              </form>
+              <p class="status-line" id="promo-redeem-message" aria-live="polite"></p>
+            </article>
             <div class="signal-disclaimer">
               <strong>Educational tool only. Not financial advice.</strong>
               <span>Subscriptions and credit packs provide access to research tools only. Affiliates may earn commissions from paid subscriptions. <button class="inline-trust-link" type="button" data-how-it-works-link>See how credits and signals work</button></span>

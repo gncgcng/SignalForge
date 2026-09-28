@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://signalforge-app.xyz/sitemap.xml
+Sitemap: https://signalforge-app.com/sitemap.xml

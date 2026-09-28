@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 
 process.env.NODE_ENV = "production";
 process.env.DATABASE_URL = "postgres://user:password@postgres.railway.internal:5432/railway";
-process.env.APP_URL = "https://signalforge-app.xyz";
+process.env.APP_URL = "https://signalforge-app.com";
 
 const {
   appConfig,
@@ -52,13 +52,13 @@ const result = {
     appConfig.sessionMaxAgeSeconds >= 60 * 60 * 24 * 30 &&
     resolveSessionMaxAgeSeconds("bad-value") === 60 * 60 * 24 * 180 &&
     resolveSessionMaxAgeSeconds("999") === 60 * 60 * 24 * 365 &&
-    resolveCookieDomain("https://signalforge-app.xyz", "production") === "signalforge-app.xyz" &&
+    resolveCookieDomain("https://signalforge-app.com", "production") === "signalforge-app.com" &&
     resolveCookieDomain("http://localhost:4173", "production") === "" &&
     cookie.startsWith("__Secure-signalforge_session=") &&
     cookie.includes("HttpOnly") &&
     cookie.includes("Secure") &&
     cookie.includes("SameSite=Lax") &&
-    cookie.includes("Domain=signalforge-app.xyz") &&
+    cookie.includes("Domain=signalforge-app.com") &&
     !cookie.includes("Domain=localhost") &&
     cookie.includes("Expires=") &&
     cookie.includes(`Max-Age=${appConfig.sessionMaxAgeSeconds}`),
@@ -198,7 +198,7 @@ const result = {
     clearCookies.some((item) => item.startsWith("__Secure-signalforge_session=")) &&
     clearCookies.some((item) => item.startsWith("__Host-signalforge_session=")) &&
     clearCookies.some((item) => item.startsWith("signalforge_session=")) &&
-    clearCookies.some((item) => item.includes("Domain=signalforge-app.xyz")) &&
+    clearCookies.some((item) => item.includes("Domain=signalforge-app.com")) &&
     clearCookies.every((item) => item.includes("Expires=Thu, 01 Jan 1970 00:00:00 GMT")) &&
     app.includes("Expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax"),
   migrationExtendsActiveSessions:

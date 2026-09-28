@@ -131,6 +131,49 @@ async function runIteration(scenario, index, adminId) {
   }
 }
 
+// A FULL code (max_redemptions=1, already redeemed by holderId): the holder retrying gets
+// already_redeemed, a different user gets redemption_cap_reached. Run both sequentially and
+// concurrently, since the already-redeemed check must win over the cap check either way.
+async function runFullCodeIteration(index, adminId) {
+  const [holderId, otherId] = await Promise.all([
+    createTestUser(`full-code-holder-${index}`),
+    createTestUser(`full-code-other-${index}`)
+  ]);
+  const promo = await createCreditGrantPromoCode(adminId, 1);
+
+  try {
+    const first = await redeemCreditGrantCode({ code: promo.code, userId: holderId });
+    assert.equal(first.redeemed, true, "holder's first redemption should succeed");
+
+    const holderRetry = await redeemCreditGrantCode({ code: promo.code, userId: holderId });
+    assert.deepEqual(holderRetry, { redeemed: false, reason: "already_redeemed" },
+      `holder retrying a full code should get already_redeemed, got ${JSON.stringify(holderRetry)}`);
+
+    const other = await redeemCreditGrantCode({ code: promo.code, userId: otherId });
+    assert.deepEqual(other, { redeemed: false, reason: "redemption_cap_reached" },
+      `a different user on a full code should get redemption_cap_reached, got ${JSON.stringify(other)}`);
+
+    const [concurrentHolder, concurrentOther] = await Promise.all([
+      redeemCreditGrantCode({ code: promo.code, userId: holderId }),
+      redeemCreditGrantCode({ code: promo.code, userId: otherId })
+    ]);
+    assert.equal(concurrentHolder.reason, "already_redeemed", "concurrent holder retry reason");
+    assert.equal(concurrentOther.reason, "redemption_cap_reached", "concurrent other-user reason");
+
+    assert.equal(await redemptionCount(promo.id), 1, "a full code must keep exactly one redemption row");
+    assert.equal(await getBalance(holderId), CREDIT_QUANTITY, "holder is granted exactly once");
+    assert.equal(await getBalance(otherId), 0, "other user is granted nothing");
+  } finally {
+    await cleanupIteration({ userIds: [holderId, otherId], promoCodeId: promo.id });
+  }
+}
+
+scenarios.push({
+  name: "full code: already redeemed vs limit reached",
+  iterations: Number(process.env.RACE_ITERATIONS_FULL || 10),
+  run: runFullCodeIteration
+});
+
 let totalFailures = 0;
 const adminId = createId("admin");
 await query(`
@@ -144,7 +187,7 @@ try {
     let scenarioFailures = 0;
     for (let index = 0; index < scenario.iterations; index += 1) {
       try {
-        await runIteration(scenario, index, adminId);
+        await (scenario.run ? scenario.run(index, adminId) : runIteration(scenario, index, adminId));
         console.log(`PASS iteration ${index + 1}/${scenario.iterations}`);
       } catch (error) {
         scenarioFailures += 1;

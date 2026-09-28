@@ -97,6 +97,17 @@ export async function redeemCreditGrantCode({ code, userId }) {
       return { redeemed: false, reason: await classifyRedemptionFailure(client, code) };
     }
 
+    // Checked before the cap so a user retrying a code they already hold is told that,
+    // not "limit reached", when their own redemption is what filled the code. Runs under
+    // the lock, so it sees every redemption committed by previous lock-holders.
+    const existingRedemption = await client.query(
+      "SELECT 1 FROM promo_code_redemptions WHERE promo_code_id = $1 AND user_id = $2",
+      [promo.id, userId]
+    );
+    if (existingRedemption.rows[0]) {
+      return { redeemed: false, reason: "already_redeemed" };
+    }
+
     const countResult = await client.query(
       "SELECT COUNT(*)::int AS count FROM promo_code_redemptions WHERE promo_code_id = $1",
       [promo.id]

@@ -15,7 +15,7 @@ const result = {
   seoMetadata:
     html.includes("<title>SignalForge | Crypto Trading Signal Scanner</title>") &&
     html.includes('name="description" content="SignalForge is a crypto trading signal scanner and setup assistant') &&
-    html.includes('rel="canonical" href="https://signalforge-app.xyz/"') &&
+    html.includes('rel="canonical" href="https://signalforge-app.com/"') &&
     html.includes('property="og:title" content="SignalForge | Crypto Trading Signal Scanner"') &&
     html.includes('name="twitter:card" content="summary_large_image"'),
   structuredData:
@@ -74,9 +74,9 @@ const result = {
     styles.includes(".faq-accordion"),
   crawlFiles:
     robots.includes("Allow: /") &&
-    robots.includes("https://signalforge-app.xyz/sitemap.xml") &&
-    sitemap.includes("<loc>https://signalforge-app.xyz/</loc>") &&
-    sitemap.includes("<loc>https://signalforge-app.xyz/#pricing</loc>"),
+    robots.includes("https://signalforge-app.com/sitemap.xml") &&
+    sitemap.includes("<loc>https://signalforge-app.com/</loc>") &&
+    sitemap.includes("<loc>https://signalforge-app.com/#pricing</loc>"),
   pwaDescription:
     manifest.description.includes("Crypto trading signal scanner") &&
     manifest.theme_color === "#000000" &&

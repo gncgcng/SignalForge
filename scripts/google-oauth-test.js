@@ -92,7 +92,7 @@ const result = {
     ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REDIRECT_URI"]
       .every((key) => config.includes(`process.env.${key}`) && envExample.includes(`${key}=`)),
   productionAndLocalRedirects:
-    config.includes("https://signalforge-app.xyz/api/auth/google/callback") &&
+    config.includes("https://signalforge-app.com/api/auth/google/callback") &&
     envExample.includes(
       "GOOGLE_REDIRECT_URI=http://localhost:4173/api/auth/google/callback"
     ),

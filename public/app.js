@@ -157,6 +157,7 @@ const state = {
     payouts: []
   },
   webhookEvents: [],
+  adminPromoCodes: { codes: [], selectedId: null },
   referralCode: getStoredAffiliateCode(),
   adminRequests: [],
   abuseDashboard: {
@@ -433,6 +434,19 @@ const adminCryptoMarketsNavLink = document.querySelector("#admin-crypto-markets-
 const affiliateAdminNavLink = document.querySelector("#affiliate-admin-nav-link");
 const webhookEventsNavLink = document.querySelector("#webhook-events-nav-link");
 const adminSupportNavLink = document.querySelector("#admin-support-nav-link");
+const adminPromoCodesNavLink = document.querySelector("#admin-promo-codes-nav-link");
+const adminPromoForm = document.querySelector("#admin-promo-form");
+const adminPromoSubmit = document.querySelector("#admin-promo-submit");
+const adminPromoFormStatus = document.querySelector("#admin-promo-form-status");
+const adminPromoSummary = document.querySelector("#admin-promo-summary");
+const adminPromoList = document.querySelector("#admin-promo-list");
+const adminPromoRedemptions = document.querySelector("#admin-promo-redemptions");
+const adminPromoRedemptionsTitle = document.querySelector("#admin-promo-redemptions-title");
+const adminPromoRedemptionList = document.querySelector("#admin-promo-redemption-list");
+const promoRedeemForm = document.querySelector("#promo-redeem-form");
+const promoRedeemCode = document.querySelector("#promo-redeem-code");
+const promoRedeemSubmit = document.querySelector("#promo-redeem-submit");
+const promoRedeemMessage = document.querySelector("#promo-redeem-message");
 const adminRequestList = document.querySelector("#admin-request-list");
 const adminRequestCount = document.querySelector("#admin-request-count");
 const verificationNote = document.querySelector("#verification-note");
@@ -1407,6 +1421,114 @@ document.querySelector("#affiliate-admin-view").addEventListener("click", async 
   } catch (error) {
     button.disabled = false;
     alert(error.message);
+  }
+});
+
+adminPromoForm.addEventListener("change", (event) => {
+  if (event.target.name === "type") syncAdminPromoTypeFields();
+});
+
+adminPromoForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (adminPromoForm.dataset.busy === "true") return;
+  const { payload, error: validationMessage } = readAdminPromoForm();
+  if (validationMessage) {
+    adminPromoFormStatus.textContent = validationMessage;
+    return;
+  }
+
+  adminPromoForm.dataset.busy = "true";
+  adminPromoSubmit.disabled = true;
+  adminPromoSubmit.textContent = "Creating...";
+  adminPromoFormStatus.textContent = "";
+  try {
+    const { promoCode } = await api.request("/api/admin/promo-codes", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    adminPromoForm.reset();
+    syncAdminPromoTypeFields();
+    adminPromoFormStatus.textContent = `Created ${promoCode.code}.`;
+    loadAdminPromoCodes().catch((error) => {
+      adminPromoFormStatus.textContent = `Created ${promoCode.code}, but the list didn't refresh: ${error.message}`;
+    });
+  } catch (error) {
+    adminPromoFormStatus.textContent = error.message;
+  } finally {
+    delete adminPromoForm.dataset.busy;
+    adminPromoSubmit.disabled = false;
+    adminPromoSubmit.textContent = "Create code";
+  }
+});
+
+adminPromoList.addEventListener("click", async (event) => {
+  const redemptionsButton = event.target.closest("[data-promo-redemptions]");
+  if (redemptionsButton) {
+    openAdminPromoRedemptions(redemptionsButton.dataset.promoRedemptions);
+    return;
+  }
+
+  const toggleButton = event.target.closest("[data-promo-toggle]");
+  if (!toggleButton || toggleButton.disabled) return;
+  const promo = state.adminPromoCodes.codes.find((item) => item.id === toggleButton.dataset.promoToggle);
+  if (!promo) return;
+  const nextActive = !promo.active;
+  const question = nextActive
+    ? `Reactivate ${promo.code}? Users will be able to redeem it again.`
+    : `Deactivate ${promo.code}? Users won't be able to redeem it until it's reactivated.`;
+  if (!window.confirm(question)) return;
+
+  toggleButton.disabled = true;
+  toggleButton.textContent = nextActive ? "Activating..." : "Deactivating...";
+  try {
+    const { promoCode } = await api.request(`/api/admin/promo-codes/${encodeURIComponent(promo.id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ active: nextActive })
+    });
+    promo.active = Boolean(promoCode?.active);
+    renderAdminPromoCodes();
+  } catch (error) {
+    toggleButton.disabled = false;
+    toggleButton.textContent = promo.active ? "Deactivate" : "Activate";
+    alert(error.message);
+  }
+});
+
+document.querySelector("#admin-promo-redemptions-close").addEventListener("click", () => {
+  state.adminPromoCodes.selectedId = null;
+  adminPromoRedemptions.classList.add("hidden");
+});
+
+promoRedeemForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (promoRedeemForm.dataset.busy === "true") return;
+  const code = promoRedeemCode.value;
+  if (!code.trim()) {
+    promoRedeemMessage.textContent = "Enter a promo code.";
+    return;
+  }
+
+  promoRedeemForm.dataset.busy = "true";
+  promoRedeemSubmit.disabled = true;
+  promoRedeemSubmit.textContent = "Redeeming...";
+  promoRedeemMessage.textContent = "";
+  try {
+    const result = await api.request("/api/promo-codes/redeem", {
+      method: "POST",
+      body: JSON.stringify({ code })
+    });
+    promoRedeemCode.value = "";
+    const credits = Number(result.creditsGranted || 0);
+    promoRedeemMessage.textContent = `Code redeemed: ${credits} unlock credit${credits === 1 ? "" : "s"} added.`;
+    await loadSubscription().catch(() => {
+      promoRedeemMessage.textContent += " Refresh to see your updated balance.";
+    });
+  } catch (error) {
+    promoRedeemMessage.textContent = error.message;
+  } finally {
+    delete promoRedeemForm.dataset.busy;
+    promoRedeemSubmit.disabled = false;
+    promoRedeemSubmit.textContent = "Redeem";
   }
 });
 
@@ -3532,6 +3654,7 @@ function clearClientAuthState() {
   state.affiliate = null;
   state.affiliateAdmin = { affiliates: [], referrals: [], payouts: [] };
   state.webhookEvents = [];
+  state.adminPromoCodes = { codes: [], selectedId: null };
   state.testerAccess = null;
   state.adminRequests = [];
   state.adminAnalytics = null;
@@ -3611,6 +3734,7 @@ async function bootDashboard() {
   adminSupportNavLink.classList.toggle("hidden", !state.user.isAdmin);
   affiliateAdminNavLink.classList.toggle("hidden", !state.user.isAdmin);
   webhookEventsNavLink.classList.toggle("hidden", !state.user.isAdmin);
+  adminPromoCodesNavLink.classList.toggle("hidden", !state.user.isAdmin);
   testerAccountBadge.classList.toggle("hidden", state.user.role !== "tester");
   renderNavSections();
   syncSignalViewToggles();
@@ -5469,7 +5593,7 @@ function handleBrowserRouteChange() {
 
 function isRouteAllowed(route) {
   if (!Object.hasOwn(ROUTE_TO_VIEW, route)) return false;
-  return !["admin", "admin-signals", "admin-crypto-markets", "admin-support", "affiliate-admin", "webhook-events"].includes(route) || Boolean(state.user?.isAdmin);
+  return !["admin", "admin-signals", "admin-crypto-markets", "admin-support", "affiliate-admin", "webhook-events", "admin-promo-codes"].includes(route) || Boolean(state.user?.isAdmin);
 }
 
 function resolvePaperTradingRouteSymbol(value) {
@@ -5528,7 +5652,7 @@ function removeHashParams(names) {
 function applyViewState(view, options = {}) {
   const allowedViews = ["scanner", "watchlist", "alerts", "notifications", "signals", "paper-portfolio", "journal", "backtesting", "performance", "how-it-works", "affiliate", "leaderboard", "profile", "settings", "support", "billing"];
   if (state.user?.isAdmin) {
-    allowedViews.push("admin", "admin-signals", "admin-crypto-markets", "admin-support", "affiliate-admin", "webhook-events");
+    allowedViews.push("admin", "admin-signals", "admin-crypto-markets", "admin-support", "affiliate-admin", "webhook-events", "admin-promo-codes");
   }
   const normalizedView = allowedViews.includes(view) ? view : "scanner";
   if (normalizedView !== "admin-signals") closeAdminSignalModal();
@@ -5577,6 +5701,7 @@ function applyViewState(view, options = {}) {
     "admin-support": ["Administration", "Support Tickets"],
     "affiliate-admin": ["Administration", "Affiliate Program"],
     "webhook-events": ["Stripe operations", "Webhook Events"],
+    "admin-promo-codes": ["Administration", "Promo Codes"],
     billing: ["Subscription", "Billing"]
   };
   const [eyebrow, title] = titles[normalizedView];
@@ -5653,6 +5778,13 @@ function applyViewState(view, options = {}) {
   if (normalizedView === "webhook-events") {
     loadWebhookEvents().catch((error) => {
       webhookEventSummary.textContent = error.message;
+    });
+  }
+
+  if (normalizedView === "admin-promo-codes") {
+    syncAdminPromoTypeFields();
+    loadAdminPromoCodes().catch((error) => {
+      adminPromoList.innerHTML = `<div class="empty-state"><strong>Promo codes unavailable</strong><p class="reasoning">${escapeHtml(error.message)}</p></div>`;
     });
   }
 
@@ -9445,6 +9577,163 @@ function renderAffiliateAdmin() {
       </article>
     `).join("")
     : `<div class="empty-state"><span>No payout requests yet.</span></div>`;
+}
+
+async function loadAdminPromoCodes() {
+  const { promoCodes } = await api.request("/api/admin/promo-codes");
+  state.adminPromoCodes.codes = promoCodes || [];
+  renderAdminPromoCodes();
+}
+
+function renderAdminPromoCodes() {
+  if (!state.user?.isAdmin) {
+    adminPromoCodesNavLink.classList.add("hidden");
+    return;
+  }
+
+  const codes = state.adminPromoCodes.codes;
+  const activeCount = codes.filter((promo) => promo.active).length;
+  adminPromoSummary.textContent = `${codes.length} code${codes.length === 1 ? "" : "s"} · ${activeCount} active`;
+  adminPromoList.innerHTML = codes.length
+    ? codes.map((promo) => {
+      const expired = Boolean(promo.expiresAt) && new Date(promo.expiresAt).getTime() <= Date.now();
+      const full = promo.redemptionCount >= promo.maxRedemptions;
+      const [statusLabel, statusClass] = !promo.active
+        ? ["Inactive", "status-expired"]
+        : expired
+          ? ["Expired", "status-hit-sl"]
+          : full
+            ? ["Fully redeemed", "status-expired"]
+            : ["Active", "status-hit-tp"];
+      return `
+        <article class="webhook-event-row admin-promo-row">
+          <div class="webhook-event-main">
+            <div>
+              <strong class="admin-promo-code">${escapeHtml(promo.code)}</strong>
+              <span>${escapeHtml(describePromoType(promo))}</span>
+            </div>
+            <span class="status-pill ${statusClass}">${statusLabel}</span>
+          </div>
+          <dl class="admin-promo-facts">
+            <div><dt>Redemptions</dt><dd>${formatInteger(promo.redemptionCount)} / ${formatInteger(promo.maxRedemptions)}</dd></div>
+            <div><dt>Expires</dt><dd>${promo.expiresAt ? escapeHtml(formatPromoDate(promo.expiresAt)) : "Never"}</dd></div>
+            <div><dt>Active</dt><dd>${promo.active ? "Yes" : "No"}</dd></div>
+          </dl>
+          <div class="admin-promo-row-actions">
+            <button class="secondary-action" type="button" data-promo-redemptions="${escapeHtml(promo.id)}">Redemptions</button>
+            <button class="secondary-action${promo.active ? " danger" : ""}" type="button" data-promo-toggle="${escapeHtml(promo.id)}">${promo.active ? "Deactivate" : "Activate"}</button>
+          </div>
+        </article>
+      `;
+    }).join("")
+    : `<div class="empty-state"><strong>No promo codes yet</strong><p class="reasoning">Codes you create will appear here.</p></div>`;
+}
+
+async function openAdminPromoRedemptions(id) {
+  const promo = state.adminPromoCodes.codes.find((item) => item.id === id);
+  state.adminPromoCodes.selectedId = id;
+  adminPromoRedemptionsTitle.textContent = promo ? promo.code : "Code";
+  adminPromoRedemptionList.innerHTML = `<p class="reasoning">Loading redemptions...</p>`;
+  adminPromoRedemptions.classList.remove("hidden");
+  adminPromoRedemptions.scrollIntoView({ block: "nearest" });
+  try {
+    const { redemptions } = await api.request(`/api/admin/promo-codes/${encodeURIComponent(id)}/redemptions`);
+    if (state.adminPromoCodes.selectedId !== id) return;
+    adminPromoRedemptionList.innerHTML = redemptions?.length
+      ? `<ul class="admin-promo-redemption-rows">${redemptions.map((redemption) => `
+          <li>
+            <span>${escapeHtml(isDeletedAccountEmail(redemption.email) ? "Deleted account" : redemption.email)}</span>
+            <time datetime="${escapeHtml(redemption.redeemedAt)}">${escapeHtml(formatPromoDate(redemption.redeemedAt))}</time>
+          </li>
+        `).join("")}</ul>`
+      : `<p class="reasoning">No one has redeemed this code yet.</p>`;
+  } catch (error) {
+    if (state.adminPromoCodes.selectedId !== id) return;
+    adminPromoRedemptionList.innerHTML = `<p class="reasoning">${escapeHtml(error.message)}</p>`;
+  }
+}
+
+function selectedAdminPromoType() {
+  return adminPromoForm.querySelector('input[name="type"]:checked')?.value || "credit_grant";
+}
+
+function syncAdminPromoTypeFields() {
+  const type = selectedAdminPromoType();
+  adminPromoForm.querySelectorAll("[data-promo-fields]").forEach((element) => {
+    element.classList.toggle("hidden", element.dataset.promoFields !== type);
+  });
+}
+
+// Mirrors the server's validation for instant feedback; the server still validates everything.
+// The code is sent as typed: normalization happens server-side.
+function readAdminPromoForm() {
+  const form = new FormData(adminPromoForm);
+  const type = selectedAdminPromoType();
+  const code = String(form.get("code") || "");
+  if (!code.trim()) return { error: "Enter a code." };
+  const maxRedemptions = Number(form.get("maxRedemptions"));
+  if (!Number.isInteger(maxRedemptions) || maxRedemptions <= 0) {
+    return { error: "Max redemptions must be a whole number of at least 1." };
+  }
+  const payload = { type, code, maxRedemptions };
+
+  const expires = String(form.get("expiresAt") || "");
+  if (expires) {
+    const date = new Date(expires);
+    if (Number.isNaN(date.getTime())) return { error: "Enter a valid expiry date." };
+    if (date.getTime() <= Date.now()) return { error: "The expiry must be in the future." };
+    payload.expiresAt = date.toISOString();
+  }
+
+  if (type === "credit_grant") {
+    const creditQuantity = Number(form.get("creditQuantity"));
+    if (!Number.isInteger(creditQuantity) || creditQuantity <= 0) {
+      return { error: "Unlock credits must be a whole number of at least 1." };
+    }
+    payload.creditQuantity = creditQuantity;
+    return { payload };
+  }
+
+  const percentRaw = String(form.get("discountPercentOff") || "").trim();
+  const amountRaw = String(form.get("discountAmountOff") || "").trim();
+  if (percentRaw && amountRaw) return { error: "Enter a percent off or an amount off, not both." };
+  if (!percentRaw && !amountRaw) return { error: "Enter a percent off or an amount off." };
+  if (percentRaw) {
+    const percent = Number(percentRaw);
+    if (!Number.isInteger(percent) || percent < 1 || percent > 100) {
+      return { error: "Percent off must be a whole number from 1 to 100." };
+    }
+    payload.discountPercentOff = percent;
+  } else {
+    const cents = Math.round(Number(amountRaw) * 100);
+    if (!Number.isFinite(cents) || cents < 1) return { error: "Amount off must be at least $0.01." };
+    payload.discountAmountOffCents = cents;
+  }
+  return { payload };
+}
+
+function describePromoType(promo) {
+  if (promo.type === "credit_grant") {
+    const credits = Number(promo.creditQuantity || 0);
+    return `Credit grant · ${formatInteger(credits)} unlock credit${credits === 1 ? "" : "s"}`;
+  }
+  if (promo.discountPercentOff) return `Checkout discount · ${promo.discountPercentOff}% off`;
+  if (promo.discountAmountOffCents) return `Checkout discount · ${formatCents(promo.discountAmountOffCents)} off`;
+  return "Checkout discount";
+}
+
+function formatPromoDate(value) {
+  return new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(new Date(value));
+}
+
+function isDeletedAccountEmail(email) {
+  return /@signalforge\.invalid$/i.test(String(email || ""));
 }
 
 function renderWebhookEvents() {

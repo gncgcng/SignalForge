@@ -41,11 +41,12 @@ for (const [label, url, host] of accepted) {
 }
 
 // 2. Wiring: any test/repro/fixture that opens a real connection must import the guard FIRST,
-// so a new DB-backed test can't forget it. Operational tools (db-seed, db-migrate, reports) are
-// meant for real databases and are not scanned.
+// so a new DB-backed test can't forget it. Local-only seed scripts are named seed-local-*.
+// Operational tools (db-seed, db-migrate, reports) are meant for real databases and are not scanned.
 const DB_ACCESS = /getPool\(|from "pg"|account-deletion-fixtures\.js/;
 const candidates = readdirSync(scriptsDir)
-  .filter((name) => /(-test|-repro|-fixtures)\.js$/.test(name) && name !== "local-database-guard-test.js");
+  .filter((name) => (/(-test|-repro|-fixtures)\.js$/.test(name) || /^seed-local-.*\.js$/.test(name)) &&
+    name !== "local-database-guard-test.js");
 const guarded = [];
 for (const name of candidates) {
   const source = readFileSync(new URL(name, import.meta.url), "utf8");
@@ -56,7 +57,7 @@ for (const name of candidates) {
 }
 for (const required of [
   "account-deletion-test.js", "account-deletion-customer-test.js", "account-deletion-retry-test.js",
-  "promo-code-redemption-race-test.js", "account-deletion-deadlock-repro.js"
+  "promo-code-redemption-race-test.js", "account-deletion-deadlock-repro.js", "seed-local-promo-ui-users.js"
 ]) {
   assert.ok(guarded.includes(required), `${required} not detected as guarded`);
 }

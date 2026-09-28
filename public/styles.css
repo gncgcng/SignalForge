@@ -9520,3 +9520,185 @@ polyline {
 .crypto-candle-check.fail {
   border-color: rgba(245, 158, 11, 0.32);
 }
+
+/* Promo codes: admin view and Billing redeem panel */
+.admin-promo-page { --border: var(--line); }
+
+.admin-promo-create,
+.promo-redeem-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.admin-promo-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+
+.admin-promo-form label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.admin-promo-type {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.admin-promo-type legend {
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.admin-promo-type label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.admin-promo-discount {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: end;
+}
+
+.admin-promo-discount.hidden,
+.admin-promo-form [data-promo-fields].hidden {
+  display: none;
+}
+
+.admin-promo-or {
+  padding-bottom: 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.admin-promo-actions {
+  grid-column: 1 / -1;
+}
+
+.admin-promo-list {
+  display: grid;
+  gap: 10px;
+}
+
+.admin-promo-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0.04em;
+  overflow-wrap: anywhere;
+}
+
+.admin-promo-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.admin-promo-facts div {
+  min-width: 0;
+}
+
+.admin-promo-facts dt {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.admin-promo-facts dd {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.admin-promo-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.admin-promo-row-actions .danger {
+  border-color: rgba(251, 113, 133, 0.45);
+  color: var(--red);
+}
+
+.admin-promo-redemption-rows {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.admin-promo-redemption-rows li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.admin-promo-redemption-rows span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.admin-promo-redemption-rows time {
+  flex: none;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.promo-redeem-form {
+  display: grid;
+  gap: 6px;
+  max-width: 460px;
+}
+
+.promo-redeem-row {
+  display: flex;
+  gap: 10px;
+}
+
+.promo-redeem-row input {
+  flex: 1;
+  min-width: 0;
+  text-transform: uppercase;
+}
+
+.promo-redeem-row input::placeholder {
+  text-transform: none;
+}
+
+@media (max-width: 460px) {
+  .admin-promo-discount {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-promo-or {
+    padding-bottom: 0;
+  }
+
+  .admin-promo-facts {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .admin-promo-redemption-rows li {
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .promo-redeem-row {
+    flex-direction: column;
+  }
+}

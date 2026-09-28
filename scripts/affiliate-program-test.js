@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 process.env.NODE_ENV = "development";
-process.env.APP_URL = "https://signalforge-app.xyz";
+process.env.APP_URL = "https://signalforge-app.com";
 
 const { calculateAffiliateCommissionCents } = await import(
   "../src/modules/affiliates/affiliateRepository.js"

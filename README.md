@@ -58,7 +58,7 @@ The public, secret-free health check is available at `GET /api/auth/health`. It 
 Run a credentialed login proof against a local or deployed instance:
 
 ```bash
-APP_URL=https://signalforge-app.xyz \
+APP_URL=https://signalforge-app.com \
 AUTH_SMOKE_EMAIL=admin@example.com \
 AUTH_SMOKE_PASSWORD=... \
 npm run auth:smoke
