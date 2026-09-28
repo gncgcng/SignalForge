@@ -26,6 +26,7 @@ import {
   sendSubscriptionConfirmationEmail
 } from "../notifications/transactionalEmailService.js";
 import { BILLING_PLANS, CREDIT_PACKS, normalizePlan } from "./subscriptionService.js";
+import { recordStripeDiscountRedemption } from "../promo-codes/promoCodeRepository.js";
 
 const stripeApiBase = "https://api.stripe.com/v1";
 
@@ -69,6 +70,7 @@ export async function createCheckout(user, { plan, pack }) {
     "line_items[0][quantity]": "1",
     success_url: appConfig.stripe.successUrl,
     cancel_url: appConfig.stripe.cancelUrl,
+    allow_promotion_codes: appConfig.stripe.promotionCodesEnabled ? "true" : undefined,
     "metadata[user_id]": user.id,
     "metadata[kind]": kind,
     "metadata[plan]": planConfig?.id || "",
@@ -102,6 +104,43 @@ export async function createCustomerPortal(user) {
     return_url: appConfig.stripe.portalReturnUrl
   });
   return { url: session.url };
+}
+
+// Pinned so the promo calls don't depend on the account's default API version
+// (promotion codes take promotion[coupon] rather than a top-level coupon here).
+// Only these promo calls send it; every other Stripe call uses the account default.
+const PROMO_STRIPE_API_VERSION = "2025-09-30.clover";
+const promoStripeOptions = { headers: { "stripe-version": PROMO_STRIPE_API_VERSION } };
+
+export async function createPromoCoupon({ percentOff, amountOffCents, maxRedemptions, expiresAt }) {
+  return stripeRequest("/coupons", {
+    percent_off: percentOff || undefined,
+    amount_off: amountOffCents || undefined,
+    currency: amountOffCents ? "usd" : undefined,
+    duration: "once",
+    max_redemptions: maxRedemptions,
+    redeem_by: expiresAt ? String(Math.floor(expiresAt.getTime() / 1000)) : undefined
+  }, promoStripeOptions);
+}
+
+export async function deletePromoCoupon(couponId) {
+  return stripeRequest(`/coupons/${encodeURIComponent(couponId)}`, {}, { ...promoStripeOptions, method: "DELETE" });
+}
+
+export async function createPromoPromotionCode({ couponId, code, maxRedemptions, expiresAt }) {
+  return stripeRequest("/promotion_codes", {
+    "promotion[type]": "coupon",
+    "promotion[coupon]": couponId,
+    code,
+    max_redemptions: maxRedemptions,
+    expires_at: expiresAt ? String(Math.floor(expiresAt.getTime() / 1000)) : undefined
+  }, promoStripeOptions);
+}
+
+export async function updatePromoPromotionCodeActive(promotionCodeId, active) {
+  return stripeRequest(`/promotion_codes/${encodeURIComponent(promotionCodeId)}`, {
+    active: active ? "true" : "false"
+  }, promoStripeOptions);
 }
 
 export function verifyStripeSignature(rawBody, signatureHeader) {
@@ -261,10 +300,12 @@ async function processCheckoutCompleted(session) {
     throw retryableWebhookError("Unable to resolve the checkout user.");
   }
   if (!userId) return { action: "checkout_ignored", userId: null };
+  if (isDeletedAccount(await findUserById(userId))) return deletedAccountResult();
 
   if (customerId) {
     await updateStripeCustomer(userId, customerId, getStripeMode());
   }
+  await recordPromoRedemptionFromCheckout(session, userId);
   if (session.metadata?.kind === "credit_pack") {
     const quantity = CREDIT_PACKS[session.metadata.pack]?.quantity || 0;
     if (quantity <= 0) throw retryableWebhookError("Unknown Stripe credit pack.");
@@ -350,6 +391,7 @@ async function processInvoicePaymentSucceeded(invoice, stripeEventId) {
     ? await findUserById(userId)
     : await findUserByStripeCustomer(customerId, getStripeMode());
   if (!user) throw retryableWebhookError("Unable to resolve the invoice user.");
+  if (isDeletedAccount(user)) return deletedAccountResult();
 
   const priceId = getInvoicePriceId(invoice) ||
     subscription?.items?.data?.[0]?.price?.id;
@@ -364,7 +406,7 @@ async function processInvoicePaymentSucceeded(invoice, stripeEventId) {
 
   const period = getInvoicePeriod(invoice, priceId);
   const subscriptionPeriod = getSubscriptionPeriod(subscription);
-  await updateStripeSubscription({
+  const applied = await updateStripeSubscription({
     userId: user.id,
     customerId,
     subscriptionId,
@@ -376,6 +418,7 @@ async function processInvoicePaymentSucceeded(invoice, stripeEventId) {
     stripeMode: getStripeMode(),
     cancelAtPeriodEnd: Boolean(subscription?.cancel_at_period_end)
   });
+  if (!applied) return deletedAccountResult();
 
   const periodStart = period.start || subscriptionPeriod.start;
   const grantReference = subscriptionId && periodStart
@@ -425,16 +468,35 @@ async function processInvoicePaymentFailed(invoice) {
     ? await findUserById(userId)
     : await findUserByStripeCustomer(customerId, getStripeMode());
   if (!user) throw retryableWebhookError("Unable to resolve the failed invoice user.");
+  if (isDeletedAccount(user)) return deletedAccountResult();
 
   sendFailedPaymentEmail(user);
   return { action: "failed_payment_notified", userId: user.id };
 }
 
 async function processSubscriptionChanged(subscription, eventType) {
-  const user = subscription.metadata?.user_id
-    ? await findUserById(subscription.metadata.user_id)
-    : await findUserByStripeCustomer(stripeId(subscription.customer), getStripeMode());
-  if (!user) throw retryableWebhookError("Unable to resolve the subscription user.");
+  const metadataUserId = subscription.metadata?.user_id || null;
+  const customerId = stripeId(subscription.customer);
+  const user = metadataUserId
+    ? await findUserById(metadataUserId)
+    : await findUserByStripeCustomer(customerId, getStripeMode());
+  if (!user) {
+    // Account deletion clears the local customer id and deletes the Stripe customer, so a
+    // later subscription.deleted for it resolves to nobody. Acknowledge only that exact case:
+    // a deleted event, no user_id metadata, and a customer Stripe confirms is deleted. A
+    // customer that exists but isn't linked yet (subscription events can arrive before
+    // checkout.session.completed links it) still throws, so Stripe retries until it's linked.
+    if (
+      eventType === "customer.subscription.deleted" &&
+      !metadataUserId &&
+      customerId &&
+      await isStripeCustomerDeleted(customerId)
+    ) {
+      return { action: "subscription_deleted_unknown_customer", userId: null };
+    }
+    throw retryableWebhookError("Unable to resolve the subscription user.");
+  }
+  if (isDeletedAccount(user)) return deletedAccountResult();
 
   const priceId = subscription.items?.data?.[0]?.price?.id || null;
   const active = !eventType.endsWith(".deleted") &&
@@ -442,7 +504,7 @@ async function processSubscriptionChanged(subscription, eventType) {
   const plan = active ? planFromPrice(priceId) : "free";
   const period = getSubscriptionPeriod(subscription);
 
-  await updateStripeSubscription({
+  const applied = await updateStripeSubscription({
     userId: user.id,
     customerId: stripeId(subscription.customer),
     subscriptionId: eventType.endsWith(".deleted") ? null : subscription.id,
@@ -454,6 +516,7 @@ async function processSubscriptionChanged(subscription, eventType) {
     stripeMode: getStripeMode(),
     cancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end)
   });
+  if (!applied) return deletedAccountResult();
   if (!active) {
     await deactivateAffiliateReferral(user.id);
   }
@@ -462,6 +525,23 @@ async function processSubscriptionChanged(subscription, eventType) {
     userId: user.id,
     plan: normalizePlan(plan)
   };
+}
+
+// Events for an anonymized account are acknowledged (so Stripe stops retrying) but never
+// applied, and are stored without a user link.
+function isDeletedAccount(user) {
+  return user?.accountStatus === "deleted";
+}
+
+function deletedAccountResult() {
+  return { action: "ignored_deleted_account", userId: null };
+}
+
+// Stripe answers a retrieve of a deleted customer with a { deleted: true } stub. Any lookup
+// error propagates, so the webhook fails and Stripe retries rather than guessing.
+async function isStripeCustomerDeleted(customerId) {
+  const customer = await stripeGet(`/customers/${encodeURIComponent(customerId)}`);
+  return customer?.deleted === true;
 }
 
 async function processChargeRefunded(charge) {
@@ -499,21 +579,214 @@ export function getPlanEntitlementsForPrice(priceId) {
   };
 }
 
-async function stripeRequest(path, params) {
+// Best-effort, informational only: Stripe already enforces the redemption cap for
+// stripe_discount codes, this just mirrors the result into our own table for admin
+// reporting. Any failure here must never break checkout processing.
+async function recordPromoRedemptionFromCheckout(session, userId) {
+  try {
+    const promotionCodeId = stripeId(session.discounts?.[0]?.promotion_code) ||
+      await resolveSessionPromotionCodeId(session.id);
+    if (!promotionCodeId) return;
+    await recordStripeDiscountRedemption({ stripePromotionCodeId: promotionCodeId, userId });
+  } catch (error) {
+    console.warn(`[stripe] promo_redemption_record_failed session=${safeLogValue(session.id)} reason=${sanitizeStripeError(error)}`);
+  }
+}
+
+async function resolveSessionPromotionCodeId(sessionId) {
+  const detailed = await stripeGet(
+    `/checkout/sessions/${encodeURIComponent(sessionId)}?expand[]=total_details.breakdown`
+  );
+  // discount.promotion_code exists before and after 2025-09-30.clover (clover only replaced
+  // discount.coupon with discount.source.coupon), so this works on any account/webhook version.
+  return stripeId(detailed.total_details?.breakdown?.discounts?.[0]?.discount?.promotion_code) || null;
+}
+
+const STRIPE_TERMINAL_SUBSCRIPTION_STATUSES = new Set(["canceled", "incomplete_expired"]);
+const LOCAL_BILLABLE_SUBSCRIPTION_STATUSES = new Set(["active", "trialing", "past_due", "unpaid", "incomplete"]);
+
+// Cancels every non-terminal Stripe subscription on the user's customer immediately
+// (not at period end: the account is about to stop existing). Stripe is treated as the
+// source of truth so a missed webhook can't leave a billable subscription behind.
+// Does not touch our database; callers record the resulting local state.
+export async function cancelSubscription(user) {
+  const subscription = user?.subscription || {};
+  const customerId = subscription.providerCustomerId || null;
+  const localSubscriptionId = subscription.providerSubscriptionId || null;
+  const locallyBillable = Boolean(localSubscriptionId) &&
+    LOCAL_BILLABLE_SUBSCRIPTION_STATUSES.has(subscription.status);
+
+  if (!customerId && !localSubscriptionId) {
+    return { canceledSubscriptionIds: [], checkedStripe: false };
+  }
+
+  const stripeReachable = Boolean(appConfig.stripe.secretKey) &&
+    shouldReuseStripeCustomer(customerId, subscription.stripeMode, getStripeMode());
+  if (!stripeReachable) {
+    if (locallyBillable) {
+      const error = new Error("Unable to confirm your subscription is cancelled. Please contact support to delete your account.");
+      error.statusCode = 409;
+      error.code = "subscription_unverifiable";
+      throw error;
+    }
+    return { canceledSubscriptionIds: [], checkedStripe: false };
+  }
+
+  // The full list is fetched before anything is cancelled: any page failing aborts with nothing touched.
+  let listed;
+  try {
+    listed = await listCustomerSubscriptions(customerId);
+  } catch (cause) {
+    // A retry after a partial deletion: the customer is already gone from Stripe, which
+    // cancelled all its subscriptions when it was deleted. Confirmed with a retrieve (a deleted
+    // customer returns a `deleted: true` stub), so a customer that never existed, e.g. under
+    // a different Stripe account's key, still fails as permanent.
+    if (cause.stripeCode === "resource_missing") {
+      let customer;
+      try {
+        customer = await stripeGet(`/customers/${encodeURIComponent(customerId)}`);
+      } catch (lookupError) {
+        throw stripeVerificationError(isTransientStripeError(lookupError) ? lookupError : cause, customerId, "subscription list");
+      }
+      if (customer?.deleted === true) {
+        return { canceledSubscriptionIds: [], checkedStripe: true, customerAlreadyDeleted: true };
+      }
+    }
+    throw stripeVerificationError(cause, customerId, "subscription list");
+  }
+  // Stripe's default listing already excludes canceled subscriptions; filter anyway as a safety net.
+  const open = listed.filter((item) => !STRIPE_TERMINAL_SUBSCRIPTION_STATUSES.has(item.status));
+  const canceledSubscriptionIds = [];
+  for (const item of open) {
+    let canceled;
+    try {
+      canceled = await stripeRequest(
+        `/subscriptions/${encodeURIComponent(item.id)}`,
+        {},
+        { method: "DELETE" }
+      );
+    } catch (cause) {
+      // Includes a subscription that became canceled after it was listed; a retry re-lists and skips it.
+      throw subscriptionCancelFailedError(cause);
+    }
+    if (canceled.status !== "canceled") {
+      throw subscriptionCancelFailedError();
+    }
+    canceledSubscriptionIds.push(item.id);
+  }
+  return { canceledSubscriptionIds, checkedStripe: true };
+}
+
+const STRIPE_SUBSCRIPTION_PAGE_SIZE = 100;
+const STRIPE_SUBSCRIPTION_MAX_PAGES = 20;
+
+export async function listCustomerSubscriptions(customerId) {
+  const subscriptions = [];
+  let startingAfter = null;
+  for (let page = 0; page < STRIPE_SUBSCRIPTION_MAX_PAGES; page += 1) {
+    const cursor = startingAfter ? `&starting_after=${encodeURIComponent(startingAfter)}` : "";
+    const listed = await stripeGet(
+      `/subscriptions?customer=${encodeURIComponent(customerId)}&limit=${STRIPE_SUBSCRIPTION_PAGE_SIZE}${cursor}`
+    );
+    const data = Array.isArray(listed.data) ? listed.data : [];
+    subscriptions.push(...data);
+    if (!listed.has_more) return subscriptions;
+    startingAfter = data.at(-1)?.id;
+    if (!startingAfter) {
+      // has_more with an empty page: treated as a transient Stripe fault (no stripeStatus set).
+      throw new Error("Stripe reported more subscriptions but returned an empty page.");
+    }
+  }
+  const error = new Error("Too many subscriptions to cancel automatically. Please contact support.");
+  error.statusCode = 409;
+  error.code = "too_many_subscriptions";
+  throw error;
+}
+
+// Network failures, 429 and 5xx may succeed on retry. A missing customer or a rejected
+// key (401/403) won't, nor will any other 4xx, so those send the user to support instead.
+function isTransientStripeError(error) {
+  const status = error.stripeStatus;
+  if (!status) return true;
+  if (error.stripeCode === "resource_missing") return false;
+  return status === 429 || status >= 500;
+}
+
+// Deletes the Stripe customer during account deletion (only; no other flow deletes customers).
+// Already deleted (resource_missing) counts as success so a retry after a failed DB step works.
+// Anything else fails closed with the same transient/permanent classes as the subscription list.
+export async function deleteStripeCustomer(customerId) {
+  let deleted;
+  try {
+    deleted = await stripeRequest(`/customers/${encodeURIComponent(customerId)}`, {}, { method: "DELETE" });
+  } catch (cause) {
+    if (cause.stripeCode === "resource_missing") return { deleted: true, alreadyDeleted: true };
+    throw stripeVerificationError(cause, customerId, "customer delete");
+  }
+  if (deleted?.deleted !== true) {
+    throw stripeVerificationError(new Error("Stripe did not confirm the customer deletion."), customerId, "customer delete");
+  }
+  return { deleted: true, alreadyDeleted: false };
+}
+
+function stripeVerificationError(cause, customerId, step) {
+  if (cause.code === "too_many_subscriptions") return cause;
+  const transient = isTransientStripeError(cause);
+  console.error(
+    `[stripe] ${step} failed customer=${customerId} class=${transient ? "transient" : "permanent"} ` +
+    `http=${cause.stripeStatus ?? "none"} code=${cause.stripeCode ?? "none"} type=${cause.stripeType ?? "none"} ` +
+    `request_id=${cause.stripeRequestId ?? "none"} message=${cause.message}`
+  );
+  const error = new Error(transient
+    ? "We couldn't verify your subscription, so your account was not deleted. Please try again."
+    : "We couldn't verify your subscription, so your account was not deleted. Please contact support to delete your account.");
+  error.statusCode = transient ? 503 : 502;
+  error.code = transient ? "subscription_check_unavailable" : "subscription_check_failed";
+  error.cause = cause;
+  return error;
+}
+
+function subscriptionCancelFailedError(cause) {
+  const error = new Error(
+    "We couldn't confirm your subscription was cancelled, so your account was not deleted. " +
+    "Please try again, and contact support if this keeps happening."
+  );
+  error.statusCode = 502;
+  error.code = "subscription_cancel_failed";
+  if (cause) error.cause = cause;
+  return error;
+}
+
+async function stripeRequest(path, params, { method = "POST", headers = {} } = {}) {
   const response = await fetch(`${stripeApiBase}${path}`, {
-    method: "POST",
+    method,
     headers: {
       authorization: `Bearer ${appConfig.stripe.secretKey}`,
-      "content-type": "application/x-www-form-urlencoded"
+      "content-type": "application/x-www-form-urlencoded",
+      ...headers
     },
     body: new URLSearchParams(
       Object.entries(params).filter(([, value]) => value !== undefined)
     )
   });
-  const payload = await response.json();
+  return readStripeResponse(response);
+}
+
+// Errors carry Stripe's HTTP status, error code/type and request id so callers can classify them.
+async function readStripeResponse(response) {
+  let payload = null;
+  try {
+    payload = await response.json();
+  } catch (parseError) {
+    if (response.ok) throw parseError;
+  }
   if (!response.ok) {
-    const error = new Error(payload.error?.message || "Stripe request failed.");
+    const error = new Error(payload?.error?.message || `Stripe request failed with HTTP ${response.status}.`);
     error.statusCode = response.status >= 500 ? 502 : 400;
+    error.stripeStatus = response.status;
+    error.stripeCode = payload?.error?.code;
+    error.stripeType = payload?.error?.type;
+    error.stripeRequestId = response.headers?.get?.("request-id") || undefined;
     throw error;
   }
   return payload;
@@ -525,13 +798,7 @@ async function stripeGet(path) {
       authorization: `Bearer ${appConfig.stripe.secretKey}`
     }
   });
-  const payload = await response.json();
-  if (!response.ok) {
-    const error = new Error(payload.error?.message || "Stripe request failed.");
-    error.statusCode = response.status >= 500 ? 502 : 400;
-    throw error;
-  }
-  return payload;
+  return readStripeResponse(response);
 }
 
 function assertStripeCheckoutConfigured(user) {

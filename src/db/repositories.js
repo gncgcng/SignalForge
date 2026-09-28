@@ -1558,7 +1558,12 @@ export async function updateStripeSubscription({
   stripeMode,
   cancelAtPeriodEnd = false
 }) {
-  await transaction(async (client) => {
+  return transaction(async (client) => {
+    // Same row lock account deletion takes: a webhook racing a deletion either commits first
+    // (and is then overwritten by the anonymization) or sees deleted_at and writes nothing,
+    // so it can never restore a cleared customer id onto a deleted account.
+    const locked = await client.query(`SELECT deleted_at FROM users WHERE id = $1 FOR UPDATE`, [userId]);
+    if (locked.rows[0]?.deleted_at) return false;
     await client.query(`
       UPDATE users SET plan = $2, updated_at = now() WHERE id = $1
     `, [userId, plan]);
@@ -1585,6 +1590,7 @@ export async function updateStripeSubscription({
       cancelAtPeriodEnd,
       stripeMode
     ]);
+    return true;
   });
 }
 
@@ -2121,7 +2127,9 @@ export async function listPerformanceSignalsByUser(userId, filters = {}) {
 }
 
 export async function listActiveSignals() {
-  const result = await query(signalSelectSql("WHERE COALESCE(o.status, 'Active') = 'Active' ORDER BY s.created_at DESC"), []);
+  const result = await query(signalSelectSql(`WHERE COALESCE(o.status, 'Active') = 'Active'
+    AND NOT EXISTS (SELECT 1 FROM users du WHERE du.id = s.user_id AND du.deleted_at IS NOT NULL)
+    ORDER BY s.created_at DESC`), []);
   return result.rows.map(mapSignal);
 }
 
@@ -2132,6 +2140,7 @@ export async function expireActiveSignalsPastValidity() {
       SELECT s.id, 'Active', now()
       FROM saved_signals s
       WHERE s.valid_until <= now()
+        AND NOT EXISTS (SELECT 1 FROM users du WHERE du.id = s.user_id AND du.deleted_at IS NOT NULL)
       ON CONFLICT (saved_signal_id) DO NOTHING
     `);
     const expired = await client.query(`
@@ -2146,6 +2155,7 @@ export async function expireActiveSignalsPastValidity() {
         WHERE o.saved_signal_id = s.id
           AND o.status = 'Active'
           AND s.valid_until <= now()
+          AND NOT EXISTS (SELECT 1 FROM users du WHERE du.id = s.user_id AND du.deleted_at IS NOT NULL)
         RETURNING o.saved_signal_id, o.resolved_at
       )
       UPDATE saved_signals s

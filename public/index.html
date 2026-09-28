@@ -1001,7 +1001,7 @@
                   <strong id="telegram-connection-code">--------</strong>
                   <p class="reasoning">Send <code id="telegram-start-command">/start CODE</code> to the SignalForge bot.</p>
                   <div class="connection-actions">
-                    <a class="button-link" id="telegram-open-bot-link" href="#" target="_blank" rel="noopener">Open Telegram Bot</a>
+                    <a class="button-link" id="telegram-open-bot-link" href="#" target="signalforge-telegram-connect" rel="noopener">Open Telegram Bot</a>
                     <button class="secondary-action" id="telegram-copy-command" type="button">Copy /start CODE</button>
                   </div>
                 </div>
@@ -1640,6 +1640,30 @@
                 <button class="secondary-button" id="settings-view-leaderboard" type="button">View leaderboard</button>
               </div>
               <p class="form-note" id="profile-settings-message">Usernames are unique and can be changed once every 30 days.</p>
+            </article>
+            <article class="panel delete-account-panel">
+              <div>
+                <span class="eyebrow danger-eyebrow">Danger zone</span>
+                <h3>Delete account</h3>
+                <p class="reasoning">Permanently deletes your signals, watchlists, alerts, paper trades, journals, Telegram connection and support requests, and signs you out everywhere. Any active subscription is cancelled immediately with no refund for the current period. Billing and credit records are kept for accounting but no longer identify you. This cannot be undone.</p>
+              </div>
+              <button class="link-button danger" id="delete-account-start" type="button">Delete my account…</button>
+              <form id="delete-account-form" class="delete-account-form hidden" autocomplete="off">
+                <label>
+                  Current password
+                  <input id="delete-account-password" name="password" type="password" autocomplete="current-password" required />
+                </label>
+                <label>
+                  <span>Type <strong>DELETE</strong> to confirm</span>
+                  <input id="delete-account-confirmation" name="confirmation" autocomplete="off" spellcheck="false" required />
+                </label>
+                <p class="form-note">Signed up with Google? Set a password first using “Forgot password” on the sign-in page.</p>
+                <div class="delete-account-actions">
+                  <button class="danger-button" id="delete-account-submit" type="submit" disabled>Permanently delete account</button>
+                  <button class="secondary-button" id="delete-account-cancel" type="button">Cancel</button>
+                </div>
+              </form>
+              <p class="status-line" id="delete-account-message" aria-live="polite"></p>
             </article>
           </section>
 

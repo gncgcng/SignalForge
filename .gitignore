@@ -6,3 +6,4 @@ signalforge-debug-bundle/
 signalforge-debug-bundle.zip
 .env
 .env.local
+.claude/

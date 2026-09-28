@@ -6,6 +6,7 @@ import { appConfig, logEmailConfiguration, logStripeConfiguration } from "./conf
 import { verifyDatabaseConnection } from "./db/client.js";
 import { runPendingMigrations, verifySessionSchema } from "./db/migrations.js";
 import { attachAuth } from "./middleware/authMiddleware.js";
+import { handleAccountDeletionRoutes } from "./modules/account-deletion/accountDeletionController.js";
 import { handleAdminAnalyticsRoutes } from "./modules/admin/analyticsController.js";
 import { handleAdminGeneratedSignalRoutes } from "./modules/admin-signals/generatedSignalController.js";
 import { handleAdminCryptoMarketRoutes } from "./modules/markets/cryptoMarketController.js";
@@ -25,6 +26,7 @@ import { recalculateLeaderboardStats } from "./modules/leaderboards/leaderboardS
 import { handleNotificationRoutes } from "./modules/notifications/notificationController.js";
 import { handlePaperTradingRoutes } from "./modules/paper-trading/paperTradingController.js";
 import { handlePerformanceRoutes } from "./modules/performance/performanceController.js";
+import { handlePromoCodeRoutes } from "./modules/promo-codes/promoCodeController.js";
 import { handleProfileRoutes } from "./modules/profiles/profileController.js";
 import { startTelegramNotificationQueue } from "./modules/notifications/notificationQueue.js";
 import { startTelegramConnectionPoller } from "./modules/notifications/telegramConnectionService.js";
@@ -90,6 +92,7 @@ const server = createServer(async (req, res) => {
 
     const handled =
       (await handleAuthRoutes(req, res, url.pathname)) ||
+      (await handleAccountDeletionRoutes(req, res, url.pathname)) ||
       (await handleAdminAnalyticsRoutes(req, res, url.pathname)) ||
       (await handleAdminGeneratedSignalRoutes(req, res, url.pathname, url)) ||
       (await handleAdminCryptoMarketRoutes(req, res, url.pathname, url)) ||
@@ -105,6 +108,7 @@ const server = createServer(async (req, res) => {
       (await handleJournalRoutes(req, res, url.pathname, url)) ||
       (await handleBacktestRoutes(req, res, url.pathname, url)) ||
       (await handlePerformanceRoutes(req, res, url.pathname, url)) ||
+      (await handlePromoCodeRoutes(req, res, url.pathname)) ||
       (await handleProfileRoutes(req, res, url.pathname)) ||
       (await handleLeaderboardRoutes(req, res, url.pathname)) ||
       (await handleSignalRoutes(req, res, url.pathname));

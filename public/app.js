@@ -410,6 +410,12 @@ const testerRequestStatus = document.querySelector("#tester-request-status");
 const requestTesterAccessButton = document.querySelector("#request-tester-access");
 const testerAccessMessage = document.querySelector("#tester-access-message");
 const profileSettingsForm = document.querySelector("#profile-settings-form");
+const deleteAccountStart = document.querySelector("#delete-account-start");
+const deleteAccountForm = document.querySelector("#delete-account-form");
+const deleteAccountPassword = document.querySelector("#delete-account-password");
+const deleteAccountConfirmation = document.querySelector("#delete-account-confirmation");
+const deleteAccountSubmit = document.querySelector("#delete-account-submit");
+const deleteAccountMessage = document.querySelector("#delete-account-message");
 const settingsUsername = document.querySelector("#settings-username");
 const settingsPublicProfile = document.querySelector("#settings-public-profile");
 const settingsPublicLeaderboard = document.querySelector("#settings-public-leaderboard");
@@ -1125,6 +1131,61 @@ profileSettingsForm?.addEventListener("submit", async (event) => {
     publicLeaderboardEnabled: settingsPublicLeaderboard.checked,
     messageElement: profileSettingsMessage
   });
+});
+
+function resetDeleteAccountForm() {
+  deleteAccountForm.reset();
+  deleteAccountForm.classList.add("hidden");
+  deleteAccountStart.classList.remove("hidden");
+  deleteAccountSubmit.disabled = true;
+  deleteAccountMessage.textContent = "";
+}
+
+deleteAccountStart?.addEventListener("click", () => {
+  deleteAccountStart.classList.add("hidden");
+  deleteAccountForm.classList.remove("hidden");
+  deleteAccountMessage.textContent = "";
+  deleteAccountPassword.focus();
+});
+
+document.querySelector("#delete-account-cancel")?.addEventListener("click", resetDeleteAccountForm);
+
+deleteAccountForm?.addEventListener("input", () => {
+  deleteAccountSubmit.disabled = deleteAccountConfirmation.value.trim() !== "DELETE" || !deleteAccountPassword.value;
+});
+
+deleteAccountForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (deleteAccountConfirmation.value.trim() !== "DELETE" || !deleteAccountPassword.value) return;
+
+  try {
+    deleteAccountSubmit.disabled = true;
+    deleteAccountSubmit.textContent = "Deleting account...";
+    deleteAccountMessage.textContent = "";
+    await api.request("/api/account", {
+      method: "DELETE",
+      body: JSON.stringify({
+        password: deleteAccountPassword.value,
+        confirmation: deleteAccountConfirmation.value
+      })
+    });
+  } catch (error) {
+    deleteAccountPassword.value = "";
+    deleteAccountSubmit.textContent = "Permanently delete account";
+    deleteAccountMessage.textContent = error.message;
+    return;
+  }
+
+  clearAuthSession("account_deleted");
+  clearClientAuthState();
+  resetDeleteAccountForm();
+  deleteAccountSubmit.textContent = "Permanently delete account";
+  dashboard.classList.add("hidden");
+  authScreen.classList.add("hidden");
+  landingPage.classList.remove("hidden");
+  history.replaceState({}, "", `${location.pathname}${location.search}`);
+  window.scrollTo(0, 0);
+  window.alert("Your SignalForge account has been deleted.");
 });
 
 settingsViewLeaderboard?.addEventListener("click", () => navigateTo("leaderboard"));
@@ -11360,6 +11421,8 @@ function startTelegramConnectionStatusPolling() {
         clearInterval(telegramConnectionTimer);
         telegramConnectionTimer = null;
         setTelegramConnectionFeedback("Connected successfully", "success");
+        telegramConnectButton.disabled = true;
+        telegramConnectButton.textContent = "Telegram Connected";
         await loadNotifications();
         telegramStatusLine.textContent = "Connected successfully. Alerts remain disabled until you enable them.";
         return;

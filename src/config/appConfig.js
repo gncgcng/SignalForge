@@ -209,6 +209,7 @@ export const appConfig = {
     successUrl: appUrl ? `${appUrl}/#billing?checkout=success` : "",
     cancelUrl: appUrl ? `${appUrl}/#billing?checkout=cancelled` : "",
     portalReturnUrl: appUrl ? `${appUrl}/#billing` : "",
+    promotionCodesEnabled: process.env.STRIPE_ALLOW_PROMOTION_CODES !== "false",
     prices: {
       pro: process.env.STRIPE_PRO_PRICE_ID || "",
       elite: process.env.STRIPE_ELITE_PRICE_ID || "",

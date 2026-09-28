@@ -60,6 +60,23 @@ export function isPasswordHasherReady() {
   }
 }
 
+// Re-authentication for destructive account actions. Shares the login attempt
+// counters so a stolen session can't be used to brute-force the password here.
+export async function reauthenticateWithPassword(user, password, req) {
+  const emailHash = hashIdentifier(`email:${String(user.email || "").trim().toLowerCase()}`);
+  const ipHash = getSignupContext(req, null).ipHash;
+  assertLoginVelocity(await getLoginAttemptVelocity({ emailHash, ipHash }));
+  const passwordValid = isValidPassword(String(password || ""), user.password);
+  await recordLoginAttempt({ emailHash, ipHash, successful: passwordValid });
+  if (!passwordValid) {
+    const error = new Error("Incorrect password.");
+    error.statusCode = 401;
+    error.code = "reauth_failed";
+    throw error;
+  }
+  return { emailHash };
+}
+
 function isValidPassword(password, record) {
   if (!record?.salt || !record?.hash) return false;
   const candidate = hashPassword(password, record.salt).hash;
