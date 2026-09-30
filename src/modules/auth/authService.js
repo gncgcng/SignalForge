@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { appConfig } from "../../config/appConfig.js";
 import { createId } from "../../shared/ids.js";
 import {
@@ -22,6 +22,7 @@ import {
   revokeAuthRestoreToken,
   revokeAuthRestoreTokensForUserDevice,
   storeAuthRestoreToken,
+  upgradeUserPasswordHash,
   verifyEmailToken
 } from "../../db/repositories.js";
 import { isDemoOrTesterIdentity } from "./authPolicy.js";
@@ -46,14 +47,27 @@ import {
   sendWelcomeEmail
 } from "../notifications/transactionalEmailService.js";
 
-export function hashPassword(password, salt = randomBytes(16).toString("hex")) {
-  const hash = createHash("sha256").update(`${salt}:${password}`).digest("hex");
-  return { salt, hash };
+const SCRYPT_PREFIX = "scrypt$";
+const SCRYPT_N = 16384;
+const SCRYPT_R = 8;
+const SCRYPT_P = 1;
+const SCRYPT_KEYLEN = 64;
+
+// New hashes are self-describing: "scrypt$N$r$p$saltHex$hashHex" in password_hash, with an
+// empty password_salt. Rows without the prefix are the legacy single-round
+// sha256(salt:password) format and are upgraded on the owner's next successful login.
+export function hashPassword(password) {
+  const salt = randomBytes(16);
+  const hash = scryptSync(String(password), salt, SCRYPT_KEYLEN, { N: SCRYPT_N, r: SCRYPT_R, p: SCRYPT_P });
+  return {
+    salt: "",
+    hash: `${SCRYPT_PREFIX}${SCRYPT_N}$${SCRYPT_R}$${SCRYPT_P}$${salt.toString("hex")}$${hash.toString("hex")}`
+  };
 }
 
 export function isPasswordHasherReady() {
   try {
-    const record = hashPassword("signalforge-auth-health", "signalforge-health-salt");
+    const record = hashPassword("signalforge-auth-health");
     return isValidPassword("signalforge-auth-health", record);
   } catch {
     return false;
@@ -66,7 +80,7 @@ export async function reauthenticateWithPassword(user, password, req) {
   const emailHash = hashIdentifier(`email:${String(user.email || "").trim().toLowerCase()}`);
   const ipHash = getSignupContext(req, null).ipHash;
   assertLoginVelocity(await getLoginAttemptVelocity({ emailHash, ipHash }));
-  const passwordValid = isValidPassword(String(password || ""), user.password);
+  const { valid: passwordValid, legacy } = verifyAndClassifyPassword(String(password || ""), user.password);
   await recordLoginAttempt({ emailHash, ipHash, successful: passwordValid });
   if (!passwordValid) {
     const error = new Error("Incorrect password.");
@@ -74,15 +88,55 @@ export async function reauthenticateWithPassword(user, password, req) {
     error.code = "reauth_failed";
     throw error;
   }
+  if (legacy) await upgradeLegacyPasswordHash(user, String(password || ""));
   return { emailHash };
 }
 
-function isValidPassword(password, record) {
+export function isValidPassword(password, record) {
+  return verifyAndClassifyPassword(password, record).valid;
+}
+
+export function verifyAndClassifyPassword(password, record) {
+  if (String(record?.hash || "").startsWith(SCRYPT_PREFIX)) {
+    return { valid: verifyScryptPassword(password, record.hash), legacy: false };
+  }
+  return { valid: legacyIsValidPassword(password, record), legacy: true };
+}
+
+function verifyScryptPassword(password, storedHash) {
+  try {
+    const [, nStr, rStr, pStr, saltHex, hashHex, ...rest] = storedHash.split("$");
+    if (rest.length || !saltHex || !hashHex) return false;
+    const expected = Buffer.from(hashHex, "hex");
+    if (!expected.length) return false;
+    const actual = scryptSync(String(password), Buffer.from(saltHex, "hex"), expected.length, {
+      N: Number(nStr), r: Number(rStr), p: Number(pStr)
+    });
+    return actual.length === expected.length && timingSafeEqual(actual, expected);
+  } catch {
+    return false;
+  }
+}
+
+// Legacy verification, unchanged apart from inlining the old sha256 formula that used to live
+// in hashPassword. Keep it: accounts that never log in again stay in this format indefinitely.
+function legacyIsValidPassword(password, record) {
   if (!record?.salt || !record?.hash) return false;
-  const candidate = hashPassword(password, record.salt).hash;
+  const candidate = createHash("sha256").update(`${record.salt}:${password}`).digest("hex");
   const candidateBuffer = Buffer.from(candidate);
   const storedBuffer = Buffer.from(record.hash);
   return candidateBuffer.length === storedBuffer.length && timingSafeEqual(candidateBuffer, storedBuffer);
+}
+
+// Best-effort: the caller has already authenticated, so a failed write is logged and ignored.
+// The update is conditional on the old hash, so it can't overwrite a concurrent password reset.
+async function upgradeLegacyPasswordHash(user, password) {
+  try {
+    const upgraded = await upgradeUserPasswordHash(user.id, user.password.hash, hashPassword(password));
+    console.info(`[auth] password_hash_upgrade user=${safeLogId(user.id)} upgraded=${Boolean(upgraded)}`);
+  } catch (error) {
+    console.warn(`[auth] password_hash_upgrade_failed user=${safeLogId(user.id)} error=${error?.message || "unknown"}`);
+  }
 }
 
 function publicUser(user) {
@@ -156,7 +210,7 @@ export async function registerOrLogin({
     assertLoginVelocity(velocity);
 
     console.info("[auth] login:password_check:start");
-    const passwordValid = isValidPassword(password, existing.password);
+    const { valid: passwordValid, legacy } = verifyAndClassifyPassword(password, existing.password);
     console.info(`[auth] login:password_check:valid=${passwordValid}`);
 
     await recordLoginAttempt({ emailHash, ipHash, successful: passwordValid });
@@ -164,6 +218,8 @@ export async function registerOrLogin({
     if (!passwordValid) {
       throw invalidCredentialsError();
     }
+
+    if (legacy) await upgradeLegacyPasswordHash(existing, password);
 
     return { ...(await createSession(existing)), verificationRequired: !existing.emailVerifiedAt };
   }

@@ -45,7 +45,7 @@ const existingUserBranch = extractBlock(authService, "if (existing) {");
 assert.ok(existingUserBranch, "the existing-user branch of registerOrLogin must exist");
 
 const velocityCheckIndex = existingUserBranch.indexOf("assertLoginVelocity(velocity)");
-const passwordCheckIndex = existingUserBranch.indexOf("isValidPassword(password, existing.password)");
+const passwordCheckIndex = existingUserBranch.indexOf("verifyAndClassifyPassword(password, existing.password)");
 const recordCallIndex = existingUserBranch.indexOf("recordLoginAttempt({ emailHash, ipHash, successful: passwordValid })");
 const failureThrowIndex = existingUserBranch.indexOf("if (!passwordValid) {");
 

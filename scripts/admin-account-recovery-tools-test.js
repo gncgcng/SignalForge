@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { hashPassword } from "../src/modules/auth/authService.js";
+import { hashPassword, verifyAndClassifyPassword } from "../src/modules/auth/authService.js";
 import { handleSupportRoutes } from "../src/modules/support/supportController.js";
 
 const migration = readFileSync("migrations/034_support_recovery_admin_tools.sql", "utf8");
@@ -27,8 +27,9 @@ assert.match(controller, /account-recovery\\\/\(lookup\|temporary-password\|revo
 
 const password = hashPassword("TemporaryAccess123");
 assert.notEqual(password.hash, "TemporaryAccess123");
-assert.equal(password.hash.length, 64);
-assert.ok(password.salt.length >= 32);
+assert.ok(!password.hash.includes("TemporaryAccess123"));
+assert.match(password.hash, /^scrypt\$16384\$8\$1\$[0-9a-f]{32}\$[0-9a-f]{128}$/);
+assert.deepEqual(verifyAndClassifyPassword("TemporaryAccess123", password), { valid: true, legacy: false });
 
 const nonAdmin = mockResponse();
 await handleSupportRoutes(

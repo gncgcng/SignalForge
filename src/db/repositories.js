@@ -1261,6 +1261,17 @@ export async function createPasswordResetToken(userId, tokenHash, expiresAt) {
   });
 }
 
+// Compare-and-set on the old hash: if a reset or admin recovery changed the password between
+// verification and this write, the stale upgrade matches no row and is dropped.
+export async function upgradeUserPasswordHash(userId, previousHash, password) {
+  const result = await query(`
+    UPDATE users
+    SET password_salt = $3, password_hash = $4, updated_at = now()
+    WHERE id = $1 AND password_hash = $2
+  `, [userId, previousHash, password.salt, password.hash]);
+  return result.rowCount === 1;
+}
+
 export async function resetPasswordWithToken(tokenHash, password) {
   return transaction(async (client) => {
     const result = await client.query(`
