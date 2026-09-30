@@ -13,7 +13,7 @@ const appConfig = readFileSync(new URL("../src/config/appConfig.js", import.meta
 
 assert.match(html, /auth-bootstrap\.js\?v=AUTH-DEBUG-001/);
 assert.ok(html.indexOf("auth-bootstrap.js") < html.indexOf("app.js?v="));
-assert.match(serviceWorker, /signalforge-static-v33-auth-debug-001/);
+assert.match(serviceWorker, /signalforge-static-v34-promo-nav-20260930/);
 assert.match(serviceWorker, /"\/auth-bootstrap\.js"/);
 assert.match(appSource, /\[auth-ui\] login:submit/);
 assert.match(appSource, /\[auth-ui\] login:request:start/);
