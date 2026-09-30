@@ -38,8 +38,32 @@
         "description": "SignalForge is a crypto trading signal scanner and trading setup assistant with multi-timeframe analysis, confluence, risk management, Telegram alerts, paper trading, and performance tracking.",
         "offers": [
           { "@type": "Offer", "name": "Free", "price": "0", "priceCurrency": "USD" },
-          { "@type": "Offer", "name": "Pro", "priceCurrency": "USD", "availability": "https://schema.org/InStock" },
-          { "@type": "Offer", "name": "Elite", "priceCurrency": "USD", "availability": "https://schema.org/InStock" }
+          {
+            "@type": "Offer",
+            "name": "Pro",
+            "price": "9.99",
+            "priceCurrency": "USD",
+            "availability": "https://schema.org/InStock",
+            "priceSpecification": {
+              "@type": "UnitPriceSpecification",
+              "price": "9.99",
+              "priceCurrency": "USD",
+              "unitText": "month"
+            }
+          },
+          {
+            "@type": "Offer",
+            "name": "Elite",
+            "price": "19.99",
+            "priceCurrency": "USD",
+            "availability": "https://schema.org/InStock",
+            "priceSpecification": {
+              "@type": "UnitPriceSpecification",
+              "price": "19.99",
+              "priceCurrency": "USD",
+              "unitText": "month"
+            }
+          }
         ]
       }
     </script>
@@ -51,7 +75,7 @@
           {
             "@type": "Question",
             "name": "Is SignalForge financial advice?",
-            "acceptedAnswer": { "@type": "Answer", "text": "No. SignalForge is an educational trading setup assistant and scanner. It is not financial advice." }
+            "acceptedAnswer": { "@type": "Answer", "text": "No. SignalForge is an educational tool only. It is not financial advice and does not provide personalized recommendations." }
           },
           {
             "@type": "Question",
@@ -61,17 +85,22 @@
           {
             "@type": "Question",
             "name": "What markets are supported?",
-            "acceptedAnswer": { "@type": "Answer", "text": "SignalForge focuses on crypto trading signals including BTC and Ethereum markets, with commodities such as gold, silver, and oil available when provider data is configured." }
+            "acceptedAnswer": { "@type": "Answer", "text": "SignalForge focuses on crypto trading signals for supported markets such as BTC and Ethereum pairs. Gold, silver, and oil depend on live commodity provider availability." }
           },
           {
             "@type": "Question",
             "name": "How do Telegram trading alerts work?",
-            "acceptedAnswer": { "@type": "Answer", "text": "Users can connect Telegram and receive in-app or Telegram alerts when the scanner detects setups that match their timeframe, direction, and confidence preferences." }
+            "acceptedAnswer": { "@type": "Answer", "text": "Connect the SignalForge Telegram bot, choose timeframes, direction, and minimum confidence, then receive alerts when matching crypto setups are detected." }
+          },
+          {
+            "@type": "Question",
+            "name": "Can beginners use it?",
+            "acceptedAnswer": { "@type": "Answer", "text": "Yes, but beginners should treat SignalForge as an educational scanner and paper trading journal, not as a guarantee or substitute for risk education." }
           },
           {
             "@type": "Question",
             "name": "Can I cancel anytime?",
-            "acceptedAnswer": { "@type": "Answer", "text": "Yes. Paid subscriptions are managed through Stripe billing." }
+            "acceptedAnswer": { "@type": "Answer", "text": "Yes. Subscriptions are managed through Stripe, including plan changes and cancellation." }
           },
           {
             "@type": "Question",
@@ -326,7 +355,7 @@
             </article>
             <article class="pricing-plan featured-price">
               <div class="popular-badge">⭐ Most Popular</div>
-              <div class="pricing-heading"><span>Pro</span><strong>Active trading workflow</strong></div>
+              <div class="pricing-heading"><span>Pro</span><strong class="pricing-amount">$9.99<small>/month</small></strong><strong>Active trading workflow</strong></div>
               <p>For traders who want alerts, more unlocks, and performance context.</p>
               <ul>
                 <li>300 setup discoveries per month</li>
@@ -337,7 +366,7 @@
               <button class="launch-auth-button" type="button">Choose Pro</button>
             </article>
             <article class="pricing-plan">
-              <div class="pricing-heading"><span>Elite</span><strong>Research and scale</strong></div>
+              <div class="pricing-heading"><span>Elite</span><strong class="pricing-amount">$19.99<small>/month</small></strong><strong>Research and scale</strong></div>
               <p>For deeper scanning, backtesting, and advanced review.</p>
               <ul>
                 <li>1,000 setup discoveries per month</li>
@@ -377,15 +406,19 @@
           </div>
           <div class="faq-accordion">
             <details open>
-              <summary>Is this financial advice?</summary>
+              <summary>Is SignalForge financial advice?</summary>
               <p>No. SignalForge is an educational tool only. It is not financial advice and does not provide personalized recommendations.</p>
             </details>
             <details>
-              <summary>What markets are supported?</summary>
-              <p>SignalForge focuses on supported crypto markets such as BTC and Ethereum pairs. Gold, silver, and oil depend on live commodity provider availability.</p>
+              <summary>Do SignalForge signals guarantee profit?</summary>
+              <p>No. Signals do not guarantee profit. Trading involves risk and outcomes are uncertain.</p>
             </details>
             <details>
-              <summary>How do Telegram alerts work?</summary>
+              <summary>What markets are supported?</summary>
+              <p>SignalForge focuses on crypto trading signals for supported markets such as BTC and Ethereum pairs. Gold, silver, and oil depend on live commodity provider availability.</p>
+            </details>
+            <details>
+              <summary>How do Telegram trading alerts work?</summary>
               <p>Connect the SignalForge Telegram bot, choose timeframes, direction, and minimum confidence, then receive alerts when matching crypto setups are detected.</p>
             </details>
             <details>
@@ -395,6 +428,10 @@
             <details>
               <summary>Can I cancel anytime?</summary>
               <p>Yes. Subscriptions are managed through Stripe, including plan changes and cancellation.</p>
+            </details>
+            <details>
+              <summary>How do affiliates get paid?</summary>
+              <p>Affiliates may request payouts after reaching the minimum payout threshold. Supported payout methods include PayPal, Wise, and USDT, subject to admin approval.</p>
             </details>
           </div>
         </section>

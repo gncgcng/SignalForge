@@ -587,6 +587,15 @@ button {
   min-height: 58px;
 }
 
+.pricing-amount {
+  font-size: 24px;
+}
+
+.pricing-amount small {
+  color: var(--muted);
+  font-size: 14px;
+}
+
 .pricing-plan > p {
   min-height: 48px;
 }

@@ -79,8 +79,8 @@ const result = {
     sitemap.includes("<loc>https://signalforge-app.com/#pricing</loc>"),
   pwaDescription:
     manifest.description.includes("Crypto trading signal scanner") &&
-    manifest.theme_color === "#000000" &&
-    manifest.background_color === "#000000"
+    manifest.theme_color === "#061B22" &&
+    manifest.background_color === "#061B22"
 };
 
 for (const [name, passed] of Object.entries(result)) {
