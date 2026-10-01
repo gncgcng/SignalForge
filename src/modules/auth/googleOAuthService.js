@@ -27,7 +27,7 @@ import {
   isDisposableEmail
 } from "./abuseProtectionService.js";
 import { createSession } from "./authService.js";
-import { isDemoOrTesterIdentity } from "./authPolicy.js";
+import { buildSignupConsentRecord, isDemoOrTesterIdentity } from "./authPolicy.js";
 import { trackProductEvent } from "../analytics/productAnalyticsService.js";
 import { attributeAffiliateReferral } from "../affiliates/affiliateRepository.js";
 import { sendWelcomeEmail } from "../notifications/transactionalEmailService.js";
@@ -36,7 +36,7 @@ const provider = "google";
 const stateTtlMs = 10 * 60 * 1000;
 let jwksCache = { expiresAt: 0, keys: [] };
 
-export async function startGoogleOAuth(req, deviceFingerprint, affiliateCode) {
+export async function startGoogleOAuth(req, deviceFingerprint, affiliateCode, { legalConsentAccepted = false, ageConfirmed = false } = {}) {
   assertGoogleConfigured();
   const state = randomBytes(32).toString("base64url");
   const nonce = randomBytes(32).toString("base64url");
@@ -49,6 +49,8 @@ export async function startGoogleOAuth(req, deviceFingerprint, affiliateCode) {
     signupIpHash: signupContext.ipHash,
     deviceFingerprintHash: signupContext.deviceHash,
     affiliateCode: sanitizeAffiliateCode(affiliateCode),
+    legalConsentAccepted: legalConsentAccepted === true,
+    ageConfirmed: ageConfirmed === true,
     expiresAt: new Date(Date.now() + stateTtlMs)
   });
 
@@ -157,6 +159,14 @@ export function validateGoogleClaims(claims, { nonce, now = Date.now() / 1000 } 
 }
 
 async function createGoogleUser(claims, loginState) {
+  // The account is created here, after Google's redirect, so the confirmations checked at
+  // /api/auth/google/start must have been carried through the state record to count.
+  if (loginState.legalConsentAccepted !== true || loginState.ageConfirmed !== true) {
+    throw oauthFailure(
+      "Agree to the Terms, Privacy Policy, and Risk Disclaimer and confirm you are 18 or older before creating an account.",
+      "consent_required"
+    );
+  }
   const normalizedEmail = claims.email.trim().toLowerCase();
   const emailDomain = getEmailDomain(normalizedEmail);
   const disposableEmail = isDisposableEmail(normalizedEmail);
@@ -198,7 +208,8 @@ async function createGoogleUser(claims, loginState) {
     deviceFingerprintHash: loginState.deviceFingerprintHash,
     abuseScore: abuse.score,
     abuseFlags: abuse.flags,
-    abuseReviewStatus: abuse.reviewStatus
+    abuseReviewStatus: abuse.reviewStatus,
+    ...buildSignupConsentRecord(loginState)
   });
   await grantOAuthFreeTrial(user.id, loginState.deviceFingerprintHash);
   await attributeAffiliateReferral(user.id, loginState.affiliateCode);

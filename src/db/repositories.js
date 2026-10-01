@@ -93,7 +93,10 @@ export async function createUser({
   abuseReviewStatus = "clear",
   username = null,
   publicProfileEnabled = false,
-  publicLeaderboardEnabled = false
+  publicLeaderboardEnabled = false,
+  legalConsentAcceptedAt = null,
+  legalConsentVersion = null,
+  ageConfirmedAt = null
 }) {
   const usernameNormalized = normalizeUsernameForLookup(username);
   await transaction(async (client) => {
@@ -102,9 +105,10 @@ export async function createUser({
         id, name, email, password_salt, password_hash, plan, email_verified_at,
         signup_ip_hash, device_fingerprint_hash, abuse_score, abuse_flags,
         abuse_review_status, affiliate_code, username, username_normalized,
-        username_updated_at, public_profile_enabled, public_leaderboard_enabled
+        username_updated_at, public_profile_enabled, public_leaderboard_enabled,
+        legal_consent_accepted_at, legal_consent_version, age_confirmed_at
       )
-      VALUES ($1,$2,$3,$4,$5,'free',$6,$7,$8,$9,$10,$11,lower(substr(md5($1),1,12)),$12,$13,CASE WHEN $13 IS NULL THEN NULL ELSE now() END,$14,$15)
+      VALUES ($1,$2,$3,$4,$5,'free',$6,$7,$8,$9,$10,$11,lower(substr(md5($1),1,12)),$12,$13,CASE WHEN $13::text IS NULL THEN NULL ELSE now() END,$14,$15,$16,$17,$18)
     `, [
       id,
       name,
@@ -120,7 +124,10 @@ export async function createUser({
       usernameNormalized ? username : null,
       usernameNormalized,
       Boolean(publicProfileEnabled),
-      Boolean(publicProfileEnabled && publicLeaderboardEnabled)
+      Boolean(publicProfileEnabled && publicLeaderboardEnabled),
+      legalConsentAcceptedAt,
+      legalConsentVersion,
+      ageConfirmedAt
     ]);
 
     await client.query(`
@@ -1307,14 +1314,16 @@ export async function createOAuthLoginState({
   signupIpHash,
   deviceFingerprintHash,
   affiliateCode,
+  legalConsentAccepted = false,
+  ageConfirmed = false,
   expiresAt
 }) {
   await query(`
     INSERT INTO oauth_login_states (
       state_hash, provider, nonce, signup_ip_hash,
-      device_fingerprint_hash, affiliate_code, expires_at
+      device_fingerprint_hash, affiliate_code, legal_consent_accepted, age_confirmed, expires_at
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
   `, [
     stateHash,
     provider,
@@ -1322,6 +1331,8 @@ export async function createOAuthLoginState({
     signupIpHash,
     deviceFingerprintHash,
     affiliateCode,
+    legalConsentAccepted === true,
+    ageConfirmed === true,
     expiresAt
   ]);
 }
@@ -1351,7 +1362,9 @@ export async function consumeOAuthLoginState(stateHash, provider) {
       nonce: state.nonce,
       signupIpHash: state.signup_ip_hash,
       deviceFingerprintHash: state.device_fingerprint_hash,
-      affiliateCode: state.affiliate_code
+      affiliateCode: state.affiliate_code,
+      legalConsentAccepted: state.legal_consent_accepted === true,
+      ageConfirmed: state.age_confirmed === true
     };
   });
 }
@@ -1371,7 +1384,7 @@ export async function linkOAuthIdentity({
   userId,
   providerEmail
 }) {
-  return transaction(async (client) => {
+  await transaction(async (client) => {
     const existing = await client.query(`
       SELECT user_id
       FROM oauth_accounts

@@ -118,10 +118,16 @@ export async function handleAuthRoutes(req, res, pathname) {
         error.statusCode = 400;
         throw error;
       }
+      if (body.ageConfirmed !== true) {
+        const error = new Error("Confirm you are 18 or older before creating an account.");
+        error.statusCode = 400;
+        throw error;
+      }
       const result = await startGoogleOAuth(
         req,
         req.headers["x-device-fingerprint"] || body.deviceFingerprint,
-        body.affiliateCode
+        body.affiliateCode,
+        { legalConsentAccepted: body.legalConsentAccepted, ageConfirmed: body.ageConfirmed }
       );
       return sendJson(res, 200, {
         authorizationUrl: result.authorizationUrl

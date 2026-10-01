@@ -339,6 +339,7 @@
             <div class="pricing-trust-links">
               <span>Stripe checkout uses the live configured prices for your SignalForge plans.</span>
               <a href="#how-it-works" data-public-how-it-works>Understand credits and unlocks</a>
+              <button class="inline-trust-link" type="button" data-legal-doc="refund">Refund Policy</button>
             </div>
           </div>
           <div class="pricing-grid premium-pricing-grid">
@@ -468,6 +469,7 @@
             <button type="button" data-legal-doc="terms">Terms</button>
             <button type="button" data-legal-doc="privacy">Privacy Policy</button>
             <button type="button" data-legal-doc="risk">Risk Disclaimer</button>
+            <button type="button" data-legal-doc="refund">Refund Policy</button>
           </div>
         </footer>
   </section>
@@ -598,6 +600,10 @@
               <button type="button" data-legal-doc="privacy">Privacy Policy</button>, and
               <button type="button" data-legal-doc="risk">Risk Disclaimer</button>.
             </span>
+          </label>
+          <label class="consent-row">
+            <input id="age-confirm" name="ageConfirmed" type="checkbox" />
+            <span>I confirm that I am 18 years of age or older.</span>
           </label>
           <button type="submit">Enter Dashboard</button>
           <button class="link-button" id="forgot-password-button" type="button">Forgot password?</button>
@@ -1683,7 +1689,7 @@
               <div>
                 <span class="eyebrow danger-eyebrow">Danger zone</span>
                 <h3>Delete account</h3>
-                <p class="reasoning">Permanently deletes your signals, watchlists, alerts, paper trades, journals, Telegram connection and support requests, and signs you out everywhere. Any active subscription is cancelled immediately with no refund for the current period. Billing and credit records are kept for accounting but no longer identify you. This cannot be undone.</p>
+                <p class="reasoning">Permanently deletes your signals, watchlists, alerts, paper trades, journals, Telegram connection and support requests, and signs you out everywhere. Cancelling or deleting your account stops future billing immediately. Charges already made are non-refundable except in the case of a genuine billing error or duplicate charge — see our <button class="inline-trust-link" type="button" data-legal-doc="refund">Refund Policy</button>. Billing and credit records are kept for accounting but no longer identify you. This cannot be undone.</p>
               </div>
               <button class="link-button danger" id="delete-account-start" type="button">Delete my account…</button>
               <form id="delete-account-form" class="delete-account-form hidden" autocomplete="off">
@@ -2340,7 +2346,7 @@
             </article>
             <div class="signal-disclaimer">
               <strong>Educational tool only. Not financial advice.</strong>
-              <span>Subscriptions and credit packs provide access to research tools only. Affiliates may earn commissions from paid subscriptions. <button class="inline-trust-link" type="button" data-how-it-works-link>See how credits and signals work</button></span>
+              <span>Subscriptions and credit packs provide access to research tools only. Affiliates may earn commissions from paid subscriptions. <button class="inline-trust-link" type="button" data-how-it-works-link>See how credits and signals work</button> · <button class="inline-trust-link" type="button" data-legal-doc="refund">Refund Policy</button></span>
             </div>
             <section>
               <div class="section-title">

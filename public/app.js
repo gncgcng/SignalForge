@@ -287,6 +287,7 @@ const passwordResetContactSupport = document.querySelector("#password-reset-cont
 let emailFeaturesEnabled = false;
 const backToLoginButton = document.querySelector("#back-to-login-button");
 const legalConsent = document.querySelector("#legal-consent");
+const ageConfirm = document.querySelector("#age-confirm");
 const legalModal = document.querySelector("#legal-modal");
 const legalModalTitle = document.querySelector("#legal-modal-title");
 const legalModalBody = document.querySelector("#legal-modal-body");
@@ -551,6 +552,14 @@ const legalDocuments = {
       <p>Trading crypto, commodities, stocks, ETFs, or any other market involves substantial risk. You can lose money. SignalForge confidence scores and setup quality labels describe rule alignment, not a probability of profit.</p>
       <p>Backtests, paper trading, alerts, and historical outcomes may exclude fees, slippage, liquidity constraints, execution quality, and future market changes. Past or simulated performance does not guarantee future results.</p>
       <p>Affiliate disclosure: Affiliates may earn commissions from paid subscriptions.</p>
+    `
+  },
+  refund: {
+    title: "Refund Policy",
+    body: `
+      <p>SignalForge does not offer refunds for subscription charges or unlock credit purchases, except in the case of a genuine billing error or duplicate charge. If you believe you were charged in error — for example, billed twice for the same period, or charged after cancellation — contact support with your account email and the date of the charge, and we will review and correct confirmed errors.</p>
+      <p>Cancelling a subscription stops future billing immediately but does not refund the current period already paid for. Unlock credit packs are one-time purchases and are non-refundable once purchased, except under the billing-error exception above.</p>
+      <p>This policy does not limit any rights you have under applicable law that cannot be waived by agreement.</p>
     `
   }
 };
@@ -834,6 +843,7 @@ authForm.addEventListener("submit", async (event) => {
   const credentials = Object.fromEntries(form);
   credentials.affiliateCode = state.referralCode;
   credentials.legalConsentAccepted = legalConsent.checked;
+  credentials.ageConfirmed = ageConfirm.checked;
   credentials.publicProfileEnabled = Boolean(credentials.publicProfileEnabled);
   const submitButton = authForm.querySelector("button[type='submit']");
   const loginOperationId = ++authOperationVersion;
@@ -1067,6 +1077,10 @@ googleAuthButton.addEventListener("click", async () => {
     authNote.textContent = "Agree to the Terms, Privacy Policy, and Risk Disclaimer before creating or connecting an account.";
     return;
   }
+  if (!ageConfirm.checked) {
+    authNote.textContent = "Confirm you are 18 or older before creating or connecting an account.";
+    return;
+  }
 
   try {
     googleAuthButton.disabled = true;
@@ -1077,7 +1091,8 @@ googleAuthButton.addEventListener("click", async () => {
       method: "POST",
       body: JSON.stringify({
         affiliateCode: state.referralCode,
-        legalConsentAccepted: true
+        legalConsentAccepted: true,
+        ageConfirmed: true
       }),
       timeoutMs: 8000,
       onResponse: ({ status }) => {
@@ -11676,6 +11691,7 @@ function googleOAuthErrorMessage(code) {
     unverified_email: "Your Google account email must be verified.",
     disposable_email: "Temporary or disposable email addresses are not supported.",
     account_blocked: "Google sign-in is unavailable for this account.",
+    consent_required: "Agree to the Terms, Privacy Policy, and Risk Disclaimer and confirm you are 18 or older, then try Google sign-in again.",
     not_configured: "Google sign-in is not configured."
   };
   return messages[code] || "Google sign-in failed. Please try again.";

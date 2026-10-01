@@ -87,7 +87,7 @@ class FakeElement {
 }
 
 const ids = [
-  "auth-form", "auth-note", "legal-consent", "forgot-password-button", "back-to-login-button",
+  "auth-form", "auth-note", "legal-consent", "age-confirm", "forgot-password-button", "back-to-login-button",
   "recovery-back-to-sign-in", "google-auth-button", "auth-screen", "password-reset-request-form",
   "password-reset-confirm-form", "password-reset-unavailable", "password-reset-email-field",
   "password-reset-submit", "password-reset-request-note", "landing-page", "dashboard",
@@ -97,6 +97,7 @@ const ids = [
 const elements = Object.fromEntries(ids.map((id) => [id, new FakeElement(id)]));
 elements.submit = new FakeElement("submit");
 elements["legal-consent"].checked = true;
+elements["age-confirm"].checked = true;
 
 function createStorage() {
   const values = new Map();
@@ -111,6 +112,7 @@ function createStorage() {
 
 let fetchMode = "success";
 const requests = [];
+const requestBodies = [];
 const location = {
   hash: "#signin",
   pathname: "/",
@@ -134,6 +136,7 @@ const context = {
   },
   fetch: async (path, options = {}) => {
     requests.push(path);
+    requestBodies.push({ path, body: options.body });
     if (path === "/api/auth/config") return response(200, { googleEnabled: true });
     if (path === "/api/auth/google/start") return response(200, { authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth?state=test" });
     if (fetchMode === "invalid") return response(401, { ok: false, error: "invalid_credentials" });
@@ -173,6 +176,7 @@ await new Promise((resolve) => setTimeout(resolve, 0));
 const submitEvent = { preventDefault() {}, stopImmediatePropagation() {} };
 await elements["auth-form"].listeners.submit(submitEvent);
 assert.ok(requests.includes("/api/auth/login"), "login form calls the auth API");
+assert.equal(JSON.parse(requestBodies.find((request) => request.path === "/api/auth/login").body).ageConfirmed, true, "bootstrap login sends ageConfirmed");
 assert.equal(context.__signalForgeAuthDebug.endpoint, "/api/auth/login");
 assert.equal(context.__signalForgeAuthDebug.lastHttpStatus, 200);
 assert.equal(context.localStorage.getItem("signalforge-restore-token"), "opaque-restore-token");
@@ -180,8 +184,17 @@ assert.equal(location.hash, "#scanner");
 assert.equal(location.reloadCalled, true);
 assert.equal(elements.submit.disabled, false, "loading state resets after success");
 
+elements["age-confirm"].checked = false;
+await elements["google-auth-button"].listeners.click({ stopImmediatePropagation() {} });
+assert.equal(location.assignedTo, undefined, "Google login is blocked until the age box is checked");
+assert.match(elements["auth-note"].textContent, /18 or older/);
+assert.equal(requests.includes("/api/auth/google/start"), false, "no OAuth start request without age confirmation");
+elements["age-confirm"].checked = true;
+
 await elements["google-auth-button"].listeners.click({ stopImmediatePropagation() {} });
 assert.match(location.assignedTo, /^https:\/\/accounts\.google\.com\//, "enabled Google login opens the OAuth URL");
+const googleStart = requestBodies.find((request) => request.path === "/api/auth/google/start");
+assert.equal(JSON.parse(googleStart.body).ageConfirmed, true, "bootstrap Google start sends ageConfirmed");
 
 fetchMode = "invalid";
 await elements["auth-form"].listeners.submit(submitEvent);

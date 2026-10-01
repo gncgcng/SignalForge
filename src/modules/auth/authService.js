@@ -25,7 +25,7 @@ import {
   upgradeUserPasswordHash,
   verifyEmailToken
 } from "../../db/repositories.js";
-import { isDemoOrTesterIdentity } from "./authPolicy.js";
+import { buildSignupConsentRecord, isDemoOrTesterIdentity } from "./authPolicy.js";
 import {
   assertLoginVelocity,
   assertSignupVelocity,
@@ -180,6 +180,7 @@ export async function registerOrLogin({
   deviceFingerprint,
   affiliateCode,
   legalConsentAccepted,
+  ageConfirmed,
   username,
   publicProfileEnabled
 }, req, options = {}) {
@@ -224,10 +225,17 @@ export async function registerOrLogin({
     return { ...(await createSession(existing)), verificationRequired: !existing.emailVerifiedAt };
   }
 
-  if (!options.bypassVerification && legalConsentAccepted !== true) {
-    const error = new Error("Agree to the Terms, Privacy Policy, and Risk Disclaimer before creating an account.");
-    error.statusCode = 400;
-    throw error;
+  if (!options.bypassVerification) {
+    if (legalConsentAccepted !== true) {
+      const error = new Error("Agree to the Terms, Privacy Policy, and Risk Disclaimer before creating an account.");
+      error.statusCode = 400;
+      throw error;
+    }
+    if (ageConfirmed !== true) {
+      const error = new Error("Confirm you are 18 or older before creating an account.");
+      error.statusCode = 400;
+      throw error;
+    }
   }
 
   const normalizedUsername = assertValidSignupUsername(username, options);
@@ -296,7 +304,8 @@ export async function registerOrLogin({
     abuseReviewStatus: abuse.reviewStatus,
     username: normalizedUsername,
     publicProfileEnabled: Boolean(publicProfileEnabled),
-    publicLeaderboardEnabled: false
+    publicLeaderboardEnabled: false,
+    ...buildSignupConsentRecord({ legalConsentAccepted, ageConfirmed })
   });
   if (!options.bypassVerification) {
     await attributeAffiliateReferral(user.id, affiliateCode);
