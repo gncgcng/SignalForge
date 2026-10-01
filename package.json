@@ -127,6 +127,7 @@
     "test:account-deletion-retry": "node scripts/account-deletion-retry-test.js",
     "test:promo-code-redemption-race": "node scripts/promo-code-redemption-race-test.js",
     "test:local-database-guard": "node scripts/local-database-guard-test.js",
+    "test:create-user-db": "node scripts/create-user-db-test.js",
     "test:promo-code-stripe": "node scripts/promo-code-stripe-test.js",
     "test:account-deletion": "node scripts/account-deletion-test.js",
     "test:telegram-notifications": "node scripts/telegram-notifications-test.js",

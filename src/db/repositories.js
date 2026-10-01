@@ -104,7 +104,7 @@ export async function createUser({
         abuse_review_status, affiliate_code, username, username_normalized,
         username_updated_at, public_profile_enabled, public_leaderboard_enabled
       )
-      VALUES ($1,$2,$3,$4,$5,'free',$6,$7,$8,$9,$10,$11,lower(substr(md5($1),1,12)),$12,$13,CASE WHEN $13 IS NULL THEN NULL ELSE now() END,$14,$15)
+      VALUES ($1,$2,$3,$4,$5,'free',$6,$7,$8,$9,$10,$11,lower(substr(md5($1),1,12)),$12,$13,$14,$15,$16)
     `, [
       id,
       name,
@@ -118,7 +118,12 @@ export async function createUser({
       JSON.stringify(abuseFlags),
       abuseReviewStatus,
       usernameNormalized ? username : null,
-      usernameNormalized,
+      // NULL, not "": the unique index skips only NULLs, so "" collides from the second
+      // username-less signup (every Google signup) onward.
+      usernameNormalized || null,
+      // Bound as a value, not `CASE WHEN $13 IS NULL ...`: Postgres can't infer a type for a
+      // parameter used only in IS NULL and rejected every signup with 42P08.
+      usernameNormalized ? new Date() : null,
       Boolean(publicProfileEnabled),
       Boolean(publicProfileEnabled && publicLeaderboardEnabled)
     ]);
@@ -1371,7 +1376,7 @@ export async function linkOAuthIdentity({
   userId,
   providerEmail
 }) {
-  return transaction(async (client) => {
+  await transaction(async (client) => {
     const existing = await client.query(`
       SELECT user_id
       FROM oauth_accounts
