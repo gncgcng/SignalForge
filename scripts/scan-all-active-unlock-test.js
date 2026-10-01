@@ -200,7 +200,9 @@ async function deterministicFetch(input) {
   providerCallsBySymbol.set(symbol, Number(providerCallsBySymbol.get(symbol) || 0) + 1);
 
   const granularity = Number(url.searchParams.get("granularity"));
-  const candles = buildFixedCandles(granularity).map((candle) => [
+  const startSeconds = Date.parse(url.searchParams.get("start")) / 1000;
+  const endSeconds = Date.parse(url.searchParams.get("end")) / 1000;
+  const candles = buildFixedCandles(granularity, startSeconds, endSeconds).map((candle) => [
     candle.time,
     candle.low,
     candle.high,
@@ -214,22 +216,33 @@ async function deterministicFetch(input) {
   });
 }
 
-function buildFixedCandles(granularity) {
+// Honors the requested start/end window like Coinbase does: since a58d555 the provider pages
+// backwards and builds 4h from ~484 hourly candles, so a fixed 120-candle reply never fills it.
+// Index 119 is the last COMPLETED candle (the setup trigger); index 120 is the still-forming
+// candle, which strategy scans drop since a58d555. Older pages extend the same curve backwards.
+function buildFixedCandles(granularity, startSeconds, endSeconds) {
   const interval = Number.isFinite(granularity) && granularity > 0 ? granularity : 900;
-  const latestTime = Math.floor(currentNowMs / 1000 / interval) * interval;
+  const formingTime = Math.floor(currentNowMs / 1000 / interval) * interval;
+  const triggerTime = formingTime - interval;
+  // Hourly data also feeds the 4h aggregate. At 0.03/candle its ADX is ~23.5, barely over the 22
+  // "Trend Up" threshold; 0.06 keeps 4h (ADX ~44) clearly trending so the fixture isn't fragile.
+  const slope = interval === 3600 ? 0.06 : 0.03;
+  const closeAt = (index) => 100 + index * slope + Math.sin(index * 0.38 + 1.4) * 0.8;
+  const firstTime = Math.ceil((Number.isFinite(startSeconds) ? startSeconds : triggerTime - 119 * interval) / interval) * interval;
+  const lastTime = Math.min(Number.isFinite(endSeconds) ? endSeconds : formingTime, formingTime);
   const candles = [];
-  for (let index = 0; index < 120; index += 1) {
-    const close = 100 + index * 0.03 + Math.sin(index * 0.38 + 1.4) * 0.8;
-    const previousClose = index ? candles[index - 1].close : close - 0.03;
-    const open = index === 119 ? close - 0.096 : previousClose;
+  for (let time = firstTime; time <= lastTime; time += interval) {
+    const index = 119 - (triggerTime - time) / interval;
+    const close = closeAt(index);
+    const open = index === 119 ? close - 0.096 : closeAt(index - 1);
     const padding = 0.144;
     candles.push({
-      time: latestTime - (119 - index) * interval,
+      time,
       open,
       high: Math.max(open, close) + padding,
       low: Math.min(open, close) - padding,
       close,
-      volume: index === 119 ? 1800 : 1000 + (index % 7) * 15
+      volume: index === 119 ? 1800 : 1000 + (((index % 7) + 7) % 7) * 15
     });
   }
   return candles;

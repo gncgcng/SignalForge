@@ -54,3 +54,10 @@ export function getOhlcv(symbol, timeframe) {
   const controlled = globalThis.__signalForgeActiveScanMarketData?.(symbol, timeframe);
   return controlled || actual.getOhlcv(symbol, timeframe);
 }
+
+// Strategy scans fetch through getStrategyOhlcv (a58d555), which calls marketDataService's own
+// getOhlcv binding and so never reaches the override above. Hold symbols here too.
+export function getStrategyOhlcv(symbol, timeframe, input = {}) {
+  const controlled = globalThis.__signalForgeActiveScanMarketData?.(symbol, timeframe);
+  return controlled || actual.getStrategyOhlcv(symbol, timeframe, input);
+}
