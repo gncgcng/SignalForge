@@ -1,3 +1,4 @@
+import "./test-support/require-local-database.js"; // must stay first: refuses non-local DATABASE_URL
 import { createHash } from "node:crypto";
 import { createId } from "../src/shared/ids.js";
 import { query, transaction } from "../src/db/client.js";

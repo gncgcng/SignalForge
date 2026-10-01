@@ -41,23 +41,26 @@ for (const [label, url, host] of accepted) {
 }
 
 // 2. Wiring: any test/repro/fixture that opens a real connection must import the guard FIRST,
-// so a new DB-backed test can't forget it. Local-only seed scripts are named seed-local-*.
-// Operational tools (db-seed, db-migrate, reports) are meant for real databases and are not scanned.
+// so a new DB-backed test can't forget it. Local-only seed scripts are named seed-local-*;
+// db-seed.js (demo user, known password) is local-only too and is listed explicitly.
+// Operational tools (db-migrate, reports) are meant for real databases and are not scanned.
 const DB_ACCESS = /getPool\(|from "pg"|account-deletion-fixtures\.js/;
+const ALWAYS_GUARDED = new Set(["db-seed.js"]);
 const candidates = readdirSync(scriptsDir)
-  .filter((name) => (/(-test|-repro|-fixtures)\.js$/.test(name) || /^seed-local-.*\.js$/.test(name)) &&
-    name !== "local-database-guard-test.js");
+  .filter((name) => (/(-test|-repro|-fixtures)\.js$/.test(name) || /^seed-local-.*\.js$/.test(name) ||
+    ALWAYS_GUARDED.has(name)) && name !== "local-database-guard-test.js");
 const guarded = [];
 for (const name of candidates) {
   const source = readFileSync(new URL(name, import.meta.url), "utf8");
-  if (!DB_ACCESS.test(source)) continue;
+  if (!DB_ACCESS.test(source) && !ALWAYS_GUARDED.has(name)) continue;
   const firstImport = source.split("\n").find((line) => /^import\s/.test(line));
   assert.ok(firstImport?.includes(GUARD_IMPORT), `${name} opens a real DB connection but does not import ${GUARD_IMPORT} first`);
   guarded.push(name);
 }
 for (const required of [
   "account-deletion-test.js", "account-deletion-customer-test.js", "account-deletion-retry-test.js",
-  "promo-code-redemption-race-test.js", "account-deletion-deadlock-repro.js", "seed-local-promo-ui-users.js"
+  "promo-code-redemption-race-test.js", "account-deletion-deadlock-repro.js", "seed-local-promo-ui-users.js",
+  "db-seed.js"
 ]) {
   assert.ok(guarded.includes(required), `${required} not detected as guarded`);
 }
