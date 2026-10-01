@@ -1,26 +1,25 @@
 import "./test-support/require-local-database.js"; // must stay first: refuses non-local DATABASE_URL
-import { createHash } from "node:crypto";
 import { createId } from "../src/shared/ids.js";
 import { query, transaction } from "../src/db/client.js";
 import { appConfig } from "../src/config/appConfig.js";
+import { hashPassword } from "../src/modules/auth/authService.js";
 
 const email = process.env.SEED_EMAIL || "demo@signalforge.app";
 const password = process.env.SEED_PASSWORD || "signal123";
-const salt = "local-demo-seed";
-const hash = createHash("sha256").update(`${salt}:${password}`).digest("hex");
 const userId = createId("usr");
 
 if (appConfig.isProduction) {
   throw new Error("Demo seed data is disabled in production.");
 }
 
-await transaction(async (client) => {
+const created = await transaction(async (client) => {
   const existing = await client.query("SELECT id FROM users WHERE email = $1", [email]);
 
   if (existing.rows[0]) {
-    console.log(`Demo user already exists: ${email}`);
-    return;
+    return false;
   }
+
+  const { salt, hash } = hashPassword(password);
 
   await client.query(`
     INSERT INTO users (
@@ -41,6 +40,7 @@ await transaction(async (client) => {
     )
     VALUES ($1, 0, $2, 0, $2)
   `, [userId, appConfig.freeSignalAllowance]);
+  return true;
 });
 
-console.log(`Seeded demo user: ${email} / ${password}`);
+console.log(created ? `Seeded demo user: ${email} / ${password}` : `Demo user already exists: ${email}`);
