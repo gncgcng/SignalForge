@@ -38,7 +38,10 @@ export function calculateSignalStats(signals) {
     winRate: 0
   });
 
-  totals.winRate = totals.closedCount === 0 ? 0 : Math.round((totals.hitTpCount / totals.closedCount) * 100);
+  // Win rate is TP / (TP + SL), matching every other win rate in the app; expired and manually
+  // closed signals count toward closedCount but are neither wins nor losses.
+  const decided = totals.hitTpCount + totals.hitSlCount;
+  totals.winRate = decided === 0 ? 0 : Math.round((totals.hitTpCount / decided) * 100);
   return totals;
 }
 
