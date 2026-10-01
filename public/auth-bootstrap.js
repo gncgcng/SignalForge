@@ -263,6 +263,7 @@
     var credentials = Object.fromEntries(new FormData(authForm));
     credentials.affiliateCode = window.sessionStorage.getItem("signalforge-affiliate-code") || "";
     credentials.legalConsentAccepted = Boolean(document.getElementById("legal-consent")?.checked);
+    credentials.ageConfirmed = Boolean(document.getElementById("age-confirm")?.checked);
     credentials.publicProfileEnabled = Boolean(credentials.publicProfileEnabled);
     try {
       if (submitButton) {
@@ -338,6 +339,10 @@
       if (authNote) authNote.textContent = "Agree to the Terms, Privacy Policy, and Risk Disclaimer before using Google sign-in.";
       return;
     }
+    if (!document.getElementById("age-confirm")?.checked) {
+      if (authNote) authNote.textContent = "Confirm you are 18 or older before using Google sign-in.";
+      return;
+    }
     try {
       googleButton.disabled = true;
       if (authNote) authNote.textContent = "Opening Google sign-in...";
@@ -346,6 +351,7 @@
         method: "POST",
         body: JSON.stringify({
           legalConsentAccepted: true,
+          ageConfirmed: true,
           affiliateCode: window.sessionStorage.getItem("signalforge-affiliate-code") || ""
         })
       });
