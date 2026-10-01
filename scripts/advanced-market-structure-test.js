@@ -85,7 +85,8 @@ const generator = readFileSync(
 const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
 const app = readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
 
-assert.ok(correlationSource.includes("getCachedOhlcv(symbol, timeframe)"));
+// a58d555 restricted correlation to completed candles (excludes the still-forming one).
+assert.ok(correlationSource.includes("getCachedOhlcv(symbol, timeframe, { completedOnly: true })"));
 assert.ok(correlationSource.includes('category === "Crypto"'));
 assert.ok(backtesting.includes("candle.time <= latest.time"));
 assert.ok(backtesting.includes("advancedStructureComparison"));

@@ -62,12 +62,13 @@ const result = {
     html.includes('data-view="paper-portfolio"') &&
     app.includes("data-paper-signal-id"),
   disclaimerPresent: html.includes("Paper trading only. No real orders are placed."),
+  // Backend only: e430f8a/0f2d3cf added UI disclaimers to app.js saying SignalForge does
+  // NOT connect to brokers, which a substring match on "broker" can't tell apart.
   noBrokerIntegration: ![
     migration,
     repositories,
     service,
-    controller,
-    app
+    controller
   ].join("\n").toLowerCase().includes("broker")
 };
 

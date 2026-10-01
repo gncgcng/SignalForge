@@ -25,7 +25,8 @@ const checks = {
     autoScan.includes('const scope = settings.favoriteMarketsOnly ? "watchlist" : "all_crypto"') &&
     autoScan.includes("[auto-scan] scope=${scope}") &&
     autoScan.includes("[auto-scan] markets selected") &&
-    autoScan.includes("[auto-scan] telegram alert sent") &&
+    // 5a941f8 renamed "sent" to "queued": auto-scan only enqueues Telegram notifications.
+    autoScan.includes("[auto-scan] telegram alert queued") &&
     autoScan.includes("[auto-scan] markets scanned") &&
     autoScan.includes("[auto-scan] alerts created") &&
     autoScan.includes("[auto-scan] skipped duplicates"),

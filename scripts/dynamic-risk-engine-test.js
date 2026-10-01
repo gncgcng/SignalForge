@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import {
   buildDynamicRiskPlan,
   calculatePositionSizing,
+  getRiskTier,
   maximumRiskPercent
 } from "../src/modules/risk/riskEngineService.js";
 import { calculateAccountGrowthCurve } from "../src/modules/paper-trading/paperTradingService.js";
@@ -60,15 +61,21 @@ const mediumQuality = calculatePositionSizing({
 assert.equal(mediumQuality.effectiveRiskPercent, 1);
 assert.equal(mediumQuality.riskAmount, 100);
 
+// Tier boundary is inclusive at 70 to match the strategies' minimumQuality gate (a0eb604).
+// 70c59c7 once made it exclusive, rejecting score-70 signals that had passed their own gate.
+assert.equal(getRiskTier(70), "Medium quality");
+assert.equal(getRiskTier(69), "No trade");
+
 const lowQuality = calculatePositionSizing({
   accountSize: 10000,
   requestedRiskPercent: 1,
-  qualityScore: 70,
+  qualityScore: 69,
   entryPrice: 100,
   stopLoss: 98,
   takeProfit: 104
 });
 assert.equal(lowQuality.tradeAllowed, false);
+assert.equal(lowQuality.riskAmount, 0);
 
 const growth = calculateAccountGrowthCurve([
   paperTrade("2026-01-01", "Hit TP", 200),
@@ -92,7 +99,6 @@ const performance = readFileSync(
   new URL("../src/modules/performance/performanceService.js", import.meta.url),
   "utf8"
 );
-const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
 const app = readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
 
 assert.ok(migration.includes("effective_risk_percent <= 2"));
@@ -100,7 +106,8 @@ assert.ok(generator.includes("newsRisk.blockSignal"));
 assert.ok(generator.includes("buildDynamicRiskPlan"));
 assert.ok(backtesting.includes('"fixed"') && backtesting.includes('"dynamic"'));
 assert.ok(performance.includes("expectancyByRiskLevel"));
-assert.ok(html.includes("Account growth curve"));
+// No UI check for the growth curve: 523fa38 removed the chart and its container from the paper
+// trading page. The server still returns accountGrowthCurve, covered by the assertion above.
 assert.ok(app.includes("Dynamic Risk Engine"));
 
 console.log("Dynamic Risk Engine tests passed.");

@@ -35,7 +35,11 @@ assert.deepEqual(summary, {
   expired: 0,
   topAvoidReason: null,
   topRejectionReason: "poor RR",
-  topRejectionCode: "poor_rr"
+  topRejectionCode: "poor_rr",
+  // 0acb920 added skipped/providerErrors/noData counts for manual scanner market coverage.
+  skipped: 0,
+  providerErrors: 0,
+  noData: 0
 });
 
 const migration = readFileSync("migrations/036_candidate_explanations.sql", "utf8");
@@ -57,7 +61,8 @@ assert.match(signalService, /return "Data is stale\."/);
 assert.match(signalService, /return "Provider unavailable\."/);
 assert.match(signalService, /recordDiscoveryUsage\(\s*user,\s*allowedSetups\.length/);
 assert.match(autoScan, /const setup = detailed\.fullSetup/);
-assert.match(autoScan, /if \(!setup \|\| !telegramPreferenceMatchesSetup/);
+// d83475d runs setups through confidence calibration first; the guard now checks telegramSetup.
+assert.match(autoScan, /if \(!telegramSetup \|\| !telegramPreferenceMatchesSetup/);
 assert.match(html, /Watching Setups/);
 assert.match(html, /Watching setups are not signals yet/);
 assert.match(html, /View scan diagnostics/);
