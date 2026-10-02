@@ -8,6 +8,8 @@ process.env.CRYPTO_WATCHER_ENABLED = "false";
 process.env.MANUAL_SCAN_MAX_MARKETS = "200";
 
 const marketData = await import("../src/modules/market-data/marketDataService.js");
+// Closed markets are skipped from the scan universe; pin a Wednesday so commodities are in session.
+(await import("../src/modules/markets/sessionService.js")).setSessionClockForTest("2026-01-14T15:00:00Z");
 const { appConfig } = await import("../src/config/appConfig.js");
 
 const manualAll = marketData.getManualScannerUniverse({ marketType: "all" });

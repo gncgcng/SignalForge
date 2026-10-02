@@ -16,6 +16,7 @@ import { createId } from "../../shared/ids.js";
 import { getManualScannerUniverse } from "../market-data/marketDataService.js";
 import { appConfig } from "../../config/appConfig.js";
 import { getMultiTimeframeMarketData } from "../market-data/multiTimeframeService.js";
+import { describeMarketSession, formatSessionTime, isMarketOpen } from "../markets/sessionService.js";
 import {
   canDiscoverSetups,
   getSubscriptionSummary,
@@ -397,7 +398,7 @@ export async function scanMarketSetup(user, { symbol, timeframe }) {
   }
   assertDiscoveryAvailable(user);
   const result = await scanMarketSetupDetailed(user, { symbol, timeframe });
-  const marketBrief = await refreshMarketBriefSafely([result.briefObservation]);
+  const marketBrief = await refreshMarketBriefSafely([result.briefObservation].filter(Boolean));
   const quantity = result.publicResult.valid ? 1 : 0;
   const subscription = await recordDiscoveryUsage(user, quantity, scanKey);
   await cacheScanResult(user.id, scanKey, result);
@@ -418,6 +419,8 @@ export async function scanMarketSetup(user, { symbol, timeframe }) {
 
 export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analystProfile = null, generationContext = {}) {
   const generationSource = generationContext.source || "manual_scan";
+  // A closed market is answered without touching the provider; validation would reject it anyway.
+  if (!isMarketOpen(symbol)) return closedMarketScanResult(symbol, timeframe);
   const marketData = await getMultiTimeframeMarketData(symbol, timeframe);
   const profile = analystProfile || await getUserAnalystProfile(user);
   const result = generateMarketDataSetup(marketData, timeframe, { analystProfile: profile });
@@ -550,6 +553,34 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
     fullSetup: publishable ? signal : null,
     analysis,
     briefObservation
+  };
+}
+
+function closedMarketScanResult(symbol, timeframe) {
+  const session = describeMarketSession(symbol);
+  const reason = `Market is closed${session.nextOpen ? `; reopens ${formatSessionTime(session.nextOpen)}` : ""}.`;
+  const analysis = {
+    message: reason,
+    rejectionSummary: `No setup found because: ${reason}`,
+    rejectionReasons: [reason],
+    rejectionReasonCodes: ["market_closed"],
+    marketClosed: true,
+    nextOpen: session.nextOpen
+  };
+  return {
+    publicResult: {
+      symbol,
+      timeframe,
+      valid: false,
+      resultType: SCANNER_RESULT_TYPES.REJECTED,
+      setup: null,
+      analysis,
+      candidate: null,
+      avoidTrade: null
+    },
+    fullSetup: null,
+    analysis,
+    briefObservation: null
   };
 }
 

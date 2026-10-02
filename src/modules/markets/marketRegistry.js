@@ -8,7 +8,7 @@ import { query } from "../../db/client.js";
 const NO_PROVIDER = "none";
 
 //
-// The database is authoritative. bootstrapRows mirrors what migration 059 seeds and is used
+// The database is authoritative. bootstrapRows mirrors what migrations 059/060 seed and is used
 // only until loadMarketRegistry() runs at boot (and by unit tests that never open a database).
 const bootstrapRows = Object.freeze([
   commodityRow("XAU/USD", "XAU/USD", "Gold"),
@@ -116,8 +116,8 @@ function commodityRow(symbol, providerSymbol, name) {
     asset_class: "commodity",
     provider: "twelve-data",
     provider_symbol: providerSymbol,
-    exchange_timezone: null,
-    session_calendar_id: null,
+    exchange_timezone: "America/New_York",
+    session_calendar_id: "us_commodity_week",
     category: "Commodities",
     venue: "OTC",
     scanner_enabled: true,

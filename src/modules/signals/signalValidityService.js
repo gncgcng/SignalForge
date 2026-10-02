@@ -1,3 +1,8 @@
+import { addOpenMarketTime } from "../markets/sessionService.js";
+
+// Validity is measured in open-market time: the clock pauses while the market is closed, so a
+// commodity signal generated just before the Friday close keeps its full window into the next
+// session instead of expiring over the weekend. 24/7 markets (crypto) are plain wall-clock.
 export const signalValidityMsByTimeframe = Object.freeze({
   "1m": 30 * 60 * 1000,
   "5m": 2 * 60 * 60 * 1000,
@@ -14,7 +19,7 @@ export function getSignalValidUntil(signal) {
   const persisted = new Date(signal?.validUntil || signal?.valid_until || 0).getTime();
   if (Number.isFinite(persisted) && persisted > 0) return new Date(persisted).toISOString();
   const generatedAt = new Date(signal?.generatedAt || signal?.generated_at || Date.now()).getTime();
-  return new Date(generatedAt + getSignalValidityMs(signal?.timeframe)).toISOString();
+  return addOpenMarketTime(signal?.symbol || signal?.pair || null, generatedAt, getSignalValidityMs(signal?.timeframe)).toISOString();
 }
 
 export function withSignalValidity(signal) {

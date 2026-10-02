@@ -18,6 +18,8 @@ const { query, getPool } = await import("../src/db/client.js");
 const { runPendingMigrations } = await import("../src/db/migrations.js");
 const { loadMarketRegistry, getNonCryptoMarket, resetMarketRegistryForTest } = await import("../src/modules/markets/marketRegistry.js");
 const { getManualScannerUniverse, getPair, getOhlcv } = await import("../src/modules/market-data/marketDataService.js");
+// Closed markets are skipped from the scan universe; pin a Wednesday so commodities are in session.
+(await import("../src/modules/markets/sessionService.js")).setSessionClockForTest("2026-01-14T15:00:00Z");
 
 const rootDir = fileURLToPath(new URL("..", import.meta.url));
 const migration = (name) => readFileSync(join(rootDir, "migrations", name), "utf8");

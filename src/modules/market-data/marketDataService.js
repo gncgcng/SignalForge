@@ -20,6 +20,7 @@ import {
   recordCryptoMarketSuccess
 } from "../markets/cryptoMarketService.js";
 import { listNonCryptoMarkets } from "../markets/marketRegistry.js";
+import { describeMarketSession, formatSessionTime, isMarketOpen, sessionNow } from "../markets/sessionService.js";
 
 // Commodity and stock markets come from the `markets` table (see marketRegistry.js); crypto
 // markets come from the same table through cryptoMarketService.
@@ -93,6 +94,8 @@ export function getManualScanMarkets(options = {}) {
 
 export function getManualScannerUniverse(options = {}) {
   const marketType = normalizeMarketType(options.marketType);
+  // Not taken from options: those arrive straight from the request body.
+  const now = sessionNow();
   const skipped = [];
   const selected = [];
   const candidates = [
@@ -129,6 +132,14 @@ export function getManualScannerUniverse(options = {}) {
 
     if (!isReadyStatus(pair.status || pair.marketStatus)) {
       skipped.push(toSkippedMarket(pair, pair.availabilityCode || "market_unavailable", pair.availabilityMessage || "Market is not ready for scanning."));
+      continue;
+    }
+
+    // A closed market is skipped before any provider call rather than fetched and then rejected.
+    if (!isMarketOpen(pair, now)) {
+      const session = describeMarketSession(pair, now);
+      skipped.push(toSkippedMarket(pair, "market_closed",
+        `Market is closed${session.nextOpen ? `; reopens ${formatSessionTime(session.nextOpen)}` : ""}.`));
       continue;
     }
 
@@ -400,20 +411,21 @@ export function resolveMarketStatus(pair, timeframe, candles = [], receivedAt = 
   }
 
   if (pair.category === "Commodities") {
-    const open = isCommodityMarketOpen(now);
-    const code = !open ? "CLOSED" : stale ? "DELAYED" : "LIVE";
+    const session = describeMarketSession(pair, now);
+    const code = !session.open ? "CLOSED" : stale ? "DELAYED" : "LIVE";
 
     return {
       code,
       label: code === "LIVE" ? "Live" : code === "DELAYED" ? "Delayed" : "Closed",
       detail: code === "CLOSED"
-        ? "Commodity session is closed or the feed is not actively updating."
+        ? `Commodity session is closed${session.nextOpen ? `; reopens ${formatSessionTime(session.nextOpen)}` : ""}.`
         : code === "DELAYED"
           ? "Commodity feed is active, but the latest candle is stale."
           : "Commodity feed is updating during active session hours.",
       stale,
       lastCandleAt: latestCandleAt,
-      checkedAt: receivedAt
+      checkedAt: receivedAt,
+      session
     };
   }
 
@@ -549,16 +561,6 @@ function summarizeScannerUniverse(candidates, selectedTotal, selectedMarkets, ma
     skipped: skipped.length,
     skippedByReason
   };
-}
-
-function isCommodityMarketOpen(date) {
-  const day = date.getUTCDay();
-  const hour = date.getUTCHours();
-
-  if (day === 0) return hour >= 22;
-  if (day >= 1 && day <= 4) return true;
-  if (day === 5) return hour < 22;
-  return false;
 }
 
 function withAvailability(pair) {

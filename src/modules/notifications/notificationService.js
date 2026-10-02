@@ -214,7 +214,7 @@ export function formatTelegramSignalMessage(setup) {
     `Direction: ${setup.direction.toUpperCase()}`,
     `Confidence: ${confidence}% (${getConfidenceTier(confidence)})`,
     `Setup: ${setup.setupType || "Qualified setup"}`,
-    `Valid for: ${formatSignalValidityWindow(setup.timeframe)}`,
+    `Valid for: ${formatSignalValidityWindow(setup.timeframe)}${isCommoditySymbol(setup.symbol) ? " of market hours" : ""}`,
     "",
     "Preview reason:",
     reason,
