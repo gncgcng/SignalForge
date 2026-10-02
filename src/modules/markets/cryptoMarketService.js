@@ -17,20 +17,22 @@ const loggedFailures = new Map();
 export async function initializeCryptoMarketSettings() {
   for (const market of cryptoMarketUniverse) {
     const state = defaultState(market);
-    await query(`INSERT INTO crypto_markets (
+    await query(`INSERT INTO markets (
+      id, asset_class, category, venue,
       symbol, display_symbol, provider_symbol, name, provider, liquidity_tier,
       enabled, scanner_enabled, paper_trading_enabled, watchlist_enabled,
       provider_status, supported_timeframes, base_asset, quote_asset, product_status,
       trading_enabled, market_status, verification_status, status, replacement_symbol
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+    ) VALUES ('crypto:' || $1, 'crypto', 'Crypto', 'Coinbase',
+      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
     ON CONFLICT (symbol) DO UPDATE SET
       display_symbol = EXCLUDED.display_symbol,
       provider_symbol = EXCLUDED.provider_symbol,
       name = EXCLUDED.name,
       provider = EXCLUDED.provider,
       liquidity_tier = EXCLUDED.liquidity_tier,
-      base_asset = COALESCE(crypto_markets.base_asset, EXCLUDED.base_asset),
-      quote_asset = COALESCE(crypto_markets.quote_asset, EXCLUDED.quote_asset),
+      base_asset = COALESCE(markets.base_asset, EXCLUDED.base_asset),
+      quote_asset = COALESCE(markets.quote_asset, EXCLUDED.quote_asset),
       updated_at = now()`, [
       state.symbol, state.displaySymbol, state.providerSymbol, state.name,
       state.provider, state.liquidityTier, state.enabled, state.scannerEnabled,
@@ -45,7 +47,7 @@ export async function initializeCryptoMarketSettings() {
 }
 
 export async function reloadCryptoMarketSettings() {
-  const result = await query("SELECT * FROM crypto_markets ORDER BY liquidity_tier, symbol");
+  const result = await query("SELECT * FROM markets WHERE asset_class = 'crypto' ORDER BY liquidity_tier, symbol");
   runtime.clear();
   for (const row of result.rows) runtime.set(row.symbol, mapRow(row));
   return listCryptoMarketSettings();
@@ -115,7 +117,7 @@ export async function updateCryptoMarketSettings(symbol, changes) {
   if (scannerEnabled && enabled && marketStatus !== "active") {
     throw marketError("Verify provider candle support before enabling this pair for scanning.", 409);
   }
-  const result = await query(`UPDATE crypto_markets SET enabled=$2, scanner_enabled=$3,
+  const result = await query(`UPDATE markets SET enabled=$2, scanner_enabled=$3,
     paper_trading_enabled=$4, watchlist_enabled=$5, market_status=$6, status=$7, updated_at=now()
     WHERE symbol=$1 RETURNING *`, [current.symbol, enabled, scannerEnabled, paperTradingEnabled, watchlistEnabled, marketStatus, status]);
   runtime.set(current.symbol, mapRow(result.rows[0]));
@@ -125,19 +127,21 @@ export async function updateCryptoMarketSettings(symbol, changes) {
 export async function importCoinbaseCryptoProducts(products) {
   const discovered = normalizeCoinbaseProducts(products);
   const discoveredSymbols = new Set(discovered.map((product) => product.providerSymbol));
-  const existingResult = await query("SELECT provider_symbol FROM crypto_markets");
+  const existingResult = await query("SELECT provider_symbol FROM markets WHERE provider='coinbase-exchange'");
   const existing = new Set(existingResult.rows.map((row) => row.provider_symbol));
   let imported = 0;
   let updated = 0;
   for (const product of discovered) {
     const existed = existing.has(product.providerSymbol);
-    await query(`INSERT INTO crypto_markets (
+    await query(`INSERT INTO markets (
+      id, asset_class, category, venue,
       symbol, display_symbol, provider_symbol, name, provider, liquidity_tier,
       enabled, scanner_enabled, paper_trading_enabled, watchlist_enabled,
       provider_status, base_asset, quote_asset, product_status, trading_enabled,
       market_status, verification_status, status
-    ) VALUES ($1,$2,$3,$4,'coinbase-exchange',$5,true,false,true,true,'unchecked',$6,$7,$8,true,'unavailable','failed','unavailable')
-    ON CONFLICT (provider_symbol) DO UPDATE SET
+    ) VALUES ('crypto:' || $1, 'crypto', 'Crypto', 'Coinbase',
+      $1,$2,$3,$4,'coinbase-exchange',$5,true,false,true,true,'unchecked',$6,$7,$8,true,'unavailable','failed','unavailable')
+    ON CONFLICT (provider, provider_symbol) DO UPDATE SET
       display_symbol=EXCLUDED.display_symbol, name=EXCLUDED.name,
       base_asset=EXCLUDED.base_asset, quote_asset=EXCLUDED.quote_asset,
       product_status=EXCLUDED.product_status, trading_enabled=EXCLUDED.trading_enabled,
@@ -150,7 +154,7 @@ export async function importCoinbaseCryptoProducts(products) {
   }
   let missingLegacy = 0;
   if (discovered.length > 0) {
-    const missing = await query(`UPDATE crypto_markets SET market_status='unavailable',
+    const missing = await query(`UPDATE markets SET market_status='unavailable',
       verification_status='failed', status='unavailable', provider_status='unavailable',
       last_error='Product no longer returned by Coinbase product sync.',
       failure_code='PRODUCT_NOT_RETURNED', cooldown_until=NULL, updated_at=now()
@@ -257,7 +261,7 @@ export async function saveCryptoMarketVerification(symbol, checks, details = {})
     nextRetryAt: cooldownUntil?.toISOString() || null,
     lastVerificationAttempt: checkedAt.toISOString()
   });
-  const result = await query(`UPDATE crypto_markets SET market_status=$2, verification_status=$3,
+  const result = await query(`UPDATE markets SET market_status=$2, verification_status=$3,
     status=$13, provider_status=$4, supported_timeframes=$5, unsupported_timeframes=$6,
     last_successful_candle_at=COALESCE($7, last_successful_candle_at), last_checked_at=$11, last_verified_at=$11,
     last_verification_attempt_at=$11,
@@ -310,7 +314,7 @@ export async function replaceLegacyCryptoMarket(symbol, replacementSymbol) {
     nextRetryTime: null,
     finalStatus: "legacy"
   };
-  const result = await query(`UPDATE crypto_markets SET market_status='legacy', verification_status='legacy', status='legacy',
+  const result = await query(`UPDATE markets SET market_status='legacy', verification_status='legacy', status='legacy',
     provider_status='unavailable', enabled=false, scanner_enabled=false, paper_trading_enabled=false,
     replacement_symbol=$2, last_error='Legacy Coinbase symbol. Use the replacement market.',
     last_checked_at=$3, last_verified_at=$3, last_verification_attempt_at=$3,
@@ -332,7 +336,7 @@ export async function resetCryptoMarketCooldown(symbol) {
     cooldownUntil: null, lastError: null, failureCode: null
   };
   runtime.set(current.symbol, next);
-  await query(`UPDATE crypto_markets SET market_status=CASE WHEN cardinality(supported_timeframes)>0 THEN 'active' ELSE 'unavailable' END,
+  await query(`UPDATE markets SET market_status=CASE WHEN cardinality(supported_timeframes)>0 THEN 'active' ELSE 'unavailable' END,
     verification_status=CASE WHEN cardinality(supported_timeframes)>0 THEN 'verified' ELSE 'failed' END,
     status=CASE WHEN cardinality(supported_timeframes)>0 THEN 'active' ELSE 'unavailable' END,
     provider_status=CASE WHEN cardinality(supported_timeframes)>0 THEN 'available' ELSE 'unavailable' END,
@@ -350,7 +354,7 @@ export async function recordCryptoMarketSuccess(symbol, timeframe, lastCandleAt)
   runtime.set(current.symbol, next);
   loggedFailures.delete(`${current.symbol}:${timeframe}`);
   if (recentlyRecorded) return;
-  await query(`UPDATE crypto_markets SET market_status='active', verification_status='verified', status='active', provider_status='available',
+  await query(`UPDATE markets SET market_status='active', verification_status='verified', status='active', provider_status='available',
     supported_timeframes=$2, unsupported_timeframes=$3, last_successful_candle_at=$4, last_checked_at=$5,
     last_verified_at=$5, last_error=NULL, failure_code=NULL, cooldown_until=NULL,
     consecutive_failures=0, updated_at=now() WHERE symbol=$1`, [current.symbol, supported, unsupported, lastCandleAt, checkedAt]).catch(() => {});
@@ -397,13 +401,13 @@ export async function recordCryptoMarketFailure(symbol, timeframe, error) {
   };
   runtime.set(current.symbol, next);
   if (activeOrRecent) {
-    await query(`UPDATE crypto_markets SET market_status='active', verification_status='verified',
+    await query(`UPDATE markets SET market_status='active', verification_status='verified',
       status='active', provider_status='available', last_checked_at=now(), last_error=NULL,
       failure_code=$2, cooldown_until=$3, verification_details=$4,
       consecutive_failures=consecutive_failures+1, updated_at=now()
       WHERE symbol=$1`, [current.symbol, next.failureCode, cooldownUntil, details]).catch(() => {});
   } else {
-    await query(`UPDATE crypto_markets SET last_checked_at=now(),
+    await query(`UPDATE markets SET last_checked_at=now(),
       failure_code=$2, cooldown_until=$3, verification_details=$4,
       consecutive_failures=consecutive_failures+1, updated_at=now()
       WHERE symbol=$1`, [current.symbol, next.failureCode, cooldownUntil, details]).catch(() => {});
@@ -412,7 +416,7 @@ export async function recordCryptoMarketFailure(symbol, timeframe, error) {
 }
 
 export async function enableScannerForAllActiveCryptoMarkets() {
-  const result = await query(`UPDATE crypto_markets
+  const result = await query(`UPDATE markets
     SET scanner_enabled=true,
       paper_trading_enabled=true,
       watchlist_enabled=true,
@@ -424,7 +428,8 @@ export async function enableScannerForAllActiveCryptoMarkets() {
       failure_code=NULL,
       cooldown_until=NULL,
       updated_at=now()
-    WHERE enabled=true
+    WHERE asset_class='crypto'
+      AND enabled=true
       AND provider IS NOT NULL
       AND cardinality(supported_timeframes) > 0
       AND (status IN ('active', 'ready', 'provider_error') OR market_status IN ('active', 'ready', 'provider_error'))
@@ -441,7 +446,7 @@ export async function enableScannerForAllActiveCryptoMarkets() {
 }
 
 export async function restoreRecentlyActiveCryptoMarkets() {
-  const result = await query(`UPDATE crypto_markets
+  const result = await query(`UPDATE markets
     SET market_status='active',
       verification_status='verified',
       status='active',
@@ -460,7 +465,8 @@ export async function restoreRecentlyActiveCryptoMarkets() {
         true
       ),
       updated_at=now()
-    WHERE enabled=true
+    WHERE asset_class='crypto'
+      AND enabled=true
       AND provider IS NOT NULL
       AND status NOT IN ('legacy', 'disabled')
       AND COALESCE(market_status, status) NOT IN ('legacy', 'disabled')

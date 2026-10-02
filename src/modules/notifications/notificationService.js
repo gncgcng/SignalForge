@@ -9,6 +9,7 @@ import {
 } from "../../db/repositories.js";
 import { sendTelegramMessage } from "./telegramClient.js";
 import { formatSignalValidityWindow } from "../signals/signalValidityService.js";
+import { isCommoditySymbol } from "../markets/marketRegistry.js";
 
 const directions = new Set(["long", "short", "both"]);
 const timeframes = new Set(["5m", "15m", "1h", "4h"]);
@@ -311,7 +312,7 @@ function getDisplaySymbol(symbol = "") {
 }
 
 function getProviderLabel(symbol = "") {
-  if (["XAU/USD", "XAG/USD", "WTI", "BRENT", "NATGAS"].includes(symbol)) {
+  if (isCommoditySymbol(symbol)) {
     return `Twelve Data · ${symbol}`;
   }
 

@@ -57,8 +57,8 @@ const checks = {
   syncDeduplicates: products.filter((product) => product.providerSymbol === "BTC-USD").length === 1,
   rebuildCatalogImportsUsdCrypto: rebuildCatalog.has("BTC-USD") && !rebuildCatalog.has("USDC-USD"),
   rebuildCatalogMarksInactive: rebuildCatalog.get("MATIC-USD")?.tradingEnabled === false,
-  syncPreservesAdminSettings: serviceSource.includes("ON CONFLICT (provider_symbol) DO UPDATE SET") &&
-    !serviceSource.slice(serviceSource.indexOf("ON CONFLICT (provider_symbol)"), serviceSource.indexOf("await reloadCryptoMarketSettings", serviceSource.indexOf("ON CONFLICT (provider_symbol)"))).includes("scanner_enabled=EXCLUDED"),
+  syncPreservesAdminSettings: serviceSource.includes("ON CONFLICT (provider, provider_symbol) DO UPDATE SET") &&
+    !serviceSource.slice(serviceSource.indexOf("ON CONFLICT (provider, provider_symbol)"), serviceSource.indexOf("await reloadCryptoMarketSettings", serviceSource.indexOf("ON CONFLICT (provider, provider_symbol)"))).includes("scanner_enabled=EXCLUDED"),
   pendingBecomesActive: classifyCryptoVerification(passedChecks).marketStatus === "active",
   emptyBecomesUnavailable: classifyCryptoVerification(emptyChecks).marketStatus === "unavailable",
   timeoutBecomesProviderError: classifyCryptoVerification(timeoutChecks).marketStatus === "provider_error",

@@ -1,13 +1,6 @@
 import { appConfig } from "../../config/appConfig.js";
 import { MarketDataProviderError } from "./marketDataProviderError.js";
-
-export const twelveDataSymbolMap = {
-  "XAU/USD": "XAU/USD",
-  "XAG/USD": "XAG/USD",
-  WTI: "XTI/USD",
-  BRENT: "XBR/USD",
-  NATGAS: "XNG/USD"
-};
+import { getNonCryptoMarket } from "../markets/marketRegistry.js";
 
 const providerIntervals = {
   "5m": "5min",
@@ -26,7 +19,7 @@ export const twelveDataMarketDataProvider = {
     return Boolean(appConfig.twelveData.apiKey);
   },
   supports(symbol, timeframe) {
-    return Object.hasOwn(twelveDataSymbolMap, symbol) &&
+    return Boolean(resolveProviderSymbol(symbol)) &&
       Object.hasOwn(providerIntervals, timeframe);
   },
   getCachedCandles(symbol, timeframe) {
@@ -80,7 +73,7 @@ export const twelveDataMarketDataProvider = {
 
 async function fetchCandles(providerId, symbol, timeframe, cacheKey) {
     const url = new URL("/time_series", appConfig.twelveData.baseUrl);
-    url.searchParams.set("symbol", twelveDataSymbolMap[symbol]);
+    url.searchParams.set("symbol", resolveProviderSymbol(symbol));
     url.searchParams.set("interval", providerIntervals[timeframe]);
     url.searchParams.set("outputsize", String(appConfig.marketData.candleLimit));
     url.searchParams.set("format", "JSON");
@@ -171,6 +164,12 @@ async function fetchCandles(providerId, symbol, timeframe, cacheKey) {
     } finally {
       clearTimeout(timeout);
     }
+}
+
+// The symbol string Twelve Data expects comes from markets.provider_symbol (e.g. WTI -> XTI/USD).
+function resolveProviderSymbol(symbol) {
+  const market = getNonCryptoMarket(symbol);
+  return market?.provider === "twelve-data" ? market.providerSymbol : null;
 }
 
 function isValidPriceCandle(candle) {

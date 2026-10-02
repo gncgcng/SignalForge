@@ -72,7 +72,9 @@ const result = {
   commoditiesComingSoon: commodities.every((pair) => pair.status === "coming-soon"),
   stocksComingSoon: stocks.every((pair) => pair.status === "coming-soon"),
   requiredCommodityCoverage: requiredCommoditySymbols.every((symbol) => commodities.some((pair) => pair.symbol === symbol)),
-  naturalGasOptionalCoverage: optionalCommoditySymbols.every((symbol) => commodities.some((pair) => pair.symbol === symbol && pair.optional)),
+  // NATGAS was flagged `optional` in the old hardcoded array; nothing read the flag and the markets
+  // table has no such column, so only its presence is checked.
+  naturalGasOptionalCoverage: optionalCommoditySymbols.every((symbol) => commodities.some((pair) => pair.symbol === symbol)),
   allTimeframesSupported: supportChecks.every((check) => check.supported),
   allUnavailableMarketsRejectCleanly: comingSoonChecks.every((check) => {
     return check.rejected && check.code === "PROVIDER_NOT_CONFIGURED" && check.statusCode === 503;

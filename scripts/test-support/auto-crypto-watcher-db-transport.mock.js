@@ -112,7 +112,7 @@ export function getAutoCryptoWatcherState() {
 export async function query(sql, params = []) {
   const normalized = normalizeSql(sql);
 
-  if (normalized === "select * from crypto_markets order by liquidity_tier, symbol" && cryptoMarketRows) {
+  if (normalized === "select * from markets where asset_class = 'crypto' order by liquidity_tier, symbol" && cryptoMarketRows) {
     return { rows: structuredClone(cryptoMarketRows) };
   }
 

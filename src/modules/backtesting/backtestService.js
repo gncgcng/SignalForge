@@ -19,11 +19,15 @@ import { getTradingSession, tradingSessions } from "../intelligence/sessionIntel
 import { currentStrategyVersion } from "../analyst/signalAnalystService.js";
 import { saveGeneratedSignal } from "../admin-signals/generatedSignalService.js";
 import { cryptoMarketUniverse } from "../markets/cryptoMarkets.js";
+import { listMarketsByAssetClass } from "../markets/marketRegistry.js";
 
-export const backtestSymbols = [
-  ...cryptoMarketUniverse.map((market) => market.symbol),
-  "XAU/USD", "XAG/USD", "WTI", "BRENT"
-];
+// Commodities come from the markets registry, so this is resolved per call rather than at import.
+export function listBacktestSymbols() {
+  return [
+    ...cryptoMarketUniverse.map((market) => market.symbol),
+    ...listMarketsByAssetClass("commodity").map((market) => market.symbol)
+  ];
+}
 export const backtestTimeframes = ["15m", "1h", "4h"];
 export const strategyComponentNames = [
   "marketRegime",
@@ -47,7 +51,7 @@ const maximumHoldingBars = 20;
 const timeframeOrder = ["15m", "1h", "4h"];
 
 export async function runHistoricalBacktest(user, input) {
-  const symbols = normalizeSelections(input.symbols || input.symbol, backtestSymbols, "market");
+  const symbols = normalizeSelections(input.symbols || input.symbol, listBacktestSymbols(), "market");
   const timeframes = normalizeSelections(input.timeframes || input.timeframe, backtestTimeframes, "timeframe");
   const components = normalizeComponents(input.components);
   const sessionFilters = normalizeSessionFilters(input.sessions);

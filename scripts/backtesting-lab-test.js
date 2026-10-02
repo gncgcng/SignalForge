@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
-  backtestSymbols,
+  listBacktestSymbols,
   backtestTimeframes,
   calculateBacktestMetrics,
   strategyComponentNames
@@ -35,7 +35,7 @@ const requiredSymbols = [
   "LINK-USD", "AVAX-USD", "LTC-USD", "XAU/USD", "XAG/USD", "WTI", "BRENT"
 ];
 const result = {
-  marketCoverage: requiredSymbols.every((symbol) => backtestSymbols.includes(symbol)),
+  marketCoverage: requiredSymbols.every((symbol) => listBacktestSymbols().includes(symbol)),
   timeframeCoverage: ["15m", "1h", "4h"].every((timeframe) => backtestTimeframes.includes(timeframe)),
   componentCoverage: [
     "marketRegime", "multiTimeframe", "ema", "rsi", "adx", "atr", "supportResistance"

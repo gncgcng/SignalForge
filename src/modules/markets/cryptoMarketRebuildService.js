@@ -105,17 +105,19 @@ export function normalizeCoinbaseProductCatalog(products = []) {
 
 async function ensureProductRows(products, existingByProvider) {
   for (const product of products) {
-    await query(`INSERT INTO crypto_markets (
+    await query(`INSERT INTO markets (
+      id, asset_class, category, venue,
       symbol, display_symbol, provider_symbol, name, provider, liquidity_tier,
       enabled, scanner_enabled, paper_trading_enabled, watchlist_enabled,
       provider_status, base_asset, quote_asset, product_status, trading_enabled,
       market_status, verification_status, status
-    ) VALUES ($1,$2,$3,$4,'coinbase-exchange',$5,true,false,false,false,'unavailable',$6,$7,$8,$9,'unavailable','failed','unavailable')
-    ON CONFLICT (provider_symbol) DO UPDATE SET
+    ) VALUES ('crypto:' || $1, 'crypto', 'Crypto', 'Coinbase',
+      $1,$2,$3,$4,'coinbase-exchange',$5,true,false,false,false,'unavailable',$6,$7,$8,$9,'unavailable','failed','unavailable')
+    ON CONFLICT (provider, provider_symbol) DO UPDATE SET
       display_symbol=EXCLUDED.display_symbol,
       name=EXCLUDED.name,
       provider='coinbase-exchange',
-      liquidity_tier=COALESCE(crypto_markets.liquidity_tier, EXCLUDED.liquidity_tier),
+      liquidity_tier=COALESCE(markets.liquidity_tier, EXCLUDED.liquidity_tier),
       base_asset=EXCLUDED.base_asset,
       quote_asset=EXCLUDED.quote_asset,
       product_status=EXCLUDED.product_status,
@@ -239,7 +241,7 @@ async function rebuildProduct(product, existing = {}) {
 
 async function updateMarket(product, state) {
   const checkedAt = new Date();
-  await query(`UPDATE crypto_markets SET
+  await query(`UPDATE markets SET
     display_symbol=$2, name=$3, provider='coinbase-exchange', liquidity_tier=$4,
     base_asset=$5, quote_asset=$6, product_status=$7, trading_enabled=$8,
     enabled=$9, scanner_enabled=$10, paper_trading_enabled=$11, watchlist_enabled=$12,
@@ -265,7 +267,7 @@ async function cleanRemovedLegacyAndPendingMarkets(discoveredProviderSymbols, pr
   const summary = { legacy: 0, unavailable: 0, providerError: 0, disabled: 0 };
   const inactiveProducts = [...productCatalog.values()].filter((product) => product.usdCrypto && !product.tradingEnabled);
   for (const product of inactiveProducts) {
-    const inactive = await query(`UPDATE crypto_markets SET market_status='unavailable',
+    const inactive = await query(`UPDATE markets SET market_status='unavailable',
       verification_status='failed', status='unavailable', provider_status='unavailable',
       product_status=$2, trading_enabled=false, scanner_enabled=false, paper_trading_enabled=false,
       watchlist_enabled=false, last_error='Coinbase product is not trading-enabled.',
@@ -298,7 +300,7 @@ async function cleanRemovedLegacyAndPendingMarkets(discoveredProviderSymbols, pr
       finalStatus: "legacy",
       lastError: `Legacy Coinbase symbol. Use ${replacementSymbol}.`
     });
-    const legacy = await query(`UPDATE crypto_markets SET market_status='legacy', verification_status='legacy',
+    const legacy = await query(`UPDATE markets SET market_status='legacy', verification_status='legacy',
       status='legacy', provider_status='unavailable', enabled=false, scanner_enabled=false,
       paper_trading_enabled=false, watchlist_enabled=false, replacement_symbol=$2,
       last_error=$3, failure_code='LEGACY_MARKET', cooldown_until=NULL,
@@ -309,7 +311,7 @@ async function cleanRemovedLegacyAndPendingMarkets(discoveredProviderSymbols, pr
     summary.legacy += legacy.rows.length;
   }
 
-  const unavailable = await query(`UPDATE crypto_markets SET market_status='unavailable',
+  const unavailable = await query(`UPDATE markets SET market_status='unavailable',
     verification_status='failed', status='unavailable', provider_status='unavailable',
     scanner_enabled=false, paper_trading_enabled=false, watchlist_enabled=false,
     last_error=COALESCE(NULLIF(last_error, ''), 'Product not returned by Coinbase active-market rebuild.'),
@@ -323,7 +325,7 @@ async function cleanRemovedLegacyAndPendingMarkets(discoveredProviderSymbols, pr
     RETURNING symbol`, [[...discoveredProviderSymbols], checkedAt]);
   summary.unavailable += unavailable.rows.length;
 
-  const pendingCleanup = await query(`UPDATE crypto_markets SET market_status='unavailable',
+  const pendingCleanup = await query(`UPDATE markets SET market_status='unavailable',
     verification_status='failed', status='unavailable', provider_status='unavailable',
     scanner_enabled=false, paper_trading_enabled=false, watchlist_enabled=false,
     last_error=COALESCE(NULLIF(last_error, ''), 'Pending verification retired. Run market:rebuild-active for fresh provider checks.'),
@@ -336,7 +338,7 @@ async function cleanRemovedLegacyAndPendingMarkets(discoveredProviderSymbols, pr
     RETURNING symbol`, [checkedAt]);
   summary.unavailable += pendingCleanup.rows.length;
 
-  const disabled = await query(`UPDATE crypto_markets SET status='disabled', market_status='disabled',
+  const disabled = await query(`UPDATE markets SET status='disabled', market_status='disabled',
     verification_status='failed', scanner_enabled=false, paper_trading_enabled=false,
     watchlist_enabled=false, updated_at=now()
     WHERE provider='coinbase-exchange'
@@ -353,7 +355,7 @@ async function loadExistingMarkets() {
   const result = await query(`SELECT symbol, provider_symbol, enabled, scanner_enabled,
     paper_trading_enabled, watchlist_enabled, status, market_status,
     supported_timeframes, last_successful_candle_at, consecutive_failures
-    FROM crypto_markets WHERE provider='coinbase-exchange'`);
+    FROM markets WHERE provider='coinbase-exchange'`);
   return result.rows;
 }
 
@@ -364,7 +366,7 @@ function shouldEnableCapability(existing = {}, key) {
 }
 
 async function countCryptoMarkets() {
-  const result = await query("SELECT count(*)::int AS count FROM crypto_markets WHERE provider='coinbase-exchange'");
+  const result = await query("SELECT count(*)::int AS count FROM markets WHERE provider='coinbase-exchange'");
   return Number(result.rows[0]?.count || 0);
 }
 

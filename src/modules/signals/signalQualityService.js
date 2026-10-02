@@ -1,3 +1,5 @@
+import { isCommoditySymbol } from "../markets/marketRegistry.js";
+
 const categoryDefinitions = Object.freeze([
   ["trendAlignment", "Trend alignment"],
   ["momentum", "Momentum"],
@@ -307,7 +309,7 @@ function humanReason(value, fallback) {
 }
 
 function isCommodity(signal) {
-  return ["XAU/USD", "XAG/USD", "WTI", "BRENT", "NATGAS"].includes(signal.symbol);
+  return isCommoditySymbol(signal.symbol);
 }
 
 function joinLabels(labels) {
