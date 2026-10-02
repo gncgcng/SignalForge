@@ -1,4 +1,6 @@
 process.env.TWELVEDATA_API_KEY = "test-key";
+// 20 stubbed requests; this test is about routing, not the plan's per-minute throttle.
+process.env.TWELVEDATA_REQUESTS_PER_MINUTE = "1000";
 
 const commoditySymbols = ["XAU/USD", "XAG/USD", "WTI", "BRENT", "NATGAS"];
 const timeframes = ["1h", "4h", "15m", "5m"];

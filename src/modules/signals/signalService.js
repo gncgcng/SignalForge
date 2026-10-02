@@ -811,7 +811,10 @@ async function meterScanAllResult(user, result, scanKey) {
     allowedSetups.length,
     scanKey
   );
-  await cacheScanResult(user.id, scanKey, meteredResult);
+  // An incomplete scan is not cached: re-running it should retry the markets the provider missed.
+  if (meteredResult.publicResult.coverage?.complete !== false) {
+    await cacheScanResult(user.id, scanKey, meteredResult);
+  }
   await trackScanAllAnalytics(user, meteredResult.publicResult.scanned, false);
   return {
     ...meteredResult.publicResult,
@@ -828,7 +831,13 @@ async function trackScanAllAnalytics(user, scanned = [], cached = false) {
       userId: user.id,
       symbol: item.symbol,
       timeframe: item.timeframe,
-      metadata: { cached, mode: "scan_all", valid: Boolean(item.valid) }
+      metadata: {
+        cached,
+        mode: "scan_all",
+        valid: Boolean(item.valid),
+        providerError: Boolean(item.providerError),
+        ...(item.providerError ? { failureCode: item.rejectionReasonCodes?.[0] || "provider_unavailable" } : {})
+      }
     }))
   );
 }
@@ -1003,14 +1012,21 @@ async function finalizeManualScanContext(context) {
     candidates,
     finalizedDiagnostics,
     context.avoidTrades,
-    context.universe.skipped
+    context.universe.skipped,
+    context.marketsToScan
   );
   const marketBrief = await refreshMarketBriefSafely(context.briefObservations, scanSummary);
+  const coverage = scanSummary.coverage;
   console.info(
     `[scanner] ready=${scanSummary.ready} watching=${scanSummary.watching} ` +
     `avoid=${scanSummary.avoidTrade} rejected=${scanSummary.rejected} expired=${scanSummary.expired}`
   );
   console.info(`[scanner] top_rejection_reason=${scanSummary.topRejectionCode}`);
+  const coverageLine = `[scanner] coverage complete=${coverage.complete} expected=${coverage.expectedMarkets} ` +
+    `checked=${coverage.checkedMarkets} partial=${coverage.partiallyCheckedMarkets} unchecked=${coverage.uncheckedMarkets} ` +
+    `closed=${coverage.skippedClosedMarkets} failures=${Object.entries(coverage.failureReasons).map(([code, count]) => `${code}:${count}`).join(",") || "none"}`;
+  if (coverage.complete) console.info(coverageLine);
+  else console.warn(`${coverageLine} summary="${coverage.summary}"`);
 
   return {
     publicResult: {
@@ -1024,7 +1040,8 @@ async function finalizeManualScanContext(context) {
       scanUniverse: context.universe.summary,
       skippedMarkets: context.universe.skipped,
       marketBrief,
-      message: context.setups.length ? "Valid setups found." : "No high-probability setups right now"
+      coverage,
+      message: scanResultMessage(context.setups.length, coverage)
     },
     fullSetups: context.fullSetups
   };
@@ -1039,7 +1056,8 @@ function updateScanJobSnapshot(job, context) {
     candidates,
     diagnostics,
     context.avoidTrades,
-    context.universe.skipped
+    context.universe.skipped,
+    context.marketsToScan
   );
   job.privateFullSetups = [...context.fullSetups];
   job.result = {
@@ -1058,6 +1076,7 @@ function updateScanJobSnapshot(job, context) {
     },
     skippedMarkets: context.universe.skipped,
     marketBrief: null,
+    coverage: scanSummary.coverage,
     message: context.setups.length ? "Valid setups found." : "Scanning markets..."
   };
 }
@@ -1110,6 +1129,7 @@ function toScanAllJobStatus(job) {
     },
     skippedMarkets: result.skippedMarkets || [],
     marketBrief: result.marketBrief || null,
+    coverage: result.coverage || null,
     subscription: job.subscription || result.subscription || null,
     detectedAlerts: job.detectedAlerts || [],
     queuedTelegramAlerts: job.queuedTelegramAlerts || 0,
@@ -1147,12 +1167,13 @@ function findUserResumableScanAllJob(userId, { activeOnly = false } = {}) {
   return jobs.find((job) => ["completed", "failed", "cancelled"].includes(job.status)) || null;
 }
 
-export function summarizeScanBatch(scanned, setups, candidates, diagnostics, avoidTrades = [], skippedMarkets = []) {
+export function summarizeScanBatch(scanned, setups, candidates, diagnostics, avoidTrades = [], skippedMarkets = [], markets = null) {
   const watching = candidates.filter((candidate) => ["watching", "almost_ready"].includes(candidate.status)).length;
   const expired = candidates.filter((candidate) => candidate.status === "expired").length;
   const hasTypedResults = scanned.some((item) => item.resultType);
   const rejected = hasTypedResults
-    ? scanned.filter((item) => item.resultType === SCANNER_RESULT_TYPES.REJECTED).length
+    // A market the provider could not serve was never evaluated, so it is not a rejected setup.
+    ? scanned.filter((item) => item.resultType === SCANNER_RESULT_TYPES.REJECTED && !item.providerError).length
     : Math.max(
       candidates.filter((candidate) => candidate.status === "rejected").length,
       scanned.filter((item) => !item.valid && !item.providerError).length - watching - expired
@@ -1178,8 +1199,96 @@ export function summarizeScanBatch(scanned, setups, candidates, diagnostics, avo
     providerErrors: scanned.filter((item) => item.providerError).length,
     noData: scanned.filter((item) => (item.rejectionReasonCodes || []).some((code) =>
       ["invalid_market_data", "stale_data"].includes(code)
-    )).length
+    )).length,
+    ...(markets ? { coverage: summarizeScanCoverage(markets, scanned, skippedMarkets) } : {})
   };
+}
+
+const coverageReasonLabels = Object.freeze({
+  provider_rate_limit: "provider rate limit",
+  provider_auth_failed: "provider rejected the API key",
+  provider_unavailable: "provider unavailable",
+  stale_data: "stale data",
+  invalid_market_data: "not enough candle data",
+  unsupported_market: "not supported by the provider"
+});
+const coverageTypeLabels = Object.freeze({ crypto: "crypto markets", commodities: "commodities", other: "markets" });
+
+// Which selected markets were actually evaluated. A market whose every timeframe failed at the
+// provider was not checked at all; reporting "no setups" for it would be a false negative.
+export function summarizeScanCoverage(markets = [], scanned = [], skippedMarkets = []) {
+  const resultsBySymbol = new Map();
+  for (const item of scanned) {
+    if (!resultsBySymbol.has(item.symbol)) resultsBySymbol.set(item.symbol, []);
+    resultsBySymbol.get(item.symbol).push(item);
+  }
+  const byType = {};
+  const failureReasons = {};
+  const unchecked = [];
+  const partial = [];
+  let checked = 0;
+  let notScanned = 0;
+  for (const market of markets) {
+    const type = market.category === "Crypto" ? "crypto" : market.category === "Commodities" ? "commodities" : "other";
+    const bucket = byType[type] ||= { expected: 0, checked: 0, partial: 0, unchecked: 0, reasons: {} };
+    bucket.expected += 1;
+    const results = resultsBySymbol.get(market.symbol) || [];
+    const failed = results.filter((item) => item.providerError);
+    for (const item of failed) {
+      const code = item.rejectionReasonCodes?.[0] || "provider_unavailable";
+      failureReasons[code] = (failureReasons[code] || 0) + 1;
+      bucket.reasons[code] = (bucket.reasons[code] || 0) + 1;
+    }
+    if (!results.length) {
+      // Not reached yet (job still running) or the scan was cancelled: not a provider failure.
+      notScanned += 1;
+    } else if (failed.length === results.length) {
+      bucket.unchecked += 1;
+      unchecked.push({ symbol: market.symbol, type, reasons: [...new Set(failed.map((item) => item.rejectionReasonCodes?.[0]))] });
+    } else if (failed.length) {
+      bucket.partial += 1;
+      partial.push({ symbol: market.symbol, type, failedTimeframes: failed.map((item) => item.timeframe) });
+    } else {
+      bucket.checked += 1;
+      checked += 1;
+    }
+  }
+  const describeReasons = (reasons) => Object.entries(reasons)
+    .sort((a, b) => b[1] - a[1])
+    .map(([code]) => coverageReasonLabels[code] || code.replace(/_/g, " "))
+    .join(", ");
+  const sentences = [];
+  for (const [type, bucket] of Object.entries(byType)) {
+    if (bucket.unchecked) sentences.push(`${bucket.unchecked} of ${bucket.expected} ${coverageTypeLabels[type]} couldn't be checked (${describeReasons(bucket.reasons)})`);
+    if (bucket.partial) sentences.push(`${bucket.partial} of ${bucket.expected} ${coverageTypeLabels[type]} were only partially checked (${describeReasons(bucket.reasons)})`);
+  }
+  return {
+    complete: unchecked.length === 0 && partial.length === 0,
+    expectedMarkets: markets.length,
+    checkedMarkets: checked,
+    partiallyCheckedMarkets: partial.length,
+    uncheckedMarkets: unchecked.length,
+    notScannedMarkets: notScanned,
+    skippedClosedMarkets: skippedMarkets.filter((item) => item.reasonCode === "market_closed").length,
+    byType,
+    failureReasons,
+    unchecked,
+    partial,
+    summary: sentences.length ? `${sentences.join("; ")}.` : null
+  };
+}
+
+function scanResultMessage(setupCount, coverage) {
+  if (!coverage.complete) {
+    return setupCount
+      ? `Valid setups found, but the scan was incomplete: ${coverage.summary}`
+      : `Scan incomplete: ${coverage.summary} No setups were found among the markets that were checked.`;
+  }
+  if (setupCount) return "Valid setups found.";
+  if (coverage.expectedMarkets === 0 && coverage.skippedClosedMarkets > 0) {
+    return "All selected markets are closed right now; nothing was scanned.";
+  }
+  return "No high-probability setups right now";
 }
 
 async function runManualScanMarkets(markets, scanMarket) {
@@ -1220,6 +1329,9 @@ function slugDiagnostic(value) {
 }
 
 function humanizeScanFailure(error) {
+  const code = String(error?.code || "").toUpperCase();
+  if (code === "RATE_LIMITED") return "Provider rate limit reached.";
+  if (code === "PROVIDER_AUTH_FAILED") return "Provider rejected the API key.";
   const message = String(error?.message || "").toLowerCase();
   if (/stale|outdated|last candle/.test(message)) return "Data is stale.";
   if (/rate limit|too many requests|429/.test(message)) return "Provider rate limit reached.";
@@ -1229,6 +1341,10 @@ function humanizeScanFailure(error) {
 }
 
 function failureDiagnosticCode(error) {
+  // The provider's error code is authoritative; Twelve Data's rate-limit text never says "rate limit".
+  const code = String(error?.code || "").toUpperCase();
+  if (code === "RATE_LIMITED") return "provider_rate_limit";
+  if (code === "PROVIDER_AUTH_FAILED") return "provider_auth_failed";
   const message = String(error?.message || "").toLowerCase();
   if (/stale|outdated|last candle/.test(message)) return "stale_data";
   if (/rate limit|too many requests|429/.test(message)) return "provider_rate_limit";

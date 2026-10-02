@@ -24,12 +24,15 @@ export function generateSeries({ interval, endMs = Date.now(), count = 120, star
 }
 
 export async function startTwelveDataStandIn({
+  port = 0,                // 0 = any free port
   creditsPerMinute = Infinity,
+  windowMs = 60_000,      // the plan's credit window (Twelve Data: one minute)
   rateLimitStyle = "body", // "body": HTTP 200 + {status:"error",code:429}; "http": HTTP 429
   series = null,           // (symbol, interval) => values array (newest first); default generateSeries
-  fail = null              // (symbol, interval) => null | { status, body }
+  fail = null              // (symbol, interval, path) => null | { status, body }
 } = {}) {
   const requests = [];
+  const limits = { creditsPerMinute, windowMs, rateLimitStyle };
   let windowStart = Date.now();
   let used = 0;
 
@@ -37,36 +40,39 @@ export async function startTwelveDataStandIn({
     const url = new URL(req.url, "http://127.0.0.1");
     const symbol = url.searchParams.get("symbol");
     const interval = url.searchParams.get("interval");
-    const entry = { at: Date.now(), path: url.pathname, symbol, interval, apikey: url.searchParams.get("apikey"), outcome: "ok" };
+    const entry = {
+      at: Date.now(), path: url.pathname, symbol, interval, outcome: "ok",
+      apikey: url.searchParams.get("apikey"), timezone: url.searchParams.get("timezone")
+    };
     requests.push(entry);
     const send = (status, body) => {
       res.writeHead(status, { "content-type": "application/json" });
       res.end(JSON.stringify(body));
     };
 
-    if (Date.now() - windowStart >= 60_000) {
+    if (Date.now() - windowStart >= limits.windowMs) {
       windowStart = Date.now();
       used = 0;
     }
     used += 1;
-    if (used > creditsPerMinute) {
+    if (used > limits.creditsPerMinute) {
       entry.outcome = "rate_limited";
       const body = {
         code: 429,
-        message: `You have run out of API credits for the current minute. ${used} API credits were used, with the current limit being ${creditsPerMinute}. Wait for the next minute or consider switching to a higher tier plan at https://twelvedata.com/pricing`,
+        message: `You have run out of API credits for the current minute. ${used} API credits were used, with the current limit being ${limits.creditsPerMinute}. Wait for the next minute or consider switching to a higher tier plan at https://twelvedata.com/pricing`,
         status: "error"
       };
-      return send(rateLimitStyle === "http" ? 429 : 200, body);
+      return send(limits.rateLimitStyle === "http" ? 429 : 200, body);
     }
 
-    const injected = fail?.(symbol, interval);
+    const injected = fail?.(symbol, interval, url.pathname);
     if (injected) {
       entry.outcome = "injected_failure";
       return send(injected.status || 200, injected.body || { code: 500, message: "Injected failure", status: "error" });
     }
 
     if (url.pathname === "/api_usage") {
-      return send(200, { timestamp: new Date().toISOString(), current_usage: used, plan_limit: creditsPerMinute });
+      return send(200, { timestamp: new Date().toISOString(), current_usage: used, plan_limit: limits.creditsPerMinute });
     }
     if (url.pathname !== "/time_series" || !intervalMs[interval]) {
       entry.outcome = "bad_request";
@@ -81,13 +87,14 @@ export async function startTwelveDataStandIn({
     });
   });
 
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const { port } = server.address();
+  await new Promise((resolve) => server.listen(port, "127.0.0.1", resolve));
   return {
-    baseUrl: `http://127.0.0.1:${port}`,
+    baseUrl: `http://127.0.0.1:${server.address().port}`,
     requests,
     resetRequests() { requests.length = 0; },
     resetCredits() { windowStart = Date.now(); used = 0; },
+    // Change the simulated plan between test phases.
+    configure(next) { Object.assign(limits, next); windowStart = Date.now(); used = 0; },
     close: () => new Promise((resolve) => server.close(resolve))
   };
 }

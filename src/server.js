@@ -13,6 +13,7 @@ import { handleAdminGeneratedSignalRoutes } from "./modules/admin-signals/genera
 import { handleAdminCryptoMarketRoutes } from "./modules/markets/cryptoMarketController.js";
 import { initializeCryptoMarketSettings } from "./modules/markets/cryptoMarketService.js";
 import { loadMarketRegistry } from "./modules/markets/marketRegistry.js";
+import { runTwelveDataBootCheck } from "./modules/market-data/twelveDataMarketDataProvider.js";
 import { startCryptoMarketAvailabilityMonitor } from "./modules/markets/cryptoMarketMonitor.js";
 import { startCoinbaseCryptoMarketSync } from "./modules/markets/cryptoMarketSyncService.js";
 import { handleAuthRoutes } from "./modules/auth/authController.js";
@@ -210,6 +211,7 @@ await runPendingMigrations();
 await verifySessionSchema();
 await initializeCryptoMarketSettings();
 await loadMarketRegistry();
+await runTwelveDataBootCheck();
 
 server.listen(appConfig.port, () => {
   console.log(`${appConfig.appName} running at http://localhost:${appConfig.port}`);

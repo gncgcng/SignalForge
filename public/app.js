@@ -8200,12 +8200,19 @@ function renderScanSummary(opportunitiesFound, marketsScanned, timeframesScanned
   const skippedCount = counts.skipped ?? skippedMarkets.length ?? 0;
   const providerErrors = counts.providerErrors ?? errors.length ?? 0;
   const noData = counts.noData ?? 0;
+  // Markets the provider couldn't serve were never evaluated: say so instead of "no setups".
+  const coverage = counts.coverage || null;
+  const incomplete = coverage?.complete === false;
   scanSummaryPanel.classList.remove("hidden");
-  document.querySelector("#scan-summary-title").textContent = opportunitiesFound > 0
-    ? "Scan complete"
-    : counts.watching > 0 ? "No ready signals yet" : "No clean setups right now.";
+  document.querySelector("#scan-summary-title").textContent = incomplete
+    ? "Scan incomplete"
+    : opportunitiesFound > 0
+      ? "Scan complete"
+      : counts.watching > 0 ? "No ready signals yet" : "No clean setups right now.";
   document.querySelector("#scan-summary-opportunities").textContent = `${counts.ready} ready · ${counts.watching} watching · ${counts.avoidTrade || 0} avoid`;
-  document.querySelector("#scan-summary-markets").textContent = `${marketsScanned} market${marketsScanned === 1 ? "" : "s"} scanned`;
+  document.querySelector("#scan-summary-markets").textContent = incomplete
+    ? `${coverage.checkedMarkets} of ${coverage.expectedMarkets} markets fully checked`
+    : `${marketsScanned} market${marketsScanned === 1 ? "" : "s"} scanned`;
   document.querySelector("#scan-summary-timeframes").textContent = `${timeframesScanned} timeframes scanned`;
   document.querySelector("#scan-summary-ready").textContent = counts.ready;
   document.querySelector("#scan-summary-watching").textContent = counts.watching;
@@ -8219,11 +8226,16 @@ function renderScanSummary(opportunitiesFound, marketsScanned, timeframesScanned
     ? "No unlock credits used yet"
     : "No credits used";
   document.querySelector("#scan-summary-next").textContent = `Suggested next scan: ${formatSuggestedScanTime()}`;
-  document.querySelector("#scan-summary-reason").textContent = opportunitiesFound > 0
+  const coverageNote = incomplete ? `${coverage.summary} Results only cover the markets that were checked; try again shortly. ` : "";
+  document.querySelector("#scan-summary-reason").textContent = coverageNote + (opportunitiesFound > 0
     ? `Ready signals appear below. ${counts.watching ? `${counts.watching} additional setup${counts.watching === 1 ? " is" : "s are"} still being monitored.` : "No additional setups are being watched."}`
     : counts.watching > 0
       ? "Probable setups were found, but confirmation or entry readiness is still incomplete. No credits used."
-      : "SignalForge scanned the market but did not find enough confirmation for a valid setup. No credits used.";
+      : incomplete
+        ? "No valid setup among the markets that were checked. No credits used."
+        : coverage?.expectedMarkets === 0 && coverage?.skippedClosedMarkets > 0
+          ? "All selected markets are closed right now, so nothing was scanned. No credits used."
+          : "SignalForge scanned the market but did not find enough confirmation for a valid setup. No credits used.");
   document.querySelector("#scan-summary-diagnostics-content").innerHTML = `
     ${scanUniverse ? `<p><strong>Scanner universe:</strong> ${formatInteger(scanUniverse.selectedMarkets ?? scanUniverse.selectedManual ?? marketsScanned)} selected · ${formatInteger(scanUniverse.scannedMarkets ?? scanUniverse.selectedManual ?? marketsScanned)} scanned · ${formatInteger(scanUniverse.scanTasks || 0)} checks · ${formatInteger(scanUniverse.crypto || 0)} crypto · ${formatInteger(scanUniverse.commodities || 0)} commodities · ${formatInteger(scanUniverse.skipped || skippedCount)} skipped</p>` : ""}
     <p><strong>Most common avoid reason:</strong> ${escapeHtml(summary?.topAvoidReason || summary?.topRejectionReason || diagnostics?.topReasons?.[0]?.reason || "Strategy not matched")}</p>

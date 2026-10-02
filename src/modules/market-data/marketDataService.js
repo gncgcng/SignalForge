@@ -230,6 +230,8 @@ export async function getOhlcv(symbol, timeframe, input = {}) {
           ? `${pair.symbol}: ${pair.availabilityMessage || "No candle data from provider"}.`
       : isCommodityMarket(pair) && pair.availabilityCode === "PROVIDER_NOT_CONFIGURED"
         ? `${pair.symbol}: Data provider not configured.`
+      : isCommodityMarket(pair) && pair.availabilityCode === "PROVIDER_AUTH_FAILED"
+        ? `${pair.symbol}: Data provider rejected the API key.`
         : `${pair.symbol} market data is Coming Soon.`,
       {
         statusCode: 503,

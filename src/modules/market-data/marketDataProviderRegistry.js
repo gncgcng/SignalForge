@@ -54,6 +54,15 @@ export function getPairProviderAvailability(pair) {
     };
   }
 
+  // A key that is present but was rejected at the boot-time check is not a working provider.
+  if (provider.getHealth?.().status === "rejected") {
+    return {
+      configured: false,
+      code: "PROVIDER_AUTH_FAILED",
+      message: "Data provider rejected the API key"
+    };
+  }
+
   return {
     configured: true,
     code: "LIVE",

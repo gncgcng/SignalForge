@@ -145,7 +145,14 @@ export const appConfig = {
   twelveData: {
     baseUrl: process.env.TWELVEDATA_API_BASE_URL || "https://api.twelvedata.com",
     apiKey: process.env.TWELVEDATA_API_KEY || "",
-    cacheTtlMs: Number(process.env.TWELVEDATA_CACHE_TTL_MS || 300000)
+    cacheTtlMs: Number(process.env.TWELVEDATA_CACHE_TTL_MS || 300000),
+    // API credits per minute on the configured Twelve Data plan (free plan: 8). Outgoing requests are
+    // queued and spaced to stay under it. Change this when the plan tier changes.
+    requestsPerMinute: Math.max(1, Number(process.env.TWELVEDATA_REQUESTS_PER_MINUTE || 8)),
+    // Length of the plan's rate window. Only tests shorten it.
+    rateWindowMs: Math.max(100, Number(process.env.TWELVEDATA_RATE_WINDOW_MS || 60000)),
+    // A queued request that cannot be sent within this long fails as a rate-limit miss.
+    maxQueueWaitMs: Math.max(1000, Number(process.env.TWELVEDATA_MAX_QUEUE_WAIT_MS || 180000))
   },
   manualScan: {
     maxMarkets: Math.max(200, Number(process.env.MANUAL_SCAN_MAX_MARKETS || 500)),
