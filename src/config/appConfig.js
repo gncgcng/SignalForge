@@ -169,7 +169,13 @@ export const appConfig = {
   },
   signalTracking: {
     enabled: true,
-    intervalMs: Number(process.env.SIGNAL_TRACKING_INTERVAL_MS || 60000)
+    intervalMs: Number(process.env.SIGNAL_TRACKING_INTERVAL_MS || 60000),
+    // Session-bound (non-crypto) signals are checked on their own slower loop to stay inside the
+    // Twelve Data budget: one request per open market per cycle, nothing while a market is closed.
+    nonCryptoIntervalMs: Math.max(300000, Number(process.env.NON_CRYPTO_OUTCOME_INTERVAL_MS || 900000)),
+    // After a validity window ends, how long to keep retrying the final window check (provider
+    // outage, lagging data) before expiring the signal as unverified.
+    nonCryptoFinalCheckGraceMs: Math.max(900000, Number(process.env.NON_CRYPTO_OUTCOME_FINAL_CHECK_GRACE_MS || 21600000))
   },
   autoScan: {
     enabled: process.env.CRYPTO_WATCHER_ENABLED !== "false" && process.env.AUTO_SCAN_ENABLED !== "false",

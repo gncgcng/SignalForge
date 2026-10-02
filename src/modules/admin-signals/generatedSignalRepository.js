@@ -222,8 +222,10 @@ export async function listGeneratedSignalPerformanceRecords(filters = {}) {
   }));
 }
 
-export async function listActiveGeneratedSignals(limit = 500) {
-  const result = await query("SELECT * FROM generated_signals WHERE status = 'Active' ORDER BY created_at ASC LIMIT $1", [limit]);
+export async function listActiveGeneratedSignals(limit = 500, { pairs = null } = {}) {
+  const result = pairs
+    ? await query("SELECT * FROM generated_signals WHERE status = 'Active' AND pair = ANY($2) ORDER BY created_at ASC LIMIT $1", [limit, pairs])
+    : await query("SELECT * FROM generated_signals WHERE status = 'Active' ORDER BY created_at ASC LIMIT $1", [limit]);
   return result.rows.map(mapGeneratedSignal);
 }
 

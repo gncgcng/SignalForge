@@ -7,16 +7,21 @@ import {
   refreshLearningStats,
   updateSignalOutcome
 } from "../../db/repositories.js";
-import { getCachedOhlcv, getOhlcv, getPair } from "../market-data/marketDataService.js";
+import { getOhlcv } from "../market-data/marketDataService.js";
 import { runSignalPostMortem } from "./signalLearningService.js";
 import { getSignalValidUntil } from "./signalValidityService.js";
 import { recordPromotedCandidatePatternOutcome } from "./setupCandidateRepository.js";
-import { syncGeneratedSignalOutcome } from "../admin-signals/generatedSignalRepository.js";
-import { updateAllGeneratedSignalOutcomes } from "../admin-signals/generatedSignalService.js";
+import { listActiveGeneratedSignals, syncGeneratedSignalOutcome } from "../admin-signals/generatedSignalRepository.js";
+import { candleOutcome, recordGeneratedSignalOutcome, updateAllGeneratedSignalOutcomes } from "../admin-signals/generatedSignalService.js";
+import { getNonCryptoMarket, listNonCryptoMarkets } from "../markets/marketRegistry.js";
+import { isMarketOpen, nextOpen } from "../markets/sessionService.js";
 
 const terminalStatuses = new Set(["Hit TP", "Hit SL", "Expired"]);
 let trackingTimer = null;
 let trackingInProgress = false;
+let sessionTrackingTimer = null;
+let sessionTrackingInProgress = false;
+const timeframeMs = Object.freeze({ "5m": 300_000, "15m": 900_000, "1h": 3_600_000, "4h": 14_400_000 });
 
 export function calculateSignalStats(signals) {
   const totals = signals.reduce((stats, signal) => {
@@ -106,7 +111,9 @@ export function startSignalOutcomeTracker() {
 }
 
 async function updateSignalOutcomes(signals) {
-  const activeSignals = signals.filter((signal) => !terminalStatuses.has(signal.status || "Active"));
+  // Session-bound markets are tracked by trackSessionBoundSignalOutcomes on their own cadence.
+  const activeSignals = signals.filter((signal) =>
+    !terminalStatuses.has(signal.status || "Active") && !isSessionBoundSignal(signal));
 
   for (const signal of activeSignals) {
     try {
@@ -128,14 +135,7 @@ async function updateSingleSignalOutcome(signal) {
     return;
   }
 
-  const marketData = shouldFetchSignalOutcomeMarketData(signal)
-    ? await getOhlcv(signal.symbol, signal.timeframe)
-    : getCachedOhlcv(signal.symbol, signal.timeframe);
-
-  if (!marketData) {
-    return;
-  }
-
+  const marketData = await getOhlcv(signal.symbol, signal.timeframe);
   const candles = marketData.candles.filter((candle) => candle.time * 1000 >= createdAt.getTime());
 
   for (const candle of candles) {
@@ -148,11 +148,183 @@ async function updateSingleSignalOutcome(signal) {
   }
 }
 
+// Whether the every-minute tracker fetches market data for this signal. Session-bound markets are
+// never fetched here: trackSessionBoundSignalOutcomes owns them, at a rate the provider can sustain.
 export function shouldFetchSignalOutcomeMarketData(signal) {
-  return getPair(signal.symbol)?.category !== "Commodities";
+  return !isSessionBoundSignal(signal);
 }
 
-function getCandleOutcome(signal, candle) {
+export function isSessionBoundSignal(signal) {
+  return Boolean(getNonCryptoMarket(signal?.symbol || signal?.pair));
+}
+
+export function startSessionBoundOutcomeTracker() {
+  if (!appConfig.signalTracking.enabled || sessionTrackingTimer) return;
+  const runCycle = async () => {
+    if (sessionTrackingInProgress) return;
+    sessionTrackingInProgress = true;
+    try {
+      await trackSessionBoundSignalOutcomes();
+    } catch (error) {
+      console.warn(`[signal-outcome-tracker] session-bound cycle skipped: ${error.message}`);
+    } finally {
+      sessionTrackingInProgress = false;
+    }
+  };
+  setTimeout(runCycle, 30_000).unref?.();
+  sessionTrackingTimer = setInterval(runCycle, appConfig.signalTracking.nonCryptoIntervalMs);
+  console.info(`[signal-outcome-tracker] session-bound tracker started interval_ms=${appConfig.signalTracking.nonCryptoIntervalMs}`);
+}
+
+// Resolves open signals on session-bound (non-crypto) markets — saved user signals and the
+// generated signals behind admin performance stats — against real candles:
+// - one provider request per market per cycle, shared by every open signal on that market;
+// - nothing is fetched for a closed market (its validity clock is paused anyway), unless a signal
+//   there has reached the end of its window and needs its final check;
+// - a signal is only expired after its whole window has been checked against candles; if that is
+//   impossible for longer than the grace period it expires as explicitly unverified.
+export async function trackSessionBoundSignalOutcomes(dependencies = {}) {
+  const nowMs = dependencies.now ? new Date(dependencies.now()).getTime() : Date.now();
+  const listSaved = dependencies.listActiveSignals || listActiveSignals;
+  // Only session-bound pairs, so they can never sit behind hundreds of active crypto rows.
+  const listGenerated = dependencies.listActiveGeneratedSignals ||
+    (() => listActiveGeneratedSignals(5000, { pairs: listNonCryptoMarkets().map((market) => market.symbol) }));
+  const loadMarketData = dependencies.loadMarketData || ((symbol, timeframe) => getOhlcv(symbol, timeframe));
+  const graceMs = dependencies.finalCheckGraceMs ?? appConfig.signalTracking.nonCryptoFinalCheckGraceMs;
+
+  const tracked = [
+    ...(await listSaved())
+      .filter((signal) => !terminalStatuses.has(signal.status || "Active") && isSessionBoundSignal(signal))
+      .map((signal) => ({ kind: "saved", signal, symbol: signal.symbol, generatedAtMs: Date.parse(signal.generatedAt), validUntilMs: Date.parse(getSignalValidUntil(signal)) })),
+    ...(await listGenerated())
+      .filter((signal) => isSessionBoundSignal(signal))
+      .map((signal) => ({ kind: "generated", signal, symbol: signal.pair, generatedAtMs: Date.parse(signal.createdAt), validUntilMs: Date.parse(signal.validUntil) }))
+  ];
+  const bySymbol = new Map();
+  for (const item of tracked) {
+    if (!bySymbol.has(item.symbol)) bySymbol.set(item.symbol, []);
+    bySymbol.get(item.symbol).push(item);
+  }
+
+  const summary = {
+    markets: bySymbol.size, signals: tracked.length, requests: 0, skippedClosed: 0, providerFailures: 0,
+    hitTp: 0, hitSl: 0, expired: 0, expiredUnverified: 0, pending: 0, failures: []
+  };
+  for (const [symbol, items] of bySymbol) {
+    const market = getNonCryptoMarket(symbol);
+    const needsFinalCheck = items.some((item) => item.validUntilMs <= nowMs);
+    if (!isMarketOpen(market, nowMs) && !needsFinalCheck) {
+      summary.skippedClosed += 1;
+      summary.pending += items.length;
+      continue;
+    }
+    // Each signal gets the finest candles whose history still reaches back to it; signals that
+    // agree share one request (the usual case: one request per market per cycle).
+    const byTimeframe = new Map();
+    for (const item of items) {
+      const timeframe = chooseTrackingTimeframe(item, nowMs);
+      if (!byTimeframe.has(timeframe)) byTimeframe.set(timeframe, []);
+      byTimeframe.get(timeframe).push(item);
+    }
+    for (const [timeframe, group] of byTimeframe) {
+      let candles = null;
+      try {
+        summary.requests += 1;
+        candles = (await loadMarketData(symbol, timeframe))?.candles || [];
+      } catch (error) {
+        summary.providerFailures += 1;
+        summary.failures.push({ symbol, timeframe, code: error.code || "PROVIDER_ERROR", message: error.message });
+      }
+      for (const item of group) {
+        const decision = decideSessionBoundOutcome(item, candles, timeframe, market, nowMs, graceMs);
+        if (decision.status === "pending") {
+          summary.pending += 1;
+          continue;
+        }
+        await recordSessionBoundOutcome(item, decision, dependencies);
+        if (decision.status === "Hit TP") summary.hitTp += 1;
+        else if (decision.status === "Hit SL") summary.hitSl += 1;
+        else if (decision.verified) summary.expired += 1;
+        else summary.expiredUnverified += 1;
+      }
+    }
+  }
+
+  if (summary.signals || summary.providerFailures) {
+    console.info(
+      `[signal-outcome-tracker] session_bound markets=${summary.markets} signals=${summary.signals} ` +
+      `requests=${summary.requests} skipped_closed=${summary.skippedClosed} provider_failures=${summary.providerFailures} ` +
+      `hit_tp=${summary.hitTp} hit_sl=${summary.hitSl} expired=${summary.expired} ` +
+      `expired_unverified=${summary.expiredUnverified} pending=${summary.pending}`
+    );
+  }
+  for (const failure of summary.failures) {
+    console.warn(`[signal-outcome-tracker] session_bound_fetch_failed symbol=${failure.symbol} timeframe=${failure.timeframe} code=${failure.code}`);
+  }
+  return summary;
+}
+
+// Finest timeframe whose candle history (the provider returns a fixed number of candles) still
+// reaches back to the signal. Finer candles order TP/SL hits better and bound window-edge error.
+function chooseTrackingTimeframe(item, nowMs) {
+  const span = Math.max(0, nowMs - item.generatedAtMs);
+  const limit = appConfig.marketData.candleLimit;
+  // 0.8: margin for the in-progress candle and minor provider gaps.
+  return Object.keys(timeframeMs).find((timeframe) => timeframeMs[timeframe] * limit * 0.8 >= span) || "4h";
+}
+
+function decideSessionBoundOutcome(item, candles, timeframe, market, nowMs, graceMs) {
+  const { signal, generatedAtMs, validUntilMs } = item;
+  if (candles) {
+    const inWindow = candles.filter((candle) => {
+      const openedAt = Number(candle.time) * 1000;
+      return openedAt >= generatedAtMs && openedAt < validUntilMs;
+    });
+    for (const candle of inWindow) {
+      const hit = item.kind === "saved" ? getCandleOutcome(signal, candle, market) : candleOutcome(signal, candle);
+      if (hit) return { status: hit.status, reason: hit.reason, resolvedAtMs: Number(candle.time) * 1000, verified: true };
+    }
+  }
+  if (nowMs < validUntilMs) return { status: "pending" };
+
+  // The window is over and no hit was found. Expire only if the candles actually cover it: from the
+  // first open-market moment after generation through the end of validity.
+  const stepMs = timeframeMs[timeframe];
+  const coverageStartMs = isMarketOpen(market, generatedAtMs) ? generatedAtMs : nextOpen(market, generatedAtMs)?.getTime() ?? generatedAtMs;
+  const covered = Boolean(candles?.length) &&
+    Number(candles[0].time) * 1000 <= coverageStartMs &&
+    Number(candles.at(-1).time) * 1000 + stepMs >= validUntilMs;
+  if (covered) {
+    return {
+      status: "Expired",
+      reason: "Validity window ended before TP or SL was reached (checked against market candles for the full window).",
+      resolvedAtMs: validUntilMs,
+      verified: true
+    };
+  }
+  if (nowMs - validUntilMs < graceMs) return { status: "pending" };
+  return {
+    status: "Expired",
+    reason: "Validity window ended, but market data for the full window could not be retrieved, so the outcome is unverified.",
+    resolvedAtMs: validUntilMs,
+    verified: false
+  };
+}
+
+async function recordSessionBoundOutcome(item, decision, dependencies) {
+  if (item.kind === "generated") {
+    await recordGeneratedSignalOutcome(item.signal, decision.status, {
+      resolvedAt: new Date(decision.resolvedAtMs),
+      reason: decision.reason,
+      verified: decision.verified
+    }, dependencies);
+    return;
+  }
+  const mark = dependencies.markSavedSignal || markSignal;
+  await mark(item.signal, decision.status, decision.reason, Math.floor(decision.resolvedAtMs / 1000));
+}
+
+function getCandleOutcome(signal, candle, market = null) {
   const isLong = signal.direction === "long";
   const hitTp = isLong ? candle.high >= signal.takeProfit : candle.low <= signal.takeProfit;
   const hitSl = isLong ? candle.low <= signal.stopLoss : candle.high >= signal.stopLoss;
@@ -165,9 +337,10 @@ function getCandleOutcome(signal, candle) {
     return resolveSameCandleHit(signal, candle);
   }
 
+  const source = market ? "market" : "Coinbase";
   return hitTp
-    ? { status: "Hit TP", reason: "Take profit reached by live Coinbase candle." }
-    : { status: "Hit SL", reason: "Stop loss reached by live Coinbase candle." };
+    ? { status: "Hit TP", reason: `Take profit reached by live ${source} candle.` }
+    : { status: "Hit SL", reason: `Stop loss reached by live ${source} candle.` };
 }
 
 function resolveSameCandleHit(signal, candle) {

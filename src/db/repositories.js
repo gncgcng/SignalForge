@@ -2172,6 +2172,9 @@ export async function expireActiveSignalsPastValidity() {
           AND o.status = 'Active'
           AND s.valid_until <= now()
           AND NOT EXISTS (SELECT 1 FROM users du WHERE du.id = s.user_id AND du.deleted_at IS NOT NULL)
+          -- Session-bound markets are expired by the non-crypto outcome tracker, only after it has
+          -- checked the whole validity window against market data (signalOutcomeService).
+          AND NOT EXISTS (SELECT 1 FROM markets m WHERE m.symbol = s.symbol AND m.asset_class <> 'crypto')
         RETURNING o.saved_signal_id, o.resolved_at
       )
       UPDATE saved_signals s
@@ -2221,6 +2224,13 @@ export async function updateSignalOutcome(signal) {
       signal.lastTrackingError || null,
       signal.lastTrackingAttemptAt || null
     ]);
+    if (outcome.rows[0]?.status === "Expired") {
+      // Same bookkeeping as the expiry sweep, for expiries decided by an outcome tracker.
+      await client.query(
+        "UPDATE saved_signals SET expired_at = COALESCE(expired_at, $2, now()) WHERE id = $1",
+        [signal.id, signal.resolvedAt || null]
+      );
+    }
     await refundSignalCreditForTerminalOutcome(client, {
       savedSignalId: signal.id,
       status: outcome.rows[0]?.status || signal.status || "Active"

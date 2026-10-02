@@ -1,4 +1,5 @@
-import { getCachedOhlcv, getOhlcv, getPair } from "../market-data/marketDataService.js";
+import { getOhlcv } from "../market-data/marketDataService.js";
+import { getNonCryptoMarket } from "../markets/marketRegistry.js";
 import {
   getAdminSignalQualityBreakdown,
   updateSignalGroupStatus
@@ -58,7 +59,11 @@ export async function updateAllGeneratedSignalOutcomes(dependencies = {}) {
   const loadMarketData = dependencies.loadMarketData || loadGeneratedSignalMarketData;
   const warn = dependencies.warn || console.warn;
   const nowMs = dependencies.now ? Number(dependencies.now()) : Date.now();
-  const active = await listActive();
+  // Session-bound markets (commodities) are resolved by the dedicated lower-frequency tracker in
+  // signalOutcomeService, which pauses while the market is closed and checks the full window
+  // before expiring. This loop handles 24/7 crypto only.
+  const trackedElsewhere = dependencies.isTrackedElsewhere || ((signal) => Boolean(getNonCryptoMarket(signal.pair)));
+  const active = (await listActive()).filter((signal) => !trackedElsewhere(signal));
   const groups = new Map();
   for (const signal of active) {
     const key = `${signal.pair}:${signal.timeframe}`;
@@ -114,9 +119,22 @@ export async function updateAllGeneratedSignalOutcomes(dependencies = {}) {
 }
 
 async function loadGeneratedSignalMarketData(signal) {
-  return getPair(signal.pair)?.category === "Commodities"
-    ? getCachedOhlcv(signal.pair, signal.timeframe)
-    : getOhlcv(signal.pair, signal.timeframe);
+  return getOhlcv(signal.pair, signal.timeframe);
+}
+
+// Records an outcome decided by the session-bound tracker. An unverified expiry (the window could not
+// be checked against market data) is stored as Expired but kept out of forward R metrics.
+export async function recordGeneratedSignalOutcome(signal, status, { resolvedAt = null, reason, verified = true } = {}, dependencies = {}) {
+  return updateOutcomeStatus(signal, status, {
+    ...(resolvedAt ? { resolvedAt } : {}),
+    evaluatedAt: new Date(),
+    reason,
+    riskReward: signal.riskReward,
+    recordForwardOutcomeMetrics: verified && isForwardOutcomeEligibleSignal(signal)
+  }, {
+    updateStatus: dependencies.updateGeneratedSignalStatus || updateGeneratedSignalStatus,
+    warn: dependencies.warn || console.warn
+  });
 }
 
 async function updateOutcomeStatus(signal, attemptedStatus, details, { updateStatus, warn }) {
