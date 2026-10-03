@@ -62,6 +62,7 @@
     "test:trading-session": "node scripts/trading-session-test.js",
     "test:session-bound-outcomes": "node scripts/session-bound-outcome-tracking-test.js",
     "test:twelve-data-rate-limit": "node scripts/twelve-data-rate-limit-test.js",
+    "test:twelve-data-daily-limit": "node scripts/twelve-data-daily-limit-test.js",
     "test:crypto-market-sync": "node scripts/crypto-market-sync-test.js",
     "test:crypto-market-scanner-state": "node scripts/crypto-market-scanner-state-test.js",
     "test:manual-scanner-coverage": "node scripts/manual-scanner-market-coverage-test.js",

@@ -14,6 +14,7 @@ import { recordPromotedCandidatePatternOutcome } from "./setupCandidateRepositor
 import { listActiveGeneratedSignals, syncGeneratedSignalOutcome } from "../admin-signals/generatedSignalRepository.js";
 import { candleOutcome, recordGeneratedSignalOutcome, updateAllGeneratedSignalOutcomes } from "../admin-signals/generatedSignalService.js";
 import { getNonCryptoMarket, listNonCryptoMarkets } from "../markets/marketRegistry.js";
+import { getMarketDataProvider } from "../market-data/marketDataProviderRegistry.js";
 import { isMarketOpen, nextOpen } from "../markets/sessionService.js";
 
 const terminalStatuses = new Set(["Hit TP", "Hit SL", "Expired"]);
@@ -191,6 +192,7 @@ export async function trackSessionBoundSignalOutcomes(dependencies = {}) {
     (() => listActiveGeneratedSignals(5000, { pairs: listNonCryptoMarkets().map((market) => market.symbol) }));
   const loadMarketData = dependencies.loadMarketData || ((symbol, timeframe) => getOhlcv(symbol, timeframe));
   const graceMs = dependencies.finalCheckGraceMs ?? appConfig.signalTracking.nonCryptoFinalCheckGraceMs;
+  const dailyLimitReached = dependencies.isDailyLimitReached || providerDailyLimitReached;
 
   const tracked = [
     ...(await listSaved())
@@ -208,13 +210,20 @@ export async function trackSessionBoundSignalOutcomes(dependencies = {}) {
 
   const summary = {
     markets: bySymbol.size, signals: tracked.length, requests: 0, skippedClosed: 0, providerFailures: 0,
-    hitTp: 0, hitSl: 0, expired: 0, expiredUnverified: 0, pending: 0, failures: []
+    skippedDailyLimit: 0, hitTp: 0, hitSl: 0, expired: 0, expiredUnverified: 0, pending: 0, failures: []
   };
   for (const [symbol, items] of bySymbol) {
     const market = getNonCryptoMarket(symbol);
     const needsFinalCheck = items.some((item) => item.validUntilMs <= nowMs);
     if (!isMarketOpen(market, nowMs) && !needsFinalCheck) {
       summary.skippedClosed += 1;
+      summary.pending += items.length;
+      continue;
+    }
+    // Out of daily provider budget: wait for the reset. Nothing is decided, so the pause can never
+    // turn into an "unverified" expiry by itself; the first check after the reset decides normally.
+    if (dailyLimitReached(market)) {
+      summary.skippedDailyLimit += 1;
       summary.pending += items.length;
       continue;
     }
@@ -232,6 +241,13 @@ export async function trackSessionBoundSignalOutcomes(dependencies = {}) {
         summary.requests += 1;
         candles = (await loadMarketData(symbol, timeframe))?.candles || [];
       } catch (error) {
+        if (error.code === "DAILY_LIMIT_REACHED") {
+          // Budget ran out mid-cycle: same as above, leave these signals undecided.
+          summary.requests -= 1; // never sent
+          summary.skippedDailyLimit += 1;
+          summary.pending += group.length;
+          continue;
+        }
         summary.providerFailures += 1;
         summary.failures.push({ symbol, timeframe, code: error.code || "PROVIDER_ERROR", message: error.message });
       }
@@ -250,10 +266,10 @@ export async function trackSessionBoundSignalOutcomes(dependencies = {}) {
     }
   }
 
-  if (summary.signals || summary.providerFailures) {
+  if (summary.signals || summary.providerFailures || summary.skippedDailyLimit) {
     console.info(
       `[signal-outcome-tracker] session_bound markets=${summary.markets} signals=${summary.signals} ` +
-      `requests=${summary.requests} skipped_closed=${summary.skippedClosed} provider_failures=${summary.providerFailures} ` +
+      `requests=${summary.requests} skipped_closed=${summary.skippedClosed} skipped_daily_limit=${summary.skippedDailyLimit} provider_failures=${summary.providerFailures} ` +
       `hit_tp=${summary.hitTp} hit_sl=${summary.hitSl} expired=${summary.expired} ` +
       `expired_unverified=${summary.expiredUnverified} pending=${summary.pending}`
     );
@@ -262,6 +278,14 @@ export async function trackSessionBoundSignalOutcomes(dependencies = {}) {
     console.warn(`[signal-outcome-tracker] session_bound_fetch_failed symbol=${failure.symbol} timeframe=${failure.timeframe} code=${failure.code}`);
   }
   return summary;
+}
+
+function providerDailyLimitReached(market) {
+  try {
+    return Boolean(getMarketDataProvider(market).isDailyLimitReached?.());
+  } catch {
+    return false;
+  }
 }
 
 // Finest timeframe whose candle history (the provider returns a fixed number of candles) still

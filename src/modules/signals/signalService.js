@@ -1206,6 +1206,7 @@ export function summarizeScanBatch(scanned, setups, candidates, diagnostics, avo
 
 const coverageReasonLabels = Object.freeze({
   provider_rate_limit: "provider rate limit",
+  provider_daily_limit: "daily provider limit reached",
   provider_auth_failed: "provider rejected the API key",
   provider_unavailable: "provider unavailable",
   stale_data: "stale data",
@@ -1331,6 +1332,7 @@ function slugDiagnostic(value) {
 function humanizeScanFailure(error) {
   const code = String(error?.code || "").toUpperCase();
   if (code === "RATE_LIMITED") return "Provider rate limit reached.";
+  if (code === "DAILY_LIMIT_REACHED") return "Daily provider limit reached.";
   if (code === "PROVIDER_AUTH_FAILED") return "Provider rejected the API key.";
   const message = String(error?.message || "").toLowerCase();
   if (/stale|outdated|last candle/.test(message)) return "Data is stale.";
@@ -1344,6 +1346,7 @@ function failureDiagnosticCode(error) {
   // The provider's error code is authoritative; Twelve Data's rate-limit text never says "rate limit".
   const code = String(error?.code || "").toUpperCase();
   if (code === "RATE_LIMITED") return "provider_rate_limit";
+  if (code === "DAILY_LIMIT_REACHED") return "provider_daily_limit";
   if (code === "PROVIDER_AUTH_FAILED") return "provider_auth_failed";
   const message = String(error?.message || "").toLowerCase();
   if (/stale|outdated|last candle/.test(message)) return "stale_data";

@@ -152,7 +152,10 @@ export const appConfig = {
     // Length of the plan's rate window. Only tests shorten it.
     rateWindowMs: Math.max(100, Number(process.env.TWELVEDATA_RATE_WINDOW_MS || 60000)),
     // A queued request that cannot be sent within this long fails as a rate-limit miss.
-    maxQueueWaitMs: Math.max(1000, Number(process.env.TWELVEDATA_MAX_QUEUE_WAIT_MS || 180000))
+    maxQueueWaitMs: Math.max(1000, Number(process.env.TWELVEDATA_MAX_QUEUE_WAIT_MS || 180000)),
+    // API credits per UTC day on the plan (free plan: 800). Once spent, requests fail fast as
+    // DAILY_LIMIT_REACHED, the session-bound outcome tracker skips, and scans report it.
+    requestsPerDay: Math.max(1, Number(process.env.TWELVEDATA_REQUESTS_PER_DAY || 800))
   },
   manualScan: {
     maxMarkets: Math.max(200, Number(process.env.MANUAL_SCAN_MAX_MARKETS || 500)),

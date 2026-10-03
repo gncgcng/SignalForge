@@ -32,7 +32,8 @@ export async function startTwelveDataStandIn({
   fail = null              // (symbol, interval, path) => null | { status, body }
 } = {}) {
   const requests = [];
-  const limits = { creditsPerMinute, windowMs, rateLimitStyle };
+  // dailyUsage / planDailyLimit: what /api_usage reports for the day (real plans: 800/day free).
+  const limits = { creditsPerMinute, windowMs, rateLimitStyle, dailyUsage: null, planDailyLimit: null };
   let windowStart = Date.now();
   let used = 0;
 
@@ -72,7 +73,11 @@ export async function startTwelveDataStandIn({
     }
 
     if (url.pathname === "/api_usage") {
-      return send(200, { timestamp: new Date().toISOString(), current_usage: used, plan_limit: limits.creditsPerMinute });
+      return send(200, {
+        timestamp: new Date().toISOString(), current_usage: used, plan_limit: limits.creditsPerMinute,
+        ...(limits.dailyUsage === null ? {} : { daily_usage: limits.dailyUsage }),
+        ...(limits.planDailyLimit === null ? {} : { plan_daily_limit: limits.planDailyLimit })
+      });
     }
     if (url.pathname !== "/time_series" || !intervalMs[interval]) {
       entry.outcome = "bad_request";

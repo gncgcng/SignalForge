@@ -26,6 +26,10 @@ export const twelveDataMarketDataProvider = {
   getHealth() {
     return { ...credentialHealth };
   },
+  // True once today's TWELVEDATA_REQUESTS_PER_DAY budget is spent; callers can skip work up front.
+  isDailyLimitReached() {
+    return isDailyLimitReached();
+  },
   supports(symbol, timeframe) {
     return Boolean(resolveProviderSymbol(symbol)) &&
       Object.hasOwn(providerIntervals, timeframe);
@@ -88,6 +92,33 @@ const sentAt = [];
 let pausedUntil = 0;
 let queueTail = Promise.resolve();
 
+// Daily budget (plans also cap credits per day; free plan: 800). Counted per UTC day, by requests
+// actually sent. Once spent, requests fail immediately as DAILY_LIMIT_REACHED instead of queueing:
+// waiting would not help until the day rolls over.
+let daily = { day: utcDay(Date.now()), used: 0 };
+
+function utcDay(ms) {
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+function rollDailyCounter(now = Date.now()) {
+  const day = utcDay(now);
+  if (daily.day !== day) daily = { day, used: 0 };
+}
+
+function isDailyLimitReached() {
+  rollDailyCounter();
+  return daily.used >= appConfig.twelveData.requestsPerDay;
+}
+
+function dailyLimitError() {
+  return providerError(
+    `Twelve Data daily request limit reached (${daily.used}/${appConfig.twelveData.requestsPerDay} today, resets 00:00 UTC).`,
+    429,
+    "DAILY_LIMIT_REACHED"
+  );
+}
+
 function acquireRequestSlot() {
   const enqueuedAt = Date.now();
   const slot = queueTail.then(() => waitForCapacity(enqueuedAt));
@@ -99,12 +130,15 @@ async function waitForCapacity(enqueuedAt) {
   const { requestsPerMinute, rateWindowMs, maxQueueWaitMs } = appConfig.twelveData;
   for (;;) {
     const now = Date.now();
+    rollDailyCounter(now);
+    if (daily.used >= appConfig.twelveData.requestsPerDay) throw dailyLimitError();
     while (sentAt.length && now - sentAt[0] >= rateWindowMs) sentAt.shift();
     let waitMs = 0;
     if (pausedUntil > now) waitMs = pausedUntil - now;
     else if (sentAt.length >= requestsPerMinute) waitMs = sentAt[0] + rateWindowMs - now;
     if (waitMs <= 0) {
       sentAt.push(now);
+      daily.used += 1;
       return;
     }
     if (now + waitMs - enqueuedAt > maxQueueWaitMs) {
@@ -129,14 +163,22 @@ export function getTwelveDataThrottleState() {
   return {
     requestsPerMinute: appConfig.twelveData.requestsPerMinute,
     sentInWindow: sentAt.filter((at) => now - at < appConfig.twelveData.rateWindowMs).length,
-    pausedUntil: pausedUntil > now ? new Date(pausedUntil).toISOString() : null
+    pausedUntil: pausedUntil > now ? new Date(pausedUntil).toISOString() : null,
+    requestsPerDay: appConfig.twelveData.requestsPerDay,
+    usedToday: (rollDailyCounter(now), daily.used),
+    day: daily.day
   };
+}
+
+export function setTwelveDataDailyUsageForTest({ day = utcDay(Date.now()), used = 0 } = {}) {
+  daily = { day, used };
 }
 
 export function resetTwelveDataStateForTest() {
   sentAt.length = 0;
   pausedUntil = 0;
   queueTail = Promise.resolve();
+  daily = { day: utcDay(Date.now()), used: 0 };
   cache.clear();
   credentialHealth = { status: "unchecked", checkedAt: null, planLimitPerMinute: null, message: null };
 }
@@ -164,6 +206,15 @@ export async function verifyTwelveDataCredentials() {
       credentialHealth = { status: "unverified", checkedAt: new Date().toISOString(), planLimitPerMinute: null, message: `Credential check inconclusive (${code || response.status}).` };
     } else {
       const planLimit = Number(body.plan_limit);
+      // The provider's own count for today includes earlier processes and other consumers of the
+      // key, so start from it rather than from zero after every restart.
+      const providerDailyUsage = Number(body.daily_usage);
+      if (Number.isFinite(providerDailyUsage) && providerDailyUsage > daily.used) daily.used = providerDailyUsage;
+      const planDailyLimit = Number(body.plan_daily_limit);
+      if (Number.isFinite(planDailyLimit) && planDailyLimit > 0 && planDailyLimit < appConfig.twelveData.requestsPerDay) {
+        console.warn(`[twelve-data] TWELVEDATA_REQUESTS_PER_DAY=${appConfig.twelveData.requestsPerDay} exceeds the plan's daily limit ${planDailyLimit}; using ${planDailyLimit}`);
+        appConfig.twelveData.requestsPerDay = planDailyLimit;
+      }
       credentialHealth = {
         status: "ok",
         checkedAt: new Date().toISOString(),
@@ -193,7 +244,7 @@ export async function runTwelveDataBootCheck(log = console) {
     appConfig.twelveData.requestsPerMinute = health.planLimitPerMinute;
   }
   const line = `[twelve-data] credentials=${health.status} plan_limit=${health.planLimitPerMinute ?? "unknown"} ` +
-    `throttle_per_minute=${appConfig.twelveData.requestsPerMinute}${health.message ? ` detail="${health.message}"` : ""}`;
+    `throttle_per_minute=${appConfig.twelveData.requestsPerMinute} daily=${getTwelveDataThrottleState().usedToday}/${appConfig.twelveData.requestsPerDay}${health.message ? ` detail="${health.message}"` : ""}`;
   if (health.status === "ok" || health.status === "not_configured") log.info(line);
   else log.warn(line);
   return health;

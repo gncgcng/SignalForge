@@ -74,6 +74,7 @@ const AVOID_REASON_RULES = [
 const REJECT_ONLY_CODES = new Set([
   "provider_unavailable",
   "provider_rate_limit",
+  "provider_daily_limit",
   "provider_auth_failed",
   "unsupported_market",
   "unsupported_timeframe",
