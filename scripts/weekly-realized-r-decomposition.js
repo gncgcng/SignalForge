@@ -7,7 +7,7 @@
 // /tmp inside the Railway container, where it loads pg and the tab module from /app (APP_ROOT overrides).
 //
 //   node scripts/weekly-realized-r-decomposition.js --range 30d --timezone <IANA zone of the browser> --expect -44.71
-//   node scripts/weekly-realized-r-decomposition.js --range 90d --timezone <zone> --strategy "Momentum breakout" --direction short --generated-since 2026-08-10
+//   node scripts/weekly-realized-r-decomposition.js --range 90d --timezone <zone> --strategy momentum-breakout --direction short --generated-since 2026-08-10
 //
 // Options:
 //   --range <key>      Tab range: today | 7d | 30d | 90d | ytd | all | custom. Default 7d.
@@ -17,7 +17,8 @@
 //   --expect <R>       Figure seen in the tab (e.g. -44.71). If it does not reproduce, the script prints why
 //                      and stops before the breakdown (exit code 2) unless --force is given.
 //   --force            Print the breakdown even when --expect does not reproduce.
-//   --strategy <name>  Keep only this strategy (case-insensitive exact name, e.g. "Momentum breakout").
+//   --strategy <name>  Keep only this strategy: its name, any case, with any separators ("Momentum breakout"
+//                      or momentum-breakout).
 //   --direction <dir>  Keep only long or short signals.
 //                      Both filters apply after the --expect gate (which always checks the unfiltered tab
 //                      figure) and before every breakdown below it.
@@ -188,11 +189,14 @@ export function buildDecomposition(records, options = {}) {
 }
 
 // Resolves --strategy against the strategies actually present (a typo would otherwise report an empty window).
+// Matches on a slug so "Momentum breakout" and momentum-breakout both work (no quoting needed through railway ssh).
 function resolveFilter(records, options) {
   let strategy = null;
   if (options.strategy) {
     const known = [...new Set(records.map(strategyOf))].sort();
-    strategy = known.find((name) => name.toLowerCase() === options.strategy.toLowerCase());
+    const matches = known.filter((name) => slug(name) === slug(options.strategy));
+    if (matches.length > 1) throw new Error(`--strategy "${options.strategy}" is ambiguous: ${matches.join(", ")}.`);
+    strategy = matches[0];
     if (!strategy) throw new Error(`No signals with strategy "${options.strategy}". Known strategies: ${known.join(", ") || "none"}.`);
   }
   const direction = options.direction || null;
@@ -475,6 +479,7 @@ function symbolOf(record) { return String(record.pair || record.symbol || "Unkno
 // Same fallbacks as the tab's normalizeRecord; direction is lowercased so Long/long compare equal.
 function strategyOf(record) { return String(record.strategy || "Unknown"); }
 function directionOf(record) { return String(record.direction || "Unknown").toLowerCase(); }
+function slug(value) { return String(value).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""); }
 function weekStart(isoDate) {
   const [year, month, day] = isoDate.split("-").map(Number);
   return addDays(isoDate, -((new Date(Date.UTC(year, month - 1, day)).getUTCDay() || 7) - 1));
