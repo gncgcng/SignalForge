@@ -12,14 +12,19 @@ export async function handleAdminGeneratedSignalRoutes(req, res, pathname, url) 
     const groupKey = clean(body.groupKey, 160);
     if (!groupKey) return sendError(res, 400, "Performance group is required.");
     const status = clean(body.status, 40);
-    const updated = await updateAdminSignalGroupStatus({
-      groupKey,
-      status,
-      adminNote: clean(body.adminNote, 500),
-      penaltyOverride: numberFromBody(body.penaltyOverride),
-      confidenceCapOverride: numberFromBody(body.confidenceCapOverride)
-    }, req.user);
-    return sendJson(res, 200, { ok: true, status: updated });
+    try {
+      const updated = await updateAdminSignalGroupStatus({
+        groupKey,
+        status,
+        adminNote: clean(body.adminNote, 500),
+        penaltyOverride: numberFromBody(body.penaltyOverride),
+        confidenceCapOverride: numberFromBody(body.confidenceCapOverride)
+      }, req.user);
+      return sendJson(res, 200, { ok: true, status: updated });
+    } catch (error) {
+      if (error.statusCode) return sendError(res, error.statusCode, error.message);
+      throw error;
+    }
   }
 
   if (req.method !== "GET") return sendError(res, 405, "Method not allowed.");

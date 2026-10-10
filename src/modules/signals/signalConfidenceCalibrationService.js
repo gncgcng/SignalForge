@@ -496,6 +496,11 @@ export async function updateSignalGroupStatus({ groupKey, status, adminNote = ""
   const cleanStatus = adminStatuses.has(status) ? status : "active";
   const [groupType, ...valueParts] = String(groupKey || "").split(":");
   const groupValue = valueParts.join(":") || "unknown";
+  if (cleanStatus === "disabled_by_admin" && !canDisableGroupType(groupType)) {
+    const error = new Error(`${titleCase(groupType || "unknown")} groups can't be disabled: not a signal group.`);
+    error.statusCode = 400;
+    throw error;
+  }
   const result = await query(`
     INSERT INTO signal_strategy_statuses (
       group_key, group_type, group_value, status, admin_note, penalty_override,
@@ -596,7 +601,7 @@ async function aggregatePerformanceGroups(groupType, groupExpression, where = "t
       const groupKey = buildGroupKey(groupType, groupValue);
       const metrics = calculateGroupMetrics(row);
       const status = calculateGroupStatus(metrics, overrides.get(groupKey));
-      return { groupKey, groupType, groupValue, ...metrics, ...status };
+      return { groupKey, groupType, groupValue, ...metrics, ...status, canDisable: canDisableGroupType(groupType) };
     });
 }
 
@@ -732,6 +737,21 @@ async function loadStatusOverride(groupKey) {
 async function loadStatusOverrides() {
   const result = await query("SELECT * FROM signal_strategy_statuses");
   return new Map(result.rows.map((row) => [row.group_key, row]));
+}
+
+// The group types a live signal carries (buildSignalGroupDefinitions). Only these can be disabled_by_admin;
+// other calibration-tab groups (market_regime, source) never match a signal, so disabling them would do nothing.
+export const SIGNAL_GROUP_TYPES = Object.freeze([
+  "source_strategy_timeframe", "strategy", "pair_timeframe", "pair", "timeframe",
+  "direction", "confidence_bucket", "recent_strategy", "pattern"
+]);
+
+export function canDisableGroupType(groupType) {
+  return SIGNAL_GROUP_TYPES.includes(String(groupType || "").toLowerCase());
+}
+
+export function signalGroupTypesFor(signal) {
+  return buildSignalGroupDefinitions(signal).map((definition) => definition.groupType);
 }
 
 function buildSignalGroupDefinitions(signal) {

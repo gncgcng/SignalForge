@@ -13,8 +13,10 @@ export const UNLOCK_SAVE_REACHED = "UNLOCK_SAVE_REACHED";
 let overrideRows = [];
 let overrideLoads = 0;
 let groupStats = new Map();
+let aggregateRows = [];
 const rejections = [];
 const scanCache = new Map();
+const statusWrites = [];
 
 export function setAdminOverrideRows(rows) { overrideRows = structuredClone(rows); }
 export function getAdminOverrideLoads() { return overrideLoads; }
@@ -23,12 +25,22 @@ export function clearGroupStats() { groupStats = new Map(); }
 export function getValidationRejections() { return structuredClone(rejections); }
 export function clearValidationRejections() { rejections.length = 0; }
 export function setCachedScanResult(userId, scanKey, result) { scanCache.set(`${userId}|${scanKey}`, structuredClone(result)); }
+export function setAggregateRows(rows) { aggregateRows = structuredClone(rows); }
+export function getStatusWrites() { return structuredClone(statusWrites); }
+export function clearStatusWrites() { statusWrites.length = 0; }
 
 export async function query(sql, params = []) {
   const normalized = String(sql).replace(/\s+/g, " ").trim().toLowerCase();
   if (normalized.includes("from signal_strategy_statuses where status = 'disabled_by_admin'")) {
     overrideLoads += 1;
     return { rows: structuredClone(overrideRows.filter((row) => row.status === "disabled_by_admin")) };
+  }
+  if (normalized.includes(" as group_value,") && normalized.includes("group by group_value")) {
+    return { rows: structuredClone(aggregateRows) };
+  }
+  if (normalized.includes("insert into signal_strategy_statuses")) {
+    statusWrites.push({ groupKey: params[0], groupType: params[1], status: params[3] });
+    return { rows: [{ group_key: params[0], group_type: params[1], group_value: params[2], status: params[3] }] };
   }
   if (normalized.includes("insert into signal_validation_rejections")) {
     rejections.push({ symbol: params[3], timeframe: params[4], direction: params[5], strategy: params[6], reasons: JSON.parse(params[10]), source: params[11] });

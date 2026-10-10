@@ -4778,6 +4778,7 @@ function renderSignalQualityGroupList(title, items, mode = "worst") {
       <span><strong>${Number(group.winRate || 0).toFixed(1)}%</strong><small>${Number(group.estimatedExpectancy || 0).toFixed(2)}R expectancy · ${Number(group.expiredRate || 0).toFixed(1)}% expired · ${Number(group.averageRiskReward || 0).toFixed(2)}R avg RR</small><small>TP ${Number(group.hitTp || 0)} · SL ${Number(group.hitSl || 0)} · Exp ${Number(group.expired || 0)} · Conf ${Number(group.averageConfidence || 0).toFixed(1)}%</small></span>
       <span class="signal-quality-actions">
         ${mode === "best" ? renderBestSignalQualityActions(group) : renderWorstSignalQualityActions(group)}
+        ${group.canDisable === false ? `<small>Can't be disabled: not a signal group.</small>` : ""}
       </span>
     </div>`).join("")
     : `<p class="reasoning">Not enough data yet.</p>`;
@@ -4798,8 +4799,8 @@ function renderWorstSignalQualityActions(group) {
   return `
     <button class="secondary-action" data-signal-quality-status="active" data-group-key="${escapeHtml(group.groupKey)}" type="button">Restore</button>
     <button class="secondary-action" data-signal-quality-status="reduced_confidence" data-group-key="${escapeHtml(group.groupKey)}" type="button">Reduce</button>
-    <button class="secondary-action" data-signal-quality-status="quarantined" data-group-key="${escapeHtml(group.groupKey)}" type="button">Quarantine</button>
-    <button class="secondary-action" data-signal-quality-status="disabled_by_admin" data-group-key="${escapeHtml(group.groupKey)}" type="button">Disable</button>`;
+    <button class="secondary-action" data-signal-quality-status="quarantined" data-group-key="${escapeHtml(group.groupKey)}" type="button">Quarantine</button>${group.canDisable === false ? "" : `
+    <button class="secondary-action" data-signal-quality-status="disabled_by_admin" data-group-key="${escapeHtml(group.groupKey)}" type="button">Disable</button>`}`;
 }
 
 function renderSignalQualityBucketRows(items) {
