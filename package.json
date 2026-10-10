@@ -178,7 +178,8 @@
     "report:cross-strategy-direction-watch": "node scripts/cross-strategy-direction-watch-report.js",
     "test:cross-strategy-direction-watch": "node scripts/cross-strategy-direction-watch-test.js",
     "report:market-regime-diagnostic": "node scripts/market-regime-diagnostic-report.js",
-    "test:market-regime-diagnostic": "node scripts/market-regime-diagnostic-report-test.js"
+    "test:market-regime-diagnostic": "node scripts/market-regime-diagnostic-report-test.js",
+    "test:htf-alignment-report": "node scripts/htf-alignment-outcome-report-test.js"
   },
   "dependencies": {
     "pg": "^8.13.1"

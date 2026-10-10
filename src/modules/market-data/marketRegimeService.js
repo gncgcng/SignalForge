@@ -202,7 +202,8 @@ function wilders(values, period) {
   return output;
 }
 
-function ema(values, period) {
+// Exported for read-only diagnostics (scripts/htf-alignment-outcome-report.js); behaviour unchanged.
+export function ema(values, period) {
   const output = Array(values.length).fill(null);
   const multiplier = 2 / (period + 1);
   let previous = null;
