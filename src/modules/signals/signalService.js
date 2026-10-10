@@ -43,11 +43,13 @@ import {
 import { toLockedSignalQuality, withSignalQuality } from "./signalQualityService.js";
 import {
   applyConfidenceCalibration,
+  findAdminDisabledGroup,
   isSignalBlockedByCalibration,
   preserveDownstreamConfidence
 } from "./signalConfidenceCalibrationService.js";
 import {
   applyGeneratedSignalQualityBlock,
+  blockedGeneratedSignalStatuses,
   applyTimeframeConfidencePolicy,
   evaluateGeneratedSignalQualityGate
 } from "./generatedSignalQualityGate.js";
@@ -133,6 +135,14 @@ export async function createSignal(user, { symbol, timeframe, setupKey }) {
     status: "Active",
     statusUpdatedAt: new Date().toISOString()
   };
+  const adminGate = await evaluateAdminDisabledGate(signal, { source: "unlock", userId: user.id });
+  if (!adminGate.passed) {
+    return {
+      signal: null,
+      analysis: validationNoSetupAnalysis(result.fullSetup, qualityGateToValidation(result.fullSetup, adminGate)),
+      subscription: getSubscriptionSummary(user)
+    };
+  }
 
   await saveGeneratedSignal(signal, { source: "manual_scan", generatedBy: user.id });
 
@@ -192,6 +202,13 @@ async function unlockPreviouslyDiscoveredSetup(user, { symbol, timeframe, setupK
   }
 
   assertExactReadySetup(storedSetup, { symbol, timeframe, setupKey });
+  const adminGate = await evaluateAdminDisabledGate(storedSetup, { source: "scan_unlock", userId: user.id });
+  if (!adminGate.passed) {
+    const error = new Error("This scanner setup is no longer eligible to unlock.");
+    error.code = "SCAN_SETUP_NOT_READY";
+    error.statusCode = 409;
+    throw error;
+  }
   const signal = {
     ...storedSetup,
     userId: user.id,
@@ -347,6 +364,14 @@ export async function unlockTelegramSignal(user, { setupKey }) {
     { source: "telegram_alert" }
   );
   const validatedSignal = withSignalQuality(withSignalValidity(learningAdjustedSignal));
+  const adminGate = await evaluateAdminDisabledGate(validatedSignal, { source: "telegram_unlock", userId: user.id });
+  if (!adminGate.passed) {
+    return {
+      signal: null,
+      analysis: validationNoSetupAnalysis(signal, qualityGateToValidation(signal, adminGate)),
+      subscription: getSubscriptionSummary(user)
+    };
+  }
   await saveGeneratedSignal(validatedSignal, { source: "telegram_alert", generatedBy: user.id });
   const savedSignal = await saveUnlockedSignal(user.id, validatedSignal);
   if (!savedSignal?.alreadyUnlocked) {
@@ -452,9 +477,16 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
     : null;
   const cappedSignal = learnedSignal ? applyTimeframeConfidencePolicy(learnedSignal) : null;
   const calibrationBlocked = isSignalBlockedByCalibration(cappedSignal);
-  const qualityGate = cappedSignal && !calibrationBlocked
+  const generatedQualityGate = cappedSignal && !calibrationBlocked
     ? await evaluateGeneratedSignalQualityGate(cappedSignal, { source: generationSource })
     : { passed: !cappedSignal || calibrationBlocked };
+  // Checked with the confidence the signal would publish at, so its confidence_bucket group key matches.
+  const qualityGate = cappedSignal && !calibrationBlocked && generatedQualityGate.passed
+    ? await evaluateAdminDisabledGate({
+      ...cappedSignal,
+      confidenceScore: Math.min(cappedSignal.confidenceScore, candidate?.confidenceEstimate || 99)
+    }, { source: generationSource, userId: user?.id })
+    : generatedQualityGate;
   const qualityBlocked = Boolean(cappedSignal && !qualityGate.passed);
   const signal = cappedSignal && !calibrationBlocked && !qualityBlocked
     ? withSignalQuality({
@@ -1295,6 +1327,44 @@ function toUserSignal(signal) {
     signalQuality,
     indicators: { ...indicators, signalQuality }
   };
+}
+
+// The one admin-disabled check. Every publish path runs it: scanMarketSetupDetailed (manual scan, scan-all,
+// auto_crypto_watcher, and every Telegram enqueue, which only ever sends that scan's fullSetup) and each unlock
+// re-validation (createSignal, unlockPreviouslyDiscoveredSetup, unlockTelegramSignal). Signals already Active are
+// never revisited. A block is recorded as a validation rejection so it appears in the rejection counts.
+async function evaluateAdminDisabledGate(signal, context = {}) {
+  const group = await findAdminDisabledGroup(signal);
+  if (!group) return { passed: true, status: "passed", reasons: [] };
+  const checkedAt = new Date().toISOString();
+  const gate = {
+    passed: false,
+    type: "admin_disabled",
+    stage: "admin_disabled",
+    status: blockedGeneratedSignalStatuses.adminDisabled,
+    reason: group.reason,
+    reasons: [group.reason],
+    details: group,
+    checkedAt
+  };
+  try {
+    await recordSignalValidationRejection({
+      userId: context.userId || null,
+      setupKey: signal?.setupKey || signal?.id || null,
+      symbol: signal?.symbol || "unknown",
+      timeframe: signal?.timeframe || "unknown",
+      direction: signal?.direction || null,
+      strategy: signal?.setupType || signal?.strategy || "unknown",
+      validationScore: Number(signal?.validationScore || 0),
+      confidenceScore: Number(signal?.confidenceScore || 0),
+      riskRewardRatio: Number(signal?.riskRewardRatio || 0),
+      reasons: qualityGateToValidation(signal, gate).rejectedReasons,
+      source: context.source || "unknown"
+    });
+  } catch (error) {
+    console.warn(`[admin-disabled] rejection not recorded for ${signal?.symbol} ${signal?.timeframe}: ${error.message}`);
+  }
+  return gate;
 }
 
 function qualityGateToValidation(signal, gate = {}) {

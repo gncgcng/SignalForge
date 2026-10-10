@@ -179,7 +179,8 @@
     "test:cross-strategy-direction-watch": "node scripts/cross-strategy-direction-watch-test.js",
     "report:market-regime-diagnostic": "node scripts/market-regime-diagnostic-report.js",
     "test:market-regime-diagnostic": "node scripts/market-regime-diagnostic-report-test.js",
-    "test:htf-alignment-report": "node scripts/htf-alignment-outcome-report-test.js"
+    "test:htf-alignment-report": "node scripts/htf-alignment-outcome-report-test.js",
+    "test:admin-disabled-group-block": "node --import ./scripts/register-admin-disabled-group-block-loader.js ./scripts/admin-disabled-group-block-test.js"
   },
   "dependencies": {
     "pg": "^8.13.1"

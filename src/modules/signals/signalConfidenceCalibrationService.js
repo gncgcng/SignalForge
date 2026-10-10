@@ -9,6 +9,8 @@ const SAMPLE_SMALL = "Small sample size. Do not trust this result yet.";
 const SAMPLE_EARLY = "Early data. Calibration may change.";
 const CONFIDENCE_COPY = "Confidence reflects current setup alignment. Historical performance is diagnostic only and is not a guaranteed win rate.";
 const CONFIDENCE_WARNING_COPY = "Confidence calibration warning: higher confidence buckets are not outperforming lower buckets. Confidence should be tightened before promotion.";
+const ADMIN_DISABLED_CACHE_MS = 30 * 1000;
+let adminDisabledCache = null;
 
 export function breakEvenWinRate(averageRiskReward) {
   const rr = Number(averageRiskReward || 0);
@@ -517,7 +519,41 @@ export async function updateSignalGroupStatus({ groupKey, status, adminNote = ""
     finiteOrNull(confidenceCapOverride),
     userId || "admin"
   ]);
+  adminDisabledCache = null;
   return result.rows[0];
+}
+
+// Only an explicit admin row with status disabled_by_admin blocks publication; auto-computed statuses
+// (watchlist, reduced_confidence, quarantined) stay advisory. Rows are read at most once per cache window.
+export async function findAdminDisabledGroup(signal) {
+  const disabled = await loadAdminDisabledGroups();
+  if (!signal || !disabled.size) return null;
+  for (const definition of buildSignalGroupDefinitions(signal)) {
+    const row = disabled.get(buildGroupKey(definition.groupType, definition.groupValue));
+    if (row) {
+      return {
+        groupKey: buildGroupKey(definition.groupType, definition.groupValue),
+        groupType: definition.groupType,
+        groupValue: definition.groupValue,
+        adminNote: row.admin_note || null,
+        reason: `${titleCase(definition.groupType)} ${definition.groupValue} disabled by admin`
+      };
+    }
+  }
+  return null;
+}
+
+async function loadAdminDisabledGroups() {
+  const now = Date.now();
+  if (adminDisabledCache && now - adminDisabledCache.loadedAt < ADMIN_DISABLED_CACHE_MS) return adminDisabledCache.groups;
+  const result = await query("SELECT group_key, admin_note FROM signal_strategy_statuses WHERE status = 'disabled_by_admin'");
+  // Keys are normalized the way buildGroupKey builds them, so a row saved as "strategy:Momentum breakout" still matches.
+  const groups = new Map((result.rows || []).map((row) => {
+    const [groupType, ...valueParts] = String(row.group_key || "").split(":");
+    return [buildGroupKey(groupType, valueParts.join(":")), row];
+  }));
+  adminDisabledCache = { loadedAt: now, groups };
+  return groups;
 }
 
 async function loadSignalGroup(definition) {
