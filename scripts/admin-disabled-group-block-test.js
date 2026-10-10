@@ -143,6 +143,45 @@ try {
     assert.equal(await findAdminDisabledGroup({ ...signal, setupType: "Mean reversion" }), null);
   });
 
+  // ---------- keys as the production calibration tab saves them (slugs) ----------
+  nextWindow();
+  db.setAdminOverrideRows([
+    "strategy:momentum-breakout",
+    "strategy:breakout-retest",
+    "strategy:liquidity-sweep-reversal",
+    "pair:ltc-usd",
+    "market_regime:range"
+  ].map((group_key) => ({ group_key, status: "disabled_by_admin" })));
+  await check("slug rows block the strategies they name and pair:ltc-usd matches LTC-USD", async () => {
+    const signal = { symbol: "ETH-USD", timeframe: "15m", direction: "long", generationSource: "auto_crypto_watcher", confidenceScore: 85 };
+    for (const [setupType, groupKey] of [
+      ["Momentum breakout", "strategy:momentum-breakout"],
+      ["Breakout retest", "strategy:breakout-retest"],
+      ["Liquidity sweep reversal", "strategy:liquidity-sweep-reversal"]
+    ]) {
+      const group = await findAdminDisabledGroup({ ...signal, setupType });
+      assert.equal(group?.groupKey, groupKey);
+      assert.equal(group.reason, `Strategy ${setupType} disabled by admin`);
+    }
+    const ltc = await findAdminDisabledGroup({ ...signal, symbol: "LTC-USD", setupType: "Mean reversion" });
+    assert.equal(ltc?.groupKey, "pair:ltc-usd");
+    assert.equal(ltc.reason, "Pair LTC-USD disabled by admin");
+    // market_regime is a calibration-tab group but not one of a signal's group keys, so it never matches.
+    assert.equal(await findAdminDisabledGroup({ ...signal, setupType: "Mean reversion" }), null);
+  });
+  nextWindow();
+  resetWatcher([{ group_key: "pair:ltc-usd", status: "disabled_by_admin" }]);
+  fixtures.set("LTC-USD", LONG_FIXTURE);
+  const ltcScan = await scanMarketSetupDetailed(USER, { symbol: "LTC-USD", timeframe: "15m" });
+  const btcScan = await scanMarketSetupDetailed(USER, { symbol: "BTC-USD", timeframe: "15m" });
+  fixtures.delete("LTC-USD");
+  await check("pair:ltc-usd disabled: a real LTC-USD scan is blocked, BTC-USD still publishes", () => {
+    assert.equal(ltcScan.publicResult.valid, false);
+    assert.equal(ltcScan.fullSetup, null);
+    assert.deepEqual(ltcScan.analysis.rejectionReasons, ["Pair LTC-USD disabled by admin"]);
+    assert.equal(btcScan.publicResult.valid, true);
+  });
+
   // ---------- an auto-computed quarantine is advisory only ----------
   nextWindow();
   resetWatcher([]);
