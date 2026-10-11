@@ -65,7 +65,14 @@ for (const { name, email } of samples) {
   // Layout pieces.
   assert.match(email.html, /display:none;[^"]*max-height:0[^"]*mso-hide:all/, `${name}: no hidden preheader`);
   assert.match(email.html, /width="600"/, `${name}: not a 600px table layout`);
-  assert.match(email.html, /<v:roundrect[\s\S]+fillcolor="#22d3ee"/, `${name}: no Outlook (VML) button`);
+  // Button: dark teal with bold white text, in both the Outlook (VML) and the regular version.
+  assert.match(email.html, /<v:roundrect[^>]+fillcolor="#0e7490"/, `${name}: Outlook (VML) button isn't teal`);
+  assert.match(email.html, /<center style="color:#ffffff;[^"]*font-weight:bold;/, `${name}: Outlook button text isn't bold white`);
+  const button = email.html.match(/<a href="[^"]+" style="(display:inline-block;[^"]+)">/);
+  assert.ok(button, `${name}: no button link`);
+  assert.match(button[1], /background-color:#0e7490;/, `${name}: button background isn't teal`);
+  assert.match(button[1], /(^|;)color:#ffffff;/, `${name}: button text isn't white`);
+  assert.match(button[1], /font-weight:bold;/, `${name}: button text isn't bold`);
   assert.match(email.html, /Or paste this link:<br>/, `${name}: no paste-this-link fallback`);
   for (const footer of [
     "SignalForge · You&#039;re receiving this because you created an account at signalforge-app.com",
@@ -74,6 +81,20 @@ for (const { name, email } of samples) {
   assert.ok(email.text.includes("SignalForge · You're receiving this because you created an account at signalforge-app.com"));
 }
 results.everyTemplateHasHtmlTextAndNoPlaceholders = true;
+
+// WCAG contrast of the button text on its background (light mode, as rendered): at least 4.5:1.
+const luminance = (hex) => {
+  const [r, g, b] = [1, 3, 5].map((index) => parseInt(hex.slice(index, index + 2), 16) / 255)
+    .map((channel) => (channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+};
+const contrast = (a, b) => {
+  const [light, dark] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (light + 0.05) / (dark + 0.05);
+};
+const buttonContrast = contrast("#ffffff", "#0e7490");
+assert.ok(buttonContrast >= 4.5, `button contrast ${buttonContrast.toFixed(2)}:1 is below 4.5:1`);
+results.buttonTealWhiteContrast = Number(buttonContrast.toFixed(2));
 results.allLinksAbsoluteHttpsOnAppUrl = true;
 
 // Button URL is printed in full under the button.

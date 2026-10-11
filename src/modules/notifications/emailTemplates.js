@@ -21,8 +21,10 @@ const COLORS = {
   text: "#111827",
   muted: "#5b6676",
   link: "#0e7490",
-  cyan: "#22d3ee",
-  buttonText: "#04131a",
+  // Dark teal with white text (≈5.4:1). A bright cyan button with dark text came out as light
+  // text on bright cyan after Gmail's dark-mode inversion; this pair stays readable either way.
+  button: "#0e7490",
+  buttonText: "#ffffff",
   rule: "#e3e8ef"
 };
 const FONT = "Arial, Helvetica, sans-serif";
@@ -282,13 +284,13 @@ function renderButton(label, url) {
   const text = escapeHtml(label);
   return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:8px 0 0;"><tr><td align="left">
 <!--[if mso]>
-<v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${href}" style="height:48px;v-text-anchor:middle;width:260px;" arcsize="17%" stroke="f" fillcolor="${COLORS.cyan}">
+<v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${href}" style="height:48px;v-text-anchor:middle;width:260px;" arcsize="17%" stroke="f" fillcolor="${COLORS.button}">
 <w:anchorlock/>
 <center style="color:${COLORS.buttonText};font-family:${FONT};font-size:16px;font-weight:bold;">${text}</center>
 </v:roundrect>
 <![endif]-->
 <!--[if !mso]><!-- -->
-<a href="${href}" style="display:inline-block;background-color:${COLORS.cyan};color:${COLORS.buttonText};font-family:${FONT};font-size:16px;font-weight:bold;line-height:48px;text-align:center;text-decoration:none;width:260px;border-radius:8px;-webkit-text-size-adjust:none;mso-hide:all;">${text}</a>
+<a href="${href}" style="display:inline-block;background-color:${COLORS.button};color:${COLORS.buttonText};font-family:${FONT};font-size:16px;font-weight:bold;line-height:48px;text-align:center;text-decoration:none;width:260px;border-radius:8px;-webkit-text-size-adjust:none;mso-hide:all;">${text}</a>
 <!--<![endif]-->
 </td></tr></table>`;
 }
