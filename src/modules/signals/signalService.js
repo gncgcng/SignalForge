@@ -13,7 +13,8 @@ import {
   saveUnlockedSignal
 } from "../../db/repositories.js";
 import { createId } from "../../shared/ids.js";
-import { getManualScannerUniverse } from "../market-data/marketDataService.js";
+import { getManualScannerUniverse, getPair } from "../market-data/marketDataService.js";
+import { evaluateLiquidityFloor } from "../markets/marketLiquidityService.js";
 import { appConfig } from "../../config/appConfig.js";
 import { getMultiTimeframeMarketData } from "../market-data/multiTimeframeService.js";
 import {
@@ -481,12 +482,16 @@ export async function scanMarketSetupDetailed(user, { symbol, timeframe }, analy
     ? await evaluateGeneratedSignalQualityGate(cappedSignal, { source: generationSource })
     : { passed: !cappedSignal || calibrationBlocked };
   // Checked with the confidence the signal would publish at, so its confidence_bucket group key matches.
-  const qualityGate = cappedSignal && !calibrationBlocked && generatedQualityGate.passed
-    ? await evaluateAdminDisabledGate({
-      ...cappedSignal,
-      confidenceScore: Math.min(cappedSignal.confidenceScore, candidate?.confidenceEstimate || 99)
-    }, { source: generationSource, userId: user?.id })
+  const publicationSignal = cappedSignal && {
+    ...cappedSignal,
+    confidenceScore: Math.min(cappedSignal.confidenceScore, candidate?.confidenceEstimate || 99)
+  };
+  const liquidityGate = cappedSignal && !calibrationBlocked && generatedQualityGate.passed
+    ? await evaluateLiquidityFloorGate(publicationSignal, { source: generationSource, userId: user?.id })
     : generatedQualityGate;
+  const qualityGate = cappedSignal && !calibrationBlocked && liquidityGate.passed
+    ? await evaluateAdminDisabledGate(publicationSignal, { source: generationSource, userId: user?.id })
+    : liquidityGate;
   const qualityBlocked = Boolean(cappedSignal && !qualityGate.passed);
   const signal = cappedSignal && !calibrationBlocked && !qualityBlocked
     ? withSignalQuality({
@@ -1336,17 +1341,34 @@ function toUserSignal(signal) {
 async function evaluateAdminDisabledGate(signal, context = {}) {
   const group = await findAdminDisabledGroup(signal);
   if (!group) return { passed: true, status: "passed", reasons: [] };
-  const checkedAt = new Date().toISOString();
-  const gate = {
-    passed: false,
+  return recordPublicationBlock(signal, {
     type: "admin_disabled",
     stage: "admin_disabled",
     status: blockedGeneratedSignalStatuses.adminDisabled,
     reason: group.reason,
-    reasons: [group.reason],
-    details: group,
-    checkedAt
-  };
+    details: group
+  }, context);
+}
+
+// Crypto markets below the Coinbase 24h USD volume floor generate no signals. Runs in scanMarketSetupDetailed,
+// which every generating path uses: auto scanner, manual scan and scan-all, scoped watcher, watchlist alerts.
+// Inactive (always passes) until a liquidity refresh has succeeded.
+async function evaluateLiquidityFloorGate(signal, context = {}) {
+  if (getPair(signal?.symbol)?.category !== "Crypto") return { passed: true, status: "passed", reasons: [] };
+  const floor = evaluateLiquidityFloor(signal.symbol);
+  if (!floor.belowFloor) return { passed: true, status: "passed", reasons: [] };
+  return recordPublicationBlock(signal, {
+    type: "liquidity_floor",
+    stage: "liquidity_floor",
+    status: blockedGeneratedSignalStatuses.belowLiquidityFloor,
+    reason: floor.reason,
+    details: floor
+  }, context);
+}
+
+// Records a publication block as a validation rejection (so it appears in the rejection counts) and returns the gate.
+async function recordPublicationBlock(signal, block, context = {}) {
+  const gate = { passed: false, ...block, reasons: [block.reason], checkedAt: new Date().toISOString() };
   try {
     await recordSignalValidationRejection({
       userId: context.userId || null,
@@ -1362,7 +1384,7 @@ async function evaluateAdminDisabledGate(signal, context = {}) {
       source: context.source || "unknown"
     });
   } catch (error) {
-    console.warn(`[admin-disabled] rejection not recorded for ${signal?.symbol} ${signal?.timeframe}: ${error.message}`);
+    console.warn(`[${gate.stage}] rejection not recorded for ${signal?.symbol} ${signal?.timeframe}: ${error.message}`);
   }
   return gate;
 }

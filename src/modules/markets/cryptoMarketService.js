@@ -1,6 +1,7 @@
 import { appConfig } from "../../config/appConfig.js";
 import { query } from "../../db/client.js";
 import { cryptoMarketUniverse, cryptoTimeframes, findCryptoMarket } from "./cryptoMarkets.js";
+import { compareByLiquidity, evaluateLiquidityFloor } from "./marketLiquidityService.js";
 
 const establishedSymbols = new Set([
   "BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "ADA-USD", "DOGE-USD",
@@ -71,8 +72,20 @@ export function listEligibleScannerCryptoMarkets() {
     .filter((market) => isReadyStatus(market.status || market.marketStatus) && market.enabled && market.scannerEnabled && !isBlockingCooldown(market));
 }
 
+// Every enabled Coinbase USD crypto market: the products the liquidity refresh asks Coinbase about.
+export function listEnabledUsdCryptoSymbols() {
+  return listCryptoMarketSettings()
+    .filter((market) => market.enabled && /^[A-Z0-9]{1,20}-USD$/.test(market.providerSymbol || market.symbol))
+    .map((market) => market.providerSymbol || market.symbol);
+}
+
+// The auto scanner's markets: within each tier by Coinbase 24h USD volume (highest first, no data last), then
+// symbol; markets below the liquidity floor never take a slot. Before any liquidity refresh has succeeded both are
+// inactive, so this is the plain tier + symbol order.
 export function listScannerCryptoMarkets() {
-  return listEligibleScannerCryptoMarkets()
+  return [...listEligibleScannerCryptoMarkets()]
+    .sort((a, b) => tierOrder(a.liquidityTier) - tierOrder(b.liquidityTier) || compareByLiquidity(a.symbol, b.symbol) || a.symbol.localeCompare(b.symbol))
+    .filter((market) => !evaluateLiquidityFloor(market.symbol).belowFloor)
     .slice(0, appConfig.cryptoMarkets.maxActiveScannerPairs);
 }
 

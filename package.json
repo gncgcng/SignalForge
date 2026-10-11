@@ -181,7 +181,8 @@
     "test:market-regime-diagnostic": "node scripts/market-regime-diagnostic-report-test.js",
     "test:htf-alignment-report": "node scripts/htf-alignment-outcome-report-test.js",
     "test:admin-disabled-group-block": "node --import ./scripts/register-admin-disabled-group-block-loader.js ./scripts/admin-disabled-group-block-test.js",
-    "test:calibration-disable-guard": "node --import ./scripts/register-admin-disabled-group-block-loader.js ./scripts/calibration-disable-guard-test.js"
+    "test:calibration-disable-guard": "node --import ./scripts/register-admin-disabled-group-block-loader.js ./scripts/calibration-disable-guard-test.js",
+    "test:market-liquidity": "node --import ./scripts/register-admin-disabled-group-block-loader.js ./scripts/market-liquidity-test.js"
   },
   "dependencies": {
     "pg": "^8.13.1"

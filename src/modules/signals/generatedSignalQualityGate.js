@@ -7,7 +7,8 @@ export const blockedGeneratedSignalStatuses = Object.freeze({
   correlated: "Correlated duplicate",
   timeframe: "Quarantined timeframe",
   readiness: "Readiness failed",
-  adminDisabled: "Admin disabled"
+  adminDisabled: "Admin disabled",
+  belowLiquidityFloor: "Below liquidity floor"
 });
 
 const currentEngineSourceSql = "source NOT IN ('legacy_saved_signal','legacy_unlocked_signal')";

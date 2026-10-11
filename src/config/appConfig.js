@@ -137,6 +137,12 @@ export const appConfig = {
     verificationTimeoutMs: Math.max(1000, Number(process.env.MARKET_VERIFICATION_TIMEOUT_MS || 10000)),
     verificationRetries: Math.max(0, Number(process.env.MARKET_VERIFICATION_RETRIES || 2)),
     maxActiveScannerPairs: Math.max(1, Number(process.env.CRYPTO_MAX_ACTIVE_SCANNER_PAIRS || 25)),
+    // Crypto markets below this Coinbase 24h USD volume generate no signals (once a liquidity refresh has succeeded).
+    minVolume24hUsd: String(process.env.CRYPTO_MIN_24H_VOLUME_USD ?? "").trim() !== "" && Number.isFinite(Number(process.env.CRYPTO_MIN_24H_VOLUME_USD))
+      ? Math.max(0, Number(process.env.CRYPTO_MIN_24H_VOLUME_USD))
+      : 2000000,
+    liquidityRefreshEnabled: process.env.MARKET_LIQUIDITY_REFRESH_ENABLED !== "false",
+    liquidityRefreshIntervalMs: Math.max(3600000, Number(process.env.MARKET_LIQUIDITY_REFRESH_INTERVAL_MS || 21600000)),
     maxConcurrentRequests: Math.min(5, Math.max(1, Number(process.env.CRYPTO_MAX_CONCURRENT_REQUESTS || 4))),
     maxCandlesPerRequest: Math.min(300, Math.max(60, Number(process.env.CRYPTO_MAX_CANDLES_PER_REQUEST || 120))),
     unavailableCooldownMs: Math.max(300000, Number(process.env.CRYPTO_UNAVAILABLE_COOLDOWN_MS || 21600000)),
