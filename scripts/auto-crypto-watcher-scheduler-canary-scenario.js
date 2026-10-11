@@ -207,7 +207,10 @@ async function deterministicFetch(input) {
   const symbol = decodeURIComponent(url.pathname.split("/")[2] || "");
   const granularity = Number(url.searchParams.get("granularity"));
   marketRequests.push({ symbol, granularity });
-  const candles = buildCandles(granularity).map((candle) => [
+  const candles = buildCandles(granularity, {
+    start: new Date(url.searchParams.get("start")).getTime() / 1000,
+    end: new Date(url.searchParams.get("end")).getTime() / 1000
+  }).map((candle) => [
     candle.time, candle.low, candle.high, candle.open, candle.close, candle.volume
   ]).reverse();
   return new Response(JSON.stringify(candles), {
@@ -216,24 +219,31 @@ async function deterministicFetch(input) {
   });
 }
 
-function buildCandles(granularity) {
+// Same construction as auto-crypto-watcher-e2e-test.js since a58d555: candles cover the requested window (enough
+// completed history for every timeframe, including 4h built from 1h), indexed relative to the latest bar, and the
+// trigger move lands on the last completed bar because strategies only see completed candles.
+function buildCandles(granularity, window = {}) {
   const interval = Number.isFinite(granularity) && granularity > 0 ? granularity : 900;
   const latestTime = Math.floor(FIXED_NOW_MS / 1000 / interval) * interval;
-  const candles = [];
+  const firstTime = Math.ceil(Number(window.start ?? latestTime - 119 * interval) / interval) * interval;
+  const lastTime = Math.floor(Number(window.end ?? latestTime) / interval) * interval;
   const noSetup = scenario === "overlap" || scenario === "multi-overlap";
-  for (let index = 0; index < 120; index += 1) {
+  const candles = [];
+  for (let time = firstTime; time <= lastTime; time += interval) {
+    const index = 120 + Math.round((time - latestTime) / interval);
     const close = noSetup
       ? 100 + Math.sin(index * 0.38) * 0.02
       : 100 + index * 0.03 + Math.sin(index * 0.38 + 1.4) * 0.8;
-    const previousClose = index ? candles[index - 1].close : close - (noSetup ? 0 : 0.03);
-    const open = index === 119 && !noSetup ? close - 0.096 : previousClose;
+    const priorClose = candles.at(-1)?.close ?? close - (noSetup ? 0 : 0.03);
+    const isLastCompleted = time === latestTime - interval;
+    const open = isLastCompleted && !noSetup ? close - 0.096 : priorClose;
     candles.push({
-      time: latestTime - (119 - index) * interval,
+      time,
       open,
       high: Math.max(open, close) + (noSetup ? 0.04 : 0.144),
       low: Math.min(open, close) - (noSetup ? 0.04 : 0.144),
       close,
-      volume: index === 119 && !noSetup ? 1800 : 1000 + (index % 7) * 15
+      volume: isLastCompleted && !noSetup ? 1800 : 1000 + (Math.abs(index) % 7) * 15
     });
   }
   return candles;

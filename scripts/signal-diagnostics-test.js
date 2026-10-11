@@ -24,6 +24,9 @@ const requiredMajorCrypto = [
   "NEAR-USD",
   "SUI-USD"
 ];
+// Active without any crypto_markets rows (cryptoMarketService establishedSymbols, since 479f134). The other majors
+// above become active only after DB verification, so they are scanned as fixtures but not required to be active.
+const defaultActiveCrypto = ["BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "ADA-USD", "DOGE-USD", "LINK-USD", "AVAX-USD", "LTC-USD"];
 const timeframes = ["5m", "15m", "1h", "4h"];
 
 function confidenceFixture(overrides = {}) {
@@ -200,7 +203,7 @@ assert.equal(weakRejected.valid, false, "Weak fixture should produce no signal."
 assert.ok(weakRejected.analysis.rejectionReasons.length, "Rejected scans should include stable diagnostic reasons.");
 assert.ok(weakRejected.analysis.rejectionSummary.includes("No setup found because:"), "Rejected scans should include a human summary.");
 assert.ok(!commodityConfirmations.some((item) => item.name === "Volume"), "Commodity fixtures without volume should not require volume confirmation.");
-for (const symbol of requiredMajorCrypto) {
+for (const symbol of defaultActiveCrypto) {
   assert.ok(activeSymbols.has(symbol), `Missing required active crypto market ${symbol}.`);
 }
 assert.ok(Object.keys(debugReport.rejectionsByReason).length, "Debug report should aggregate rejection reasons.");
