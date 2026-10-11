@@ -82,7 +82,10 @@ try {
     analyticsScans: await evidence("analyticsScans", `SELECT symbol, timeframe, created_at, metadata->>'mode' AS mode,
       COALESCE((metadata->>'cached')::boolean, false) AS cached
       FROM product_analytics_events WHERE event_type = 'scan' AND symbol IS NOT NULL AND timeframe IS NOT NULL AND created_at >= ${since}`),
-    validationRejections: await evidence("validationRejections", `SELECT symbol, timeframe, source, created_at
+    // stages: every rejected reason's stage and text (e.g. admin_disabled, liquidity_floor); no user ids.
+    validationRejections: await evidence("validationRejections", `SELECT symbol, timeframe, direction, strategy, source, created_at,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object('stage', item->>'stage', 'reason', item->>'reason'))
+        FROM jsonb_array_elements(CASE WHEN jsonb_typeof(reasons) = 'array' THEN reasons ELSE '[]'::jsonb END) AS item), '[]'::jsonb) AS stages
       FROM signal_validation_rejections WHERE created_at >= ${since}`),
     candidates: await evidence("candidates", `SELECT symbol, timeframe, first_detected_at, last_checked_at
       FROM setup_candidates WHERE last_checked_at >= ${since} OR first_detected_at >= ${since}`),
