@@ -1867,9 +1867,17 @@ button {
   gap: 10px;
 }
 
+/* Expanded sections are as tall as their links (no cap, so nothing is clipped); collapsing animates
+   the links row from 1fr to 0fr, which needs no fixed height to animate from. */
 .nav-section {
   display: grid;
+  grid-template-rows: auto 1fr;
   gap: 7px;
+  transition: grid-template-rows 180ms ease;
+}
+
+.nav-section.collapsed {
+  grid-template-rows: auto 0fr;
 }
 
 .nav-section-toggle {
@@ -1908,15 +1916,16 @@ button {
 .nav-section-links {
   display: grid;
   gap: 6px;
+  min-height: 0;
   overflow: hidden;
-  max-height: 320px;
-  transition: max-height 180ms ease, opacity 160ms ease;
+  transition: opacity 160ms ease, visibility 0s linear 0s;
 }
 
 .nav-section.collapsed .nav-section-links {
-  max-height: 0;
   opacity: 0;
+  visibility: hidden;
   pointer-events: none;
+  transition: opacity 160ms ease, visibility 0s linear 180ms;
 }
 
 nav a {

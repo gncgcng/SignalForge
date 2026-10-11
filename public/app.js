@@ -436,6 +436,7 @@ const affiliateAdminNavLink = document.querySelector("#affiliate-admin-nav-link"
 const webhookEventsNavLink = document.querySelector("#webhook-events-nav-link");
 const adminSupportNavLink = document.querySelector("#admin-support-nav-link");
 const adminPromoCodesNavLink = document.querySelector("#admin-promo-codes-nav-link");
+const adminNavSection = document.querySelector("#admin-nav-section");
 const adminPromoForm = document.querySelector("#admin-promo-form");
 const adminPromoSubmit = document.querySelector("#admin-promo-submit");
 const adminPromoFormStatus = document.querySelector("#admin-promo-form-status");
@@ -3755,6 +3756,8 @@ async function bootDashboard() {
   authScreen.classList.add("hidden");
   dashboard.classList.remove("hidden");
   document.querySelector("#user-name").textContent = getUserDisplayName();
+  // The Administration sidebar section and its links exist only for admins.
+  adminNavSection?.classList.toggle("hidden", !state.user.isAdmin);
   adminNavLink.classList.toggle("hidden", !state.user.isAdmin);
   adminSignalsNavLink.classList.toggle("hidden", !state.user.isAdmin);
   adminCryptoMarketsNavLink.classList.toggle("hidden", !state.user.isAdmin);
@@ -11137,7 +11140,8 @@ function getStoredNavSections() {
     portfolio: true,
     growth: true,
     community: true,
-    account: true
+    account: true,
+    admin: true
   };
 
   try {
