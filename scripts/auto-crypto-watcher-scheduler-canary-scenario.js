@@ -10,6 +10,7 @@ const realLog = console.log;
 const realWarn = console.warn;
 const logs = [];
 const warnings = [];
+const errors = [];
 const marketRequests = [];
 const scheduledTimeouts = [];
 const scheduledIntervals = [];
@@ -29,6 +30,8 @@ globalThis.Date = FixedDate;
 globalThis.fetch = deterministicFetch;
 console.log = (...args) => logs.push(args.map(String).join(" "));
 console.warn = (...args) => warnings.push(args.map(String).join(" "));
+const realError = console.error;
+console.error = (...args) => errors.push(args.map(String).join(" "));
 globalThis.setTimeout = (callback, delay) => {
   scheduledTimeouts.push({ callback, delay });
   return scheduledTimeouts.length;
@@ -62,35 +65,17 @@ try {
     assert.equal(scheduledTimeouts.length, 0);
     assert.equal(scheduledIntervals.length, 0);
     result = { scheduled: false, scans: 0 };
-  } else if (["partial", "empty", "list-partial"].includes(scenario)) {
-    assert.equal(scheduledTimeouts.length, 0);
-    assert.equal(scheduledIntervals.length, 0);
-    assert.ok(warnings.some((message) => message.includes("canary configuration incomplete; scheduler disabled")));
-    result = { scheduled: false, scans: 0, failedClosed: scenario === "empty" ? "empty" : "incomplete" };
-  } else if (scenario === "invalid") {
-    assert.equal(scheduledTimeouts.length, 0);
-    assert.equal(scheduledIntervals.length, 0);
-    assert.ok(warnings.some((message) => message.includes("canary timeframe invalid (2h); scheduler disabled")));
-    result = { scheduled: false, scans: 0, failedClosed: "invalid_timeframe" };
-  } else if (scenario === "both-symbol-modes") {
-    assert.equal(scheduledTimeouts.length, 0);
-    assert.equal(scheduledIntervals.length, 0);
-    assert.ok(warnings.some((message) => message.includes("canary symbol configuration conflicts; scheduler disabled")));
-    result = { scheduled: false, scans: 0, failedClosed: "symbol_conflict" };
-  } else if (scenario === "list-empty") {
-    assert.equal(scheduledTimeouts.length, 0);
-    assert.equal(scheduledIntervals.length, 0);
-    assert.ok(warnings.some((message) => message.includes("canary symbol list empty or invalid; scheduler disabled")));
-    result = { scheduled: false, scans: 0, failedClosed: "empty_symbol_list" };
-  } else if (scenario === "list-too-many") {
-    assert.equal(scheduledTimeouts.length, 0);
-    assert.equal(scheduledIntervals.length, 0);
-    assert.ok(warnings.some((message) => message.includes("canary symbol limit exceeded (11/10); scheduler disabled")));
-    result = { scheduled: false, scans: 0, failedClosed: "symbol_limit" };
+  } else if (configurationFailureScenarios.has(scenario)) {
+    // A bad or leftover canary never disables auto-scanning: it logs an ERROR and schedules the full scan.
+    assert.equal(scheduledTimeouts.length, 1);
+    assert.equal(scheduledIntervals.length, 2);
+    assert.ok(errors.every((message) => message.endsWith("running the full scan instead")));
+    assert.ok(logs.some((message) => message.includes("[auto-scan] started") && message.includes("mode=full")));
+    result = { scheduled: true, scans: 0, fallbackToFullScan: classifyConfigurationError(errors[0]) };
   } else {
     assert.equal(scheduledTimeouts.length, 1);
     assert.equal(scheduledTimeouts[0].delay, 1000);
-    assert.equal(scheduledIntervals.length, 1);
+    assert.equal(scheduledIntervals.length, 2, "scan cycle plus the heartbeat check");
     assert.ok(scheduledIntervals[0].delay >= 60_000);
 
     const listMode = Boolean(process.env.AUTO_SCAN_CANARY_SYMBOLS !== undefined);
@@ -187,6 +172,7 @@ try {
   globalThis.setInterval = realSetInterval;
   console.log = realLog;
   console.warn = realWarn;
+  console.error = realError;
 }
 
 function configureUsers(db) {
@@ -270,4 +256,15 @@ function parseCycleSummary(messages) {
   if (!message) return null;
   const match = message.match(/requested_symbols=(\d+) scanned=(\d+)/);
   return match ? { requested: Number(match[1]), scanned: Number(match[2]) } : null;
+}
+
+function classifyConfigurationError(message = "") {
+  if (!message) return "none";
+  if (message.includes("AUTO_SCAN_MODE is not canary")) return "mode_not_canary";
+  if (message.includes("incomplete")) return "incomplete";
+  if (message.includes("timeframe invalid")) return "invalid_timeframe";
+  if (message.includes("conflicts")) return "symbol_conflict";
+  if (message.includes("list empty or invalid")) return "empty_symbol_list";
+  if (message.includes("limit exceeded")) return "symbol_limit";
+  return "other";
 }

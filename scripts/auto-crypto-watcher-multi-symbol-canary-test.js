@@ -8,6 +8,7 @@ const fiveSymbols = "BTC-USD,ETH-USD,SOL-USD,XRP-USD,DOGE-USD";
 const base = {
   CRYPTO_WATCHER_ENABLED: "true",
   AUTO_SCAN_ENABLED: "true",
+  AUTO_SCAN_MODE: "canary",
   AUTO_SCAN_CANARY_USER_ID: "user-a",
   AUTO_SCAN_CANARY_TIMEFRAME: "15m",
   CRYPTO_MAX_ACTIVE_SCANNER_PAIRS: "1"
@@ -39,6 +40,7 @@ const cases = [
     env: {
       CRYPTO_WATCHER_ENABLED: "true",
       AUTO_SCAN_ENABLED: "true",
+      AUTO_SCAN_MODE: "canary",
       AUTO_SCAN_CANARY_USER_ID: "user-a",
       AUTO_SCAN_CANARY_SYMBOLS: fiveSymbols
     }
@@ -66,10 +68,10 @@ assert.deepEqual(results["multi-invalid"].skippedSymbols, ["NOTREAL-USD"]);
 assert.equal(results["multi-overlap"].overlapSkipped, true);
 assert.equal(results["multi-overlap"].requestedSymbols, 5);
 assert.equal(results["multi-overlap"].scannedSymbols, 5);
-assert.equal(results["both-symbol-modes"].failedClosed, "symbol_conflict");
-assert.equal(results["list-too-many"].failedClosed, "symbol_limit");
-assert.equal(results["list-partial"].failedClosed, "incomplete");
-assert.equal(results["list-empty"].failedClosed, "empty_symbol_list");
+assert.equal(results["both-symbol-modes"].fallbackToFullScan, "symbol_conflict");
+assert.equal(results["list-too-many"].fallbackToFullScan, "symbol_limit");
+assert.equal(results["list-partial"].fallbackToFullScan, "incomplete");
+assert.equal(results["list-empty"].fallbackToFullScan, "incomplete", "an empty symbol list counts as unset");
 
 console.log(JSON.stringify({
   tests: { passed: 15, failed: 0 },
@@ -78,10 +80,10 @@ console.log(JSON.stringify({
   invalidSymbolIsolated: results["multi-invalid"],
   overlapProtectedForWholeCycle: results["multi-overlap"].overlapSkipped,
   configurationFailures: {
-    bothSymbolModes: results["both-symbol-modes"].failedClosed,
-    overLimit: results["list-too-many"].failedClosed,
-    partial: results["list-partial"].failedClosed,
-    empty: results["list-empty"].failedClosed
+    bothSymbolModes: results["both-symbol-modes"].fallbackToFullScan,
+    overLimit: results["list-too-many"].fallbackToFullScan,
+    partial: results["list-partial"].fallbackToFullScan,
+    empty: results["list-empty"].fallbackToFullScan
   }
 }, null, 2));
 
@@ -93,7 +95,7 @@ function runScenario(testCase) {
     TELEGRAM_BOT_TOKEN: "fixture-token",
     ...testCase.env
   };
-  for (const key of ["AUTO_SCAN_CANARY_USER_ID", "AUTO_SCAN_CANARY_SYMBOL", "AUTO_SCAN_CANARY_SYMBOLS", "AUTO_SCAN_CANARY_TIMEFRAME"]) {
+  for (const key of ["AUTO_SCAN_CANARY_USER_ID", "AUTO_SCAN_CANARY_SYMBOL", "AUTO_SCAN_CANARY_SYMBOLS", "AUTO_SCAN_CANARY_TIMEFRAME", "AUTO_SCAN_MODE"]) {
     if (!(key in testCase.env)) delete env[key];
   }
   const child = spawnSync(process.execPath, ["--import", loader, scenarioScript, testCase.name], {

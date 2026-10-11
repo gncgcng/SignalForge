@@ -14,6 +14,7 @@ const cases = [
     env: {
       CRYPTO_WATCHER_ENABLED: "true",
       AUTO_SCAN_ENABLED: "true",
+      AUTO_SCAN_MODE: "canary",
       AUTO_SCAN_CANARY_USER_ID: "user-a",
       AUTO_SCAN_CANARY_SYMBOL: " btc-usd ",
       AUTO_SCAN_CANARY_TIMEFRAME: "15M",
@@ -44,6 +45,7 @@ const cases = [
     env: {
       CRYPTO_WATCHER_ENABLED: "true",
       AUTO_SCAN_ENABLED: "true",
+      AUTO_SCAN_MODE: "canary",
       AUTO_SCAN_CANARY_USER_ID: "user-a",
       AUTO_SCAN_CANARY_SYMBOL: "BTC-USD",
       AUTO_SCAN_CANARY_TIMEFRAME: "2h"
@@ -54,6 +56,7 @@ const cases = [
     env: {
       CRYPTO_WATCHER_ENABLED: "true",
       AUTO_SCAN_ENABLED: "true",
+      AUTO_SCAN_MODE: "canary",
       AUTO_SCAN_CANARY_USER_ID: "user-a",
       AUTO_SCAN_CANARY_SYMBOL: "BTC-USD",
       AUTO_SCAN_CANARY_TIMEFRAME: "15m"
@@ -75,9 +78,9 @@ assert.deepEqual(results.canary.generatedScopes, ["BTC-USD:15m"]);
 assert.deepEqual(results.canary.candidateScopes, ["BTC-USD:15m"]);
 assert.deepEqual(results.canary.queuedUsers, ["user-a"]);
 assert.equal(results.canary.marketBriefRefreshed, false);
-assert.equal(results.partial.failedClosed, "incomplete");
-assert.equal(results.empty.failedClosed, "empty");
-assert.equal(results.invalid.failedClosed, "invalid_timeframe");
+assert.equal(results.partial.fallbackToFullScan, "mode_not_canary");
+assert.equal(results.empty.fallbackToFullScan, "none");
+assert.equal(results.invalid.fallbackToFullScan, "invalid_timeframe");
 assert.equal(results.overlap.overlapSkipped, true);
 assert.deepEqual(
   parseSmokeScope(["--symbol", "btc-usd", "--timeframe", "15M", "--user-id", "user-a"]),
@@ -92,9 +95,9 @@ console.log(JSON.stringify({
   },
   unconfiguredPreservesBroadMode: results.broad,
   configuredCanaryIsExact: results.canary,
-  partialConfigurationFailsClosed: true,
-  blankConfigurationFailsClosed: true,
-  invalidTimeframeFailsClosed: true,
+  partialConfigurationRunsFullScanWithError: true,
+  blankConfigurationRunsFullScan: true,
+  invalidTimeframeRunsFullScanWithError: true,
   overlappingCycleSkipped: true,
   scopedMarketBriefSkipped: true,
   smokeScopeUnchanged: true
@@ -108,7 +111,7 @@ function runScenario(testCase) {
     TELEGRAM_BOT_TOKEN: "fixture-token",
     ...testCase.env
   };
-  for (const key of ["AUTO_SCAN_CANARY_USER_ID", "AUTO_SCAN_CANARY_SYMBOL", "AUTO_SCAN_CANARY_SYMBOLS", "AUTO_SCAN_CANARY_TIMEFRAME"]) {
+  for (const key of ["AUTO_SCAN_CANARY_USER_ID", "AUTO_SCAN_CANARY_SYMBOL", "AUTO_SCAN_CANARY_SYMBOLS", "AUTO_SCAN_CANARY_TIMEFRAME", "AUTO_SCAN_MODE"]) {
     if (!(key in testCase.env)) delete env[key];
   }
   const child = spawnSync(process.execPath, ["--import", loader, scenarioScript, testCase.name], {

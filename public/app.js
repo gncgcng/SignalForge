@@ -4415,7 +4415,7 @@ async function loadAdminCryptoMarkets() {
   }
   adminCryptoMarketList.innerHTML = `<div class="empty-state"><strong>Loading crypto markets...</strong></div>`;
   const result = await api.request(`/api/admin/crypto-markets?${params}`);
-  state.adminCryptoMarkets = { ...state.adminCryptoMarkets, markets: result.markets || [], summary: result.summary || {}, displayed: result.displayed || 0, verificationJob: result.verificationJob || null };
+  state.adminCryptoMarkets = { ...state.adminCryptoMarkets, markets: result.markets || [], summary: result.summary || {}, displayed: result.displayed || 0, verificationJob: result.verificationJob || null, autoScan: result.autoScan || null };
   renderAdminCryptoMarkets();
   if (result.verificationJob?.running) renderCryptoVerificationProgress(result.verificationJob);
 }
@@ -4428,8 +4428,23 @@ function renderAdminCryptoMarkets() {
     ["Legacy / migrated", summary.legacy], ["Disabled by admin", summary.disabled],
     ["Total discovered", summary.totalDiscovered], ["Scanner enabled", summary.scannerEnabled],
     ["Paper trading", summary.paperTradingEnabled]
-  ].map(([label, value]) => `<article><span>${label}</span><strong>${Number(value || 0)}</strong></article>`).join("");
+  ].map(([label, value]) => `<article><span>${label}</span><strong>${Number(value || 0)}</strong></article>`).join("") +
+    renderAutoScanHealth(state.adminCryptoMarkets.autoScan);
   adminCryptoMarketList.innerHTML = markets.length ? markets.map(renderAdminCryptoMarket).join("") : `<div class="empty-state"><strong>No crypto markets match these filters.</strong></div>`;
+}
+
+// Auto-scan heartbeat: last completed cycle, staleness (no cycle for 30 minutes) and the last error.
+function renderAutoScanHealth(autoScan) {
+  if (!autoScan) return "";
+  const lastCycle = autoScan.lastCompletedCycleAt ? formatDateTime(autoScan.lastCompletedCycleAt) : "No cycle yet";
+  const status = !autoScan.schedulerRunning
+    ? "Scheduler not running"
+    : autoScan.stale
+      ? `Stale: no cycle in ${Number(autoScan.staleAfterMinutes || 30)}+ min`
+      : `Running (${escapeHtml(autoScan.mode || "full")} mode)`;
+  const problem = autoScan.configurationError || autoScan.lastCycleError?.message || "";
+  return `<article class="${autoScan.stale || !autoScan.schedulerRunning ? "warning" : ""}"><span>Auto-scan last cycle</span><strong>${escapeHtml(lastCycle)}</strong><small>${escapeHtml(status)}</small></article>` +
+    `<article class="${problem ? "warning" : ""}"><span>Auto-scan last error</span><strong>${problem ? "Error" : "None"}</strong><small>${escapeHtml(problem ? `${problem}${autoScan.lastCycleError?.at && !autoScan.configurationError ? ` (${formatDateTime(autoScan.lastCycleError.at)})` : ""}` : "No errors recorded")}</small></article>`;
 }
 
 function renderAdminCryptoMarket(market) {
