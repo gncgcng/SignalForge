@@ -61,6 +61,7 @@ try {
     password: "email-signup-pass",
     deviceFingerprint: `create-user-test-device-${run}-email`,
     legalConsentAccepted: true,
+    ageConfirmed: true,
     username: emailUsername
   }, fakeReq(1));
   assert.ok(session?.user?.id || session?.sessionId || session?.token, "email signup did not return a session");
@@ -73,7 +74,7 @@ try {
   const jwks = { keys: [{ ...publicKey.export({ format: "jwk" }), kid, alg: "RS256", use: "sig" }] };
   const b64 = (value) => Buffer.from(JSON.stringify(value)).toString("base64url");
   async function googleSignIn(email, n) {
-    const { state } = await startGoogleOAuth(fakeReq(10 + n), `create-user-test-device-${run}-google-${n}`, null);
+    const { state } = await startGoogleOAuth(fakeReq(10 + n), `create-user-test-device-${run}-google-${n}`, null, { legalConsentAccepted: true, ageConfirmed: true });
     const { nonce } = (await query("SELECT nonce FROM oauth_login_states ORDER BY created_at DESC LIMIT 1")).rows[0];
     const now = Math.floor(Date.now() / 1000);
     const unsigned = `${b64({ alg: "RS256", kid, typ: "JWT" })}.${b64({
