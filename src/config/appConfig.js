@@ -183,17 +183,14 @@ export const appConfig = {
     cryptoOnly: process.env.AUTO_SCAN_CRYPTO_ONLY !== "false",
     intervalMs: Number(process.env.AUTO_SCAN_INTERVAL_MS || 300000),
     duplicateCooldownMs: Number(process.env.AUTO_SCAN_DUPLICATE_COOLDOWN_MS || process.env.AUTO_SCAN_INTERVAL_MS || 900000),
+    // "full" (default) scans every Telegram setting and alert preference; "canary" scans only the AUTO_SCAN_CANARY_*
+    // scope and must be set explicitly. Empty canary values count as unset.
+    mode: String(process.env.AUTO_SCAN_MODE || "full").trim().toLowerCase() || "full",
     canary: {
       userId: String(process.env.AUTO_SCAN_CANARY_USER_ID || "").trim(),
       symbol: String(process.env.AUTO_SCAN_CANARY_SYMBOL || "").trim().toUpperCase(),
-      symbols: String(process.env.AUTO_SCAN_CANARY_SYMBOLS || ""),
-      timeframe: String(process.env.AUTO_SCAN_CANARY_TIMEFRAME || "").trim().toLowerCase(),
-      configured: {
-        userId: process.env.AUTO_SCAN_CANARY_USER_ID !== undefined,
-        symbol: process.env.AUTO_SCAN_CANARY_SYMBOL !== undefined,
-        symbols: process.env.AUTO_SCAN_CANARY_SYMBOLS !== undefined,
-        timeframe: process.env.AUTO_SCAN_CANARY_TIMEFRAME !== undefined
-      }
+      symbols: String(process.env.AUTO_SCAN_CANARY_SYMBOLS || "").trim(),
+      timeframe: String(process.env.AUTO_SCAN_CANARY_TIMEFRAME || "").trim().toLowerCase()
     }
   },
   candidates: {

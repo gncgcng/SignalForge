@@ -20,8 +20,19 @@ import { waitForPendingAvoidTradeLearningCleanup } from "../signals/setupCandida
 import { preferenceMatchesSetup } from "./alertService.js";
 
 let autoScanTimer = null;
+let heartbeatTimer = null;
 let autoScanRunning = false;
 const scheduledCanaryCycleToken = Symbol("scheduled-canary-cycle");
+export const AUTO_SCAN_HEARTBEAT_STALE_MS = 30 * 60 * 1000;
+const AUTO_SCAN_HEARTBEAT_CHECK_MS = 5 * 60 * 1000;
+const autoScanHealth = {
+  mode: "off",
+  schedulerStartedAt: null,
+  lastCompletedCycleAt: null,
+  lastCycleError: null,
+  configurationError: null,
+  lastHeartbeatWarningAt: null
+};
 
 export function startAutoCryptoAlertScanner() {
   if (!appConfig.autoScan.cryptoWatcherEnabled) {
@@ -32,116 +43,139 @@ export function startAutoCryptoAlertScanner() {
     return;
   }
 
-  const scheduledCanary = resolveScheduledAutoScanScope();
-  if (scheduledCanary.error) {
-    console.warn(scheduledCanary.error);
-    return;
-  }
+  // A bad canary configuration never disables auto-scanning: it is logged as an error and the full scan runs.
+  const schedule = resolveScheduledAutoScanScope();
+  if (schedule.error) console.error(schedule.error);
+  autoScanHealth.configurationError = schedule.error;
+  autoScanHealth.mode = schedule.scopes?.length ? "canary" : "full";
+  autoScanHealth.schedulerStartedAt = Date.now();
 
   const intervalMs = Math.max(60_000, Number(appConfig.autoScan.intervalMs || 900_000));
-  console.log(`[auto-scan] started interval_ms=${intervalMs}`);
-  if (scheduledCanary.scopes?.length === 1 && !scheduledCanary.listMode) {
+  console.log(`[auto-scan] started interval_ms=${intervalMs} mode=${autoScanHealth.mode}`);
+  if (schedule.scopes?.length === 1 && !schedule.listMode) {
     console.log(
-      `[crypto-watch] canary scheduler enabled user=${scheduledCanary.scopes[0].userId} ` +
-      `symbol=${scheduledCanary.scopes[0].symbol} timeframe=${scheduledCanary.scopes[0].timeframe}`
+      `[crypto-watch] canary scheduler enabled user=${schedule.scopes[0].userId} ` +
+      `symbol=${schedule.scopes[0].symbol} timeframe=${schedule.scopes[0].timeframe}`
     );
-  } else if (scheduledCanary.scopes?.length) {
+  } else if (schedule.scopes?.length) {
     console.log(
-      `[crypto-watch] canary scheduler enabled user=${scheduledCanary.scopes[0].userId} ` +
-      `symbols=${scheduledCanary.scopes.map((scope) => scope.symbol).join(",")} ` +
-      `timeframe=${scheduledCanary.scopes[0].timeframe}`
+      `[crypto-watch] canary scheduler enabled user=${schedule.scopes[0].userId} ` +
+      `symbols=${schedule.scopes.map((scope) => scope.symbol).join(",")} ` +
+      `timeframe=${schedule.scopes[0].timeframe}`
     );
   }
 
   setTimeout(() => {
-    runScheduledAutoScanCycle(scheduledCanary).catch((error) => {
+    runScheduledAutoScanCycle(schedule).catch((error) => {
       console.warn(`[auto-scan] failed ${error.message}`);
     });
   }, 1000);
 
   autoScanTimer = setInterval(() => {
-    runScheduledAutoScanCycle(scheduledCanary).catch((error) => {
+    runScheduledAutoScanCycle(schedule).catch((error) => {
       console.warn(`[auto-scan] failed ${error.message}`);
     });
   }, intervalMs);
+  heartbeatTimer = setInterval(() => checkAutoScanHeartbeat(), AUTO_SCAN_HEARTBEAT_CHECK_MS);
 }
 
-function resolveScheduledAutoScanScope() {
-  const canary = appConfig.autoScan.canary || {};
-  const configured = canary.configured || {};
-  const configuredCount = Object.values(configured).filter(Boolean).length;
-  if (configuredCount === 0) return { scopes: undefined, listMode: false, error: null };
-  if (configured.symbol && configured.symbols) {
-    return {
-      scopes: null,
-      listMode: false,
-      error: "[crypto-watch] canary symbol configuration conflicts; scheduler disabled"
-    };
+// Canary mode only with an explicit AUTO_SCAN_MODE=canary and a complete, valid AUTO_SCAN_CANARY_* scope. Anything
+// else that mentions a canary (leftover or partial variables, an unknown mode) returns the full scan with an error.
+export function resolveScheduledAutoScanScope(config = appConfig.autoScan) {
+  const canary = config.canary || {};
+  const mode = String(config.mode || "full").trim().toLowerCase() || "full";
+  const values = {
+    userId: String(canary.userId || "").trim(),
+    symbol: String(canary.symbol || "").trim().toUpperCase(),
+    symbols: String(canary.symbols || "").trim(),
+    timeframe: String(canary.timeframe || "").trim().toLowerCase()
+  };
+  const anyCanaryValue = Object.values(values).some(Boolean);
+  const fullScan = (problem = null) => ({
+    scopes: undefined,
+    listMode: false,
+    error: problem ? `[crypto-watch] ERROR ${problem}; running the full scan instead` : null
+  });
+
+  if (mode !== "canary") {
+    if (mode !== "full") return fullScan(`AUTO_SCAN_MODE=${mode} is not "full" or "canary"`);
+    return anyCanaryValue ? fullScan("AUTO_SCAN_CANARY_* is set but AUTO_SCAN_MODE is not canary") : fullScan();
   }
-  const usesSingleSymbol = configured.symbol && !configured.symbols;
-  const usesSymbolList = configured.symbols && !configured.symbol;
-  if (!configured.userId || !configured.timeframe || (!usesSingleSymbol && !usesSymbolList) ||
-    !canary.userId || !canary.timeframe) {
-    return {
-      scopes: null,
-      listMode: usesSymbolList,
-      error: "[crypto-watch] canary configuration incomplete; scheduler disabled"
-    };
+  if (values.symbol && values.symbols) {
+    return fullScan("canary symbol configuration conflicts (both AUTO_SCAN_CANARY_SYMBOL and AUTO_SCAN_CANARY_SYMBOLS are set)");
   }
-  if (!appConfig.supportedTimeframes.includes(canary.timeframe)) {
-    return {
-      scopes: null,
-      listMode: usesSymbolList,
-      error: `[crypto-watch] canary timeframe invalid (${canary.timeframe}); scheduler disabled`
-    };
+  if (!values.userId || !values.timeframe || (!values.symbol && !values.symbols)) {
+    return fullScan("canary configuration incomplete (AUTO_SCAN_MODE=canary needs AUTO_SCAN_CANARY_USER_ID, AUTO_SCAN_CANARY_TIMEFRAME and AUTO_SCAN_CANARY_SYMBOL or AUTO_SCAN_CANARY_SYMBOLS)");
+  }
+  if (!appConfig.supportedTimeframes.includes(values.timeframe)) {
+    return fullScan(`canary timeframe invalid (${values.timeframe})`);
   }
 
-  let symbols;
-  if (usesSingleSymbol) {
-    if (!canary.symbol) {
-      return {
-        scopes: null,
-        listMode: false,
-        error: "[crypto-watch] canary configuration incomplete; scheduler disabled"
-      };
-    }
-    symbols = [canary.symbol];
-  } else {
-    const entries = String(canary.symbols || "").split(",").map((symbol) => symbol.trim().toUpperCase());
-    if (!entries.length || entries.some((symbol) => !symbol)) {
-      return {
-        scopes: null,
-        listMode: true,
-        error: "[crypto-watch] canary symbol list empty or invalid; scheduler disabled"
-      };
-    }
+  let symbols = [values.symbol];
+  const listMode = Boolean(values.symbols);
+  if (listMode) {
+    const entries = values.symbols.split(",").map((symbol) => symbol.trim().toUpperCase());
+    if (entries.some((symbol) => !symbol)) return fullScan("canary symbol list empty or invalid");
     symbols = [...new Set(entries)];
-    if (symbols.length > 10) {
-      return {
-        scopes: null,
-        listMode: true,
-        error: `[crypto-watch] canary symbol limit exceeded (${symbols.length}/10); scheduler disabled`
-      };
-    }
+    if (symbols.length > 10) return fullScan(`canary symbol limit exceeded (${symbols.length}/10)`);
   }
 
   return {
-    scopes: symbols.map((symbol) => ({
-      userId: canary.userId,
-      symbol,
-      timeframe: canary.timeframe
-    })),
-    listMode: usesSymbolList,
+    scopes: symbols.map((symbol) => ({ userId: values.userId, symbol, timeframe: values.timeframe })),
+    listMode,
     error: null
   };
 }
 
-async function runScheduledAutoScanCycle({ scopes, listMode }) {
+// Last completed cycle, last error and staleness, for the admin Crypto Markets view.
+export function getAutoScanHealth(nowMs = Date.now()) {
+  const reference = autoScanHealth.lastCompletedCycleAt ?? autoScanHealth.schedulerStartedAt;
+  const iso = (value) => (value == null ? null : new Date(value).toISOString());
+  return {
+    mode: autoScanHealth.mode,
+    schedulerRunning: autoScanHealth.schedulerStartedAt != null,
+    schedulerStartedAt: iso(autoScanHealth.schedulerStartedAt),
+    lastCompletedCycleAt: iso(autoScanHealth.lastCompletedCycleAt),
+    lastCycleError: autoScanHealth.lastCycleError
+      ? { message: autoScanHealth.lastCycleError.message, at: iso(autoScanHealth.lastCycleError.at) }
+      : null,
+    configurationError: autoScanHealth.configurationError,
+    stale: reference != null && nowMs - reference > AUTO_SCAN_HEARTBEAT_STALE_MS,
+    staleAfterMinutes: AUTO_SCAN_HEARTBEAT_STALE_MS / 60000
+  };
+}
+
+// Warns when no auto-scan cycle has completed for 30 minutes (at most once per 30 minutes).
+export function checkAutoScanHeartbeat(nowMs = Date.now()) {
+  const health = getAutoScanHealth(nowMs);
+  if (!health.stale) return health;
+  if (autoScanHealth.lastHeartbeatWarningAt != null && nowMs - autoScanHealth.lastHeartbeatWarningAt < AUTO_SCAN_HEARTBEAT_STALE_MS) return health;
+  autoScanHealth.lastHeartbeatWarningAt = nowMs;
+  const since = autoScanHealth.lastCompletedCycleAt ?? autoScanHealth.schedulerStartedAt;
+  console.warn(
+    `[auto-scan] heartbeat: no auto-scan cycle completed in ${Math.round((nowMs - since) / 60000)} minutes ` +
+    `(last completed ${health.lastCompletedCycleAt || "never"}; last error ${health.lastCycleError?.message || "none"})`
+  );
+  return health;
+}
+
+async function runScheduledAutoScanCycle(schedule) {
+  try {
+    const result = await runScheduledCycleScopes(schedule);
+    if (!result?.skippedRunningCycle) autoScanHealth.lastCompletedCycleAt = Date.now();
+    return result;
+  } catch (error) {
+    autoScanHealth.lastCycleError = { message: error.message, at: Date.now() };
+    throw error;
+  }
+}
+
+async function runScheduledCycleScopes({ scopes, listMode }) {
   if (!scopes?.length) return runAutoCryptoAlertScan();
   if (!listMode) return runAutoCryptoAlertScan(scopes[0]);
   if (autoScanRunning) {
     console.log("[auto-scan] skipped duplicates running_cycle=true");
-    return { scanned: 0, alertsCreated: 0, telegramAlertsQueued: 0, skippedDuplicates: 1 };
+    return { scanned: 0, alertsCreated: 0, telegramAlertsQueued: 0, skippedDuplicates: 1, skippedRunningCycle: true };
   }
 
   autoScanRunning = true;
@@ -154,6 +188,7 @@ async function runScheduledAutoScanCycle({ scopes, listMode }) {
         scannedSymbols += 1;
         for (const key of Object.keys(totals)) totals[key] += Number(result?.[key] || 0);
       } catch (error) {
+        autoScanHealth.lastCycleError = { message: `${scope.symbol} ${scope.timeframe}: ${error.message}`, at: Date.now() };
         console.warn(`[auto-scan] ${scope.symbol} ${scope.timeframe} skipped: ${error.message}`);
       }
     }
@@ -176,7 +211,7 @@ export async function runAutoCryptoAlertScan(scope = undefined, cycleToken = nul
 
   if (ownsAutoScanLock && autoScanRunning) {
     console.log("[auto-scan] skipped duplicates running_cycle=true");
-    return { scanned: 0, alertsCreated: 0, skippedDuplicates: 1 };
+    return { scanned: 0, alertsCreated: 0, skippedDuplicates: 1, skippedRunningCycle: true };
   }
 
   if (ownsAutoScanLock) autoScanRunning = true;

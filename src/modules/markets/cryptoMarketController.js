@@ -1,5 +1,6 @@
 import { readJson, sendError, sendJson } from "../../shared/http.js";
 import { isAdminUser } from "../auth/authService.js";
+import { getAutoScanHealth } from "../alerts/autoScanService.js";
 import { getPendingCryptoVerificationJob, startPendingCryptoVerification, testCoinbaseProviderDiagnostics, verifyCryptoMarket, verifyPendingCryptoMarkets } from "./cryptoMarketMonitor.js";
 import { rebuildActiveCryptoMarkets } from "./cryptoMarketRebuildService.js";
 import { syncCoinbaseCryptoMarkets } from "./cryptoMarketSyncService.js";
@@ -13,7 +14,7 @@ export async function handleAdminCryptoMarketRoutes(req, res, pathname, url) {
   if (pathname === "/api/admin/crypto-markets" && req.method === "GET") {
     const allMarkets = listCryptoMarketSettings();
     const markets = filterMarkets(allMarkets, url.searchParams);
-    return sendJson(res, 200, { markets, summary: summarize(allMarkets), displayed: markets.length, verificationJob: getPendingCryptoVerificationJob() });
+    return sendJson(res, 200, { markets, summary: summarize(allMarkets), displayed: markets.length, verificationJob: getPendingCryptoVerificationJob(), autoScan: getAutoScanHealth() });
   }
 
   if (pathname === "/api/admin/crypto-markets/sync" && req.method === "POST") {
