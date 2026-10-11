@@ -76,7 +76,7 @@ const result = {
   googleVerifiedAccountsSupported:
     googleOAuth.includes("claims.email_verified !== true") &&
     googleOAuth.includes("verificationWasRequired") &&
-    googleOAuth.includes("grantOAuthFreeTrial(user.id, loginState.deviceFingerprintHash)") &&
+    googleOAuth.includes("grantOAuthFreeTrial(user.id, loginState.deviceFingerprintHash, trialIdentity)") &&
     repositories.includes("email_verified_at = COALESCE(email_verified_at, now())"),
   callbackFeedbackVisible:
     frontend.includes("showAuthCallback") &&

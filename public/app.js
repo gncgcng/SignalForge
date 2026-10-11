@@ -320,6 +320,13 @@ const onboardingProgressNote = document.querySelector("#onboarding-progress-note
 const onboardingSkipButton = document.querySelector("#onboarding-skip-button");
 const onboardingShowButton = document.querySelector("#onboarding-show-button");
 const statusLine = document.querySelector("#status-line");
+// Matches TRIAL_ALREADY_USED_MESSAGE in src/modules/auth/trialIdentity.js.
+const TRIAL_ALREADY_USED_MESSAGE = "This email has already used its free trial.";
+
+// A new account whose email or Google account already had a free trial starts with 0 unlocks.
+function showTrialAlreadyUsedNotice() {
+  if (statusLine) statusLine.textContent = TRIAL_ALREADY_USED_MESSAGE;
+}
 const signalsGrid = document.querySelector("#signals-grid");
 const paperPortfolioGrid = document.querySelector("#paper-portfolio-grid");
 const paperTradeCount = document.querySelector("#paper-trade-count");
@@ -928,10 +935,11 @@ authForm.addEventListener("submit", async (event) => {
     }
     history.replaceState({}, "", `${location.pathname}${location.search}#scanner`);
     console.info("[auth-ui] login:navigate:dashboard");
-    bootDashboard().catch((error) => {
+    const dashboardReady = bootDashboard().catch((error) => {
       console.warn(`[auth-ui] dashboard:hydrate:failed reason=${safeAuthFailureReason(error)}`);
       if (statusLine) statusLine.textContent = "Signed in. Some dashboard data could not load yet; refresh or retry in a moment.";
     });
+    if (result.trialAlreadyUsed) void dashboardReady.then(showTrialAlreadyUsedNotice);
   } catch (error) {
     const message = getLoginErrorMessage(error);
     if (error.code === "request_timeout") console.warn("[auth-ui] login:timeout");
@@ -3337,6 +3345,8 @@ async function init() {
       history.replaceState({}, "", `${location.pathname}${location.hash}`);
       verificationMessage = result.trialGranted
         ? "Email verified. Your free signals are active."
+        : result.trialBlockedBy === "identity"
+        ? `Email verified. ${TRIAL_ALREADY_USED_MESSAGE}`
         : "Email verified. This device has already received a free trial.";
     } catch (error) {
       verificationMessage = error.message;
@@ -3392,12 +3402,14 @@ async function init() {
     if (isPublicAuthRoute()) {
       history.replaceState({}, "", `${location.pathname}${location.search}#scanner`);
     }
+    const oauthTrialAlreadyUsed = oauthSuccess && new URLSearchParams(location.search).get("trial") === "used";
     if (oauthSuccess) {
       history.replaceState({}, "", `${location.pathname}${location.hash}`);
     }
     const reauthReturn = takeReauthReturn();
     await bootDashboard();
     applyReauthReturn(reauthReturn);
+    if (oauthTrialAlreadyUsed) showTrialAlreadyUsedNotice();
   } else if (isHowItWorksRoute()) {
     setSplashStatus("Opening SignalForge guide");
     showPublicHowItWorks();

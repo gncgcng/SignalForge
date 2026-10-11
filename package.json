@@ -11,6 +11,7 @@
     "test:auth-security": "node scripts/auth-security-test.js",
     "test:google-oauth": "node scripts/google-oauth-test.js",
     "test:google-reauth": "node scripts/google-reauth-test.js",
+    "test:trial-identity-claims": "node scripts/trial-identity-claims-test.js",
     "test:email-verification": "node scripts/email-verification-test.js",
     "test:transactional-emails": "node scripts/transactional-emails-test.js",
     "test:email-feature-flag": "node scripts/email-feature-flag-test.js",

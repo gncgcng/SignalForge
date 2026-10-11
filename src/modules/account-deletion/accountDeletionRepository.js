@@ -1,4 +1,5 @@
 import { query, transaction } from "../../db/client.js";
+import { trialIdentities } from "../auth/trialIdentity.js";
 
 // Tables whose rows are deleted outright, scoped by the named user column.
 // Order matters only where noted; everything else has no FKs between these rows.
@@ -49,6 +50,11 @@ export const RETAINED_TABLES = [
   ["stripe_webhook_events", "user_id"]
 ];
 
+// Retained with no link to the user at all, so they can't be listed above by user column.
+// trial_identity_claims holds only keyed hashes of an email / Google subject (no email, no
+// user_id); it is kept so the same identity can't earn a second free trial after deletion.
+export const RETAINED_UNLINKED_TABLES = ["trial_identity_claims"];
+
 const STRIPE_PII_KEYS = new Set([
   "email", "customer_email", "receipt_email",
   "name", "customer_name",
@@ -72,6 +78,25 @@ export async function deleteAccountData({ userId, email, loginEmailHash }) {
     if (locked.rows[0].deleted_at) return { alreadyDeleted: true };
 
     const counts = {};
+
+    // Before oauth_accounts goes: make sure an account that had its free trial leaves its claims
+    // behind. Accounts granted a trial before trial_identity_claims existed get theirs here.
+    const trial = (await client.query(`
+      SELECT c.free_signal_allowance,
+        ARRAY(SELECT provider_subject FROM oauth_accounts WHERE user_id = $1 AND provider = 'google') AS google_subjects
+      FROM credit_balances c
+      WHERE c.user_id = $1
+    `, [userId])).rows[0];
+    if (Number(trial?.free_signal_allowance || 0) > 0) {
+      const identities = trialIdentities({ email, googleSubjects: trial.google_subjects });
+      if (identities.length) {
+        await client.query(`
+          INSERT INTO trial_identity_claims (identity_hash, kind)
+          SELECT * FROM unnest($1::text[], $2::text[])
+          ON CONFLICT (identity_hash) DO NOTHING
+        `, [identities.map((identity) => identity.hash), identities.map((identity) => identity.kind)]);
+      }
+    }
 
     for (const [table, column] of HARD_DELETE_TABLES) {
       const result = await client.query(`DELETE FROM ${table} WHERE ${column} = $1`, [userId]);

@@ -164,8 +164,10 @@ export async function completeGoogleOAuth({ code, state, oauthError }) {
     throw oauthFailure("Google sign-in is unavailable for this account.", "account_blocked");
   }
 
+  const trialIdentity = { email: normalizedEmail, googleSubject: claims.sub };
   let user = await findUserByOAuthIdentity(provider, claims.sub);
   if (user) {
+    let grant = null;
     if (!user.emailVerifiedAt) {
       user = await linkOAuthIdentity({
         provider,
@@ -173,15 +175,16 @@ export async function completeGoogleOAuth({ code, state, oauthError }) {
         userId: user.id,
         providerEmail: normalizedEmail
       });
-      await grantOAuthFreeTrial(user.id, loginState.deviceFingerprintHash);
+      grant = await grantOAuthFreeTrial(user.id, loginState.deviceFingerprintHash, trialIdentity);
       user = await findUserByEmail(normalizedEmail);
     }
-    return createSession(user);
+    return withTrialNotice(await createSession(user), grant);
   }
 
   user = await findUserByEmail(normalizedEmail);
   if (user) {
     const verificationWasRequired = !user.emailVerifiedAt;
+    let grant = null;
     user = await linkOAuthIdentity({
       provider,
       providerSubject: claims.sub,
@@ -189,10 +192,10 @@ export async function completeGoogleOAuth({ code, state, oauthError }) {
       providerEmail: normalizedEmail
     });
     if (verificationWasRequired) {
-      await grantOAuthFreeTrial(user.id, loginState.deviceFingerprintHash);
+      grant = await grantOAuthFreeTrial(user.id, loginState.deviceFingerprintHash, trialIdentity);
       user = await findUserByEmail(normalizedEmail);
     }
-    return createSession(user);
+    return withTrialNotice(await createSession(user), grant);
   }
 
   return createGoogleUser(claims, loginState);
@@ -279,7 +282,11 @@ async function createGoogleUser(claims, loginState) {
     generateUsername: true,
     ...buildSignupConsentRecord(loginState)
   });
-  await grantOAuthFreeTrial(user.id, loginState.deviceFingerprintHash);
+  // A Google account (or its email) that already had a trial still gets an account, with 0 unlocks.
+  const grant = await grantOAuthFreeTrial(user.id, loginState.deviceFingerprintHash, {
+    email: normalizedEmail,
+    googleSubject: claims.sub
+  });
   await attributeAffiliateReferral(user.id, loginState.affiliateCode);
   await trackProductEvent({
     eventType: "signup",
@@ -301,7 +308,12 @@ async function createGoogleUser(claims, loginState) {
     reason: repeatedDevice ? "google_repeated_device" : "google_created"
   });
   sendWelcomeEmail(user);
-  return createSession(user);
+  return withTrialNotice(await createSession(user), grant);
+}
+
+// The callback tells the app when the trial was refused because this identity already had one.
+function withTrialNotice(session, grant) {
+  return { ...session, trialAlreadyUsed: grant?.trialBlockedBy === "identity" };
 }
 
 async function exchangeAuthorizationCode(code) {

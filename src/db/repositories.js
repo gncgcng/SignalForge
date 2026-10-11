@@ -1,6 +1,7 @@
 import { randomInt } from "node:crypto";
 import { appConfig } from "../config/appConfig.js";
 import { createId } from "../shared/ids.js";
+import { trialIdentities } from "../modules/auth/trialIdentity.js";
 import {
   consumeSignalUnlockCredit,
   refundSignalCreditForTerminalOutcome
@@ -1270,7 +1271,7 @@ export async function createEmailVerificationToken(
 export async function verifyEmailToken(tokenHash) {
   return transaction(async (client) => {
     const result = await client.query(`
-      SELECT t.*, u.device_fingerprint_hash, u.trial_used, u.email_verified_at
+      SELECT t.*, u.email, u.device_fingerprint_hash, u.trial_used, u.email_verified_at
       FROM email_verification_tokens t
       JOIN users u ON u.id = t.user_id
       WHERE t.token_hash = $1
@@ -1290,42 +1291,14 @@ export async function verifyEmailToken(tokenHash) {
       WHERE id = $1
     `, [token.user_id]);
 
-    let trialGranted = false;
-    if (!token.trial_used && token.device_fingerprint_hash) {
-      const reservation = await client.query(`
-        INSERT INTO device_trial_history (device_fingerprint_hash, first_user_id)
-        VALUES ($1, $2)
-        ON CONFLICT (device_fingerprint_hash) DO NOTHING
-        RETURNING device_fingerprint_hash
-      `, [token.device_fingerprint_hash, token.user_id]);
-      trialGranted = Boolean(reservation.rows[0]);
-    } else if (!token.trial_used && !token.device_fingerprint_hash) {
-      trialGranted = true;
-    }
+    const { trialGranted, trialBlockedBy } = await applyFreeTrialGrant(client, {
+      userId: token.user_id,
+      deviceFingerprintHash: token.device_fingerprint_hash,
+      identities: trialIdentities({ email: token.email }),
+      eligible: !token.trial_used
+    });
 
-    if (trialGranted) {
-      await client.query(`
-        UPDATE credit_balances
-        SET free_signal_allowance = $2,
-          unlock_credits_balance = GREATEST(unlock_credits_balance, $2),
-          updated_at = now()
-        WHERE user_id = $1
-      `, [token.user_id, appConfig.freeSignalAllowance]);
-    } else {
-      await client.query(`
-        UPDATE users
-        SET abuse_score = LEAST(100, abuse_score + 50),
-          abuse_flags = (
-            SELECT jsonb_agg(DISTINCT value)
-            FROM jsonb_array_elements(abuse_flags || '["repeated_trial_device"]'::jsonb)
-          ),
-          abuse_review_status = 'flagged',
-          updated_at = now()
-        WHERE id = $1
-      `, [token.user_id]);
-    }
-
-    return { userId: token.user_id, trialGranted };
+    return { userId: token.user_id, trialGranted, trialBlockedBy };
   });
 }
 
@@ -1521,46 +1494,83 @@ export async function linkOAuthIdentity({
   return findUserById(userId);
 }
 
-export async function grantOAuthFreeTrial(userId, deviceFingerprintHash) {
-  return transaction(async (client) => {
-    let trialGranted = !deviceFingerprintHash;
+// Google signup, or a Google sign-in that verifies an unverified account. Both the Google subject
+// and the Google email count as identities that may each earn one trial.
+export async function grantOAuthFreeTrial(userId, deviceFingerprintHash, { email = null, googleSubject = null } = {}) {
+  return transaction((client) => applyFreeTrialGrant(client, {
+    userId,
+    deviceFingerprintHash,
+    identities: trialIdentities({ email, googleSubjects: [googleSubject] })
+  }));
+}
 
-    if (deviceFingerprintHash) {
-      const reservation = await client.query(`
-        INSERT INTO device_trial_history (device_fingerprint_hash, first_user_id)
-        VALUES ($1, $2)
-        ON CONFLICT (device_fingerprint_hash) DO NOTHING
-        RETURNING device_fingerprint_hash
-      `, [deviceFingerprintHash, userId]);
-      trialGranted = Boolean(reservation.rows[0]);
-    }
+// The one place free unlocks are granted (email verification and Google). A grant needs every
+// identity unclaimed (trial_identity_claims) and, when there is a device fingerprint, a device
+// that has never had a trial (device_trial_history). Identities are claimed first and released
+// again if the device then blocks the grant, so only granted trials leave claims behind.
+// Concurrent claims of one identity serialize on its primary key; the loser sees it as taken.
+async function applyFreeTrialGrant(client, { userId, deviceFingerprintHash, identities, eligible = true }) {
+  let trialBlockedBy = eligible ? null : "device";
+  let claimedHashes = [];
 
-    if (trialGranted) {
-      await client.query(`
-        UPDATE credit_balances
-        SET free_signal_allowance = $2,
-          unlock_credits_balance = GREATEST(unlock_credits_balance, $2),
-          updated_at = now()
-        WHERE user_id = $1
-      `, [userId, appConfig.freeSignalAllowance]);
-    } else {
-      await client.query(`
-        UPDATE users
-        SET abuse_score = LEAST(100, abuse_score + 50),
-          abuse_flags = (
-            SELECT jsonb_agg(DISTINCT value)
-            FROM jsonb_array_elements(
-              abuse_flags || '["repeated_trial_device"]'::jsonb
-            )
-          ),
-          abuse_review_status = 'flagged',
-          updated_at = now()
-        WHERE id = $1
-      `, [userId]);
-    }
+  if (!trialBlockedBy && identities.length) {
+    const claimed = await client.query(`
+      INSERT INTO trial_identity_claims (identity_hash, kind)
+      SELECT * FROM unnest($1::text[], $2::text[])
+      ON CONFLICT (identity_hash) DO NOTHING
+      RETURNING identity_hash
+    `, [identities.map((identity) => identity.hash), identities.map((identity) => identity.kind)]);
+    claimedHashes = claimed.rows.map((row) => row.identity_hash);
+    if (claimedHashes.length < identities.length) trialBlockedBy = "identity";
+  }
 
-    return trialGranted;
-  });
+  if (!trialBlockedBy && deviceFingerprintHash) {
+    const reservation = await client.query(`
+      INSERT INTO device_trial_history (device_fingerprint_hash, first_user_id)
+      VALUES ($1, $2)
+      ON CONFLICT (device_fingerprint_hash) DO NOTHING
+      RETURNING device_fingerprint_hash
+    `, [deviceFingerprintHash, userId]);
+    if (!reservation.rows[0]) trialBlockedBy = "device";
+  }
+
+  if (trialBlockedBy && claimedHashes.length) {
+    await client.query(`DELETE FROM trial_identity_claims WHERE identity_hash = ANY($1)`, [claimedHashes]);
+  }
+
+  if (!trialBlockedBy) {
+    await client.query(`
+      UPDATE credit_balances
+      SET free_signal_allowance = $2,
+        unlock_credits_balance = GREATEST(unlock_credits_balance, $2),
+        updated_at = now()
+      WHERE user_id = $1
+    `, [userId, appConfig.freeSignalAllowance]);
+  } else {
+    const flag = trialBlockedBy === "identity" ? "repeated_trial_identity" : "repeated_trial_device";
+    await client.query(`
+      UPDATE users
+      SET abuse_score = LEAST(100, abuse_score + 50),
+        abuse_flags = (
+          SELECT jsonb_agg(DISTINCT value)
+          FROM jsonb_array_elements(abuse_flags || jsonb_build_array($2::text))
+        ),
+        abuse_review_status = 'flagged',
+        updated_at = now()
+      WHERE id = $1
+    `, [userId, flag]);
+  }
+
+  return { trialGranted: !trialBlockedBy, trialBlockedBy };
+}
+
+// Read-only, for telling a new account up front that its email already had a trial.
+export async function isTrialIdentityClaimed(identities) {
+  if (!identities.length) return false;
+  const result = await query(`
+    SELECT 1 FROM trial_identity_claims WHERE identity_hash = ANY($1) LIMIT 1
+  `, [identities.map((identity) => identity.hash)]);
+  return Boolean(result.rows[0]);
 }
 
 export async function getCachedScanResult(userId, scanKey) {

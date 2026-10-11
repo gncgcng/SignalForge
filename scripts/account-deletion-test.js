@@ -82,7 +82,7 @@ try {
   const emailResignup = await fixtures.createHelperUser("resignup_email");
   helperIds.push(oauthResignup, emailResignup);
   await query(`UPDATE users SET device_fingerprint_hash = $2 WHERE id = ANY($1)`, [[oauthResignup, emailResignup], seeded.deviceHash]);
-  assert.equal(await grantOAuthFreeTrial(oauthResignup, seeded.deviceHash), false, "OAuth re-signup granted a second trial");
+  assert.equal((await grantOAuthFreeTrial(oauthResignup, seeded.deviceHash)).trialGranted, false, "OAuth re-signup granted a second trial");
   await createEmailVerificationToken(emailResignup, `tok_${emailResignup}`, new Date(Date.now() + 3600_000));
   const verified = await verifyEmailToken(`tok_${emailResignup}`);
   assert.equal(verified.trialGranted, false, "email re-signup granted a second trial");

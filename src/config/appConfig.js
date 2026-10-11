@@ -78,6 +78,7 @@ export const appConfig = {
   restoreTokenMaxAgeSeconds: resolveSessionMaxAgeSeconds(process.env.RESTORE_TOKEN_MAX_AGE_DAYS),
   demoEnabled: process.env.NODE_ENV !== "production" && process.env.ENABLE_DEMO !== "false",
   freeSignalAllowance: 3,
+  trialIdentitySecret: process.env.TRIAL_IDENTITY_SECRET || "",
   adminEmails,
   testerCreditAllowance: 1000000,
   email: {

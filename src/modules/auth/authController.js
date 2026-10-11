@@ -191,7 +191,7 @@ export async function handleAuthRoutes(req, res, pathname) {
         oauthError: url.searchParams.get("error")
       });
       logSessionCookieIssued("google");
-      return sendRedirect(res, googleAppRedirect("oauth=success"), {
+      return sendRedirect(res, googleAppRedirect(`oauth=success${result.trialAlreadyUsed ? "&trial=used" : ""}`), {
         "set-cookie": [
           buildSessionCookie(result.sessionId),
           buildClearGoogleStateCookie()
@@ -263,6 +263,7 @@ export async function handleAuthRoutes(req, res, pathname) {
         verificationRequired: result.verificationRequired,
         verificationUnavailable: Boolean(result.verification?.unavailable),
         developmentVerificationUrl: result.verification?.developmentUrl || null,
+        trialAlreadyUsed: Boolean(result.trialAlreadyUsed),
         restore,
         // `token` is a compatibility alias for the opaque restore token. The
         // primary session remains the HttpOnly cookie and is never exposed here.

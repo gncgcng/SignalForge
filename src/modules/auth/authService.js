@@ -15,6 +15,7 @@ import {
   getLoginAttemptVelocity,
   getSignupVelocity,
   hasRecentSessionReauth,
+  isTrialIdentityClaimed,
   markAuthRestoreTokenUsed,
   recordLoginAttempt,
   recordSignupAttempt,
@@ -28,6 +29,7 @@ import {
   verifyEmailToken
 } from "../../db/repositories.js";
 import { buildSignupConsentRecord, isDemoOrTesterIdentity } from "./authPolicy.js";
+import { trialIdentities } from "./trialIdentity.js";
 import {
   assertLoginVelocity,
   assertSignupVelocity,
@@ -386,15 +388,20 @@ export async function registerOrLogin({
   });
 
   let verification = null;
+  let trialAlreadyUsed = false;
   if (!options.bypassVerification) {
     verification = await issueVerification(user);
+    // The account is created either way; the grant at verification refuses the trial. This only
+    // lets the signup response say so now.
+    trialAlreadyUsed = await isTrialIdentityClaimed(trialIdentities({ email: normalizedEmail }));
   }
   sendWelcomeEmail(user);
 
   return {
     ...(await createSession(user)),
     verificationRequired: !options.bypassVerification,
-    verification
+    verification,
+    trialAlreadyUsed
   };
 }
 

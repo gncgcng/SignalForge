@@ -1,4 +1,4 @@
-const CACHE_VERSION = "signalforge-static-v35-google-reauth-001";
+const CACHE_VERSION = "signalforge-static-v36-trial-claims-001";
 const OFFLINE_URL = "/offline.html";
 const CRITICAL_ASSET_PATHS = new Set([
   "/index.html",
