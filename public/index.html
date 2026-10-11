@@ -1680,6 +1680,25 @@
               </div>
               <p class="form-note" id="profile-settings-message">Usernames are unique and can be changed once every 30 days.</p>
             </article>
+            <article class="panel set-password-panel hidden" id="change-password-panel">
+              <div>
+                <span class="eyebrow">Sign-in</span>
+                <h3>Change password</h3>
+                <p class="reasoning">Changing your password signs you out on every other device.</p>
+              </div>
+              <form id="change-password-form" class="set-password-form" autocomplete="off">
+                <label>
+                  Current password
+                  <input id="change-password-current" name="currentPassword" type="password" autocomplete="current-password" required />
+                </label>
+                <label>
+                  New password
+                  <input id="change-password-new" name="newPassword" type="password" autocomplete="new-password" minlength="6" placeholder="6+ characters" required />
+                </label>
+                <button id="change-password-submit" type="submit" disabled>Change password</button>
+              </form>
+              <p class="status-line" id="change-password-message" aria-live="polite"></p>
+            </article>
             <article class="panel set-password-panel hidden" id="set-password-panel">
               <div>
                 <span class="eyebrow">Sign-in</span>
@@ -2546,7 +2565,7 @@
         }, 9000);
       }());
     </script>
-    <script src="/auth-bootstrap.js?v=TRIAL-CLAIMS-001"></script>
-    <script src="/app.js?v=TRIAL-CLAIMS-001" type="module"></script>
+    <script src="/auth-bootstrap.js?v=CHANGE-PASSWORD-001"></script>
+    <script src="/app.js?v=CHANGE-PASSWORD-001" type="module"></script>
   </body>
 </html>

@@ -4,6 +4,7 @@ import { query } from "../../db/client.js";
 import { attachAuth } from "../../middleware/authMiddleware.js";
 import { readJson, sendError, sendJson, parseCookies } from "../../shared/http.js";
 import {
+  changePassword,
   createDemoSession,
   createPersistentRestoreToken,
   completePasswordReset,
@@ -165,6 +166,27 @@ export async function handleAuthRoutes(req, res, pathname) {
       const body = await readJson(req);
       const result = await setPasswordAfterReauth(req.user, body.password, req.sessionId);
       return sendJson(res, 200, result, authResponseHeaders());
+    } catch (error) {
+      return sendError(res, error.statusCode || 400, error.message, error.code ? { code: error.code } : undefined);
+    }
+  }
+
+  if (pathname === "/api/auth/password/change" && req.method === "POST") {
+    if (!req.user) return sendError(res, 401, "Authentication required.");
+    try {
+      const body = await readJson(req);
+      const result = await changePassword(req.user, {
+        currentPassword: body.currentPassword,
+        newPassword: body.newPassword
+      }, { sessionId: req.sessionId, req });
+      // All restore tokens were revoked with the other sessions; this device gets a fresh one.
+      let restore = null;
+      try {
+        restore = await createPersistentRestoreToken(req.user.id, req, req.headers["x-device-fingerprint"]);
+      } catch (error) {
+        console.warn(`[auth] password_change:restore_token_failed reason=${safeSessionFailure(error)}`);
+      }
+      return sendJson(res, 200, { ...result, restore }, authResponseHeaders());
     } catch (error) {
       return sendError(res, error.statusCode || 400, error.message, error.code ? { code: error.code } : undefined);
     }

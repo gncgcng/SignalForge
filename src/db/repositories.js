@@ -1326,6 +1326,30 @@ export async function upgradeUserPasswordHash(userId, previousHash, password) {
   return result.rowCount === 1;
 }
 
+// Change password: compare-and-set on the hash the current password was verified against, then
+// revoke every other session and every restore token (they can mint new sessions), atomically.
+// Returns null when the hash moved underneath (reset or admin recovery), changing nothing.
+export async function changeUserPassword({ userId, previousHash, password, keepSessionId }) {
+  return transaction(async (client) => {
+    const updated = await client.query(`
+      UPDATE users
+      SET password_salt = $3, password_hash = $4, updated_at = now()
+      WHERE id = $1 AND password_hash = $2 AND password_hash <> ''
+    `, [userId, previousHash, password.salt, password.hash]);
+    if (updated.rowCount !== 1) return null;
+
+    const sessions = await client.query(`
+      DELETE FROM sessions WHERE user_id = $1 AND id IS DISTINCT FROM $2
+    `, [userId, keepSessionId || null]);
+    const restoreTokens = await client.query(`
+      UPDATE auth_restore_tokens
+      SET revoked_at = now(), updated_at = now()
+      WHERE user_id = $1 AND revoked_at IS NULL
+    `, [userId]);
+    return { sessionsRevoked: sessions.rowCount, restoreTokensRevoked: restoreTokens.rowCount };
+  });
+}
+
 // Only fills an empty password: if a reset or another set-password already wrote one, this
 // matches no row and the existing password stands.
 export async function setInitialUserPassword(userId, password) {

@@ -433,6 +433,12 @@ const setPasswordForm = document.querySelector("#set-password-form");
 const setPasswordInput = document.querySelector("#set-password-input");
 const setPasswordSubmit = document.querySelector("#set-password-submit");
 const setPasswordMessage = document.querySelector("#set-password-message");
+const changePasswordPanel = document.querySelector("#change-password-panel");
+const changePasswordForm = document.querySelector("#change-password-form");
+const changePasswordCurrent = document.querySelector("#change-password-current");
+const changePasswordNew = document.querySelector("#change-password-new");
+const changePasswordSubmit = document.querySelector("#change-password-submit");
+const changePasswordMessage = document.querySelector("#change-password-message");
 const settingsUsername = document.querySelector("#settings-username");
 const settingsPublicProfile = document.querySelector("#settings-public-profile");
 const settingsPublicLeaderboard = document.querySelector("#settings-public-leaderboard");
@@ -1211,6 +1217,8 @@ function renderAccountSecurity() {
   const googleOnly = isGoogleOnlyAccount();
   const confirmed = hasClientReauth();
   setPasswordPanel?.classList.toggle("hidden", !googleOnly && !passwordJustSet);
+  changePasswordPanel?.classList.toggle("hidden", googleOnly);
+  updateChangePasswordSubmit();
   setPasswordForm?.classList.toggle("hidden", passwordJustSet);
   deleteAccountPasswordField?.classList.toggle("hidden", googleOnly);
   deleteAccountPasswordNote?.classList.toggle("hidden", googleOnly);
@@ -1329,6 +1337,45 @@ setPasswordForm?.addEventListener("submit", async (event) => {
   state.user = { ...state.user, hasPassword: true };
   renderAccountSecurity();
   setPasswordMessage.textContent = "Password set. You can now also sign in with your email and password.";
+});
+
+function updateChangePasswordSubmit() {
+  if (!changePasswordSubmit || changePasswordSubmit.textContent === "Changing password...") return;
+  changePasswordSubmit.disabled = !changePasswordCurrent.value || changePasswordNew.value.length < 6;
+}
+
+changePasswordForm?.addEventListener("input", updateChangePasswordSubmit);
+
+changePasswordForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!changePasswordCurrent.value || changePasswordNew.value.length < 6) return;
+  let result;
+  try {
+    changePasswordSubmit.disabled = true;
+    changePasswordSubmit.textContent = "Changing password...";
+    changePasswordMessage.textContent = "";
+    result = await api.request("/api/auth/password/change", {
+      method: "POST",
+      body: JSON.stringify({
+        currentPassword: changePasswordCurrent.value,
+        newPassword: changePasswordNew.value
+      })
+    });
+  } catch (error) {
+    changePasswordCurrent.value = "";
+    changePasswordMessage.textContent = error.message;
+    return;
+  } finally {
+    changePasswordSubmit.textContent = "Change password";
+    updateChangePasswordSubmit();
+  }
+  changePasswordForm.reset();
+  updateChangePasswordSubmit();
+  // Every restore token was revoked with the other sessions; keep this device's fresh one.
+  if (result.restore) saveRestoreToken(result.restore);
+  changePasswordMessage.textContent = result.otherSessionsSignedOut
+    ? "Password changed. Your other devices have been signed out."
+    : "Password changed.";
 });
 
 function resetDeleteAccountForm() {

@@ -5,6 +5,7 @@ import {
   createEmailVerificationToken,
   createPasswordResetToken as createPasswordResetTokenRecord,
   createSession as createSessionRecord,
+  changeUserPassword,
   createUser,
   deleteSession,
   findAuthRestoreToken,
@@ -80,7 +81,8 @@ export function isPasswordHasherReady() {
 
 // Re-authentication for destructive account actions. Shares the login attempt
 // counters so a stolen session can't be used to brute-force the password here.
-export async function reauthenticateWithPassword(user, password, req) {
+// upgradeLegacyHash: false when the caller is about to replace the hash anyway.
+export async function reauthenticateWithPassword(user, password, req, { upgradeLegacyHash = true } = {}) {
   const emailHash = loginEmailHash(user);
   const ipHash = getSignupContext(req, null).ipHash;
   assertLoginVelocity(await getLoginAttemptVelocity({ emailHash, ipHash }));
@@ -92,8 +94,35 @@ export async function reauthenticateWithPassword(user, password, req) {
     error.code = "reauth_failed";
     throw error;
   }
-  if (legacy) await upgradeLegacyPasswordHash(user, String(password || ""));
+  if (legacy && upgradeLegacyHash) await upgradeLegacyPasswordHash(user, String(password || ""));
   return { emailHash: loginEmailHash(user) };
+}
+
+// Settings → Change password. The current password is checked like a login (same attempt
+// counters), the new one follows the signup/reset rules and is stored as scrypt. Every other
+// session and every restore token of the account is revoked; the caller's session stays.
+export async function changePassword(user, { currentPassword, newPassword } = {}, { sessionId, req } = {}) {
+  if (!userHasPassword(user)) {
+    throw authError(409, "This account has no password yet. Use Set a password instead.", "no_password");
+  }
+  assertValidNewPassword(newPassword);
+  await reauthenticateWithPassword(user, currentPassword, req, { upgradeLegacyHash: false });
+  // Compare-and-set on the hash the current password was just checked against: a reset or
+  // admin recovery that landed in between wins, and this change is refused.
+  const changed = await changeUserPassword({
+    userId: user.id,
+    previousHash: user.password.hash,
+    password: hashPassword(newPassword),
+    keepSessionId: sessionId
+  });
+  if (!changed) {
+    throw authError(409, "Your password was just changed elsewhere. Sign in again.", "password_changed_elsewhere");
+  }
+  console.info(
+    `[auth] password_changed user=${safeLogId(user.id)} sessions_revoked=${changed.sessionsRevoked} ` +
+    `restore_tokens_revoked=${changed.restoreTokensRevoked}`
+  );
+  return { ok: true, otherSessionsSignedOut: changed.sessionsRevoked };
 }
 
 // How long a "Confirm with Google" re-auth counts for on the session that performed it.

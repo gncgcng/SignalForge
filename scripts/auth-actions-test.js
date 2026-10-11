@@ -11,9 +11,9 @@ const authController = readFileSync(new URL("../src/modules/auth/authController.
 const authService = readFileSync(new URL("../src/modules/auth/authService.js", import.meta.url), "utf8");
 const appConfig = readFileSync(new URL("../src/config/appConfig.js", import.meta.url), "utf8");
 
-assert.match(html, /auth-bootstrap\.js\?v=TRIAL-CLAIMS-001/);
+assert.match(html, /auth-bootstrap\.js\?v=CHANGE-PASSWORD-001/);
 assert.ok(html.indexOf("auth-bootstrap.js") < html.indexOf("app.js?v="));
-assert.match(serviceWorker, /signalforge-static-v36-trial-claims-001/);
+assert.match(serviceWorker, /signalforge-static-v37-change-password-001/);
 assert.match(serviceWorker, /"\/auth-bootstrap\.js"/);
 assert.match(appSource, /\[auth-ui\] login:submit/);
 assert.match(appSource, /\[auth-ui\] login:request:start/);

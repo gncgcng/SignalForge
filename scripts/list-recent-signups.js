@@ -4,11 +4,13 @@
 // auth_method: "google" when a Google identity was linked within 2 minutes of account creation (the Google callback
 // creates and links in one go); "password" otherwise, "password+google" if Google was linked later.
 // Columns from migrations 063/064 print "n/a" if the database has not run them yet.
+// email_verified / unlocks / free_allowance show whether the account could verify and what it holds now
+// (free_allowance is 3 once a free trial was granted, 0 if never).
 //
 // Runs from the repo (node scripts/list-recent-signups.js) or pasted standalone into /tmp inside the Railway
 // container, where it loads pg from /app (APP_ROOT overrides).
 //
-//   node scripts/list-recent-signups.js [--limit 10] [--json]
+//   node scripts/list-recent-signups.js [--limit 10] [--since 2026-10-11T03:00:00Z] [--json]
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
@@ -21,7 +23,13 @@ const { Client } = createRequire(join(APP_ROOT, "package.json"))("pg");
 const json = process.argv.includes("--json");
 const limitIndex = process.argv.indexOf("--limit");
 const limit = Math.min(100, Math.max(1, Number(limitIndex >= 0 ? process.argv[limitIndex + 1] : 10) || 10));
-const OPTIONAL_COLUMNS = ["username_generated", "legal_consent_accepted_at", "legal_consent_version", "age_confirmed_at"];
+const sinceIndex = process.argv.indexOf("--since");
+const since = sinceIndex >= 0 ? new Date(process.argv[sinceIndex + 1]) : null;
+if (since && Number.isNaN(since.getTime())) {
+  console.error("Listing recent signups failed: --since needs an ISO timestamp, e.g. 2026-10-11T03:00:00Z.");
+  process.exit(1);
+}
+const OPTIONAL_COLUMNS =["username_generated", "legal_consent_accepted_at", "legal_consent_version", "age_confirmed_at"];
 
 const connectionString = String(process.env.DATABASE_URL || process.env.DATABASE_PUBLIC_URL || "").trim();
 if (!connectionString) {
@@ -48,12 +56,17 @@ try {
       ${column("username_generated", "u.username_generated")} AS username_generated,
       ${column("legal_consent_accepted_at", "u.legal_consent_accepted_at IS NOT NULL")} AS consent_at_set,
       ${column("legal_consent_version", "u.legal_consent_version IS NOT NULL")} AS consent_version_set,
-      ${column("age_confirmed_at", "u.age_confirmed_at IS NOT NULL")} AS age_confirmed_set
+      ${column("age_confirmed_at", "u.age_confirmed_at IS NOT NULL")} AS age_confirmed_set,
+      u.email_verified_at IS NOT NULL AS email_verified,
+      c.unlock_credits_balance AS unlocks,
+      c.free_signal_allowance AS free_allowance
     FROM users u
     LEFT JOIN oauth_accounts g ON g.user_id = u.id AND g.provider = 'google'
+    LEFT JOIN credit_balances c ON c.user_id = u.id
+    WHERE $2::timestamptz IS NULL OR u.created_at >= $2::timestamptz
     ORDER BY u.created_at DESC
     LIMIT $1
-  `, [limit]);
+  `, [limit, since ? since.toISOString() : null]);
   await client.query("ROLLBACK");
 
   if (json) {
@@ -62,8 +75,8 @@ try {
     const missing = OPTIONAL_COLUMNS.filter((name) => !present.has(name));
     console.log(`${rows.length} most recently created users${missing.length ? ` (not migrated yet: ${missing.join(", ")})` : ""}`);
     const flag = (value) => (value === null || value === undefined ? "n/a" : value ? "yes" : "no");
-    const header = ["created_at", "auth_method", "username_generated", "consent_at", "consent_version", "age_confirmed_at"];
-    const widths = [24, 15, 18, 10, 15, 16];
+    const header = ["created_at", "auth_method", "username_generated", "consent_at", "consent_version", "age_confirmed_at", "email_verified", "unlocks", "free_allowance"];
+    const widths = [24, 15, 18, 10, 15, 16, 14, 7, 14];
     console.log(header.map((name, index) => name.padEnd(widths[index])).join("  "));
     for (const row of rows) {
       const cells = [
@@ -72,7 +85,10 @@ try {
         flag(row.username_generated),
         flag(row.consent_at_set),
         flag(row.consent_version_set),
-        flag(row.age_confirmed_set)
+        flag(row.age_confirmed_set),
+        flag(row.email_verified),
+        row.unlocks === null ? "n/a" : String(row.unlocks),
+        row.free_allowance === null ? "n/a" : String(row.free_allowance)
       ];
       console.log(cells.map((cell, index) => cell.padEnd(widths[index])).join("  "));
     }
