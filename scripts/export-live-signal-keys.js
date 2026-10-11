@@ -47,16 +47,68 @@ try {
     ORDER BY created_at ASC
   `, [days])).rows;
   await reloadCryptoMarketSettings();
+  // With the liquidity ranking deployed, load stored 24h volumes so listScannerCryptoMarkets ranks as the app does.
+  let liquidity = null;
+  try {
+    liquidity = await appModule("src/modules/markets/marketLiquidityService.js");
+    await liquidity.loadMarketLiquidity();
+  } catch (error) {
+    console.warn(`liquidity ranking unavailable: ${error.message}`);
+    liquidity = null;
+  }
   const scannerReadyPairs = listScannerCryptoMarkets().map((market) => ({
     symbol: market.symbol,
     liquidityTier: market.liquidityTier || null,
-    scannerTimeframes: market.scannerTimeframes || market.supportedTimeframes || null
+    scannerTimeframes: market.scannerTimeframes || market.supportedTimeframes || null,
+    volume24hUsd: liquidity?.getMarketLiquidity(market.symbol)?.volume24hUsd ?? null
   }));
   const adminDisabled = (await query(`
     SELECT group_key, updated_at FROM signal_strategy_statuses WHERE status = 'disabled_by_admin' ORDER BY updated_at
   `)).rows;
 
-  process.stdout.write(`${JSON.stringify({ exportedAt: new Date().toISOString(), days, signals, scannerReadyPairs, adminDisabled }, null, 1)}\n`, () => process.exit(0));
+  // Per-scan evidence for the fidelity check: every record that proves a pair/timeframe was scanned at a time.
+  // Each query is independent; a failure is reported in evidenceErrors instead of failing the export.
+  const evidenceErrors = {};
+  const evidence = async (name, sql) => {
+    try {
+      return (await query(sql, [days])).rows;
+    } catch (error) {
+      evidenceErrors[name] = error.message;
+      return [];
+    }
+  };
+  const since = "now() - ($1::integer * interval '1 day')";
+  const scanEvidence = {
+    analyticsScans: await evidence("analyticsScans", `SELECT symbol, timeframe, created_at, metadata->>'mode' AS mode,
+      COALESCE((metadata->>'cached')::boolean, false) AS cached
+      FROM product_analytics_events WHERE event_type = 'scan' AND symbol IS NOT NULL AND timeframe IS NOT NULL AND created_at >= ${since}`),
+    validationRejections: await evidence("validationRejections", `SELECT symbol, timeframe, source, created_at
+      FROM signal_validation_rejections WHERE created_at >= ${since}`),
+    candidates: await evidence("candidates", `SELECT symbol, timeframe, first_detected_at, last_checked_at
+      FROM setup_candidates WHERE last_checked_at >= ${since} OR first_detected_at >= ${since}`),
+    avoidTradeEvents: await evidence("avoidTradeEvents", `SELECT market AS symbol, timeframe, created_at, last_observed_at
+      FROM avoid_trade_learning_events WHERE last_observed_at >= ${since}`),
+    discoveryUsage: await evidence("discoveryUsage", `SELECT scan_key, created_at FROM setup_discovery_usage WHERE created_at >= ${since}`),
+    scanResultCache: await evidence("scanResultCache", `SELECT scan_key, created_at FROM scan_result_cache WHERE created_at >= ${since}`),
+    detectedAlerts: await evidence("detectedAlerts", `SELECT symbol, timeframe, detected_at FROM detected_alerts WHERE detected_at >= ${since}`),
+    telegramQueue: await evidence("telegramQueue", `SELECT setup_key, created_at FROM telegram_notification_queue WHERE created_at >= ${since}`)
+  };
+  // What the auto watcher scans: per Telegram setting (no user ids) its timeframes and, when favourites-only, the
+  // watchlist; plus alert preferences. These are current values; updated_at shows whether they changed recently.
+  const watcherScope = {
+    telegramSettings: await evidence("telegramSettings", `SELECT s.enabled, s.favorite_markets_only, s.timeframes, s.updated_at,
+        COALESCE(array_agg(w.symbol ORDER BY w.symbol) FILTER (WHERE w.symbol IS NOT NULL), '{}') AS watchlist
+      FROM telegram_notification_settings s LEFT JOIN watchlist_markets w ON w.user_id = s.user_id
+      WHERE $1::integer > 0
+      GROUP BY s.user_id, s.enabled, s.favorite_markets_only, s.timeframes, s.updated_at`),
+    alertPreferences: await evidence("alertPreferences", `SELECT symbol, timeframe, enabled, updated_at FROM alert_preferences WHERE $1::integer > 0`)
+  };
+
+  process.stdout.write(`${JSON.stringify({
+    exportedAt: new Date().toISOString(), days, signals, scannerReadyPairs,
+    liquidityRankingActive: liquidity ? liquidity.isLiquidityRankingActive() : false,
+    adminDisabled, scanEvidence, watcherScope, evidenceErrors
+  }, null, 1)}\n`, () => process.exit(0));
 } catch (error) {
   process.stderr.write(`Export failed: ${error.message}\n`);
   process.exit(1);
