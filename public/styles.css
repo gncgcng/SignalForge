@@ -1793,6 +1793,18 @@ button {
   font-size: 13px;
 }
 
+.auth-mode-switch {
+  margin: 0;
+  font-size: 14px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.auth-mode-switch a {
+  color: var(--cyan);
+  font-weight: 600;
+}
+
 .app-toast {
   position: fixed;
   z-index: 1200;

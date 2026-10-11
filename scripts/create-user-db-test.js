@@ -24,9 +24,9 @@ const run = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}
 const createdEmails = [];
 const fakeReq = (n) => ({ headers: { "x-forwarded-for": `10.77.${n}.${Math.floor(Math.random() * 250) + 1}` } });
 
-async function assertCreatedRow(email, { username = null } = {}) {
+async function assertCreatedRow(email, { username = null, generated = false } = {}) {
   const row = (await query(`
-    SELECT u.username, u.username_normalized, u.username_updated_at, u.password_hash,
+    SELECT u.username, u.username_normalized, u.username_updated_at, u.username_generated, u.password_hash,
       (SELECT COUNT(*)::int FROM subscriptions s WHERE s.user_id = u.id) AS subscriptions,
       (SELECT COUNT(*)::int FROM credit_balances c WHERE c.user_id = u.id) AS balances
     FROM users u WHERE u.email = $1
@@ -34,9 +34,17 @@ async function assertCreatedRow(email, { username = null } = {}) {
   assert.ok(row, `${email} was not inserted`);
   assert.equal(row.subscriptions, 1);
   assert.equal(row.balances, 1);
-  assert.equal(row.username, username);
-  assert.equal(row.username_normalized, username);
-  assert.equal(row.username_updated_at === null, username === null, "username_updated_at must be set iff a username is");
+  if (generated) {
+    // Generated at signup (trader_NNNNNN): no rename cooldown started, flagged for onboarding.
+    assert.match(row.username, /^trader_(\d{6}|\d{9})$/);
+    assert.equal(row.username_normalized, row.username);
+    assert.equal(row.username_updated_at, null, "a generated username must not start the rename cooldown");
+  } else {
+    assert.equal(row.username, username);
+    assert.equal(row.username_normalized, username);
+    assert.equal(row.username_updated_at === null, username === null, "username_updated_at must be set iff a username is chosen");
+  }
+  assert.equal(row.username_generated, generated);
   return row;
 }
 
@@ -96,14 +104,14 @@ try {
     }
   }
 
-  // New Google users, twice: Google never sends a username, so the second is the one "" broke.
+  // New Google users, twice: Google never sends a username (one is generated); the second is the one "" broke.
   // The first attempt also used to crash after creating the user (linkOAuthIdentity returned undefined).
   for (const n of [1, 2]) {
     const googleEmail = `google-signup-${n}-${run}@example.test`;
     createdEmails.push(googleEmail);
     const googleSession = await googleSignIn(googleEmail, n);
     assert.equal(googleSession.user.email, googleEmail);
-    await assertCreatedRow(googleEmail);
+    await assertCreatedRow(googleEmail, { generated: true });
     assert.ok((await findUserByEmail(googleEmail)).emailVerifiedAt, "Google signup should be email-verified");
   }
 

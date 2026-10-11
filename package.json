@@ -40,6 +40,7 @@
     "test:password-hashing": "node scripts/password-hashing-test.js",
     "test:password-hash-migration": "node scripts/password-hash-migration-test.js",
     "test:signup-consent": "node scripts/signup-consent-test.js",
+    "test:signup-free-account": "node scripts/signup-free-account-test.js",
     "test:stripe-billing": "node scripts/stripe-billing-test.js",
     "test:stripe-config": "node scripts/stripe-config-test.js",
     "test:stripe-mode": "node scripts/stripe-mode-test.js",

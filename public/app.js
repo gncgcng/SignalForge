@@ -717,19 +717,26 @@ function closeLegalDocument() {
   legalModal.classList.add("hidden");
 }
 
+// Every create-account CTA opens the create-account form; only "Sign In" opens sign-in.
 document.querySelector("#start-free-button").addEventListener("click", () => {
-  showAuth();
+  openAuthMode("signup");
 });
 
 document.querySelector("#landing-login-button").addEventListener("click", () => {
-  showAuth();
+  openAuthMode("signin");
 });
 
 document.querySelectorAll(".launch-auth-button").forEach((button) => {
   button.addEventListener("click", () => {
-    showAuth();
+    openAuthMode("signup");
   });
 });
+
+function openAuthMode(mode) {
+  const hash = mode === "signup" ? "#signup" : "#signin";
+  if (getHashRoute() !== hash) history.pushState({}, "", `${location.pathname}${location.search}${hash}`);
+  showAuth();
+}
 
 landingRunScan?.addEventListener("click", () => {
   landingRunScan.disabled = true;
@@ -844,7 +851,14 @@ authForm.addEventListener("submit", async (event) => {
   credentials.affiliateCode = state.referralCode;
   credentials.legalConsentAccepted = legalConsent.checked;
   credentials.ageConfirmed = ageConfirm.checked;
-  credentials.publicProfileEnabled = Boolean(credentials.publicProfileEnabled);
+  credentials.intent = getAuthMode();
+  const signupMode = credentials.intent === "signup";
+  if (signupMode && (!legalConsent.checked || !ageConfirm.checked)) {
+    authNote.textContent = !legalConsent.checked
+      ? "Agree to the Terms, Privacy Policy, and Risk Disclaimer to create your account."
+      : "Confirm you are 18 or older to create your account.";
+    return;
+  }
   const submitButton = authForm.querySelector("button[type='submit']");
   const loginOperationId = ++authOperationVersion;
   loginInProgress = true;
@@ -852,8 +866,8 @@ authForm.addEventListener("submit", async (event) => {
 
   try {
     submitButton.disabled = true;
-    submitButton.textContent = "Signing in...";
-    authNote.textContent = "Signing in...";
+    submitButton.textContent = signupMode ? "Creating account..." : "Signing in...";
+    authNote.textContent = signupMode ? "Creating your account..." : "Signing in...";
     console.info("[auth-ui] login:request:start");
     console.info("[auth-ui] login:endpoint=/api/auth/login");
     updateAuthDebug({
@@ -930,7 +944,7 @@ authForm.addEventListener("submit", async (event) => {
     if (loginOperationId === authOperationVersion) loginInProgress = false;
     window.__signalForgeLoginInProgress = loginInProgress;
     submitButton.disabled = false;
-    submitButton.textContent = "Enter Dashboard";
+    submitButton.textContent = authSubmitLabel(getAuthMode());
     console.info("[auth-ui] login:finally");
     updateAuthDebug({ signingIn: loginInProgress });
   }
@@ -3896,25 +3910,35 @@ function isPasswordResetRequestRoute() {
   return ["#forgot-password", "#reset-password"].includes(getHashRoute()) && !getPasswordResetToken();
 }
 
+function getAuthMode() {
+  return getHashRoute() === "#signup" ? "signup" : "signin";
+}
+
+function authSubmitLabel(mode) {
+  return mode === "signup" ? "Create account – get 3 free unlocks" : "Sign in";
+}
+
+// One form, two modes: "#signup" is "Create your free account" (email, password, the two
+// confirmations); anything else is sign-in. Elements marked data-auth-mode show in that mode only.
 function showAuthForm() {
   accountRecoverySupportPage?.classList.add("hidden");
   authForm?.classList.remove("hidden");
   passwordResetRequestForm?.classList.add("hidden");
   passwordResetConfirmForm?.classList.add("hidden");
-  const signupMode = getHashRoute() === "#signup";
-  for (const fieldName of ["name", "username", "publicProfileEnabled"]) {
-    const input = authForm?.elements?.namedItem(fieldName);
-    const label = input?.closest("label");
-    label?.classList.toggle("hidden", !signupMode);
-    if (input) input.disabled = !signupMode;
+  const mode = getAuthMode();
+  if (authForm) authForm.dataset.mode = mode;
+  for (const element of authForm?.querySelectorAll?.("[data-auth-mode]") || []) {
+    element.classList.toggle("hidden", element.dataset.authMode !== mode);
   }
+  const password = authForm?.elements?.namedItem("password");
+  password?.setAttribute?.("autocomplete", mode === "signup" ? "new-password" : "current-password");
   const heading = authForm?.querySelector("h2");
   const submit = authForm?.querySelector('button[type="submit"]');
-  if (heading) heading.textContent = signupMode ? "Create your account" : "Sign in";
-  if (submit && !loginInProgress) submit.textContent = signupMode ? "Create account" : "Sign in";
+  if (heading) heading.textContent = mode === "signup" ? "Create your free account" : "Sign in";
+  if (submit && !loginInProgress) submit.textContent = authSubmitLabel(mode);
   if (authNote && !loginInProgress) {
-    authNote.textContent = signupMode
-      ? "Create your account to start with 3 signal unlocks."
+    authNote.textContent = mode === "signup"
+      ? "Your first 3 signal unlocks are included."
       : "Sign in to continue to your SignalForge dashboard.";
   }
 }
@@ -10884,6 +10908,7 @@ function normalizeProfile(profile, user = state.user) {
   return {
     username,
     usernameRequired: source?.usernameRequired ?? !username,
+    usernameGenerated: Boolean(username && source?.usernameGenerated),
     avatarInitial: source?.avatarInitial || (username || user?.name || "S").slice(0, 1).toUpperCase(),
     joinedAt: source?.joinedAt || user?.createdAt || null,
     publicProfileEnabled: Boolean(source?.publicProfileEnabled ?? user?.publicProfileEnabled),
@@ -11160,11 +11185,13 @@ function getOnboardingSteps() {
   return [
     {
       id: "username",
-      title: "Create username",
-      description: "Reserve a public identity for profiles, rankings, and community features.",
-      done: Boolean(profile?.username),
+      title: profile?.usernameGenerated ? "Choose your username" : "Create username",
+      description: profile?.usernameGenerated
+        ? `You are ${profile.username} for now. Pick the name shown on your profile and rankings.`
+        : "Reserve a public identity for profiles, rankings, and community features.",
+      done: Boolean(profile?.username) && !profile?.usernameGenerated,
       action: "profile",
-      cta: profile?.username ? "View profile" : "Create username"
+      cta: profile?.usernameGenerated ? "Choose username" : profile?.username ? "View profile" : "Create username"
     },
     {
       id: "telegram",
@@ -11235,6 +11262,13 @@ function renderOnboarding() {
 }
 
 function handleOnboardingAction(action) {
+  if (action === "profile" && state.profile?.usernameGenerated) {
+    // A generated name is renamed where usernames are already editable: profile settings.
+    navigateTo("settings");
+    settingsUsername?.focus({ preventScroll: false });
+    settingsUsername?.select?.();
+    return;
+  }
   if (action === "profile") {
     navigateTo("profile");
     usernameRequiredPanel?.scrollIntoView({ behavior: "smooth", block: "start" });

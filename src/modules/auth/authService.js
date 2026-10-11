@@ -182,7 +182,8 @@ export async function registerOrLogin({
   legalConsentAccepted,
   ageConfirmed,
   username,
-  publicProfileEnabled
+  publicProfileEnabled,
+  intent
 }, req, options = {}) {
   if (!email || !password || password.length < 6) {
     const error = new Error("Use a valid email and a password with at least 6 characters.");
@@ -225,6 +226,17 @@ export async function registerOrLogin({
     return { ...(await createSession(existing)), verificationRequired: !existing.emailVerifiedAt };
   }
 
+  // The sign-in form never creates an account: an unknown email there is a failed sign-in, rate
+  // limited and answered like a wrong password. Accounts come from the create-account form (or an
+  // older client that sends no intent).
+  if (intent === "signin") {
+    const emailHash = hashIdentifier(`email:${normalizedEmail}`);
+    const ipHash = getSignupContext(req, deviceFingerprint).ipHash;
+    assertLoginVelocity(await getLoginAttemptVelocity({ emailHash, ipHash }));
+    await recordLoginAttempt({ emailHash, ipHash, successful: false });
+    throw invalidCredentialsError();
+  }
+
   if (!options.bypassVerification) {
     if (legalConsentAccepted !== true) {
       const error = new Error("Agree to the Terms, Privacy Policy, and Risk Disclaimer before creating an account.");
@@ -238,7 +250,7 @@ export async function registerOrLogin({
     }
   }
 
-  const normalizedUsername = assertValidSignupUsername(username, options);
+  const normalizedUsername = assertValidOptionalSignupUsername(username);
   if (normalizedUsername && await findUserByUsername(normalizedUsername)) {
     const error = new Error("Username is already taken.");
     error.code = "USERNAME_TAKEN";
@@ -303,6 +315,7 @@ export async function registerOrLogin({
     abuseFlags: abuse.flags,
     abuseReviewStatus: abuse.reviewStatus,
     username: normalizedUsername,
+    generateUsername: !normalizedUsername,
     publicProfileEnabled: Boolean(publicProfileEnabled),
     publicLeaderboardEnabled: false,
     ...buildSignupConsentRecord({ legalConsentAccepted, ageConfirmed })
@@ -595,19 +608,11 @@ function restoreError(message) {
   return error;
 }
 
-function assertValidSignupUsername(username, options = {}) {
+// Signup has no username step: an empty username means "generate one" (createUser draws a
+// collision-safe trader_NNNNNN). A client that still sends a username gets exactly that name.
+function assertValidOptionalSignupUsername(username) {
   const value = String(username || "").trim();
-
-  if (!value && options.bypassVerification) {
-    return null;
-  }
-
-  if (!value) {
-    const error = new Error("Choose a username to create your account.");
-    error.code = "USERNAME_REQUIRED";
-    error.statusCode = 400;
-    throw error;
-  }
+  if (!value) return null;
 
   if (!/^[A-Za-z0-9_]{3,20}$/.test(value)) {
     const error = new Error("Username must be 3-20 characters using only letters, numbers, and underscores.");

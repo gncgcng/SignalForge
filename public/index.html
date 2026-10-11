@@ -569,28 +569,16 @@
           </div>
         </div>
 
-        <form class="auth-card" id="auth-form">
+        <form class="auth-card" id="auth-form" data-mode="signin">
           <span class="eyebrow">MVP access</span>
-          <h2>Start scanning</h2>
-          <label>
-            Name
-            <input name="name" autocomplete="name" placeholder="Alex Morgan" />
-          </label>
+          <h2>Sign in</h2>
           <label>
             Email
             <input name="email" type="email" autocomplete="email" placeholder="alex@signalforge.app" required />
           </label>
           <label>
-            Username
-            <input name="username" autocomplete="username" pattern="[A-Za-z0-9_]{3,20}" minlength="3" maxlength="20" placeholder="alex_trades" />
-          </label>
-          <label>
             Password
             <input name="password" type="password" autocomplete="current-password" placeholder="6+ characters" required />
-          </label>
-          <label class="consent-row">
-            <input name="publicProfileEnabled" type="checkbox" />
-            <span>Show my trading profile publicly. You can turn this off later.</span>
           </label>
           <label class="consent-row">
             <input id="legal-consent" name="legalConsentAccepted" type="checkbox" />
@@ -605,14 +593,16 @@
             <input id="age-confirm" name="ageConfirmed" type="checkbox" />
             <span>I confirm that I am 18 years of age or older.</span>
           </label>
-          <button type="submit">Enter Dashboard</button>
-          <button class="link-button" id="forgot-password-button" type="button">Forgot password?</button>
+          <button type="submit">Sign in</button>
+          <button class="link-button" id="forgot-password-button" type="button" data-auth-mode="signin">Forgot password?</button>
           <div class="auth-divider"><span>or</span></div>
           <button class="google-auth-button" id="google-auth-button" type="button" disabled aria-disabled="true">
             Checking Google sign-in...
           </button>
           <button class="secondary-action hidden" id="auth-api-test" type="button">Test auth API</button>
-          <p class="form-note" id="auth-note">Sign in or create your account. Your first 3 signals are included.</p>
+          <p class="form-note" id="auth-note">Sign in to continue to your SignalForge dashboard.</p>
+          <p class="auth-mode-switch" data-auth-mode="signin">New here? <a href="#signup" id="auth-switch-to-signup">Create a free account</a></p>
+          <p class="auth-mode-switch hidden" data-auth-mode="signup">Already have an account? <a href="#signin" id="auth-switch-to-signin">Sign in</a></p>
         </form>
         <form class="auth-card hidden" id="password-reset-request-form">
           <span class="eyebrow">Account recovery</span>

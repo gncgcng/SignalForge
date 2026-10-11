@@ -209,6 +209,8 @@ async function createGoogleUser(claims, loginState) {
     abuseScore: abuse.score,
     abuseFlags: abuse.flags,
     abuseReviewStatus: abuse.reviewStatus,
+    // No username step after Google either: a collision-safe trader_NNNNNN, renamable in settings.
+    generateUsername: true,
     ...buildSignupConsentRecord(loginState)
   });
   await grantOAuthFreeTrial(user.id, loginState.deviceFingerprintHash);

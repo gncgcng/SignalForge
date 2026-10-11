@@ -138,6 +138,7 @@
 
   function showAuthRoute(route) {
     window.history.pushState({}, "", window.location.pathname + window.location.search + "#" + route);
+    applyAuthMode();
     var authScreen = document.getElementById("auth-screen");
     var authForm = document.getElementById("auth-form");
     var resetForm = document.getElementById("password-reset-request-form");
@@ -245,6 +246,28 @@
   var authForm = document.getElementById("auth-form");
   var authNote = document.getElementById("auth-note");
   var submitButton = authForm && authForm.querySelector("button[type='submit']");
+  // Same two modes as app.js showAuthForm(): "#signup" creates an account, anything else signs in.
+  function getAuthMode() {
+    return getHashRoute() === "#signup" ? "signup" : "signin";
+  }
+
+  function authSubmitLabel(mode) {
+    return mode === "signup" ? "Create account – get 3 free unlocks" : "Sign in";
+  }
+
+  function applyAuthMode() {
+    if (!authForm) return;
+    var mode = getAuthMode();
+    authForm.dataset.mode = mode;
+    var modal = authForm.querySelectorAll ? authForm.querySelectorAll("[data-auth-mode]") : [];
+    Array.prototype.forEach.call(modal, function (element) {
+      element.classList.toggle("hidden", element.dataset.authMode !== mode);
+    });
+    var heading = authForm.querySelector ? authForm.querySelector("h2") : null;
+    if (heading) heading.textContent = mode === "signup" ? "Create your free account" : "Sign in";
+    if (submitButton && !window.__signalForgeAuthDebug?.signingIn) submitButton.textContent = authSubmitLabel(mode);
+  }
+
   authForm?.addEventListener("submit", async function (event) {
     if (window.__signalForgeMainAuthReady) return;
     event.preventDefault();
@@ -264,13 +287,22 @@
     credentials.affiliateCode = window.sessionStorage.getItem("signalforge-affiliate-code") || "";
     credentials.legalConsentAccepted = Boolean(document.getElementById("legal-consent")?.checked);
     credentials.ageConfirmed = Boolean(document.getElementById("age-confirm")?.checked);
-    credentials.publicProfileEnabled = Boolean(credentials.publicProfileEnabled);
+    credentials.intent = getAuthMode();
+    var signupMode = credentials.intent === "signup";
+    if (signupMode && (!credentials.legalConsentAccepted || !credentials.ageConfirmed)) {
+      if (authNote) {
+        authNote.textContent = !credentials.legalConsentAccepted
+          ? "Agree to the Terms, Privacy Policy, and Risk Disclaimer to create your account."
+          : "Confirm you are 18 or older to create your account.";
+      }
+      return;
+    }
     try {
       if (submitButton) {
         submitButton.disabled = true;
-        submitButton.textContent = "Signing in...";
+        submitButton.textContent = signupMode ? "Creating account..." : "Signing in...";
       }
-      if (authNote) authNote.textContent = "Signing in...";
+      if (authNote) authNote.textContent = signupMode ? "Creating your account..." : "Signing in...";
       console.info("[auth-ui] login:request:start");
       console.info("[auth-ui] login:endpoint=/api/auth/login");
       setDebug("login", "loading", "");
@@ -303,7 +335,7 @@
     } finally {
       if (submitButton) {
         submitButton.disabled = false;
-        submitButton.textContent = "Enter Dashboard";
+        submitButton.textContent = authSubmitLabel(getAuthMode());
       }
       console.info("[auth-ui] login:finally");
     }
@@ -325,11 +357,22 @@
     event.preventDefault();
     showAuthRoute("signin");
   });
-  ["start-free-button", "landing-login-button"].forEach(function (id) {
-    document.getElementById(id)?.addEventListener("click", function () {
-      if (!window.__signalForgeMainAuthReady) showAuthRoute("signin");
+  document.getElementById("landing-login-button")?.addEventListener("click", function () {
+    if (!window.__signalForgeMainAuthReady) showAuthRoute("signin");
+  });
+  // Every create-account CTA opens the create-account form.
+  var createAccountCtas = [document.getElementById("start-free-button")].concat(
+    document.querySelectorAll ? Array.prototype.slice.call(document.querySelectorAll(".launch-auth-button")) : []
+  );
+  createAccountCtas.forEach(function (button) {
+    button?.addEventListener("click", function () {
+      if (!window.__signalForgeMainAuthReady) showAuthRoute("signup");
     });
   });
+  window.addEventListener?.("hashchange", function () {
+    if (!window.__signalForgeMainAuthReady) applyAuthMode();
+  });
+  if (!window.__signalForgeMainAuthReady) applyAuthMode();
 
   var googleButton = document.getElementById("google-auth-button");
   googleButton?.addEventListener("click", async function (event) {

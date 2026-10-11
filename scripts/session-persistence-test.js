@@ -89,11 +89,11 @@ const result = {
     !app.includes('if (isPublicAuthRoute()) {\n    const authConfig = await loadAuthConfig();') &&
     app.includes('} else if (isPublicAuthRoute()) {\n    setSplashStatus("Opening sign in");') &&
     app.includes("const AUTH_RESTORE_TIMEOUT_MS = 8000"),
-  signInUsesLoginOnlyFields:
-    app.includes('const signupMode = getHashRoute() === "#signup"') &&
-    app.includes('["name", "username", "publicProfileEnabled"]') &&
-    app.includes('input.disabled = !signupMode') &&
-    app.includes('heading.textContent = signupMode ? "Create your account" : "Sign in"'),
+  signInAndSignupModesShareOneForm:
+    app.includes('return getHashRoute() === "#signup" ? "signup" : "signin";') &&
+    app.includes('element.classList.toggle("hidden", element.dataset.authMode !== mode)') &&
+    app.includes('heading.textContent = mode === "signup" ? "Create your free account" : "Sign in"') &&
+    html.includes('data-auth-mode="signin">New here? <a href="#signup"'),
   loginRefreshStillLoggedIn:
     app.includes("if (session.user)") &&
     app.includes("console.info(\"[auth] Cookie session restored.\")") &&

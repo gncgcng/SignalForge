@@ -78,6 +78,7 @@ function buildProfile(user, signals = [], { privateView, leaderboardEligibility 
   return {
     username: safeUser.username || "",
     usernameRequired: !safeUser.username,
+    usernameGenerated: Boolean(safeUser.username && safeUser.usernameGenerated),
     avatarInitial: (safeUser.username || safeUser.name || "S").slice(0, 1).toUpperCase(),
     joinedAt: safeUser.createdAt || null,
     publicProfileEnabled: Boolean(safeUser.publicProfileEnabled),

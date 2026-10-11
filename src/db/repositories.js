@@ -1,3 +1,4 @@
+import { randomInt } from "node:crypto";
 import { appConfig } from "../config/appConfig.js";
 import { createId } from "../shared/ids.js";
 import {
@@ -96,7 +97,52 @@ export async function createUser({
   publicLeaderboardEnabled = false,
   legalConsentAcceptedAt = null,
   legalConsentVersion = null,
-  ageConfirmedAt = null
+  ageConfirmedAt = null,
+  generateUsername = false,
+  usernameCandidate = randomTraderUsername
+}) {
+  const generated = generateUsername && !normalizeUsernameForLookup(username);
+  for (let attempt = 0; ; attempt += 1) {
+    const candidate = generated ? usernameCandidate(attempt) : username;
+    if (generated && !normalizeUsernameForLookup(candidate)) {
+      throw new Error(`Generated username "${candidate}" does not satisfy the username rules.`);
+    }
+    try {
+      await insertNewUser({
+        id, name, email, password, emailVerifiedAt, freeSignalAllowance, signupIpHash,
+        deviceFingerprintHash, abuseScore, abuseFlags, abuseReviewStatus, username: candidate,
+        generated, publicProfileEnabled, publicLeaderboardEnabled, legalConsentAcceptedAt,
+        legalConsentVersion, ageConfirmedAt
+      });
+      break;
+    } catch (error) {
+      // Two signups can draw the same name; the unique index decides and the loser draws again.
+      // A chosen username that is taken still fails: the caller asked for that exact name.
+      if (!generated || !isUsernameUniqueViolation(error) || attempt + 1 >= GENERATED_USERNAME_ATTEMPTS) throw error;
+    }
+  }
+
+  return findUserById(id);
+}
+
+export const GENERATED_USERNAME_ATTEMPTS = 8;
+
+// trader_ + 6 random digits, widened to 9 after repeated collisions. Fits the [A-Za-z0-9_]{3,20}
+// username rule, so users rename it through the normal profile settings.
+export function randomTraderUsername(attempt = 0) {
+  const digits = attempt < 4 ? 6 : 9;
+  return `trader_${String(randomInt(0, 10 ** digits)).padStart(digits, "0")}`;
+}
+
+function isUsernameUniqueViolation(error) {
+  return error?.code === "23505" && error?.constraint === "idx_users_username_normalized";
+}
+
+async function insertNewUser({
+  id, name, email, password, emailVerifiedAt, freeSignalAllowance, signupIpHash,
+  deviceFingerprintHash, abuseScore, abuseFlags, abuseReviewStatus, username, generated,
+  publicProfileEnabled, publicLeaderboardEnabled, legalConsentAcceptedAt, legalConsentVersion,
+  ageConfirmedAt
 }) {
   const usernameNormalized = normalizeUsernameForLookup(username);
   await transaction(async (client) => {
@@ -106,9 +152,9 @@ export async function createUser({
         signup_ip_hash, device_fingerprint_hash, abuse_score, abuse_flags,
         abuse_review_status, affiliate_code, username, username_normalized,
         username_updated_at, public_profile_enabled, public_leaderboard_enabled,
-        legal_consent_accepted_at, legal_consent_version, age_confirmed_at
+        legal_consent_accepted_at, legal_consent_version, age_confirmed_at, username_generated
       )
-      VALUES ($1,$2,$3,$4,$5,'free',$6,$7,$8,$9,$10,$11,lower(substr(md5($1),1,12)),$12,$13,$14,$15,$16,$17,$18,$19)
+      VALUES ($1,$2,$3,$4,$5,'free',$6,$7,$8,$9,$10,$11,lower(substr(md5($1),1,12)),$12,$13,$14,$15,$16,$17,$18,$19,$20)
     `, [
       id,
       name,
@@ -127,12 +173,14 @@ export async function createUser({
       usernameNormalized || null,
       // Bound as a value, not `CASE WHEN $13 IS NULL ...`: Postgres can't infer a type for a
       // parameter used only in IS NULL and rejected every signup with 42P08.
-      usernameNormalized ? new Date() : null,
+      // A generated name leaves it NULL so the 30-day rename cooldown doesn't block the first rename.
+      usernameNormalized && !generated ? new Date() : null,
       Boolean(publicProfileEnabled),
       Boolean(publicProfileEnabled && publicLeaderboardEnabled),
       legalConsentAcceptedAt,
       legalConsentVersion,
-      ageConfirmedAt
+      ageConfirmedAt,
+      Boolean(generated)
     ]);
 
     await client.query(`
@@ -148,8 +196,6 @@ export async function createUser({
       VALUES ($1, 0, $2, 0, $3)
     `, [id, freeSignalAllowance, freeSignalAllowance]);
   });
-
-  return findUserById(id);
 }
 
 export async function updateUserProfileSettings(userId, {
@@ -218,6 +264,7 @@ export async function updateUserProfileSettings(userId, {
       SET username = $2,
         username_normalized = $3,
         username_updated_at = CASE WHEN $4 THEN now() ELSE username_updated_at END,
+        username_generated = CASE WHEN $4 THEN false ELSE username_generated END,
         public_profile_enabled = COALESCE($5, public_profile_enabled),
         public_leaderboard_enabled = CASE
           WHEN COALESCE($5, public_profile_enabled) = false THEN false
@@ -3767,6 +3814,7 @@ function mapUser(row) {
     username: row.username || null,
     usernameNormalized: row.username_normalized || null,
     usernameUpdatedAt: row.username_updated_at || null,
+    usernameGenerated: Boolean(row.username_generated),
     publicProfileEnabled: Boolean(row.public_profile_enabled),
     publicLeaderboardEnabled: Boolean(row.public_leaderboard_enabled),
     signalViewMode: row.signal_view_mode === "advanced" ? "advanced" : "beginner",
