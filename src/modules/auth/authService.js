@@ -14,6 +14,7 @@ import {
   getDeviceTrialHistory,
   getLoginAttemptVelocity,
   getSignupVelocity,
+  hasRecentSessionReauth,
   markAuthRestoreTokenUsed,
   recordLoginAttempt,
   recordSignupAttempt,
@@ -21,6 +22,7 @@ import {
   resetPasswordWithToken,
   revokeAuthRestoreToken,
   revokeAuthRestoreTokensForUserDevice,
+  setInitialUserPassword,
   storeAuthRestoreToken,
   upgradeUserPasswordHash,
   verifyEmailToken
@@ -77,7 +79,7 @@ export function isPasswordHasherReady() {
 // Re-authentication for destructive account actions. Shares the login attempt
 // counters so a stolen session can't be used to brute-force the password here.
 export async function reauthenticateWithPassword(user, password, req) {
-  const emailHash = hashIdentifier(`email:${String(user.email || "").trim().toLowerCase()}`);
+  const emailHash = loginEmailHash(user);
   const ipHash = getSignupContext(req, null).ipHash;
   assertLoginVelocity(await getLoginAttemptVelocity({ emailHash, ipHash }));
   const { valid: passwordValid, legacy } = verifyAndClassifyPassword(String(password || ""), user.password);
@@ -89,7 +91,53 @@ export async function reauthenticateWithPassword(user, password, req) {
     throw error;
   }
   if (legacy) await upgradeLegacyPasswordHash(user, String(password || ""));
-  return { emailHash };
+  return { emailHash: loginEmailHash(user) };
+}
+
+// How long a "Confirm with Google" re-auth counts for on the session that performed it.
+export const REAUTH_WINDOW_SECONDS = 10 * 60;
+
+// Accounts created through Google have no password: an empty hash, which never verifies.
+export function userHasPassword(user) {
+  return Boolean(user?.password?.hash);
+}
+
+export function hasRecentReauth(user, sessionId) {
+  return hasRecentSessionReauth(sessionId, user?.id, REAUTH_WINDOW_SECONDS);
+}
+
+export function loginEmailHash(user) {
+  return hashIdentifier(`email:${String(user.email || "").trim().toLowerCase()}`);
+}
+
+// "Set a password" for an account that has none. Proof of identity is a recent Google re-auth
+// on this session; there is no current password to ask for.
+export async function setPasswordAfterReauth(user, password, sessionId) {
+  if (userHasPassword(user)) {
+    throw authError(409, "This account already has a password.", "password_already_set");
+  }
+  if (!(await hasRecentReauth(user, sessionId))) {
+    throw authError(401, "Confirm with Google first. Confirmation lasts 10 minutes.", "reauth_required");
+  }
+  assertValidNewPassword(password);
+  if (!(await setInitialUserPassword(user.id, hashPassword(password)))) {
+    throw authError(409, "This account already has a password.", "password_already_set");
+  }
+  console.info(`[auth] password_set user=${safeLogId(user.id)}`);
+  return { ok: true };
+}
+
+function assertValidNewPassword(password) {
+  if (!password || String(password).length < 6) {
+    throw authError(400, "Use a password with at least 6 characters.");
+  }
+}
+
+function authError(statusCode, message, code) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  if (code) error.code = code;
+  return error;
 }
 
 export function isValidPassword(password, record) {
@@ -154,6 +202,7 @@ function publicUser(user) {
     role: user.role,
     isAdmin: appConfig.adminEmails.has(user.email.toLowerCase()),
     plan: user.plan,
+    hasPassword: userHasPassword(user),
     emailVerified: Boolean(user.emailVerifiedAt),
     trialUsed: Boolean(user.trialUsed),
     abuseReviewStatus: user.abuseReviewStatus || "clear",
@@ -431,11 +480,7 @@ export async function requestPasswordReset(email) {
 }
 
 export async function completePasswordReset({ token, password }) {
-  if (!password || password.length < 6) {
-    const error = new Error("Use a password with at least 6 characters.");
-    error.statusCode = 400;
-    throw error;
-  }
+  assertValidNewPassword(password);
 
   const result = await resetPasswordWithToken(hashPasswordResetToken(token), hashPassword(password));
   if (!result) {

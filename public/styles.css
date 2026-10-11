@@ -2142,6 +2142,34 @@ nav a:hover {
   gap: 6px;
 }
 
+.set-password-panel {
+  display: grid;
+  gap: 14px;
+  justify-items: start;
+}
+
+.set-password-form {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+  max-width: 420px;
+}
+
+.set-password-form label {
+  display: grid;
+  gap: 6px;
+}
+
+.set-password-form button[type="submit"] {
+  justify-self: start;
+}
+
+.reauth-google-field {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+}
+
 .delete-account-actions {
   display: flex;
   flex-wrap: wrap;

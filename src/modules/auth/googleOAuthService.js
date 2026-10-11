@@ -17,7 +17,9 @@ import {
   getSignupVelocity,
   grantOAuthFreeTrial,
   linkOAuthIdentity,
-  recordSignupAttempt
+  listOAuthSubjectsForUser,
+  recordSignupAttempt,
+  stampSessionReauth
 } from "../../db/repositories.js";
 import {
   assertSignupVelocity,
@@ -54,6 +56,10 @@ export async function startGoogleOAuth(req, deviceFingerprint, affiliateCode, { 
     expiresAt: new Date(Date.now() + stateTtlMs)
   });
 
+  return { authorizationUrl: buildAuthorizationUrl(state, nonce), state };
+}
+
+function buildAuthorizationUrl(state, nonce) {
   const url = new URL(appConfig.googleOAuth.authorizationUrl);
   url.search = new URLSearchParams({
     client_id: appConfig.googleOAuth.clientId,
@@ -64,8 +70,68 @@ export async function startGoogleOAuth(req, deviceFingerprint, affiliateCode, { 
     nonce,
     prompt: "select_account"
   }).toString();
+  return url.toString();
+}
 
-  return { authorizationUrl: url.toString(), state };
+// "Confirm with Google": its own OAuth round trip and state (purpose "reauth"), bound to the
+// signed-in user and the session asking. It never signs anyone in or links anything; success
+// only stamps that session's recent_reauth_at.
+export async function startGoogleReauth(user, sessionId) {
+  assertGoogleConfigured();
+  if (!user?.id || !sessionId) {
+    throw oauthFailure("Sign in again to confirm your identity.", "reauth_session_required", 401);
+  }
+  if (!(await listOAuthSubjectsForUser(provider, user.id)).length) {
+    throw oauthFailure("This account isn't linked to a Google account.", "no_google_identity");
+  }
+  const state = randomBytes(32).toString("base64url");
+  const nonce = randomBytes(32).toString("base64url");
+  await createOAuthLoginState({
+    stateHash: hashState(state),
+    provider,
+    nonce,
+    purpose: "reauth",
+    userId: user.id,
+    sessionId,
+    expiresAt: new Date(Date.now() + stateTtlMs)
+  });
+  return { authorizationUrl: buildAuthorizationUrl(state, nonce), state };
+}
+
+export async function completeGoogleReauth({ code, state, oauthError, user, sessionId }) {
+  assertGoogleConfigured();
+  if (!state) {
+    throw oauthFailure("Google confirmation response is incomplete.", "invalid_callback");
+  }
+  const reauthState = await consumeOAuthLoginState(hashState(state), provider, "reauth");
+  if (!reauthState) {
+    throw oauthFailure("Google confirmation expired. Please try again.", "invalid_state");
+  }
+  // The callback must land on the same signed-in session that started it.
+  if (!user?.id || reauthState.userId !== user.id || reauthState.sessionId !== sessionId) {
+    throw oauthFailure("Google confirmation doesn't match this session.", "reauth_session_mismatch");
+  }
+  if (oauthError) {
+    throw oauthFailure("Google confirmation was cancelled.", "google_denied");
+  }
+  if (!code) {
+    throw oauthFailure("Google confirmation response is incomplete.", "invalid_callback");
+  }
+
+  const tokenResponse = await exchangeAuthorizationCode(code);
+  const claims = await validateGoogleIdToken(tokenResponse.id_token, reauthState.nonce);
+  const linkedSubjects = await listOAuthSubjectsForUser(provider, user.id);
+  if (!linkedSubjects.some((subject) => secureStringEqual(subject, claims.sub))) {
+    throw oauthFailure(
+      "That Google account isn't the one linked to this SignalForge account.",
+      "reauth_account_mismatch"
+    );
+  }
+  const reauthAt = await stampSessionReauth(sessionId, user.id);
+  if (!reauthAt) {
+    throw oauthFailure("Your session ended. Sign in again.", "reauth_session_mismatch");
+  }
+  return { reauthAt };
 }
 
 export async function completeGoogleOAuth({ code, state, oauthError }) {
@@ -196,12 +262,12 @@ async function createGoogleUser(claims, loginState) {
     repeatedDevice,
     disposableEmail: false
   });
-  const password = randomPasswordRecord();
   let user = await createUser({
     id: createId("usr"),
     name: String(claims.name || normalizedEmail.split("@")[0]).trim().slice(0, 120),
     email: normalizedEmail,
-    password,
+    // No password until the user sets one in settings (after confirming with Google).
+    password: { salt: "", hash: "" },
     emailVerifiedAt: new Date(),
     freeSignalAllowance: 0,
     signupIpHash: loginState.signupIpHash,
@@ -321,15 +387,6 @@ function sanitizeAffiliateCode(value) {
   return String(value || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 64);
 }
 
-function randomPasswordRecord() {
-  const salt = randomBytes(16).toString("hex");
-  const password = randomBytes(32).toString("base64url");
-  return {
-    salt,
-    hash: createHash("sha256").update(`${salt}:${password}`).digest("hex")
-  };
-}
-
 function secureStringEqual(left, right) {
   const a = Buffer.from(String(left || ""));
   const b = Buffer.from(String(right || ""));
@@ -355,9 +412,9 @@ function assertGoogleConfigured() {
   throw error;
 }
 
-function oauthFailure(message, code) {
+function oauthFailure(message, code, statusCode = 400) {
   const error = new Error(message);
-  error.statusCode = 400;
+  error.statusCode = statusCode;
   error.oauthCode = code;
   return error;
 }

@@ -5,6 +5,7 @@ const app = readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
 const bootstrap = readFileSync(new URL("../public/auth-bootstrap.js", import.meta.url), "utf8");
 const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
 const server = readFileSync(new URL("../src/server.js", import.meta.url), "utf8");
+const authMiddleware = readFileSync(new URL("../src/middleware/authMiddleware.js", import.meta.url), "utf8");
 const controller = readFileSync(new URL("../src/modules/auth/authController.js", import.meta.url), "utf8");
 const smoke = readFileSync(new URL("./auth-smoke-test.js", import.meta.url), "utf8");
 const repair = readFileSync(new URL("./repair-admin-account.js", import.meta.url), "utf8");
@@ -20,7 +21,9 @@ assert.match(controller, /pathname === "\/api\/auth\/health"/);
 assert.match(controller, /dbConnected/);
 assert.match(controller, /passwordHasherReady/);
 assert.match(controller, /sessionStoreReady/);
-assert.match(server, /"\/api\/auth\/health"/);
+// The health check runs without session attachment; that list lives in the auth middleware.
+assert.match(server, /requiresAuthAttachment\(url\.pathname\)/);
+assert.match(authMiddleware, /"\/api\/auth\/health"/);
 assert.match(controller, /token: restore\?\.token \|\| null/);
 assert.match(controller, /restoreToken: restore\?\.token \|\| null/);
 assert.match(app, /login:endpoint=\/api\/auth\/login/);

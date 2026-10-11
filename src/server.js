@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { appConfig, logEmailConfiguration, logStripeConfiguration } from "./config/appConfig.js";
 import { verifyDatabaseConnection } from "./db/client.js";
 import { runPendingMigrations, verifySessionSchema } from "./db/migrations.js";
-import { attachAuth } from "./middleware/authMiddleware.js";
+import { attachAuth, requiresAuthAttachment } from "./middleware/authMiddleware.js";
 import { redirectLegacyHost } from "./middleware/legacyHostRedirect.js";
 import { handleAccountDeletionRoutes } from "./modules/account-deletion/accountDeletionController.js";
 import { handleAdminAnalyticsRoutes } from "./modules/admin/analyticsController.js";
@@ -168,21 +168,6 @@ async function serveStatic(pathname, res) {
     });
     res.end(index);
   }
-}
-
-function requiresAuthAttachment(pathname) {
-  return ![
-    "/api/auth/config",
-    "/api/auth/health",
-    "/api/auth/login",
-    "/api/auth/google/start",
-    "/api/auth/google/callback",
-    "/api/auth/demo",
-    "/api/auth/restore",
-    "/api/auth/verify-email",
-    "/api/auth/password-reset/request",
-    "/api/auth/password-reset/confirm"
-  ].includes(pathname);
 }
 
 function withTimeout(promise, timeoutMs, code) {

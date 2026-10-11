@@ -1,4 +1,10 @@
-import { isAdminUser, reauthenticateWithPassword } from "../auth/authService.js";
+import {
+  hasRecentReauth,
+  isAdminUser,
+  loginEmailHash,
+  reauthenticateWithPassword,
+  userHasPassword
+} from "../auth/authService.js";
 import { cancelSubscription, deleteStripeCustomer } from "../subscriptions/stripeService.js";
 import { countPendingAffiliatePayouts, deleteAccountData } from "./accountDeletionRepository.js";
 
@@ -15,7 +21,7 @@ export async function deleteAccount(user, { password, confirmation } = {}, req) 
     throw httpError(403, "Admin accounts can't be deleted from settings. Contact another admin.", "admin_account");
   }
 
-  const { emailHash } = await reauthenticateWithPassword(user, password, req);
+  const { emailHash } = await confirmIdentity(user, password, req);
 
   if (await countPendingAffiliatePayouts(user.id)) {
     throw httpError(409, "You have a pending affiliate payout. Wait for it to be reviewed before deleting your account.", "pending_payout");
@@ -41,6 +47,19 @@ export async function deleteAccount(user, { password, confirmation } = {}, req) 
     `already_deleted=${result.alreadyDeleted}`
   );
   return { deleted: true };
+}
+
+// Either the current password, or a "Confirm with Google" re-auth on this session within the
+// last 10 minutes. A typed password always takes the password path, so password users see
+// exactly the old checks and errors; an account with no password can only use the re-auth.
+async function confirmIdentity(user, password, req) {
+  if (!password && await hasRecentReauth(user, req?.sessionId)) {
+    return { emailHash: loginEmailHash(user) };
+  }
+  if (password || userHasPassword(user)) {
+    return reauthenticateWithPassword(user, password, req);
+  }
+  throw httpError(401, "Confirm with Google before deleting your account. Confirmation lasts 10 minutes.", "reauth_required");
 }
 
 // Some transactions lock a child row before the users row (e.g. tester access review,

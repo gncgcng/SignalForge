@@ -1680,6 +1680,25 @@
               </div>
               <p class="form-note" id="profile-settings-message">Usernames are unique and can be changed once every 30 days.</p>
             </article>
+            <article class="panel set-password-panel hidden" id="set-password-panel">
+              <div>
+                <span class="eyebrow">Sign-in</span>
+                <h3>Set a password</h3>
+                <p class="reasoning">You sign in with Google. Add a password to also sign in with your email address. Google sign-in keeps working.</p>
+              </div>
+              <form id="set-password-form" class="set-password-form" autocomplete="off">
+                <div class="reauth-google-field">
+                  <button class="secondary-button" data-reauth-google="set-password" type="button">Confirm with Google</button>
+                  <p class="form-note" data-reauth-status>Confirm it’s you with Google first. Confirmation lasts 10 minutes.</p>
+                </div>
+                <label>
+                  New password
+                  <input id="set-password-input" name="password" type="password" autocomplete="new-password" minlength="6" placeholder="6+ characters" required />
+                </label>
+                <button id="set-password-submit" type="submit" disabled>Set password</button>
+              </form>
+              <p class="status-line" id="set-password-message" aria-live="polite"></p>
+            </article>
             <article class="panel delete-account-panel">
               <div>
                 <span class="eyebrow danger-eyebrow">Danger zone</span>
@@ -1688,15 +1707,19 @@
               </div>
               <button class="link-button danger" id="delete-account-start" type="button">Delete my account…</button>
               <form id="delete-account-form" class="delete-account-form hidden" autocomplete="off">
-                <label>
+                <label id="delete-account-password-field">
                   Current password
                   <input id="delete-account-password" name="password" type="password" autocomplete="current-password" required />
                 </label>
+                <div class="reauth-google-field hidden" id="delete-account-google-field">
+                  <button class="secondary-button" data-reauth-google="delete" type="button">Confirm with Google</button>
+                  <p class="form-note" data-reauth-status>Your account has no password, so confirm it’s you with Google first. Confirmation lasts 10 minutes.</p>
+                </div>
                 <label>
                   <span>Type <strong>DELETE</strong> to confirm</span>
                   <input id="delete-account-confirmation" name="confirmation" autocomplete="off" spellcheck="false" required />
                 </label>
-                <p class="form-note">Signed up with Google? Set a password first using “Forgot password” on the sign-in page.</p>
+                <p class="form-note" id="delete-account-password-note">Signed up with Google? Set a password first using “Forgot password” on the sign-in page.</p>
                 <div class="delete-account-actions">
                   <button class="danger-button" id="delete-account-submit" type="submit" disabled>Permanently delete account</button>
                   <button class="secondary-button" id="delete-account-cancel" type="button">Cancel</button>
@@ -2523,7 +2546,7 @@
         }, 9000);
       }());
     </script>
-    <script src="/auth-bootstrap.js?v=SIGNUP-FREE-001"></script>
-    <script src="/app.js?v=SIGNUP-FREE-001" type="module"></script>
+    <script src="/auth-bootstrap.js?v=GOOGLE-REAUTH-001"></script>
+    <script src="/app.js?v=GOOGLE-REAUTH-001" type="module"></script>
   </body>
 </html>

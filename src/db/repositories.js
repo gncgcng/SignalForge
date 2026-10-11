@@ -304,6 +304,28 @@ export async function findSessionUser(sessionId) {
   return result.rows[0] ? findUserById(result.rows[0].user_id) : null;
 }
 
+export async function stampSessionReauth(sessionId, userId) {
+  const result = await query(`
+    UPDATE sessions
+    SET recent_reauth_at = now()
+    WHERE id = $1 AND user_id = $2 AND expires_at > now()
+    RETURNING recent_reauth_at
+  `, [sessionId, userId]);
+  return result.rows[0]?.recent_reauth_at || null;
+}
+
+// Judged on the database clock, the same one that stamped it.
+export async function hasRecentSessionReauth(sessionId, userId, windowSeconds) {
+  if (!sessionId || !userId) return false;
+  const result = await query(`
+    SELECT 1
+    FROM sessions
+    WHERE id = $1 AND user_id = $2 AND expires_at > now()
+      AND recent_reauth_at > now() - make_interval(secs => $3)
+  `, [sessionId, userId, windowSeconds]);
+  return Boolean(result.rows[0]);
+}
+
 export async function refreshSession(sessionId, expiresAt) {
   const result = await query(`
     UPDATE sessions
@@ -1331,6 +1353,17 @@ export async function upgradeUserPasswordHash(userId, previousHash, password) {
   return result.rowCount === 1;
 }
 
+// Only fills an empty password: if a reset or another set-password already wrote one, this
+// matches no row and the existing password stands.
+export async function setInitialUserPassword(userId, password) {
+  const result = await query(`
+    UPDATE users
+    SET password_salt = $2, password_hash = $3, updated_at = now()
+    WHERE id = $1 AND password_hash = '' AND deleted_at IS NULL
+  `, [userId, password.salt, password.hash]);
+  return result.rowCount === 1;
+}
+
 export async function resetPasswordWithToken(tokenHash, password) {
   return transaction(async (client) => {
     const result = await client.query(`
@@ -1368,14 +1401,18 @@ export async function createOAuthLoginState({
   affiliateCode,
   legalConsentAccepted = false,
   ageConfirmed = false,
+  purpose = "login",
+  userId = null,
+  sessionId = null,
   expiresAt
 }) {
   await query(`
     INSERT INTO oauth_login_states (
       state_hash, provider, nonce, signup_ip_hash,
-      device_fingerprint_hash, affiliate_code, legal_consent_accepted, age_confirmed, expires_at
+      device_fingerprint_hash, affiliate_code, legal_consent_accepted, age_confirmed,
+      purpose, user_id, session_id, expires_at
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
   `, [
     stateHash,
     provider,
@@ -1385,18 +1422,23 @@ export async function createOAuthLoginState({
     affiliateCode,
     legalConsentAccepted === true,
     ageConfirmed === true,
+    purpose,
+    userId,
+    sessionId,
     expiresAt
   ]);
 }
 
-export async function consumeOAuthLoginState(stateHash, provider) {
+// A state is only consumed by the flow it was minted for: a login callback can't spend a
+// re-auth state, or the reverse. A state of the other purpose is left untouched.
+export async function consumeOAuthLoginState(stateHash, provider, purpose = "login") {
   return transaction(async (client) => {
     const result = await client.query(`
       SELECT *
       FROM oauth_login_states
-      WHERE state_hash = $1 AND provider = $2
+      WHERE state_hash = $1 AND provider = $2 AND purpose = $3
       FOR UPDATE
-    `, [stateHash, provider]);
+    `, [stateHash, provider, purpose]);
     const state = result.rows[0];
 
     if (
@@ -1416,9 +1458,20 @@ export async function consumeOAuthLoginState(stateHash, provider) {
       deviceFingerprintHash: state.device_fingerprint_hash,
       affiliateCode: state.affiliate_code,
       legalConsentAccepted: state.legal_consent_accepted === true,
-      ageConfirmed: state.age_confirmed === true
+      ageConfirmed: state.age_confirmed === true,
+      userId: state.user_id,
+      sessionId: state.session_id
     };
   });
+}
+
+export async function listOAuthSubjectsForUser(provider, userId) {
+  const result = await query(`
+    SELECT provider_subject
+    FROM oauth_accounts
+    WHERE provider = $1 AND user_id = $2
+  `, [provider, userId]);
+  return result.rows.map((row) => row.provider_subject);
 }
 
 export async function findUserByOAuthIdentity(provider, providerSubject) {

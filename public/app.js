@@ -418,6 +418,14 @@ const deleteAccountPassword = document.querySelector("#delete-account-password")
 const deleteAccountConfirmation = document.querySelector("#delete-account-confirmation");
 const deleteAccountSubmit = document.querySelector("#delete-account-submit");
 const deleteAccountMessage = document.querySelector("#delete-account-message");
+const deleteAccountPasswordField = document.querySelector("#delete-account-password-field");
+const deleteAccountPasswordNote = document.querySelector("#delete-account-password-note");
+const deleteAccountGoogleField = document.querySelector("#delete-account-google-field");
+const setPasswordPanel = document.querySelector("#set-password-panel");
+const setPasswordForm = document.querySelector("#set-password-form");
+const setPasswordInput = document.querySelector("#set-password-input");
+const setPasswordSubmit = document.querySelector("#set-password-submit");
+const setPasswordMessage = document.querySelector("#set-password-message");
 const settingsUsername = document.querySelector("#settings-username");
 const settingsPublicProfile = document.querySelector("#settings-public-profile");
 const settingsPublicLeaderboard = document.querySelector("#settings-public-leaderboard");
@@ -1175,6 +1183,146 @@ profileSettingsForm?.addEventListener("submit", async (event) => {
   });
 });
 
+// "Confirm with Google" for accounts with no password. The server is the authority (it checks the
+// session's recent_reauth_at); this only mirrors its 10-minute window to enable the buttons.
+const REAUTH_WINDOW_MS = 10 * 60 * 1000;
+const REAUTH_INTENT_KEY = "signalforge_reauth_intent";
+let reauthConfirmedUntil = 0;
+let reauthExpiryTimer = null;
+let passwordJustSet = false;
+
+function isGoogleOnlyAccount() {
+  return state.user?.hasPassword === false;
+}
+
+function hasClientReauth() {
+  return reauthConfirmedUntil > Date.now();
+}
+
+function renderAccountSecurity() {
+  const googleOnly = isGoogleOnlyAccount();
+  const confirmed = hasClientReauth();
+  setPasswordPanel?.classList.toggle("hidden", !googleOnly && !passwordJustSet);
+  setPasswordForm?.classList.toggle("hidden", passwordJustSet);
+  deleteAccountPasswordField?.classList.toggle("hidden", googleOnly);
+  deleteAccountPasswordNote?.classList.toggle("hidden", googleOnly);
+  deleteAccountGoogleField?.classList.toggle("hidden", !googleOnly);
+  // Disabled, not just hidden: a hidden required field would block the form from submitting.
+  if (deleteAccountPassword) deleteAccountPassword.disabled = googleOnly;
+  document.querySelectorAll("[data-reauth-status]").forEach((element) => {
+    element.dataset.defaultText ??= element.textContent;
+    element.textContent = confirmed
+      ? "Confirmed with Google. This lasts 10 minutes."
+      : element.dataset.defaultText;
+  });
+  updateDeleteAccountSubmit();
+  if (setPasswordSubmit) setPasswordSubmit.disabled = !confirmed || (setPasswordInput?.value.length || 0) < 6;
+}
+
+function updateDeleteAccountSubmit() {
+  if (!deleteAccountSubmit || deleteAccountSubmit.textContent === "Deleting account...") return;
+  const identityReady = isGoogleOnlyAccount() ? hasClientReauth() : Boolean(deleteAccountPassword.value);
+  deleteAccountSubmit.disabled = deleteAccountConfirmation.value.trim() !== "DELETE" || !identityReady;
+}
+
+function markReauthConfirmed() {
+  reauthConfirmedUntil = Date.now() + REAUTH_WINDOW_MS;
+  window.clearTimeout(reauthExpiryTimer);
+  reauthExpiryTimer = window.setTimeout(renderAccountSecurity, REAUTH_WINDOW_MS + 500);
+  renderAccountSecurity();
+}
+
+function clearReauthState() {
+  reauthConfirmedUntil = 0;
+  passwordJustSet = false;
+  window.clearTimeout(reauthExpiryTimer);
+}
+
+async function startGoogleReauth(intent, messageElement) {
+  try {
+    sessionStorage.setItem(REAUTH_INTENT_KEY, intent);
+  } catch {
+    // Only used to reopen the right form on return; settings still load without it.
+  }
+  try {
+    messageElement.textContent = "Opening Google...";
+    const result = await api.request("/api/auth/google/reauth/start", { method: "POST", body: "{}" });
+    window.location.assign(result.authorizationUrl);
+  } catch (error) {
+    messageElement.textContent = error.message;
+  }
+}
+
+const REAUTH_ERROR_MESSAGES = {
+  reauth_account_mismatch: "That Google account isn't the one linked to this SignalForge account. Nothing was changed.",
+  google_denied: "Google confirmation was cancelled.",
+  invalid_state: "Google confirmation expired. Please try again.",
+  reauth_session_mismatch: "Google confirmation didn't match this session. Please try again."
+};
+
+// Reads ?reauth=success / ?reauth_error=… left by the Google callback and strips it from the URL.
+function takeReauthReturn() {
+  const params = new URLSearchParams(location.search);
+  const success = params.get("reauth") === "success";
+  const errorCode = params.get("reauth_error");
+  if (!success && !errorCode) return null;
+  history.replaceState({}, "", `${location.pathname}${location.hash}`);
+  let intent = "delete";
+  try {
+    intent = sessionStorage.getItem(REAUTH_INTENT_KEY) || intent;
+    sessionStorage.removeItem(REAUTH_INTENT_KEY);
+  } catch {
+    // Fall back to the delete form.
+  }
+  return { success, errorCode, intent };
+}
+
+function applyReauthReturn(result) {
+  if (!result) return;
+  const message = result.success
+    ? "Confirmed with Google."
+    : REAUTH_ERROR_MESSAGES[result.errorCode] || "Google confirmation failed. Please try again.";
+  if (result.success) markReauthConfirmed();
+  if (result.intent === "set-password" && setPasswordMessage) {
+    setPasswordMessage.textContent = message;
+    return;
+  }
+  deleteAccountStart.classList.add("hidden");
+  deleteAccountForm.classList.remove("hidden");
+  deleteAccountMessage.textContent = message;
+}
+
+document.querySelectorAll("[data-reauth-google]").forEach((button) => {
+  button.addEventListener("click", () => {
+    const intent = button.dataset.reauthGoogle;
+    void startGoogleReauth(intent, intent === "set-password" ? setPasswordMessage : deleteAccountMessage);
+  });
+});
+
+setPasswordInput?.addEventListener("input", renderAccountSecurity);
+
+setPasswordForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!hasClientReauth() || setPasswordInput.value.length < 6) return;
+  try {
+    setPasswordSubmit.disabled = true;
+    setPasswordMessage.textContent = "";
+    await api.request("/api/auth/password/set", {
+      method: "POST",
+      body: JSON.stringify({ password: setPasswordInput.value })
+    });
+  } catch (error) {
+    setPasswordMessage.textContent = error.message;
+    renderAccountSecurity();
+    return;
+  }
+  setPasswordForm.reset();
+  passwordJustSet = true;
+  state.user = { ...state.user, hasPassword: true };
+  renderAccountSecurity();
+  setPasswordMessage.textContent = "Password set. You can now also sign in with your email and password.";
+});
+
 function resetDeleteAccountForm() {
   deleteAccountForm.reset();
   deleteAccountForm.classList.add("hidden");
@@ -1187,18 +1335,19 @@ deleteAccountStart?.addEventListener("click", () => {
   deleteAccountStart.classList.add("hidden");
   deleteAccountForm.classList.remove("hidden");
   deleteAccountMessage.textContent = "";
-  deleteAccountPassword.focus();
+  renderAccountSecurity();
+  (isGoogleOnlyAccount() ? deleteAccountConfirmation : deleteAccountPassword).focus();
 });
 
 document.querySelector("#delete-account-cancel")?.addEventListener("click", resetDeleteAccountForm);
 
-deleteAccountForm?.addEventListener("input", () => {
-  deleteAccountSubmit.disabled = deleteAccountConfirmation.value.trim() !== "DELETE" || !deleteAccountPassword.value;
-});
+deleteAccountForm?.addEventListener("input", updateDeleteAccountSubmit);
 
 deleteAccountForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
-  if (deleteAccountConfirmation.value.trim() !== "DELETE" || !deleteAccountPassword.value) return;
+  const googleOnly = isGoogleOnlyAccount();
+  if (deleteAccountConfirmation.value.trim() !== "DELETE") return;
+  if (googleOnly ? !hasClientReauth() : !deleteAccountPassword.value) return;
 
   try {
     deleteAccountSubmit.disabled = true;
@@ -1206,15 +1355,15 @@ deleteAccountForm?.addEventListener("submit", async (event) => {
     deleteAccountMessage.textContent = "";
     await api.request("/api/account", {
       method: "DELETE",
-      body: JSON.stringify({
-        password: deleteAccountPassword.value,
-        confirmation: deleteAccountConfirmation.value
-      })
+      body: JSON.stringify(googleOnly
+        ? { confirmation: deleteAccountConfirmation.value }
+        : { password: deleteAccountPassword.value, confirmation: deleteAccountConfirmation.value })
     });
   } catch (error) {
     deleteAccountPassword.value = "";
     deleteAccountSubmit.textContent = "Permanently delete account";
     deleteAccountMessage.textContent = error.message;
+    updateDeleteAccountSubmit();
     return;
   }
 
@@ -3246,7 +3395,9 @@ async function init() {
     if (oauthSuccess) {
       history.replaceState({}, "", `${location.pathname}${location.hash}`);
     }
+    const reauthReturn = takeReauthReturn();
     await bootDashboard();
+    applyReauthReturn(reauthReturn);
   } else if (isHowItWorksRoute()) {
     setSplashStatus("Opening SignalForge guide");
     showPublicHowItWorks();
@@ -3660,6 +3811,7 @@ function clearClientAuthState() {
   }
 
   state.user = null;
+  clearReauthState();
   state.subscription = null;
   state.marketCatalog = [];
   state.pairs = [];
@@ -3768,6 +3920,7 @@ async function bootDashboard() {
   testerAccountBadge.classList.toggle("hidden", state.user.role !== "tester");
   renderNavSections();
   syncSignalViewToggles();
+  renderAccountSecurity();
 
   const dashboardLoads = await Promise.allSettled([
     loadPairs(),

@@ -3,6 +3,23 @@ import { deleteSession, findSessionUser } from "../db/repositories.js";
 import { isDemoOrTesterIdentity } from "../modules/auth/authPolicy.js";
 import { parseCookies } from "../shared/http.js";
 
+// Public auth endpoints run without loading the session. The Google callback is one of them;
+// its re-auth branch attaches the session itself.
+export function requiresAuthAttachment(pathname) {
+  return ![
+    "/api/auth/config",
+    "/api/auth/health",
+    "/api/auth/login",
+    "/api/auth/google/start",
+    "/api/auth/google/callback",
+    "/api/auth/demo",
+    "/api/auth/restore",
+    "/api/auth/verify-email",
+    "/api/auth/password-reset/request",
+    "/api/auth/password-reset/confirm"
+  ].includes(pathname);
+}
+
 export async function attachAuth(req) {
   const cookies = parseCookies(req.headers.cookie);
   const sessionId = getSessionCookieNames()

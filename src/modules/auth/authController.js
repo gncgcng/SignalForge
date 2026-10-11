@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { appConfig } from "../../config/appConfig.js";
 import { query } from "../../db/client.js";
+import { attachAuth } from "../../middleware/authMiddleware.js";
 import { readJson, sendError, sendJson, parseCookies } from "../../shared/http.js";
 import {
   createDemoSession,
@@ -14,12 +15,15 @@ import {
   refreshSessionExpiry,
   restoreSessionFromToken,
   revokePersistentRestoreToken,
+  setPasswordAfterReauth,
   toPublicUser,
   verifyEmail
 } from "./authService.js";
 import {
   completeGoogleOAuth,
+  completeGoogleReauth,
   startGoogleOAuth,
+  startGoogleReauth,
   validateOAuthStateCookie
 } from "./googleOAuthService.js";
 
@@ -140,10 +144,41 @@ export async function handleAuthRoutes(req, res, pathname) {
     }
   }
 
+  if (pathname === "/api/auth/google/reauth/start" && req.method === "POST") {
+    if (!req.user) return sendError(res, 401, "Authentication required.");
+    try {
+      const result = await startGoogleReauth(req.user, req.sessionId);
+      return sendJson(res, 200, {
+        authorizationUrl: result.authorizationUrl
+      }, {
+        ...authResponseHeaders(),
+        "set-cookie": buildGoogleStateCookie(result.state, googleReauthStateCookieName())
+      });
+    } catch (error) {
+      return sendError(res, error.statusCode || 400, error.message, error.oauthCode ? { code: error.oauthCode } : undefined);
+    }
+  }
+
+  if (pathname === "/api/auth/password/set" && req.method === "POST") {
+    if (!req.user) return sendError(res, 401, "Authentication required.");
+    try {
+      const body = await readJson(req);
+      const result = await setPasswordAfterReauth(req.user, body.password, req.sessionId);
+      return sendJson(res, 200, result, authResponseHeaders());
+    } catch (error) {
+      return sendError(res, error.statusCode || 400, error.message, error.code ? { code: error.code } : undefined);
+    }
+  }
+
   if (pathname === "/api/auth/google/callback" && req.method === "GET") {
     const url = new URL(req.url, `http://${req.headers.host}`);
     const cookies = parseCookies(req.headers.cookie);
     const queryState = url.searchParams.get("state");
+    // Google sends both flows to the one registered redirect URI; the state cookie that matches
+    // decides which flow this is, and each flow only consumes states of its own purpose.
+    if (validateOAuthStateCookie(queryState, cookies[googleReauthStateCookieName()])) {
+      return handleGoogleReauthCallback(req, res, url, queryState);
+    }
     try {
       if (!validateOAuthStateCookie(queryState, cookies[googleStateCookieName()])) {
         const error = new Error("Google sign-in state is invalid.");
@@ -319,6 +354,32 @@ export async function handleAuthRoutes(req, res, pathname) {
   return false;
 }
 
+async function handleGoogleReauthCallback(req, res, url, queryState) {
+  const clearCookie = buildClearGoogleStateCookie(googleReauthStateCookieName());
+  try {
+    // The callback path skips session attachment (the login flow has no session yet); a re-auth
+    // must come back on the signed-in session that started it, so load that session here.
+    await attachAuth(req);
+    await completeGoogleReauth({
+      code: url.searchParams.get("code"),
+      state: queryState,
+      oauthError: url.searchParams.get("error"),
+      user: req.user,
+      sessionId: req.sessionId
+    });
+    console.info(`[auth] Google re-auth confirmed user=${safeLogContext(req.user?.id)}`);
+    return sendRedirect(res, googleAppRedirect("reauth=success#settings"), { "set-cookie": clearCookie });
+  } catch (error) {
+    const code = error.oauthCode || "reauth_failed";
+    console.warn(`[auth] Google re-auth failed code=${safeOAuthCode(code)}`);
+    return sendRedirect(
+      res,
+      googleAppRedirect(`reauth_error=${encodeURIComponent(code)}#settings`),
+      { "set-cookie": clearCookie }
+    );
+  }
+}
+
 async function handleAuthHealth(res) {
   const passwordHasherReady = isPasswordHasherReady();
   let dbConnected = false;
@@ -475,13 +536,19 @@ function googleStateCookieName() {
     : "signalforge_google_oauth";
 }
 
-function buildGoogleStateCookie(state) {
+function googleReauthStateCookieName() {
+  return appConfig.isProduction
+    ? "__Host-signalforge_google_reauth"
+    : "signalforge_google_reauth";
+}
+
+function buildGoogleStateCookie(state, name = googleStateCookieName()) {
   const secure = appConfig.isProduction ? "; Secure" : "";
-  return `${googleStateCookieName()}=${encodeURIComponent(state)}; HttpOnly; ` +
+  return `${name}=${encodeURIComponent(state)}; HttpOnly; ` +
     `SameSite=Lax; Path=/; Max-Age=600${secure}`;
 }
 
-function buildClearGoogleStateCookie() {
+function buildClearGoogleStateCookie(name = googleStateCookieName()) {
   const secure = appConfig.isProduction ? "; Secure" : "";
-  return `${googleStateCookieName()}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secure}`;
+  return `${name}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secure}`;
 }
