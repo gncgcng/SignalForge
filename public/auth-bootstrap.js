@@ -360,9 +360,10 @@
   document.getElementById("landing-login-button")?.addEventListener("click", function () {
     if (!window.__signalForgeMainAuthReady) showAuthRoute("signin");
   });
-  // Every create-account CTA opens the create-account form.
+  // Every create-account CTA opens the create-account form: hero "Start Free", every .launch-auth-button
+  // (pricing, demo, affiliate, final CTA) and "Start scanning" on How it works.
   var createAccountCtas = [document.getElementById("start-free-button")].concat(
-    document.querySelectorAll ? Array.prototype.slice.call(document.querySelectorAll(".launch-auth-button")) : []
+    document.querySelectorAll ? Array.prototype.slice.call(document.querySelectorAll(".launch-auth-button, [data-how-it-works-start]")) : []
   );
   createAccountCtas.forEach(function (button) {
     button?.addEventListener("click", function () {

@@ -784,12 +784,10 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  // "Start scanning" (How it works header and guide card) is a create-account CTA for logged-out visitors.
   if (event.target.closest("[data-how-it-works-start]")) {
     if (state.user) navigateTo("scanner");
-    else {
-      history.replaceState({}, "", `${location.pathname}${location.search}#scanner`);
-      showAuth();
-    }
+    else openAuthMode("signup");
     return;
   }
 
