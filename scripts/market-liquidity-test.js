@@ -129,7 +129,9 @@ try {
   await check("manual scan (and scan-all, which uses the same scan): ETH is refused with the floor reason, BTC publishes", () => {
     assert.equal(manualShort.publicResult.valid, false);
     assert.deepEqual(manualShort.analysis.rejectionReasonCodes, ["liquidity_floor"]);
-    assert.deepEqual(manualShort.analysis.rejectionReasons, ["Below liquidity floor ($1.00M 24h volume)"]);
+    // Users see the public wording; the internal reason stays in rejectedReasons and the recorded rejection.
+    assert.deepEqual(manualShort.analysis.rejectionReasons, ["This market trades less than $2M per day. SignalForge doesn't generate signals on thin markets."]);
+    assert.equal(manualShort.analysis.rejectedReasons[0].reason, "Below liquidity floor ($1.00M 24h volume)");
     assert.equal(manualLong.publicResult.valid, true);
     assert.equal(floorRejections()[0]?.source, "manual_scan");
   });

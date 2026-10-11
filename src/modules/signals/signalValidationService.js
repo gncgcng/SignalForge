@@ -83,7 +83,8 @@ export function applyValidationToSignal(signal, validation) {
 }
 
 export function validationNoSetupAnalysis(signal, validation) {
-  const topReasons = validation.rejectedReasons.map((item) => item.reason);
+  // Publication gates attach a user-facing publicReason; the internal reason stays in rejectedReasons.
+  const topReasons = validation.rejectedReasons.map((item) => item.publicReason || item.reason);
   return {
     symbol: signal?.symbol,
     timeframe: signal?.timeframe,

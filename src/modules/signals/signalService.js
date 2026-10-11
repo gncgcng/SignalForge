@@ -57,6 +57,7 @@ import {
 import {
   SCANNER_RESULT_TYPES,
   buildAvoidTradeResult,
+  gateGuidance,
   classifyScannerResult
 } from "./avoidTradeService.js";
 import { recordAvoidTradeLearningEvent } from "./setupCandidateRepository.js";
@@ -1396,14 +1397,23 @@ function qualityGateToValidation(signal, gate = {}) {
     validationScore: Number(signal?.validationScore || 0),
     confidenceBand: signal?.confidenceBand || "No signal",
     validatedAt: gate.checkedAt || new Date().toISOString(),
-    rejectedReasons: [{
+    rejectedReasons: [withPublicReason({
       stage: gate.stage || "generated_quality",
       reason,
       timestamp: gate.checkedAt || new Date().toISOString(),
       market: signal?.symbol,
-      strategy: signal?.setupType
-    }]
+      strategy: signal?.setupType,
+      ...(gate.details?.groupKey ? { groupKey: gate.details.groupKey } : {}),
+      ...(gate.details?.floorUsd != null ? { floorUsd: gate.details.floorUsd, volume24hUsd: gate.details.volume24hUsd ?? null } : {})
+    })]
   };
+}
+
+// Gate stages carry user-facing text chosen by stage (avoidTradeService.gateGuidance); "reason" stays the internal
+// text that the admin rejection counts group by.
+function withPublicReason(rejected) {
+  const guidance = gateGuidance(rejected);
+  return guidance ? { ...rejected, publicReason: guidance.reason } : rejected;
 }
 
 function toScanPreview(signal) {

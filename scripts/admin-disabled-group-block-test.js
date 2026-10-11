@@ -113,7 +113,9 @@ try {
     assert.equal(manualShort.publicResult.valid, false);
     assert.equal(manualShort.fullSetup, null);
     assert.deepEqual(manualShort.analysis.rejectionReasonCodes, ["admin_disabled"]);
-    assert.deepEqual(manualShort.analysis.rejectionReasons, ["Direction short disabled by admin"]);
+    // Users see the public wording; the internal reason stays in rejectedReasons and the recorded rejection.
+    assert.deepEqual(manualShort.analysis.rejectionReasons, ["Short setups are paused while we review their performance."]);
+    assert.equal(manualShort.analysis.rejectedReasons[0].reason, "Direction short disabled by admin");
     assert.equal(manualLong.publicResult.valid, true);
     assert.equal(manualLong.fullSetup.direction, "long");
     assert.equal(db.getValidationRejections()[0].source, "manual_scan");
@@ -178,7 +180,8 @@ try {
   await check("pair:ltc-usd disabled: a real LTC-USD scan is blocked, BTC-USD still publishes", () => {
     assert.equal(ltcScan.publicResult.valid, false);
     assert.equal(ltcScan.fullSetup, null);
-    assert.deepEqual(ltcScan.analysis.rejectionReasons, ["Pair LTC-USD disabled by admin"]);
+    assert.deepEqual(ltcScan.analysis.rejectionReasons, ["This setup type is paused by SignalForge."]);
+    assert.equal(ltcScan.analysis.rejectedReasons[0].reason, "Pair LTC-USD disabled by admin");
     assert.equal(btcScan.publicResult.valid, true);
   });
 

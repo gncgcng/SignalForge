@@ -1,3 +1,5 @@
+import { appConfig } from "../../config/appConfig.js";
+
 const AVOID_REASON_RULES = [
   {
     match: /poor[_ ]?rr|risk.?reward|reward.?risk/,
@@ -99,9 +101,54 @@ export function classifyScannerResult({ valid, candidate, analysis = {}, provide
   return SCANNER_RESULT_TYPES.AVOID;
 }
 
+// Publication gates (liquidity floor, admin-disabled groups) are explained by their stage and structured details,
+// never by keyword rules on their internal reason text: "24h volume" in a liquidity reason is not a candle-volume
+// problem. Returns null for every other stage.
+export function gateGuidance(rejected = {}) {
+  const stage = normalizeCode(rejected?.stage);
+  if (stage === "liquidity_floor") {
+    const floorUsd = Number(rejected.floorUsd ?? appConfig.cryptoMarkets.minVolume24hUsd);
+    return {
+      stage,
+      reason: `This market trades less than ${formatDollars(floorUsd)} per day. SignalForge doesn't generate signals on thin markets.`,
+      improvement: "Scan a more actively traded market.",
+      marketCondition: "Low liquidity"
+    };
+  }
+  if (stage === "admin_disabled") {
+    const shortsPaused = rejected.groupKey === "direction:short";
+    return {
+      stage,
+      reason: shortsPaused ? "Short setups are paused while we review their performance." : "This setup type is paused by SignalForge.",
+      improvement: shortsPaused ? "Long setups are still scanned as usual." : "Other setup types are still scanned as usual.",
+      marketCondition: "Paused by SignalForge"
+    };
+  }
+  return null;
+}
+
 export function buildAvoidTradeResult({ symbol, timeframe, analysis = {}, candidate = null, now = new Date() }) {
   const resultType = classifyScannerResult({ valid: false, candidate, analysis });
   if (resultType !== SCANNER_RESULT_TYPES.AVOID) return null;
+
+  const gates = (analysis.rejectedReasons || []).map(gateGuidance).filter(Boolean);
+  if (gates.length) {
+    return {
+      resultType: SCANNER_RESULT_TYPES.AVOID,
+      symbol,
+      timeframe,
+      label: "No Trade",
+      reason: gates[0].reason,
+      reasons: unique(gates.map((gate) => gate.reason)),
+      improvements: unique(gates.map((gate) => gate.improvement)),
+      marketCondition: gates[0].marketCondition,
+      gateStage: gates[0].stage,
+      setupQualityScore: finiteScore(candidate?.setupQualityScore ?? candidate?.candidateScore ?? analysis.qualityScore),
+      entryReadinessScore: finiteScore(candidate?.entryReadinessScore ?? candidate?.readinessScore ?? analysis.readinessScore),
+      patternContext: analysis.patternContext || candidate?.patternContext || null,
+      createdAt: new Date(now).toISOString()
+    };
+  }
 
   const sourceReasons = [
     ...(analysis.rejectionReasons || []),
@@ -155,6 +202,13 @@ function inferMarketCondition(text) {
   if (/volume|momentum/.test(value)) return "Weak participation";
   if (/stale|provider/.test(value)) return "Data not current";
   return "Confirmations not aligned";
+}
+
+// 2000000 -> "$2M"; 2500000 -> "$2.5M"; otherwise whole dollars.
+function formatDollars(value) {
+  const number = Math.max(0, Number(value) || 0);
+  if (number >= 1e6 && number % 1e5 === 0) return `$${Number((number / 1e6).toFixed(1))}M`;
+  return `$${Math.round(number).toLocaleString("en-US")}`;
 }
 
 function normalizeCode(value) {
