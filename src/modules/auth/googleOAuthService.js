@@ -177,6 +177,7 @@ export async function completeGoogleOAuth({ code, state, oauthError }) {
       });
       grant = await grantOAuthFreeTrial(user.id, loginState.deviceFingerprintHash, trialIdentity);
       user = await findUserByEmail(normalizedEmail);
+      welcomeNewlyVerified(user, grant);
     }
     return withTrialNotice(await createSession(user), grant);
   }
@@ -194,6 +195,7 @@ export async function completeGoogleOAuth({ code, state, oauthError }) {
     if (verificationWasRequired) {
       grant = await grantOAuthFreeTrial(user.id, loginState.deviceFingerprintHash, trialIdentity);
       user = await findUserByEmail(normalizedEmail);
+      welcomeNewlyVerified(user, grant);
     }
     return withTrialNotice(await createSession(user), grant);
   }
@@ -307,8 +309,14 @@ async function createGoogleUser(claims, loginState) {
     successful: true,
     reason: repeatedDevice ? "google_repeated_device" : "google_created"
   });
-  sendWelcomeEmail(user);
+  // Google accounts are verified at signup, so they're welcomed now.
+  sendWelcomeEmail(user, { trialGranted: grant.trialGranted });
   return withTrialNotice(await createSession(user), grant);
+}
+
+// An unverified email signup that signs in with Google is verified by it: that's its welcome.
+function welcomeNewlyVerified(user, grant) {
+  if (user) sendWelcomeEmail(user, { trialGranted: grant.trialGranted });
 }
 
 // The callback tells the app when the trial was refused because this identity already had one.

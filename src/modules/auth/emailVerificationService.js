@@ -1,9 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { appConfig } from "../../config/appConfig.js";
-import {
-  buildButtonEmail,
-  sendTransactionalEmail
-} from "../notifications/transactionalEmailService.js";
+import { buildVerifyEmail } from "../notifications/emailTemplates.js";
+import { sendTransactionalEmail } from "../notifications/transactionalEmailService.js";
 
 export function createVerificationToken() {
   const token = randomBytes(32).toString("base64url");
@@ -20,7 +18,9 @@ export function hashVerificationToken(token) {
   return createHash("sha256").update(String(token)).digest("hex");
 }
 
-export async function sendVerificationEmail(user, token) {
+// trialAvailable: whether verifying will (as far as signup can tell) grant the free unlocks, so
+// the email only promises them when they're coming.
+export async function sendVerificationEmail(user, token, { trialAvailable = true } = {}) {
   const verificationUrl = `${appConfig.abuseProtection.publicAppUrl}/?verify=${encodeURIComponent(token)}`;
 
   if (!appConfig.abuseProtection.resendApiKey) {
@@ -35,16 +35,12 @@ export async function sendVerificationEmail(user, token) {
 
   const delivery = await sendTransactionalEmail({
     to: user.email,
-    subject: "Verify your SignalForge email",
     category: "email_verification",
-    html: buildButtonEmail({
-      title: "Verify your SignalForge email",
-      intro: "Verify your email to activate your free SignalForge unlocks.",
-      buttonLabel: "Verify email",
-      buttonUrl: verificationUrl,
-      footer: `This link expires in ${appConfig.abuseProtection.verificationTokenHours} hours.`
-    }),
-    text: `Verify your SignalForge email: ${verificationUrl}`
+    ...buildVerifyEmail({
+      verificationUrl,
+      trialAvailable,
+      expiresInHours: appConfig.abuseProtection.verificationTokenHours
+    })
   });
 
   if (!delivery.delivered) {

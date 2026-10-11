@@ -1,4 +1,4 @@
-const CACHE_VERSION = "signalforge-static-v37-change-password-001";
+const CACHE_VERSION = "signalforge-static-v38-email-legal-links-001";
 const OFFLINE_URL = "/offline.html";
 const CRITICAL_ASSET_PATHS = new Set([
   "/index.html",

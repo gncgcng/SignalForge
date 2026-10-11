@@ -8,3 +8,4 @@ signalforge-debug-bundle.zip
 .env.local
 .claude/
 .claude/
+.email-previews/

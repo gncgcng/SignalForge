@@ -5,6 +5,10 @@ const emailService = readFileSync(
   new URL("../src/modules/notifications/transactionalEmailService.js", import.meta.url),
   "utf8"
 );
+const emailTemplates = readFileSync(
+  new URL("../src/modules/notifications/emailTemplates.js", import.meta.url),
+  "utf8"
+);
 const authService = readFileSync(
   new URL("../src/modules/auth/authService.js", import.meta.url),
   "utf8"
@@ -54,7 +58,7 @@ const result = {
     emailService.includes("sendSubscriptionConfirmationEmail") &&
     emailService.includes("sendFailedPaymentEmail") &&
     emailService.includes("sendAffiliateCommissionEmail") &&
-    emailService.includes("Educational tool only. Not financial advice."),
+    emailTemplates.includes("Educational tool only. Not financial advice."),
   passwordResetStorageAndHashing:
     migration.includes("CREATE TABLE IF NOT EXISTS password_reset_tokens") &&
     repositories.includes("createPasswordResetToken") &&
@@ -69,9 +73,11 @@ const result = {
     frontend.includes("/api/auth/password-reset/request") &&
     frontend.includes("/api/auth/password-reset/confirm") &&
     frontend.includes("getPasswordResetToken"),
-  welcomeEmailOnSignup:
-    authService.includes("sendWelcomeEmail(user)") &&
-    googleOAuth.includes("sendWelcomeEmail(user)") &&
+  // Email signups are welcomed after verification, Google signups at signup (already verified).
+  // scripts/email-templates-test.js checks the timing end to end.
+  welcomeEmailOnceVerified:
+    authService.includes("sendWelcomeEmail(user, { trialGranted: result.trialGranted })") &&
+    googleOAuth.includes("sendWelcomeEmail(user, { trialGranted: grant.trialGranted })") &&
     authService.includes("trackProductEvent") &&
     googleOAuth.includes("authProvider: \"google\""),
   stripeTransactionalEmails:

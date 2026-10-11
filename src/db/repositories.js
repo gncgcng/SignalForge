@@ -1298,7 +1298,7 @@ export async function verifyEmailToken(tokenHash) {
       eligible: !token.trial_used
     });
 
-    return { userId: token.user_id, trialGranted, trialBlockedBy };
+    return { userId: token.user_id, trialGranted, trialBlockedBy, alreadyVerified: Boolean(token.email_verified_at) };
   });
 }
 

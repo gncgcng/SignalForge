@@ -82,7 +82,9 @@ export const appConfig = {
   adminEmails,
   testerCreditAllowance: 1000000,
   email: {
-    featuresEnabled: process.env.EMAIL_FEATURES_ENABLED === "true"
+    featuresEnabled: process.env.EMAIL_FEATURES_ENABLED === "true",
+    // Postal address line in every email footer; omitted while unset.
+    footerAddress: process.env.EMAIL_FOOTER_ADDRESS || ""
   },
   affiliate: {
     commissionRate: 0.2,

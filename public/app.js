@@ -735,6 +735,18 @@ function openLegalDocument(documentKey) {
   legalModal.classList.remove("hidden");
 }
 
+// Email footers link to /?legal=terms and /?legal=privacy: open that document over whatever
+// page loads, then drop the parameter so a reload doesn't reopen it.
+function openLegalDocumentFromUrl() {
+  const params = new URLSearchParams(location.search);
+  const documentKey = params.get("legal");
+  if (!documentKey) return;
+  params.delete("legal");
+  const query = params.toString();
+  history.replaceState({}, "", `${location.pathname}${query ? `?${query}` : ""}${location.hash}`);
+  openLegalDocument(documentKey);
+}
+
 function closeLegalDocument() {
   legalModal.classList.add("hidden");
 }
@@ -3335,6 +3347,7 @@ async function enterPaperTrade(button) {
 }
 
 async function init() {
+  openLegalDocumentFromUrl();
   const restoreOperationId = ++authOperationVersion;
   console.info(`[app] build_version=${window.__SIGNALFORGE_BUILD_VERSION__ || "development"}`);
   console.info("[auth] restore:start");

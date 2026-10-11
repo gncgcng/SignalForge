@@ -419,12 +419,15 @@ export async function registerOrLogin({
   let verification = null;
   let trialAlreadyUsed = false;
   if (!options.bypassVerification) {
-    verification = await issueVerification(user);
     // The account is created either way; the grant at verification refuses the trial. This only
-    // lets the signup response say so now.
+    // lets the signup response (and the verification email's copy) say so now.
     trialAlreadyUsed = await isTrialIdentityClaimed(trialIdentities({ email: normalizedEmail }));
+    verification = await issueVerification(user, { trialAvailable: !trialAlreadyUsed && !repeatedDevice });
+  } else {
+    // Verified at creation (demo accounts), so this is already the moment to welcome them.
+    sendWelcomeEmail(user, { trialGranted: true });
   }
-  sendWelcomeEmail(user);
+  // Email signups are welcomed by verifyEmail(), once the address is confirmed.
 
   return {
     ...(await createSession(user)),
@@ -479,7 +482,11 @@ export async function resendVerification(user) {
   }
   return {
     verificationRequired: true,
-    verification: await issueVerification(user, { enforceCooldown: true })
+    verification: await issueVerification(user, {
+      enforceCooldown: true,
+      trialAvailable: !user.trialUsed && !(await getDeviceTrialHistory(user.deviceFingerprintHash)) &&
+        !(await isTrialIdentityClaimed(trialIdentities({ email: user.email })))
+    })
   };
 }
 
@@ -490,7 +497,14 @@ export async function verifyEmail(token) {
     error.statusCode = 400;
     throw error;
   }
-  return result;
+  // The welcome email waits for this moment: the account can now scan, and unlock if granted.
+  // An address verified earlier (e.g. through Google) was already welcomed.
+  if (!result.alreadyVerified) {
+    void findUserById(result.userId)
+      .then((user) => user && sendWelcomeEmail(user, { trialGranted: result.trialGranted }))
+      .catch((error) => console.warn(`[email] welcome after verification failed reason=${error?.message || "unknown"}`));
+  }
+  return { userId: result.userId, trialGranted: result.trialGranted, trialBlockedBy: result.trialBlockedBy };
 }
 
 export async function requestPasswordReset(email) {
@@ -626,7 +640,7 @@ export function isAdminUser(user) {
   return Boolean(user?.email && appConfig.adminEmails.has(user.email.toLowerCase()));
 }
 
-async function issueVerification(user, { enforceCooldown = false } = {}) {
+async function issueVerification(user, { enforceCooldown = false, trialAvailable = true } = {}) {
   if (!appConfig.email.featuresEnabled) {
     return { delivered: false, unavailable: true, developmentUrl: null };
   }
@@ -638,7 +652,7 @@ async function issueVerification(user, { enforceCooldown = false } = {}) {
     token.expiresAt,
     enforceCooldown ? appConfig.abuseProtection.verificationResendSeconds : 0
   );
-  return sendVerificationEmail(user, token.token);
+  return sendVerificationEmail(user, token.token, { trialAvailable });
 }
 
 function createPasswordResetToken() {

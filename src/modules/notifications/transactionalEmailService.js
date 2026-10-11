@@ -1,4 +1,14 @@
 import { appConfig } from "../../config/appConfig.js";
+import { BILLING_PLANS } from "../subscriptions/subscriptionService.js";
+import {
+  buildAdminSupportNoticeEmail,
+  buildAffiliateCommissionEmail,
+  buildFailedPaymentEmail,
+  buildPasswordResetEmail,
+  buildSubscriptionConfirmationEmail,
+  buildSupportConfirmationEmail,
+  buildWelcomeEmail
+} from "./emailTemplates.js";
 
 const resendEmailEndpoint = "https://api.resend.com/emails";
 
@@ -57,136 +67,59 @@ export async function sendTransactionalEmail({ to, subject, html, text, category
   }
 }
 
-export function sendWelcomeEmail(user) {
-  return sendTransactionalEmail({
-    to: user.email,
-    subject: "Welcome to SignalForge",
-    category: "welcome",
-    html: buildButtonEmail({
-      title: "Welcome to SignalForge",
-      intro: "Your SignalForge account is ready. You can scan markets, unlock setups, and track outcomes from your dashboard.",
-      buttonLabel: "Open dashboard",
-      buttonUrl: `${appConfig.appUrl || appConfig.abuseProtection.publicAppUrl}/#scanner`,
-      footer: "This is a transactional account email."
-    }),
-    text: "Welcome to SignalForge. Open your dashboard to start scanning markets."
-  });
+function sendTemplate(to, category, email) {
+  return sendTransactionalEmail({ to, category, ...email });
 }
 
-export function sendPasswordResetEmail(user, resetUrl) {
-  return sendTransactionalEmail({
-    to: user.email,
-    subject: "Reset your SignalForge password",
-    category: "password_reset",
-    html: buildButtonEmail({
-      title: "Reset your SignalForge password",
-      intro: "Use this secure link to reset your password. If you did not request this, you can ignore this email.",
-      buttonLabel: "Reset password",
-      buttonUrl: resetUrl,
-      footer: "This link expires soon and can be used once."
-    }),
-    text: `Reset your SignalForge password: ${resetUrl}`
-  });
+// Only once the account is verified: after the verification link (email signups) or at signup
+// (Google). trialGranted picks the copy, so it never promises unlocks the account doesn't have.
+export function sendWelcomeEmail(user, { trialGranted = true } = {}) {
+  return sendTemplate(user.email, "welcome", buildWelcomeEmail({ username: user.username, trialGranted }));
+}
+
+export function sendPasswordResetEmail(user, resetUrl, { expiresInMinutes = 60 } = {}) {
+  return sendTemplate(user.email, "password_reset", buildPasswordResetEmail({ resetUrl, expiresInMinutes }));
 }
 
 export function sendSubscriptionConfirmationEmail(user, plan) {
-  const planName = String(plan || "paid").toUpperCase();
-  return sendTransactionalEmail({
-    to: user.email,
-    subject: `SignalForge ${planName} subscription confirmed`,
-    category: "subscription_confirmation",
-    html: buildButtonEmail({
-      title: "Subscription confirmed",
-      intro: `Your SignalForge ${planName} subscription is active. Your plan credits will appear in Billing.`,
-      buttonLabel: "View billing",
-      buttonUrl: `${appConfig.appUrl || appConfig.abuseProtection.publicAppUrl}/#billing`,
-      footer: "This is a transactional billing confirmation."
-    }),
-    text: `Your SignalForge ${planName} subscription is active.`
-  });
+  const details = BILLING_PLANS[plan];
+  return sendTemplate(user.email, "subscription_confirmation", buildSubscriptionConfirmationEmail({
+    planName: details?.name || planLabel(plan),
+    monthlyUnlockGrant: details?.monthlyUnlockGrant || 0
+  }));
 }
 
 export function sendFailedPaymentEmail(user) {
-  return sendTransactionalEmail({
-    to: user.email,
-    subject: "SignalForge payment issue",
-    category: "failed_payment",
-    html: buildButtonEmail({
-      title: "Payment issue",
-      intro: "Stripe reported a failed payment for your SignalForge subscription. Please review your billing details to avoid interruption.",
-      buttonLabel: "Review billing",
-      buttonUrl: `${appConfig.appUrl || appConfig.abuseProtection.publicAppUrl}/#billing`,
-      footer: "This is a transactional billing notice."
-    }),
-    text: "Stripe reported a failed payment for your SignalForge subscription. Please review your billing details."
-  });
+  return sendTemplate(user.email, "failed_payment", buildFailedPaymentEmail());
 }
 
 export function sendAffiliateCommissionEmail(user, { plan, commissionCents }) {
-  return sendTransactionalEmail({
-    to: user.email,
-    subject: "SignalForge affiliate commission earned",
-    category: "affiliate_commission",
-    html: buildButtonEmail({
-      title: "Affiliate commission earned",
-      intro: `A referred ${String(plan || "paid").toUpperCase()} subscription generated a ${formatCents(commissionCents)} commission.`,
-      buttonLabel: "View affiliate dashboard",
-      buttonUrl: `${appConfig.appUrl || appConfig.abuseProtection.publicAppUrl}/#affiliate`,
-      footer: "This is a transactional affiliate account email."
-    }),
-    text: `A referred subscription generated a ${formatCents(commissionCents)} affiliate commission.`
-  });
+  return sendTemplate(user.email, "affiliate_commission", buildAffiliateCommissionEmail({
+    planName: BILLING_PLANS[plan]?.name || planLabel(plan),
+    commissionCents
+  }));
 }
 
 export function sendSupportConfirmationEmail(user, ticket) {
-  return sendTransactionalEmail({
-    to: user.email,
-    subject: `SignalForge support request ${ticket.id}`,
-    category: "support_confirmation",
-    html: buildButtonEmail({
-      title: "Support request received",
-      intro: `We received “${ticket.subject}”. Your request is open and the SignalForge team will review it as soon as possible.`,
-      buttonLabel: "View support requests",
-      buttonUrl: `${appConfig.appUrl || appConfig.abuseProtection.publicAppUrl}/#support`,
-      footer: `Reference: ${ticket.id}. This is a transactional support email.`
-    }),
-    text: `We received your SignalForge support request ${ticket.id}: ${ticket.subject}`
-  });
+  return sendTemplate(user.email, "support_confirmation", buildSupportConfirmationEmail({
+    username: user.username,
+    ticketId: ticket.id,
+    ticketSubject: ticket.subject
+  }));
 }
 
 export function sendSupportAdminNotificationEmail(email, ticket) {
-  return sendTransactionalEmail({
-    to: email,
-    subject: `SignalForge ${String(ticket.priority).toUpperCase()} support request`,
-    category: "support_admin_notification",
-    html: buildButtonEmail({
-      title: "Support request needs review",
-      intro: `${ticket.topic}: ${ticket.subject}`,
-      buttonLabel: "Open support queue",
-      buttonUrl: `${appConfig.appUrl || appConfig.abuseProtection.publicAppUrl}/#admin-support`,
-      footer: `Reference: ${ticket.id}`
-    }),
-    text: `${ticket.priority} support request ${ticket.id}: ${ticket.subject}`
-  });
+  return sendTemplate(email, "support_admin_notification", buildAdminSupportNoticeEmail({
+    ticketId: ticket.id,
+    ticketSubject: ticket.subject,
+    topic: ticket.topic,
+    priority: ticket.priority
+  }));
 }
 
-export function buildButtonEmail({ title, intro, buttonLabel, buttonUrl, footer }) {
-  return `
-    <div style="font-family:Inter,Arial,sans-serif;line-height:1.55;color:#111827">
-      <h1 style="font-size:22px;margin:0 0 12px">${escapeHtml(title)}</h1>
-      <p>${escapeHtml(intro)}</p>
-      ${buttonUrl ? `<p><a href="${escapeAttribute(buttonUrl)}" style="display:inline-block;background:#06b6d4;color:#001018;text-decoration:none;font-weight:700;padding:10px 14px;border-radius:8px">${escapeHtml(buttonLabel || "Open SignalForge")}</a></p>` : ""}
-      ${footer ? `<p style="color:#6b7280;font-size:13px">${escapeHtml(footer)}</p>` : ""}
-      <p style="color:#6b7280;font-size:12px">Educational tool only. Not financial advice.</p>
-    </div>
-  `;
-}
-
-function formatCents(value) {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD"
-  }).format(Number(value || 0) / 100);
+function planLabel(plan) {
+  const value = String(plan || "paid");
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
 export function maskEmail(email = "") {
@@ -207,17 +140,4 @@ function safeError(error) {
   return String(error?.message || "unknown")
     .replace(/\b(?:re|r)_[A-Za-z0-9_]+\b/g, "[redacted-key]")
     .slice(0, 180);
-}
-
-function escapeHtml(value) {
-  return String(value || "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
-function escapeAttribute(value) {
-  return escapeHtml(value).replaceAll("`", "&#096;");
 }
