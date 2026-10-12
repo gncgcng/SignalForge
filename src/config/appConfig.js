@@ -216,6 +216,9 @@ export const appConfig = {
     cancelUrl: appUrl ? `${appUrl}/#billing?checkout=cancelled` : "",
     portalReturnUrl: appUrl ? `${appUrl}/#billing` : "",
     promotionCodesEnabled: process.env.STRIPE_ALLOW_PROMOTION_CODES !== "false",
+    // New Checkout Sessions (plans and credit packs) are paused unless this is exactly "true".
+    // Webhooks, the Customer Portal and existing subscriptions are unaffected.
+    checkoutEnabled: process.env.BILLING_CHECKOUT_ENABLED === "true",
     prices: {
       pro: process.env.STRIPE_PRO_PRICE_ID || "",
       elite: process.env.STRIPE_ELITE_PRICE_ID || "",

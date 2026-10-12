@@ -11,7 +11,8 @@ const result = {
     app.includes("renderMobileSignalAccordion(signal)") &&
     app.includes("renderModeDetails(signal"),
   historyUsesTransparency: app.includes("history-transparency"),
-  whyThisSignalPresent: app.includes("Why this signal?"),
+  // Pivot phase 0 renamed the heading so it doesn't read as a recommendation.
+  whyThisSignalPresent: app.includes("Why this setup?") && !app.includes("Why this signal?"),
   confidenceBreakdownPresent: app.includes("Confidence summarizes rule alignment"),
   riskGuidanceIsGeneral: app.includes("Define a consistent maximum loss") &&
     !app.includes("You should risk"),

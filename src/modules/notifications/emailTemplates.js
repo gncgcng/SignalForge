@@ -73,15 +73,13 @@ export function buildWelcomeEmail({ username = "", trialGranted = true }) {
     paragraphs: trialGranted
       ? [
           `Your account is ready, and you have ${unlocks} free signal unlocks.`,
-          "Run a scan to see current setups, then unlock the ones you want to follow. Each unlocked signal shows its entry, stop and target, and is tracked to its outcome."
+          "Run a scan to see current setups, then unlock the ones you want to study. Each unlocked setup shows its setup levels (entry, stop and target) and is tracked to its outcome."
         ]
       : [
           "Your account is ready. You can run scans and review setups now.",
-          "This email or device has already used SignalForge's free trial, so this account starts without free unlocks. To unlock a signal, choose a plan or a credit pack in Billing."
+          "This email or device has already used SignalForge's free trial, so this account starts without free unlocks. A new plan is coming soon. Until then, scanning and reviewing setups stay free."
         ],
-    button: trialGranted
-      ? { label: "Run your first scan", url: appLink("/#scanner") }
-      : { label: "View plans", url: appLink("/#billing") }
+    button: { label: "Run your first scan", url: appLink("/#scanner") }
   });
 }
 

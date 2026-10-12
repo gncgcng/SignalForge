@@ -28,9 +28,9 @@ const checks = {
     css.includes(".mobile-signal-values"),
   accordionSections:
     app.includes("<summary>Overview</summary>") &&
-    app.includes("<summary>Why this signal?</summary>") &&
-    app.includes("<summary>Risk levels</summary>") &&
-    app.includes("<summary>AI analyst explanation</summary>") &&
+    app.includes("<summary>Why this setup?</summary>") &&
+    app.includes("<summary>Setup levels</summary>") &&
+    app.includes("<summary>Rule analysis explanation</summary>") &&
     app.includes("<summary>Full analysis context</summary>") &&
     css.includes(".mobile-signal-accordion details"),
   longAnalysisSafe:

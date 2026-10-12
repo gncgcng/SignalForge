@@ -10,6 +10,8 @@ process.env.STRIPE_ELITE_PRICE_ID = "price_test_elite";
 process.env.STRIPE_CREDITS_10_PRICE_ID = "price_test_10";
 process.env.STRIPE_CREDITS_50_PRICE_ID = "price_test_50";
 process.env.STRIPE_CREDITS_100_PRICE_ID = "price_test_100";
+// These checks cover checkout itself, so they run with new checkouts enabled (default is paused).
+process.env.BILLING_CHECKOUT_ENABLED = "true";
 
 const {
   appConfig,

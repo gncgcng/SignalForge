@@ -138,20 +138,22 @@ const result = {
     validUntil: "not-a-date"
   }).reason === "invalid_expiration",
   messageIsPreviewOnly: ["Market: BTCUSD", "Provider: Coinbase · BTC-USD", "Timeframe: 1h",
-    "Direction: LONG", "Confidence: 86% (Strong)", "Setup: Pullback bounce",
-    "Preview only. Unlock to view full levels."]
-    .every((value) => message.includes(value)),
+    "Direction: Long setup", "Confidence: 86% (Good match)", "Setup: Pullback bounce",
+    "It is not a probability of profit.",
+    "Preview only. Unlock to view the setup levels."]
+    .every((value) => message.includes(value)) &&
+    !/Setup Ready|Direction: LONG|Excellent|near-perfect/.test(message),
   messageDoesNotLeakPaidLevels: !["Entry:", "Stop Loss:", "Take Profit:", "Risk/Reward:"]
     .some((value) => message.includes(value)),
   messageContainsReasonAndDisclaimer: message.includes("Preview reason:") &&
     message.includes("Trend") &&
     message.includes("Educational tool only. Not financial advice."),
-  telegramReplyMarkupUnlocksExactSetup: replyMarkup.reply_markup.inline_keyboard[0][0].text === "Unlock Signal" &&
+  telegramReplyMarkupUnlocksExactSetup: replyMarkup.reply_markup.inline_keyboard[0][0].text === "Unlock setup" &&
     replyMarkup.reply_markup.inline_keyboard[0][0].url.includes("telegramUnlock=BTC-USD%3A1h%3Along%3A1770000000"),
   telegramApiCalledSafely: telegramRequest.url.includes("/bottest-token/sendMessage") &&
     telegramRequest.body.chat_id === "123456789" &&
     telegramRequest.body.text === message &&
-    telegramRequest.body.reply_markup.inline_keyboard[0][0].text === "Unlock Signal",
+    telegramRequest.body.reply_markup.inline_keyboard[0][0].text === "Unlock setup",
   telegramPipelineLogs:
     autoScan.includes("[auto-scan] matched alert") &&
     queue.includes("[telegram] sending alert") &&
