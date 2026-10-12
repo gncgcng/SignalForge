@@ -1,0 +1,114 @@
+Daily trend-following study - phase DEV - 12 variants fixed in docs/research/daily-trend-spec.md
+Costs: base 0.25%/side + 0.05% entry slippage; stress 0.60%/side (reported, not in the pass test).
+Data: Coinbase Exchange daily candles 2016-01-01 -> 2026-10-10 (closed UTC days; cache asOf 2026-10-11).
+  USD products returned by /products: 492 (89 delisted, 403 online).
+  With daily history: 492; returned none: 0.
+  Delisted with history: 89 of 89.
+  Excluded as fiat-pegged stablecoins (pre-registered): 12 (BUSD, DAI, EURC, GUSD, GYEN, MUSD, PAX, PYUSD, USD1, USDS, USDT, UST).
+  Products ever eligible (>=365 candles, 30d median $vol >= $2M) through 2024-12-31: 139 (21 now delisted).
+  Average eligible products per day: 2016 0.0, 2017 2.0, 2018 3.0, 2019 4.0, 2020 6.9, 2021 19.1, 2022 29.2, 2023 26.2, 2024 45.4.
+Bias: 492/492 = 100.0% of the USD products Coinbase still lists could be checked. Products Coinbase has removed from /products entirely cannot be fetched or counted, so the universe is survivor-biased towards products that are still catalogued; their number is unknown.
+
+DEVELOPMENT 2016-01-01 -> 2024-12-31 (candles after 2024-12-31 not loaded)
+Development BTC buy-and-hold (no fees): CAGR 81.8% maxDD 83.8% Sharpe 1.20 worst month 2022-06 -37.1%
+
+N20-E1-F0  ->  NO_EDGE
+  trades n=1049 wins=365 win 34.8% Wilson95 [32%, 37.7%] | avg win +4.156R avg loss -0.978R | open at end 0
+  avg R after base fees +0.808 month-block bootstrap 95% [+0.136, +1.538] (83 months) | stress fees +0.724 [+0.055, +1.452]
+  median hold 11d | 116.5 trades/yr | longest losing streak 32
+  by year (avg R, n): 2017 +6.969 (14), 2018 -0.479 (17), 2019 +1.472 (30), 2020 +1.579 (61), 2021 +0.532 (158), 2022 -0.523 (195), 2023 +0.818 (236), 2024 +1.310 (338)
+  portfolio 1% risk, max 10: CAGR 39.2% maxDD 61.6% Sharpe 1.01 worst month 2024-04 -20.3% | taken 597 skipped: 10 open 1364, no cash 828; size cut to cash 51
+  portfolio at stress fees: CAGR 32.6% maxDD 67.3% Sharpe 0.89
+  rule: avgR>0 & lower>0 yes | n>=150 yes | positive years 5/6 (years with >=20 trades) yes | maxDD<=35% NO
+N20-E1-F1  ->  NO_EDGE
+  trades n=803 wins=291 win 36.2% Wilson95 [33%, 39.6%] | avg win +4.237R avg loss -0.965R | open at end 0
+  avg R after base fees +0.920 month-block bootstrap 95% [+0.080, +1.808] (59 months) | stress fees +0.841 [+0.005, +1.722]
+  median hold 11d | 89.2 trades/yr | longest losing streak 58
+  by year (avg R, n): 2017 +6.969 (14), 2018 -0.489 (2), 2019 +0.198 (22), 2020 +1.121 (59), 2021 +0.421 (149), 2023 +0.452 (223), 2024 +1.222 (334)
+  portfolio 1% risk, max 10: CAGR 30.5% maxDD 48.7% Sharpe 0.92 worst month 2024-04 -20.3% | taken 449 skipped: 10 open 1181, no cash 503; size cut to cash 41
+  portfolio at stress fees: CAGR 26.2% maxDD 51.8% Sharpe 0.83
+  rule: avgR>0 & lower>0 yes | n>=150 yes | positive years 5/5 (years with >=20 trades) yes | maxDD<=35% NO
+N20-E2-F0  ->  NO_EDGE
+  trades n=875 wins=281 win 32.1% Wilson95 [29.1%, 35.3%] | avg win +5.423R avg loss -1.188R | open at end 3
+  avg R after base fees +0.935 month-block bootstrap 95% [+0.167, +1.781] (81 months) | stress fees +0.851 [+0.087, +1.693]
+  median hold 15d | 97.2 trades/yr | longest losing streak 52
+  by year (avg R, n): 2017 +7.081 (14), 2018 -0.962 (17), 2019 +3.564 (22), 2020 +5.268 (35), 2021 +0.635 (126), 2022 -0.890 (179), 2023 +1.165 (187), 2024 +1.131 (295)
+  portfolio 1% risk, max 10: CAGR 41.5% maxDD 73.6% Sharpe 1.00 worst month 2024-04 -24.6% | taken 430 skipped: 10 open 1088, no cash 1371; size cut to cash 37
+  portfolio at stress fees: CAGR 36.6% maxDD 76.8% Sharpe 0.92
+  rule: avgR>0 & lower>0 yes | n>=150 yes | positive years 5/6 (years with >=20 trades) yes | maxDD<=35% NO
+N20-E2-F1  ->  NO_EDGE
+  trades n=658 wins=223 win 33.9% Wilson95 [30.4%, 37.6%] | avg win +5.351R avg loss -1.120R | open at end 3
+  avg R after base fees +1.073 month-block bootstrap 95% [+0.086, +2.125] (57 months) | stress fees +0.995 [+0.012, +2.042]
+  median hold 18d | 73.1 trades/yr | longest losing streak 56
+  by year (avg R, n): 2017 +7.081 (14), 2018 -1.168 (2), 2019 +0.236 (17), 2020 +3.969 (37), 2021 +0.535 (118), 2023 +0.560 (176), 2024 +1.010 (294)
+  portfolio 1% risk, max 10: CAGR 31.9% maxDD 54.5% Sharpe 0.92 worst month 2024-04 -24.6% | taken 318 skipped: 10 open 946, no cash 950; size cut to cash 29
+  portfolio at stress fees: CAGR 28.7% maxDD 56.7% Sharpe 0.86
+  rule: avgR>0 & lower>0 yes | n>=150 yes | positive years 4/4 (years with >=20 trades) yes | maxDD<=35% NO
+N55-E1-F0  ->  NO_EDGE
+  trades n=500 wins=166 win 33.2% Wilson95 [29.2%, 37.4%] | avg win +3.544R avg loss -0.812R | open at end 16
+  avg R after base fees +0.634 month-block bootstrap 95% [+0.098, +1.218] (64 months) | stress fees +0.589 [+0.056, +1.169]
+  median hold 23d | 55.5 trades/yr | longest losing streak 25
+  by year (avg R, n): 2017 +4.143 (10), 2018 -0.970 (3), 2019 +3.631 (8), 2020 +2.997 (25), 2021 +0.407 (80), 2022 -0.710 (63), 2023 +0.815 (119), 2024 +0.467 (192)
+  portfolio 1% risk, max 10: CAGR 25.6% maxDD 42.3% Sharpe 0.86 worst month 2024-12 -19.1% | taken 265 skipped: 10 open 1331, no cash 0; size cut to cash 2
+  portfolio at stress fees: CAGR 23.9% maxDD 44.8% Sharpe 0.82
+  rule: avgR>0 & lower>0 yes | n>=150 yes | positive years 4/5 (years with >=20 trades) yes | maxDD<=35% NO
+N55-E1-F1  ->  NO_EDGE
+  trades n=427 wins=147 win 34.4% Wilson95 [30.1%, 39.1%] | avg win +3.638R avg loss -0.771R | open at end 16
+  avg R after base fees +0.747 month-block bootstrap 95% [+0.115, +1.412] (49 months) | stress fees +0.702 [+0.074, +1.362]
+  median hold 25d | 47.4 trades/yr | longest losing streak 25
+  by year (avg R, n): 2017 +4.143 (10), 2019 +1.848 (6), 2020 +2.860 (25), 2021 +0.406 (78), 2023 +0.725 (117), 2024 +0.411 (191)
+  portfolio 1% risk, max 10: CAGR 23.7% maxDD 39.0% Sharpe 0.84 worst month 2024-12 -19.9% | taken 219 skipped: 10 open 1245, no cash 0; size cut to cash 0
+  portfolio at stress fees: CAGR 22.4% maxDD 40.0% Sharpe 0.81
+  rule: avgR>0 & lower>0 yes | n>=150 yes | positive years 4/4 (years with >=20 trades) yes | maxDD<=35% NO
+N55-E2-F0  ->  NO_EDGE
+  trades n=504 wins=192 win 38.1% Wilson95 [34%, 42.4%] | avg win +3.243R avg loss -0.850R | open at end 4
+  avg R after base fees +0.709 month-block bootstrap 95% [+0.113, +1.345] (65 months) | stress fees +0.664 [+0.072, +1.295]
+  median hold 21d | 56.0 trades/yr | longest losing streak 23
+  by year (avg R, n): 2017 +4.798 (11), 2018 -0.648 (3), 2019 +2.881 (9), 2020 +2.380 (27), 2021 +0.438 (84), 2022 -0.753 (63), 2023 +0.874 (118), 2024 +0.655 (189)
+  portfolio 1% risk, max 10: CAGR 25.8% maxDD 43.1% Sharpe 0.94 worst month 2024-12 -14.4% | taken 281 skipped: 10 open 1320, no cash 0; size cut to cash 2
+  portfolio at stress fees: CAGR 24.1% maxDD 45.7% Sharpe 0.89
+  rule: avgR>0 & lower>0 yes | n>=150 yes | positive years 4/5 (years with >=20 trades) yes | maxDD<=35% NO
+N55-E2-F1  ->  NO_EDGE
+  trades n=432 wins=170 win 39.4% Wilson95 [34.9%, 44%] | avg win +3.378R avg loss -0.791R | open at end 4
+  avg R after base fees +0.849 month-block bootstrap 95% [+0.186, +1.552] (50 months) | stress fees +0.805 [+0.145, +1.503]
+  median hold 23d | 48.0 trades/yr | longest losing streak 22
+  by year (avg R, n): 2017 +4.798 (11), 2019 +1.564 (7), 2020 +2.222 (27), 2021 +0.413 (83), 2023 +0.788 (116), 2024 +0.625 (188)
+  portfolio 1% risk, max 10: CAGR 24.8% maxDD 35.6% Sharpe 0.95 worst month 2024-12 -14.4% | taken 234 skipped: 10 open 1233, no cash 0; size cut to cash 1
+  portfolio at stress fees: CAGR 23.4% maxDD 36.6% Sharpe 0.91
+  rule: avgR>0 & lower>0 yes | n>=150 yes | positive years 4/4 (years with >=20 trades) yes | maxDD<=35% NO
+N100-E1-F0  ->  NO_EDGE
+  trades n=323 wins=113 win 35.0% Wilson95 [30%, 40.3%] | avg win +3.407R avg loss -0.797R | open at end 17
+  avg R after base fees +0.674 month-block bootstrap 95% [+0.052, +1.323] (56 months) | stress fees +0.639 [+0.021, +1.285]
+  median hold 33d | 35.9 trades/yr | longest losing streak 25
+  by year (avg R, n): 2017 +1.493 (9), 2019 +5.639 (4), 2020 +2.797 (19), 2021 +0.274 (48), 2022 -0.715 (20), 2023 +0.698 (90), 2024 +0.503 (133)
+  portfolio 1% risk, max 10: CAGR 14.0% maxDD 53.3% Sharpe 0.65 worst month 2024-04 -19.0% | taken 161 skipped: 10 open 1006, no cash 0; size cut to cash 0
+  portfolio at stress fees: CAGR 13.3% maxDD 54.4% Sharpe 0.63
+  rule: avgR>0 & lower>0 yes | n>=150 yes | positive years 3/4 (years with >=20 trades) yes | maxDD<=35% NO
+N100-E1-F1  ->  NO_EDGE
+  trades n=301 wins=109 win 36.2% Wilson95 [31%, 41.8%] | avg win +3.340R avg loss -0.779R | open at end 17
+  avg R after base fees +0.712 month-block bootstrap 95% [+0.065, +1.366] (47 months) | stress fees +0.677 [+0.034, +1.327]
+  median hold 34d | 33.4 trades/yr | longest losing streak 25
+  by year (avg R, n): 2017 +1.493 (9), 2019 +2.815 (4), 2020 +2.784 (19), 2021 +0.296 (47), 2023 +0.695 (90), 2024 +0.457 (132)
+  portfolio 1% risk, max 10: CAGR 13.7% maxDD 45.6% Sharpe 0.66 worst month 2024-04 -19.0% | taken 140 skipped: 10 open 1001, no cash 0; size cut to cash 0
+  portfolio at stress fees: CAGR 13.2% maxDD 46.6% Sharpe 0.64
+  rule: avgR>0 & lower>0 yes | n>=150 yes | positive years 3/3 (years with >=20 trades) yes | maxDD<=35% NO
+N100-E2-F0  ->  NO_EDGE
+  trades n=376 wins=145 win 38.6% Wilson95 [33.8%, 43.6%] | avg win +2.412R avg loss -0.679R | open at end 4
+  avg R after base fees +0.513 month-block bootstrap 95% [+0.049, +1.018] (57 months) | stress fees +0.480 [+0.017, +0.982]
+  median hold 23d | 41.8 trades/yr | longest losing streak 18
+  by year (avg R, n): 2017 +2.575 (10), 2019 +2.980 (7), 2020 +1.372 (22), 2021 +0.248 (66), 2022 -0.663 (21), 2023 +0.289 (93), 2024 +0.554 (157)
+  portfolio 1% risk, max 10: CAGR 14.2% maxDD 40.4% Sharpe 0.78 worst month 2024-04 -11.7% | taken 215 skipped: 10 open 939, no cash 0; size cut to cash 0
+  portfolio at stress fees: CAGR 13.3% maxDD 42.2% Sharpe 0.74
+  rule: avgR>0 & lower>0 yes | n>=150 yes | positive years 4/5 (years with >=20 trades) yes | maxDD<=35% NO
+N100-E2-F1  ->  EDGE
+  trades n=353 wins=137 win 38.8% Wilson95 [33.9%, 44%] | avg win +2.425R avg loss -0.649R | open at end 4
+  avg R after base fees +0.544 month-block bootstrap 95% [+0.050, +1.053] (48 months) | stress fees +0.510 [+0.020, +1.016]
+  median hold 24d | 39.2 trades/yr | longest losing streak 18
+  by year (avg R, n): 2017 +2.575 (10), 2019 +1.386 (7), 2020 +1.356 (22), 2021 +0.253 (65), 2023 +0.286 (93), 2024 +0.536 (156)
+  portfolio 1% risk, max 10: CAGR 14.2% maxDD 31.5% Sharpe 0.81 worst month 2024-04 -11.7% | taken 192 skipped: 10 open 939, no cash 0; size cut to cash 0
+  portfolio at stress fees: CAGR 13.5% maxDD 33.1% Sharpe 0.77
+  rule: avgR>0 & lower>0 yes | n>=150 yes | positive years 4/4 (years with >=20 trades) yes | maxDD<=35% yes
+
+Development verdicts: N20-E1-F0 NO_EDGE, N20-E1-F1 NO_EDGE, N20-E2-F0 NO_EDGE, N20-E2-F1 NO_EDGE, N55-E1-F0 NO_EDGE, N55-E1-F1 NO_EDGE, N55-E2-F0 NO_EDGE, N55-E2-F1 NO_EDGE, N100-E1-F0 NO_EDGE, N100-E1-F1 NO_EDGE, N100-E2-F0 NO_EDGE, N100-E2-F1 EDGE
+Wrote C:\Users\monge\Documents\Codex\2026-05-24\build-a-modern-full-stack-web\.claude\worktrees\htf-alignment-report\docs\research\daily-trend\dev-results.json before any hold-out candle was loaded.
+Runtime 2.6s; replay cache 753.7 MB.

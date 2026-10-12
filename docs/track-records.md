@@ -76,3 +76,20 @@ The harness and its candle cache (about 750 MB) run on a workstation, never on R
 
 Only the label wording and thresholds above are fixed. A refresh can move any record into a different label, and that
 is expected.
+
+## Public research page (`/research`)
+
+`/research` is server-rendered by `src/modules/research/researchPage.js` (no sign-in, never gated) and links preview
+tags for sharing. Its numbers come from two committed files, read when the page renders:
+
+- **Intraday figures** (cases, win rate, break-even, average R, the table): `data/track-records/track-records.v1.json`.
+- **Research figures** (the 226-cell verdict, the daily trend study, the BTC/ETH in-or-out study):
+  `data/research/summary.v1.json`. Each figure names its source report and a pattern that finds it. The reports are
+  committed verbatim under `docs/research/` (byte-identical to the research branches; the git blob ids are recorded),
+  and `npm run test:research-summary` re-extracts every figure, so a number changed by hand fails the test.
+
+To refresh: re-export the track records as above; for a new research report, copy it into `docs/research/` unchanged,
+update its `blob` and the figures in the summary, then run `npm run test:research-summary`, `npm run test:research-page`
+and `npm run test:claims-lint`.
+
+The fee calculator on the page is client-side only (`public/feeCost.js`, `public/research.js`).

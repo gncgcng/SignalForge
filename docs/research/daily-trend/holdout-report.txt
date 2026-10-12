@@ -1,0 +1,116 @@
+Daily trend-following study - phase HOLDOUT - 12 variants fixed in docs/research/daily-trend-spec.md
+Costs: base 0.25%/side + 0.05% entry slippage; stress 0.60%/side (reported, not in the pass test).
+Data: Coinbase Exchange daily candles 2016-01-01 -> 2026-10-10 (closed UTC days; cache asOf 2026-10-11).
+  USD products returned by /products: 492 (89 delisted, 403 online).
+  With daily history: 492; returned none: 0.
+  Delisted with history: 89 of 89.
+  Excluded as fiat-pegged stablecoins (pre-registered): 12 (BUSD, DAI, EURC, GUSD, GYEN, MUSD, PAX, PYUSD, USD1, USDS, USDT, UST).
+  Products ever eligible (>=365 candles, 30d median $vol >= $2M) through 2026-10-10: 172 (23 now delisted).
+  Average eligible products per day: 2016 0.0, 2017 2.0, 2018 3.0, 2019 4.0, 2020 6.9, 2021 19.1, 2022 29.2, 2023 26.2, 2024 45.4, 2025 43.6, 2026 21.6.
+Bias: 492/492 = 100.0% of the USD products Coinbase still lists could be checked. Products Coinbase has removed from /products entirely cannot be fetched or counted, so the universe is survivor-biased towards products that are still catalogued; their number is unknown.
+
+Development verdicts read from file written 2026-10-12T00:38:03.464Z: N20-E1-F0 NO_EDGE, N20-E1-F1 NO_EDGE, N20-E2-F0 NO_EDGE, N20-E2-F1 NO_EDGE, N55-E1-F0 NO_EDGE, N55-E1-F1 NO_EDGE, N55-E2-F0 NO_EDGE, N55-E2-F1 NO_EDGE, N100-E1-F0 NO_EDGE, N100-E1-F1 NO_EDGE, N100-E2-F0 NO_EDGE, N100-E2-F1 EDGE
+
+HOLD-OUT 2025-01-01 -> 2026-10-10
+Hold-out BTC buy-and-hold (no fees): CAGR -6.5% maxDD 53.1% Sharpe 0.06 worst month 2026-06 -20.5%
+
+N20-E1-F0
+  trades n=466 wins=137 win 29.4% Wilson95 [25.4%, 33.7%] | avg win +2.475R avg loss -0.962R | open at end 6
+  avg R after base fees +0.048 month-block bootstrap 95% [-0.520, +0.727] (22 months) | stress fees -0.038 [-0.603, +0.635]
+  median hold 9d | 262.7 trades/yr | longest losing streak 28
+  by year (avg R, n): 2025 -0.132 (260), 2026 +0.276 (206)
+  portfolio 1% risk, max 10: CAGR -17.3% maxDD 56.5% Sharpe -0.21 worst month 2025-03 -25.0% | taken 245 skipped: 10 open 234, no cash 640; size cut to cash 28
+  portfolio at stress fees: CAGR -25.2% maxDD 63.0% Sharpe -0.43
+  development verdict NO_EDGE
+N20-E1-F1
+  trades n=304 wins=102 win 33.6% Wilson95 [28.5%, 39%] | avg win +2.368R avg loss -0.970R | open at end 6
+  avg R after base fees +0.150 month-block bootstrap 95% [-0.607, +0.941] (14 months) | stress fees +0.072 [-0.678, +0.855]
+  median hold 10d | 171.4 trades/yr | longest losing streak 28
+  by year (avg R, n): 2025 -0.140 (240), 2026 +1.236 (64)
+  portfolio 1% risk, max 10: CAGR -12.1% maxDD 44.6% Sharpe -0.18 worst month 2025-03 -25.0% | taken 142 skipped: 10 open 223, no cash 482; size cut to cash 10
+  portfolio at stress fees: CAGR -16.9% maxDD 46.8% Sharpe -0.34
+  development verdict NO_EDGE
+N20-E2-F0
+  trades n=398 wins=111 win 27.9% Wilson95 [23.7%, 32.5%] | avg win +3.020R avg loss -1.145R | open at end 20
+  avg R after base fees +0.016 month-block bootstrap 95% [-0.701, +0.944] (22 months) | stress fees -0.069 [-0.781, +0.851]
+  median hold 11d | 224.3 trades/yr | longest losing streak 31
+  by year (avg R, n): 2025 -0.297 (225), 2026 +0.424 (173)
+  portfolio 1% risk, max 10: CAGR -32.1% maxDD 69.1% Sharpe -0.62 worst month 2025-03 -25.9% | taken 199 skipped: 10 open 231, no cash 708; size cut to cash 30
+  portfolio at stress fees: CAGR -37.3% maxDD 73.0% Sharpe -0.79
+  development verdict NO_EDGE
+N20-E2-F1
+  trades n=256 wins=87 win 34.0% Wilson95 [28.5%, 40%] | avg win +2.865R avg loss -1.116R | open at end 20
+  avg R after base fees +0.237 month-block bootstrap 95% [-0.784, +1.373] (14 months) | stress fees +0.161 [-0.852, +1.288]
+  median hold 14.5d | 144.3 trades/yr | longest losing streak 31
+  by year (avg R, n): 2025 -0.303 (206), 2026 +2.462 (50)
+  portfolio 1% risk, max 10: CAGR -16.9% maxDD 51.5% Sharpe -0.29 worst month 2025-03 -25.9% | taken 116 skipped: 10 open 322, no cash 419; size cut to cash 9
+  portfolio at stress fees: CAGR -20.5% maxDD 53.5% Sharpe -0.41
+  development verdict NO_EDGE
+N55-E1-F0
+  trades n=188 wins=47 win 25.0% Wilson95 [19.4%, 31.6%] | avg win +1.930R avg loss -0.839R | open at end 29
+  avg R after base fees -0.147 month-block bootstrap 95% [-0.579, +0.370] (21 months) | stress fees -0.193 [-0.624, +0.318]
+  median hold 20d | 106.0 trades/yr | longest losing streak 24
+  by year (avg R, n): 2025 -0.567 (107), 2026 +0.408 (81)
+  portfolio 1% risk, max 10: CAGR -7.2% maxDD 33.9% Sharpe -0.12 worst month 2026-06 -12.3% | taken 99 skipped: 10 open 376, no cash 0; size cut to cash 1
+  portfolio at stress fees: CAGR -9.7% maxDD 36.5% Sharpe -0.22
+  development verdict NO_EDGE
+N55-E1-F1
+  trades n=150 wins=39 win 26.0% Wilson95 [19.6%, 33.6%] | avg win +1.839R avg loss -0.825R | open at end 29
+  avg R after base fees -0.132 month-block bootstrap 95% [-0.636, +0.424] (14 months) | stress fees -0.176 [-0.678, +0.376]
+  median hold 20d | 84.5 trades/yr | longest losing streak 24
+  by year (avg R, n): 2025 -0.581 (104), 2026 +0.882 (46)
+  portfolio 1% risk, max 10: CAGR -3.3% maxDD 26.4% Sharpe -0.02 worst month 2025-09 -10.2% | taken 67 skipped: 10 open 357, no cash 0; size cut to cash 0
+  portfolio at stress fees: CAGR -4.9% maxDD 28.1% Sharpe -0.09
+  development verdict NO_EDGE
+N55-E2-F0
+  trades n=192 wins=56 win 29.2% Wilson95 [23.2%, 36%] | avg win +1.652R avg loss -0.784R | open at end 22
+  avg R after base fees -0.073 month-block bootstrap 95% [-0.481, +0.393] (21 months) | stress fees -0.119 [-0.526, +0.342]
+  median hold 20d | 108.2 trades/yr | longest losing streak 25
+  by year (avg R, n): 2025 -0.467 (111), 2026 +0.466 (81)
+  portfolio 1% risk, max 10: CAGR -2.6% maxDD 31.0% Sharpe 0.04 worst month 2026-06 -9.5% | taken 109 skipped: 10 open 346, no cash 0; size cut to cash 1
+  portfolio at stress fees: CAGR -5.4% maxDD 33.8% Sharpe -0.07
+  development verdict NO_EDGE
+N55-E2-F1
+  trades n=152 wins=47 win 30.9% Wilson95 [24.1%, 38.7%] | avg win +1.573R avg loss -0.759R | open at end 22
+  avg R after base fees -0.038 month-block bootstrap 95% [-0.531, +0.507] (14 months) | stress fees -0.081 [-0.571, +0.460]
+  median hold 20d | 85.7 trades/yr | longest losing streak 25
+  by year (avg R, n): 2025 -0.477 (108), 2026 +1.039 (44)
+  portfolio 1% risk, max 10: CAGR 0.7% maxDD 25.6% Sharpe 0.15 worst month 2026-10 -7.4% | taken 75 skipped: 10 open 331, no cash 0; size cut to cash 0
+  portfolio at stress fees: CAGR -1.1% maxDD 27.4% Sharpe 0.07
+  development verdict NO_EDGE
+N100-E1-F0
+  trades n=109 wins=31 win 28.4% Wilson95 [20.8%, 37.5%] | avg win +1.444R avg loss -0.759R | open at end 29
+  avg R after base fees -0.133 month-block bootstrap 95% [-0.572, +0.298] (17 months) | stress fees -0.166 [-0.603, +0.261]
+  median hold 21d | 61.4 trades/yr | longest losing streak 14
+  by year (avg R, n): 2025 -0.535 (53), 2026 +0.248 (56)
+  portfolio 1% risk, max 10: CAGR -6.2% maxDD 24.0% Sharpe -0.22 worst month 2026-06 -10.6% | taken 66 skipped: 10 open 179, no cash 0; size cut to cash 0
+  portfolio at stress fees: CAGR -7.3% maxDD 25.2% Sharpe -0.28
+  development verdict NO_EDGE
+N100-E1-F1
+  trades n=88 wins=29 win 33.0% Wilson95 [24%, 43.3%] | avg win +1.273R avg loss -0.744R | open at end 29
+  avg R after base fees -0.079 month-block bootstrap 95% [-0.568, +0.339] (12 months) | stress fees -0.112 [-0.598, +0.304]
+  median hold 22d | 49.6 trades/yr | longest losing streak 14
+  by year (avg R, n): 2025 -0.525 (51), 2026 +0.535 (37)
+  portfolio 1% risk, max 10: CAGR -1.7% maxDD 15.3% Sharpe -0.02 worst month 2026-10 -5.1% | taken 45 skipped: 10 open 179, no cash 0; size cut to cash 0
+  portfolio at stress fees: CAGR -2.5% maxDD 16.1% Sharpe -0.06
+  development verdict NO_EDGE
+N100-E2-F0
+  trades n=125 wins=39 win 31.2% Wilson95 [23.7%, 39.8%] | avg win +1.097R avg loss -0.663R | open at end 21
+  avg R after base fees -0.114 month-block bootstrap 95% [-0.422, +0.148] (17 months) | stress fees -0.146 [-0.451, +0.113]
+  median hold 20d | 70.5 trades/yr | longest losing streak 12
+  by year (avg R, n): 2025 -0.379 (65), 2026 +0.173 (60)
+  portfolio 1% risk, max 10: CAGR -5.3% maxDD 23.0% Sharpe -0.23 worst month 2026-06 -7.0% | taken 85 skipped: 10 open 154, no cash 0; size cut to cash 0
+  portfolio at stress fees: CAGR -6.7% maxDD 24.6% Sharpe -0.32
+  development verdict NO_EDGE
+N100-E2-F1
+  trades n=103 wins=33 win 32.0% Wilson95 [23.8%, 41.6%] | avg win +1.048R avg loss -0.611R | open at end 21
+  avg R after base fees -0.079 month-block bootstrap 95% [-0.419, +0.183] (12 months) | stress fees -0.112 [-0.449, +0.148]
+  median hold 20d | 58.1 trades/yr | longest losing streak 12
+  by year (avg R, n): 2025 -0.366 (63), 2026 +0.373 (40)
+  portfolio 1% risk, max 10: CAGR -1.9% maxDD 17.9% Sharpe -0.05 worst month 2026-10 -6.1% | taken 63 skipped: 10 open 154, no cash 0; size cut to cash 0
+  portfolio at stress fees: CAGR -3.0% maxDD 19.0% Sharpe -0.12
+  development verdict EDGE | hold-out FAILS (avg R -0.079, maxDD 17.9%) | at stress fees avg R -0.112, maxDD 19.0%
+
+Multiple testing: 12 variants tested; expected to pass by chance at 5%: 0.6. Passed in development: 1.
+Runtime 4.0s; replay cache 753.7 MB.
+STOP

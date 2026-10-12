@@ -9,6 +9,8 @@ import {
 } from "../../db/repositories.js";
 import { sendTelegramMessage } from "./telegramClient.js";
 import { formatSignalValidityWindow } from "../signals/signalValidityService.js";
+import { getTrackRecords } from "../track-records/trackRecordService.js";
+import { formatTrackRecordAlertLine } from "../../../public/trackRecords.js";
 
 const directions = new Set(["long", "short", "both"]);
 const timeframes = new Set(["5m", "15m", "1h", "4h"]);
@@ -137,6 +139,8 @@ export function telegramPreferenceMatchesSetup(settings, favoriteSymbols, setup)
 
 export function evaluateTelegramSignalEligibility(settings, favoriteSymbols, setup, now = Date.now()) {
   if (!setup?.setupKey) return telegramIneligible("missing_setup_key");
+  // Short setups are switched off in production and are never sent.
+  if (String(setup.direction || "").toLowerCase() === "short") return telegramIneligible("short_not_sent");
   if (setup.resultType !== "ready_signal") return telegramIneligible("non_ready_result");
   if (setup.validationPassed === false) return telegramIneligible("validation_failed");
   if (setup.status === "Expired") return telegramIneligible("expired", { field: "status" });
@@ -195,7 +199,7 @@ export function evaluateTelegramSignalEligibility(settings, favoriteSymbols, set
   };
 }
 
-export function formatTelegramSignalMessage(setup) {
+export function formatTelegramSignalMessage(setup, { trackRecords = getTrackRecords() } = {}) {
   const confirmations = summarizeConfirmations(setup.confirmations || []);
   const passed = confirmations.filter((item) => item.passed).map((item) => item.name);
   const reason = passed.length
@@ -214,6 +218,9 @@ export function formatTelegramSignalMessage(setup) {
     `Confidence: ${confidence}% (${getConfidenceTier(confidence)})`,
     `Setup: ${setup.setupType || "Qualified setup"}`,
     `Valid for: ${formatSignalValidityWindow(setup.timeframe)}`,
+    "",
+    // Same strategy + direction + timeframe mapping as the setup cards.
+    formatTrackRecordAlertLine(trackRecords, setup) || "Track record: none yet",
     "",
     "Preview reason:",
     reason,

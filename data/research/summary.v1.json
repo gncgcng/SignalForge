@@ -1,0 +1,68 @@
+{
+  "schema": "signalforge.research-summary",
+  "version": 1,
+  "note": "Figures quoted on /research. Each one is copied from a committed research report and re-checked against that report's text by scripts/research-summary-test.js. Intraday track-record figures are read from data/track-records/track-records.v1.json at render time instead.",
+  "sources": {
+    "dailyTrendDev": {
+      "path": "docs/research/daily-trend/dev-report.txt",
+      "originalBranch": "research/daily-trend",
+      "originalPath": "docs/research/daily-trend/dev-report.txt",
+      "originalCommit": "4b552a7567eadd5d0dbcebde8e26dee701ed56f3",
+      "blob": "63df357165f078d8219b17d10d5ea91f8ede38c6"
+    },
+    "dailyTrendHoldout": {
+      "path": "docs/research/daily-trend/holdout-report.txt",
+      "originalBranch": "research/daily-trend",
+      "originalPath": "docs/research/daily-trend/holdout-report.txt",
+      "originalCommit": "796aac0acced3c924d762ef2b9244141a91b8542",
+      "blob": "d07460f2d6050e00ffd6fea889216af49058bdf3"
+    },
+    "inOutDev": {
+      "path": "docs/research/in-out/dev-report.txt",
+      "originalBranch": "research/in-out",
+      "originalPath": "docs/research/in-out/dev-report.txt",
+      "originalCommit": "8959317aef8d71f288732a51dff182cb767de5c3",
+      "blob": "c8b40ff173d2b617a005a363ed9e32f7276ca27c"
+    },
+    "inOutHoldout": {
+      "path": "docs/research/in-out/holdout-report.txt",
+      "originalBranch": "research/in-out",
+      "originalPath": "docs/research/in-out/holdout-report.txt",
+      "originalCommit": "fd97dc178e40163062f72432589224359a5dddca",
+      "blob": "646db7ec67b7b4d392b5cb112cc4b49be323683a"
+    },
+    "intradayVerdicts": {
+      "path": "docs/research/replay-harness/verdicts.txt",
+      "originalBranch": "research/replay-harness",
+      "originalPath": ".replay-cache/runs/main/verdicts.txt (harness output, not committed on that branch)",
+      "originalCommit": "2100547fe4bfaf6d7d757512a631a16578c13299",
+      "generatedAt": "2026-10-11T20:43:14.520Z",
+      "blob": "8e434eae4da230fb45899f851e54b306a7bae0cb"
+    }
+  },
+  "figures": [
+    { "id": "intradayCellsTested", "value": 226, "source": "intradayVerdicts", "pattern": "multiple testing: (\\d+) cells tested", "describes": "strategy x direction x timeframe cells with enough trades to judge, across five rule variants, before the hold-out" },
+    { "id": "intradayEdgeCells", "value": 0, "source": "intradayVerdicts", "pattern": "EDGE cells \\((\\d+)\\): none", "describes": "cells that passed the pre-registered EDGE rule" },
+
+    { "id": "dailyTrendVariants", "value": 12, "source": "dailyTrendDev", "pattern": "phase DEV - (\\d+) variants fixed", "describes": "daily trend-following versions tested" },
+    { "id": "dailyTrendDevFrom", "value": "2016-01-01", "source": "dailyTrendDev", "pattern": "DEVELOPMENT (\\d{4}-\\d{2}-\\d{2}) -> \\d{4}-\\d{2}-\\d{2}", "describes": "development period start" },
+    { "id": "dailyTrendDevTo", "value": "2024-12-31", "source": "dailyTrendDev", "pattern": "DEVELOPMENT \\d{4}-\\d{2}-\\d{2} -> (\\d{4}-\\d{2}-\\d{2})", "describes": "development period end" },
+    { "id": "dailyTrendPassedVariant", "value": "N100-E2-F1", "source": "dailyTrendDev", "pattern": "(N\\d+-E\\d-F\\d) EDGE", "describes": "the one version that passed development" },
+    { "id": "dailyTrendPassedDev", "value": 1, "source": "dailyTrendHoldout", "pattern": "Passed in development: (\\d+)\\.", "describes": "versions that passed development" },
+    { "id": "dailyTrendHoldoutFrom", "value": "2025-01-01", "source": "dailyTrendHoldout", "pattern": "HOLD-OUT (\\d{4}-\\d{2}-\\d{2}) -> \\d{4}-\\d{2}-\\d{2}", "describes": "hold-out start" },
+    { "id": "dailyTrendHoldoutTo", "value": "2026-10-10", "source": "dailyTrendHoldout", "pattern": "HOLD-OUT \\d{4}-\\d{2}-\\d{2} -> (\\d{4}-\\d{2}-\\d{2})", "describes": "hold-out end" },
+    { "id": "dailyTrendHoldoutAvgR", "value": -0.079, "source": "dailyTrendHoldout", "pattern": "development verdict EDGE \\| hold-out FAILS \\(avg R (-?\\d+\\.\\d+)", "describes": "hold-out average R per trade after base fees for the version that passed development" },
+    { "id": "dailyTrendCosts", "value": "0.25%/side + 0.05% entry slippage", "source": "dailyTrendDev", "pattern": "Costs: base ([^;]+);", "describes": "base costs in the daily trend study" },
+
+    { "id": "inOutRules", "value": "R1, R2, R3, R4, R5", "source": "inOutDev", "pattern": "rules (R\\d(?:, R\\d)*) x", "describes": "rules tested" },
+    { "id": "inOutCoins", "value": "BTC-USD, ETH-USD", "source": "inOutDev", "pattern": " x ([A-Z]+-USD(?:, [A-Z]+-USD)*) fixed", "describes": "coins tested" },
+    { "id": "inOutDevFrom", "value": "2016-01-01", "source": "inOutDev", "pattern": "DEVELOPMENT (\\d{4}-\\d{2}-\\d{2}) -> \\d{4}-\\d{2}-\\d{2}", "describes": "development period start" },
+    { "id": "inOutDevTo", "value": "2021-12-31", "source": "inOutDev", "pattern": "DEVELOPMENT \\d{4}-\\d{2}-\\d{2} -> (\\d{4}-\\d{2}-\\d{2})", "describes": "development period end" },
+    { "id": "inOutMaxDrawdownShareOfHold", "value": 60, "source": "inOutDev", "pattern": "rule: maxDD <= (\\d+)% of hold", "describes": "required worst fall as a share of buy-and-hold's (60% = a 40% cut)" },
+    { "id": "inOutPassedDev", "value": 0, "source": "inOutHoldout", "pattern": "passed development: (\\d+)", "describes": "rule x coin cells that passed development" },
+    { "id": "inOutDeepestFallMin", "value": 64.3, "source": "inOutDev", "pattern": "^  rule: CAGR -?[\\d.]+% maxDD ([\\d.]+)%", "aggregate": "min", "expectedMatches": 10, "describes": "smallest worst fall (max drawdown) among the 10 rule x coin cells in development" },
+    { "id": "inOutDeepestFallMax", "value": 87.4, "source": "inOutDev", "pattern": "^  rule: CAGR -?[\\d.]+% maxDD ([\\d.]+)%", "aggregate": "max", "expectedMatches": 10, "describes": "largest worst fall among the 10 rule x coin cells in development" },
+    { "id": "inOutHoldoutFrom", "value": "2022-01-01", "source": "inOutHoldout", "pattern": "R1 BTC-USD (\\d{4}-\\d{2}-\\d{2}) -> \\d{4}-\\d{2}-\\d{2}  ->  development", "describes": "hold-out start" },
+    { "id": "inOutHoldoutTo", "value": "2026-10-10", "source": "inOutHoldout", "pattern": "R1 BTC-USD \\d{4}-\\d{2}-\\d{2} -> (\\d{4}-\\d{2}-\\d{2})  ->  development", "describes": "hold-out end" }
+  ]
+}

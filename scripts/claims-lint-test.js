@@ -36,7 +36,10 @@ export function userFacingSources() {
   return [
     ...htmlFiles,
     "public/app.js", // app copy, tooltips, signal cards and the legal-text renderer (legalDocuments)
-    "public/trackRecords.js", // track-record card wording
+    "public/trackRecords.js", // track-record card wording and the shared methodology text
+    "public/feeCost.js", // fee-cost calculator sentence
+    "public/research.js", // /research calculator wiring
+    "src/modules/research/researchPage.js", // public /research page template
     "public/manifest.json",
     "src/modules/notifications/emailTemplates.js",
     "src/modules/notifications/notificationService.js" // Telegram message templates
@@ -70,6 +73,14 @@ assert.equal(findClaimViolations('  if (value === "elite") return "Elite";', "x"
 const sources = userFacingSources();
 const violations = sources.flatMap((file) =>
   findClaimViolations(readFileSync(join(root, file), "utf8"), relative(root, join(root, file)).replaceAll("\\", "/")));
+
+// /research is assembled from data files at render time, so lint the rendered page too.
+const { loadTrackRecords } = await import("../src/modules/track-records/trackRecordService.js");
+const { loadResearchSummary } = await import("../src/modules/research/researchSummary.js");
+const { renderResearchPage } = await import("../src/modules/research/researchPage.js");
+const renderedResearch = renderResearchPage({ trackRecords: loadTrackRecords(), summary: loadResearchSummary() });
+violations.push(...findClaimViolations(renderedResearch, "GET /research (rendered)"));
+sources.push("GET /research (rendered)");
 
 if (violations.length) {
   console.error(`Claims lint found ${violations.length} banned phrase(s):`);

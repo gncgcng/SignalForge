@@ -29,7 +29,9 @@ const result = {
     !html.includes('"name": "Elite"'),
   conversionHero:
     html.includes("<h1>Know the odds before you trade</h1>") &&
-    html.includes("We test our own rules honestly and publish the results, good or bad. Setup track records are coming soon.") &&
+    html.includes("We test our own rules honestly and publish the results, good or bad. Every long setup now shows its historical track record.") &&
+    !html.includes("track records are coming soon") &&
+    html.includes("href=\"/research\">See our research</a>") &&
     html.includes("Start Free") &&
     html.includes("3 Free Setup Unlocks") &&
     html.includes("Watch Demo") &&
