@@ -78,8 +78,10 @@ if (!lines(momentumMessage).includes(expectedMomentumLine)) {
 const unmatchedMessage = formatTelegramSignalMessage({ ...setup, setupType: "Range bounce", timeframe: "4h" }, { trackRecords: committedTrackRecords });
 if (!lines(unmatchedMessage).includes("Track record: none yet")) throw new Error("Unmatched setup must say 'Track record: none yet'");
 if (!lines(message).includes("Track record: none yet")) throw new Error("Without loaded records the line must say 'Track record: none yet'");
-const shortEligibility = evaluateTelegramSignalEligibility({ enabled: true, direction: "both", timeframes: ["1h"], minimumConfidence: 80 }, new Set(), { ...setup, direction: "short" });
-if (shortEligibility.eligible !== false || shortEligibility.reason !== "short_not_sent") throw new Error(`Shorts must never be sent: ${JSON.stringify(shortEligibility)}`);
+// A short never carries a track record line (as on the cards). Whether shorts are sent at all is the admin
+// direction:short setting (covered by admin-disabled-group-block-test), not the template's job.
+const shortMessage = formatTelegramSignalMessage({ ...setup, setupType: "Momentum breakout", timeframe: "15m", direction: "short" }, { trackRecords: committedTrackRecords });
+if (lines(shortMessage).some((line) => line.startsWith("Track record:"))) throw new Error(`A short alert must not carry a track record line:\n${shortMessage}`);
 console.log(`[telegram-test] example alert:\n${momentumMessage}`);
 let telegramRequest;
 

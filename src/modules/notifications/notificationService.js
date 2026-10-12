@@ -139,8 +139,6 @@ export function telegramPreferenceMatchesSetup(settings, favoriteSymbols, setup)
 
 export function evaluateTelegramSignalEligibility(settings, favoriteSymbols, setup, now = Date.now()) {
   if (!setup?.setupKey) return telegramIneligible("missing_setup_key");
-  // Short setups are switched off in production and are never sent.
-  if (String(setup.direction || "").toLowerCase() === "short") return telegramIneligible("short_not_sent");
   if (setup.resultType !== "ready_signal") return telegramIneligible("non_ready_result");
   if (setup.validationPassed === false) return telegramIneligible("validation_failed");
   if (setup.status === "Expired") return telegramIneligible("expired", { field: "status" });
@@ -200,6 +198,9 @@ export function evaluateTelegramSignalEligibility(settings, favoriteSymbols, set
 }
 
 export function formatTelegramSignalMessage(setup, { trackRecords = getTrackRecords() } = {}) {
+  // Same strategy + direction + timeframe mapping as the setup cards. A short gets no line at all, as on the cards;
+  // shorts are blocked by the admin direction:short setting, not here.
+  const trackRecordLine = formatTrackRecordAlertLine(trackRecords, setup);
   const confirmations = summarizeConfirmations(setup.confirmations || []);
   const passed = confirmations.filter((item) => item.passed).map((item) => item.name);
   const reason = passed.length
@@ -219,9 +220,7 @@ export function formatTelegramSignalMessage(setup, { trackRecords = getTrackReco
     `Setup: ${setup.setupType || "Qualified setup"}`,
     `Valid for: ${formatSignalValidityWindow(setup.timeframe)}`,
     "",
-    // Same strategy + direction + timeframe mapping as the setup cards.
-    formatTrackRecordAlertLine(trackRecords, setup) || "Track record: none yet",
-    "",
+    ...(trackRecordLine ? [trackRecordLine, ""] : []),
     "Preview reason:",
     reason,
     "",
