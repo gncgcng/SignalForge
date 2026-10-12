@@ -18,7 +18,14 @@ export const BANNED_PHRASES = [
   "beat the market",
   "accurate signals",
   "winning signals",
-  "profitable signals"
+  "profitable signals",
+  // The trade checker shows numbers; it never tells anyone what to do.
+  "take this trade",
+  "skip this trade",
+  "good trade",
+  "bad trade",
+  "you should",
+  "we recommend"
 ];
 
 // "elite" is banned as a confidence label. These are the only allowed uses, and each one is about
@@ -38,6 +45,7 @@ export function userFacingSources() {
     "public/app.js", // app copy, tooltips, signal cards and the legal-text renderer (legalDocuments)
     "public/trackRecords.js", // track-record card wording and the shared methodology text
     "public/feeCost.js", // fee-cost calculator sentence
+    "public/tradeCheck.js", // trade checker sentences
     "public/research.js", // /research calculator wiring
     "src/modules/research/researchPage.js", // public /research page template
     "public/manifest.json",
@@ -69,6 +77,9 @@ assert.equal(findClaimViolations('if (value >= 95) return "Elite";', "x").length
 assert.equal(findClaimViolations("function findProvenExactSourceStrategyTimeframe() {}", "x").length, 0);
 assert.equal(findClaimViolations("Past results do not guarantee future results.", "x").length, 0);
 assert.equal(findClaimViolations('  if (value === "elite") return "Elite";', "x").length, 0);
+for (const phrase of ["Take this trade now", "You might skip this trade", "This is a good trade", "Looks like a bad trade", "You should buy", "We recommend a 2R target"]) {
+  assert.equal(findClaimViolations(phrase, "x").length, 1, `not caught: ${phrase}`);
+}
 
 const sources = userFacingSources();
 const violations = sources.flatMap((file) =>

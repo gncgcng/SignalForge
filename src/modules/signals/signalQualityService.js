@@ -97,7 +97,7 @@ export function buildSignalQuality(signal = {}) {
     categories,
     strengths,
     risks,
-    confidenceExplanation: "Confidence reflects current setup alignment. Historical performance is diagnostic only and is not a probability of profit.",
+    confidenceExplanation: "Rule match reflects current setup alignment. It is not a chance of winning — see the track record for how this setup has actually done.",
     debug: buildDebug(signal, list, indicators)
   };
 }

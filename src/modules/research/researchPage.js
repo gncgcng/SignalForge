@@ -173,6 +173,7 @@ export function renderResearchPage({ trackRecords, summary }) {
             <label>Slippage per side, %<input id="fc-slippage" name="slippage" type="number" inputmode="decimal" min="0" step="0.01" value="0.05" /></label>
             <label>Target, R<input id="fc-target" name="target" type="number" inputmode="decimal" min="0" step="0.1" value="2" /></label>
           </form>
+          <p class="fee-simplified-note">Simplified: both legs priced at entry.</p>
           <div class="fee-results" id="fee-calculator-results" aria-live="polite">
             <noscript><p>The calculator needs JavaScript. The formula: cost in R = (2 × (fee + slippage per side)) ÷ stop distance, both in %.</p></noscript>
           </div>

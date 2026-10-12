@@ -94,6 +94,6 @@ assert.match(paperRepository, /Signal entry never filled in Paper Trading/);
 assert.match(app, /paperOrderType\.value = closeToEntry \? "market" : "watch"/);
 assert.match(app, /This entry is away from current price and may remain pending/);
 assert.match(html, /Watching setups/);
-assert.match(html, /Confidence reflects rule alignment, not the probability of profit/);
+assert.match(html, /Rule match reflects rule alignment\. It is not a chance of winning\./);
 
 console.log("Setup candidate, readiness, learning, and paper-order tests passed.");
