@@ -9786,3 +9786,187 @@ polyline {
     flex-direction: column;
   }
 }
+
+/* Track records: a historical frequency, kept visually separate from the match score.
+   Neutral by default; muted red only for "Has lost money"; green only for "Has made money". */
+.track-record {
+  display: grid;
+  gap: 4px;
+  margin: 10px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-left-width: 3px;
+  border-radius: 8px;
+  background: rgba(142, 155, 176, 0.06);
+}
+
+.track-record-heading {
+  font-size: 0.86rem;
+  color: var(--text);
+}
+
+.track-record-detail,
+.track-record-note {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.track-record-note {
+  font-style: italic;
+}
+
+.track-record-link {
+  color: var(--muted);
+  text-decoration: underline;
+}
+
+.track-record-neutral {
+  border-left-color: var(--muted);
+}
+
+.track-record-loss {
+  border-left-color: rgba(251, 113, 133, 0.6);
+  background: rgba(251, 113, 133, 0.06);
+}
+
+.track-record-loss .track-record-heading {
+  color: #e8a3ae;
+}
+
+.track-record-gain {
+  border-left-color: var(--green);
+  background: rgba(74, 222, 128, 0.06);
+}
+
+.track-record-gain .track-record-heading {
+  color: var(--green);
+}
+
+.track-records-method h3 {
+  margin: 18px 0 6px;
+  font-size: 1rem;
+}
+
+.track-records-method p,
+.track-records-method li {
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.track-records-lead {
+  color: var(--text) !important;
+}
+
+.track-records-disclaimer {
+  margin-top: 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.track-records-table-panel {
+  margin-top: 16px;
+}
+
+.track-records-table-wrap {
+  overflow-x: auto;
+}
+
+.track-records-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.track-records-table th,
+.track-records-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.track-records-table td small {
+  display: block;
+  color: var(--muted);
+}
+
+.track-records-all {
+  background: rgba(34, 211, 238, 0.06);
+}
+
+.track-record-sort {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.track-record-sort.active {
+  color: var(--cyan);
+}
+
+.track-record-approx {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 400;
+}
+
+.track-record-label.track-record-loss {
+  color: #e8a3ae;
+}
+
+.track-record-label.track-record-gain {
+  color: var(--green);
+}
+
+.track-record-label.track-record-neutral {
+  color: var(--muted);
+}
+
+@media (max-width: 760px) {
+  .track-records-table thead {
+    display: none;
+  }
+
+  .track-records-table,
+  .track-records-table tbody,
+  .track-records-table tr,
+  .track-records-table th,
+  .track-records-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .track-records-table tr {
+    padding: 8px 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .track-records-table th,
+  .track-records-table td {
+    padding: 3px 4px;
+    border: 0;
+  }
+
+  .track-records-table td::before {
+    content: attr(data-label) ": ";
+    color: var(--muted);
+  }
+}
+
+.track-records-sortbar {
+  margin: 4px 0 10px;
+  color: var(--muted);
+  font-size: 0.82rem;
+}

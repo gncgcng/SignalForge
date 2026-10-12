@@ -628,6 +628,7 @@
                 <a href="#backtesting" data-view-link="backtesting">Backtesting</a>
                 <a href="#performance" data-view-link="performance">Performance</a>
                 <a href="#how-it-works" data-view-link="how-it-works">How SignalForge Works</a>
+                <a href="#track-records" data-view-link="track-records">Track records</a>
               </div>
             </section>
             <section class="nav-section" data-nav-section="portfolio">
@@ -1063,6 +1064,10 @@
 
           <section class="page-view hidden how-it-works-view" id="how-it-works-view" data-view="how-it-works">
             <div data-how-it-works-content></div>
+          </section>
+
+          <section class="page-view hidden track-records-view" id="track-records-view" data-view="track-records">
+            <div id="track-records-content"><div class="empty-state"><strong>Loading track records...</strong></div></div>
           </section>
 
           <section class="page-view hidden" id="signals-view" data-view="signals">
@@ -2387,7 +2392,7 @@
         var hash = getHashRoute();
         var hashParams = new URLSearchParams(String(window.location.hash || "").split("?")[1] || "");
         var debugEnabled = new URLSearchParams(window.location.search).get("debugAuth") === "1" || hashParams.get("debugAuth") === "1";
-        var protectedRoutes = ["#scanner", "#signals", "#paper-trading", "#backtesting", "#performance", "#watchlist", "#alerts", "#notifications", "#journal", "#affiliate", "#leaderboard", "#profile", "#settings", "#support", "#billing", "#admin", "#admin-support", "#affiliate-admin", "#webhook-events"];
+        var protectedRoutes = ["#scanner", "#signals", "#paper-trading", "#backtesting", "#performance", "#track-records", "#watchlist", "#alerts", "#notifications", "#journal", "#affiliate", "#leaderboard", "#profile", "#settings", "#support", "#billing", "#admin", "#admin-support", "#affiliate-admin", "#webhook-events"];
         var authRoutes = ["#signin", "#signup", "#forgot-password", "#reset-password"];
 
         window.__SIGNALFORGE_BUILD_VERSION__ = buildVersion;

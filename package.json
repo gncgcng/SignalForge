@@ -55,6 +55,8 @@
     "test:stripe-webhooks": "node scripts/stripe-webhook-test.js",
     "test:billing-checkout-pause": "node scripts/billing-checkout-pause-test.js",
     "test:claims-lint": "node scripts/claims-lint-test.js",
+    "test:track-records": "node scripts/track-records-test.js",
+    "research:export-track-records": "node scripts/research/export-track-records.js",
     "test:signal-credit-refunds": "node scripts/signal-credit-refunds-test.js",
     "test:billing-migration": "node scripts/billing-migration-test.js",
     "test:database-config": "node scripts/database-config-test.js",

@@ -479,6 +479,7 @@ function renderActualScanCard(setup, validityStatus) {
     renderModeDetails: () => "",
     escapeHtml: (value) => String(value),
     formatSetupDirection: (direction) => `${direction} setup`,
+    renderSetupTrackRecord: () => "",
     getSignalValidityState: () => ({ status: validityStatus })
   };
   vm.createContext(context);
