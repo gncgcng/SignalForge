@@ -89,7 +89,12 @@ export async function handleSubscriptionRoutes(req, res, pathname) {
       });
     }
   } catch (error) {
-    return sendError(res, error.statusCode || 400, error.message);
+    return sendError(
+      res,
+      error.statusCode || 400,
+      error.message,
+      error.code === "checkout_paused" ? { code: error.code } : undefined
+    );
   }
 
   return false;

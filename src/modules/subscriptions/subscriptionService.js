@@ -110,6 +110,7 @@ export function getSubscriptionSummary(user) {
     cancelAtPeriodEnd: Boolean(user.subscription.cancelAtPeriodEnd),
     stripeReady: true,
     checkoutConfigured: Boolean(appConfig.stripe.secretKey),
+    checkoutEnabled: Boolean(appConfig.stripe.checkoutEnabled),
     customerPortalAvailable: Boolean(
       appConfig.stripe.secretKey &&
       user.subscription.providerCustomerId &&

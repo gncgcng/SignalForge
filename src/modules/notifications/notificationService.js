@@ -205,12 +205,12 @@ export function formatTelegramSignalMessage(setup) {
   const confidence = Number(setup.confidenceScore || 0);
 
   return [
-    "🚨 SignalForge Setup Ready",
+    "SignalForge setup alert",
     "",
     `Market: ${getDisplaySymbol(setup.symbol)}`,
     `Provider: ${provider}`,
     `Timeframe: ${setup.timeframe}`,
-    `Direction: ${setup.direction.toUpperCase()}`,
+    `Direction: ${formatSetupDirection(setup.direction)}`,
     `Confidence: ${confidence}% (${getConfidenceTier(confidence)})`,
     `Setup: ${setup.setupType || "Qualified setup"}`,
     `Valid for: ${formatSignalValidityWindow(setup.timeframe)}`,
@@ -218,7 +218,8 @@ export function formatTelegramSignalMessage(setup) {
     "Preview reason:",
     reason,
     "",
-    "Preview only. Unlock to view full levels.",
+    "Confidence is how closely the market matches this setup's rules. It is not a probability of profit.",
+    "Preview only. Unlock to view the setup levels.",
     "Market conditions may change before the validity window ends.",
     "Educational tool only. Not financial advice."
   ].join("\n");
@@ -232,7 +233,7 @@ export function formatTelegramSignalReplyMarkup(setup) {
     reply_markup: {
       inline_keyboard: [[
         {
-          text: "Unlock Signal",
+          text: "Unlock setup",
           url
         }
       ]]
@@ -298,12 +299,20 @@ function normalizeConfirmationName(name = "") {
   return name;
 }
 
+// Same thresholds as before (98 / 90 / 80 / 70); the two top tiers now share one label.
 function getConfidenceTier(confidence) {
-  if (confidence >= 98) return "Rare near-perfect";
-  if (confidence >= 90) return "Excellent";
-  if (confidence >= 80) return "Strong";
-  if (confidence >= 70) return "Decent";
+  if (confidence >= 98) return "Strong match";
+  if (confidence >= 90) return "Strong match";
+  if (confidence >= 80) return "Good match";
+  if (confidence >= 70) return "Partial match";
   return "No alert";
+}
+
+function formatSetupDirection(direction = "") {
+  const value = String(direction).toLowerCase();
+  if (value === "long") return "Long setup";
+  if (value === "short") return "Short setup";
+  return value ? `${value.charAt(0).toUpperCase()}${value.slice(1)} setup` : "Setup";
 }
 
 function getDisplaySymbol(symbol = "") {

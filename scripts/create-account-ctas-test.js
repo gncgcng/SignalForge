@@ -30,7 +30,8 @@ const isCreateAccountCta = ({ attrs }) =>
 const publicMarkup = html.slice(0, html.indexOf('id="auth-screen"'));
 const publicCtas = controls(publicMarkup).filter(isCreateAccountCta).map((control) => control.label);
 const templateCtas = controls(app).filter(isCreateAccountCta).map((control) => control.label);
-const EXPECTED_HTML_CTAS = ["Start Free 3 Free Signal Unlocks", "Unlock Preview", "Start Free", "Choose Pro", "Choose Elite", "Become an Affiliate", "Start Free", "Start scanning"];
+// Choose Pro / Choose Elite were removed while new checkouts are paused (BILLING_CHECKOUT_ENABLED).
+const EXPECTED_HTML_CTAS = ["Start Free 3 Free Setup Unlocks", "Unlock Preview", "Start Free", "Become an Affiliate", "Start Free", "Start scanning"];
 const EXPECTED_TEMPLATE_CTAS = ["Start scanning"];
 
 await check("inventory: the create-account CTAs are exactly the classified ones", () => {
@@ -90,7 +91,7 @@ function appSandbox() {
     querySelectorAll: (selector) => (selector === "[data-auth-mode]" ? [switchToSignup, switchToSignin, forgot] : [])
   });
   const byId = { "#start-free-button": element(), "#landing-login-button": element() };
-  const launchButtons = EXPECTED_HTML_CTAS.slice(1, 7).map(() => element());
+  const launchButtons = EXPECTED_HTML_CTAS.slice(1, -1).map(() => element());
   const navigations = [];
   const context = {
     URLSearchParams,
@@ -209,7 +210,7 @@ await check("auth-bootstrap.js: the same CTAs open signup mode before app.js is 
     querySelectorAll: (selector) => (selector === "[data-auth-mode]" ? modal : [])
   });
   const ids = { "auth-form": authForm, "start-free-button": make(), "landing-login-button": make() };
-  const ctas = [...EXPECTED_HTML_CTAS.slice(1, 7).map(() => make()), make()]; // .launch-auth-button ×6, Start scanning
+  const ctas = [...EXPECTED_HTML_CTAS.slice(1, -1).map(() => make()), make()]; // every .launch-auth-button, then Start scanning
   let selectorAsked = null;
   const context = {
     URLSearchParams,

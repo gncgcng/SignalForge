@@ -2,7 +2,7 @@
   "id": "/",
   "name": "SignalForge",
   "short_name": "SignalForge",
-  "description": "Crypto trading signal scanner with multi-timeframe analysis, risk management, Telegram alerts, paper trading, and performance tracking.",
+  "description": "Know the odds before you trade. Rule-based crypto setup scanner with multi-timeframe analysis, risk management, Telegram alerts, paper trading, and outcome tracking.",
   "start_url": "/?source=pwa",
   "scope": "/",
   "display": "standalone",

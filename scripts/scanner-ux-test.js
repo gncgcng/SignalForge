@@ -105,7 +105,7 @@ const checks = {
   creditsNotDeductedForScanning:
     app.includes("No unlock credits used yet") &&
     app.includes("No credits used") &&
-    app.includes("Unlocking one will use a trial credit."),
+    app.includes("Unlocking one uses an unlock credit."),
   tradingViewSymbolDisplay:
     marketDataService.includes("displaySymbol") &&
     marketDataService.includes('pair.symbol.replace("-", "")') &&

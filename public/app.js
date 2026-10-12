@@ -573,6 +573,7 @@ const legalDocuments = {
       <p><strong>Educational tool only. Not financial advice.</strong></p>
       <p>Trading crypto, commodities, stocks, ETFs, or any other market involves substantial risk. You can lose money. SignalForge confidence scores and setup quality labels describe rule alignment, not a probability of profit.</p>
       <p>Backtests, paper trading, alerts, and historical outcomes may exclude fees, slippage, liquidity constraints, execution quality, and future market changes. Past or simulated performance does not guarantee future results.</p>
+      <p>Past results do not guarantee future results. SignalForge provides information and tools, not financial advice.</p>
       <p>Affiliate disclosure: Affiliates may earn commissions from paid subscriptions.</p>
     `
   },
@@ -5331,7 +5332,7 @@ function formatBriefAge(value) {
 
 function explainMarketCondition(condition, reasons = []) {
   const text = `${condition || ""} ${(reasons || []).join(" ")}`.toLowerCase();
-  if (text.includes("range")) return "The market is moving sideways between support and resistance. SignalForge may wait for a clear breakout or retest before calling a signal.";
+  if (text.includes("range")) return "The market is moving sideways between support and resistance. SignalForge may wait for a clear breakout or retest before flagging a setup.";
   if (text.includes("trend") && (text.includes("up") || text.includes("bull"))) return "Buyers are in control. Long setups may have better follow-through if volume confirms.";
   if (text.includes("trend") && (text.includes("down") || text.includes("bear"))) return "Sellers are in control. Short setups may have better follow-through if volume confirms.";
   if (text.includes("choppy")) return "Price is moving unevenly with mixed signals. SignalForge is being more selective.";
@@ -5961,7 +5962,7 @@ function applyViewState(view, options = {}) {
   }
 
   const titles = {
-    scanner: ["Market scanner", "High-probability setup lab"],
+    scanner: ["Market scanner", "Know the odds before you trade"],
     watchlist: ["Favorite markets", "Watchlist & alert rules"],
     alerts: ["Detected setups", "In-app alerts"],
     notifications: ["Delivery channels", "Notifications"],
@@ -6443,6 +6444,18 @@ function renderBilling() {
         : `Checkout is configured. Webhooks are missing STRIPE_WEBHOOK_SECRET.`;
   }
 
+  // New purchases are paused unless the server reports BILLING_CHECKOUT_ENABLED; show the
+  // coming-soon note instead of plan and credit-pack buttons that would only be refused.
+  const checkoutEnabled = subscription.checkoutEnabled === true;
+  document.querySelector("#billing-coming-soon")?.classList.toggle("hidden", checkoutEnabled);
+  document.querySelector("#billing-plans-section")?.classList.toggle("hidden", !checkoutEnabled);
+  document.querySelector("#billing-packs-section")?.classList.toggle("hidden", !checkoutEnabled);
+  if (!checkoutEnabled) {
+    billingPlanGrid.innerHTML = "";
+    billingPackGrid.innerHTML = "";
+    return;
+  }
+
   billingPlanGrid.innerHTML = subscription.plans.map((plan) => {
     const current = subscription.plan === plan.id;
     return `
@@ -6632,7 +6645,7 @@ function renderTelegramExpiredNotice() {
       <div class="expired-history-details hidden" data-expired-history-details>
         <span>${escapeHtml(getDisplaySymbol(signal.symbol || "Signal"))} · ${escapeHtml(signal.timeframe || "")}</span>
         <strong>${escapeHtml(signal.setupType || "Historical setup")}</strong>
-        <p>${escapeHtml(signal.reasoning || "This setup is retained for learning context only. Entry levels are not available without a valid unlock.")}</p>
+        <p>${escapeHtml(displayReasoning(signal.reasoning) || "This setup is retained for learning context only. Entry levels are not available without a valid unlock.")}</p>
       </div>
     </section>
   `;
@@ -6694,7 +6707,7 @@ function renderSignalFilterControls(counts) {
 function getSignalFilterEmptyState(status) {
   const messages = {
     active: ["No active signals right now.", "Run the scanner or wait for Telegram alerts to find new setups."],
-    "hit-tp": ["No take-profit signals yet.", "Closed winning signals will appear here."],
+    "hit-tp": ["No take-profit outcomes yet.", "Setups that reached take profit will appear here."],
     "hit-sl": ["No stop-loss signals yet.", "Signals that hit stop loss will appear here."],
     expired: ["No expired signals yet.", "Signals that time out will appear here."],
     closed: ["No closed signals yet.", "Completed, expired, and manually closed signals will appear here."],
@@ -7937,7 +7950,7 @@ function renderRecentClosedSignals() {
         <tr>
           <td><strong>${escapeHtml(signal.symbol)}</strong></td>
           <td>${escapeHtml(signal.timeframe)}</td>
-          <td><strong class="direction ${signal.direction}">${escapeHtml(signal.direction).toUpperCase()}</strong></td>
+          <td><strong class="direction setup-direction ${signal.direction}">${escapeHtml(formatSetupDirection(signal.direction))}</strong></td>
           <td><span class="status-pill ${getPaperStatusClass(signal.status)}">${escapeHtml(signal.status)}</span></td>
           <td class="${Number(signal.resultR || 0) >= 0 ? "positive" : "negative"}">${formatR(signal.resultR || 0)}</td>
           <td>${formatDateTime(signal.closedAt)}</td>
@@ -8192,7 +8205,7 @@ function renderSignalHistoryRow(signal) {
         ${renderSignalReviewAction(signal, "history-details-button")}
       </td>
       <td>${signal.timeframe}</td>
-      <td><strong class="direction ${signal.direction}">${signal.direction}</strong></td>
+      <td><strong class="direction setup-direction ${signal.direction}">${escapeHtml(formatSetupDirection(signal.direction))}</strong></td>
       <td>${formatCurrency(signal.entryPrice)}</td>
       <td>${formatCurrency(signal.stopLoss)}</td>
       <td>${formatCurrency(signal.takeProfit)}</td>
@@ -8219,11 +8232,12 @@ function renderMobileSignalHistoryCard(signal) {
       </div>
       <div class="mobile-signal-meta">
         <span>${escapeHtml(signal.timeframe)}</span>
-        <strong class="direction ${signal.direction}">${escapeHtml(signal.direction || "")}</strong>
+        <strong class="direction setup-direction ${signal.direction}">${escapeHtml(formatSetupDirection(signal.direction))}</strong>
         <span>${formatDateTime(signal.generatedAt)}</span>
       </div>
       ${renderSignalValidity(signal)}
-      <div class="mobile-signal-values">
+      <div class="mobile-signal-values" aria-label="Setup levels">
+        <div class="setup-levels-heading">Setup levels</div>
         ${renderMobileSignalValue("Entry", formatCurrency(signal.entryPrice))}
         ${renderMobileSignalValue("Stop", formatCurrency(signal.stopLoss))}
         ${renderMobileSignalValue("Take profit", formatCurrency(signal.takeProfit))}
@@ -8292,8 +8306,8 @@ function renderMobileSignalAccordion(signal) {
         </div>
       </details>
       <details>
-        <summary>Risk levels</summary>
-        <div class="mobile-signal-values compact">
+        <summary>Setup levels</summary>
+        <div class="mobile-signal-values compact" aria-label="Setup levels">
           ${renderMobileSignalValue("Entry", formatCurrency(signal.entryPrice))}
           ${renderMobileSignalValue("Stop loss", formatCurrency(signal.stopLoss))}
           ${renderMobileSignalValue("Take profit", formatCurrency(signal.takeProfit))}
@@ -8302,12 +8316,12 @@ function renderMobileSignalAccordion(signal) {
         ${renderRiskEngineCard(signal)}
       </details>
       <details>
-        <summary>AI analyst explanation</summary>
+        <summary>Rule analysis explanation</summary>
         ${renderAiAnalyst(signal)}
       </details>
       <details>
         <summary>Full analysis context</summary>
-        <p class="reasoning long-analysis">${escapeHtml(signal.reasoning || "Advanced signal context is based on rule alignment.")}</p>
+        <p class="reasoning long-analysis">${escapeHtml(displayReasoning(signal.reasoning) || "Advanced signal context is based on rule alignment.")}</p>
         ${renderSignalConfluence(signal)}
         ${renderSmcExplanation(signal)}
         ${renderAdvancedStructureExplanation(signal)}
@@ -8375,7 +8389,7 @@ function renderNoSetup(analysis) {
   const rows = (analysis?.candidates || []).flatMap((candidate) => {
     return candidate.confirmations.map((item) => `
       <div>
-        <span>${candidate.direction.toUpperCase()} · ${item.name}</span>
+        <span>${escapeHtml(formatSetupDirection(candidate.direction))} · ${item.name}</span>
         <strong>${item.passed ? "Passed" : "Failed"}</strong>
       </div>
     `);
@@ -8484,7 +8498,7 @@ function renderScanSummary(opportunitiesFound, marketsScanned, timeframesScanned
   scanSummaryPanel.classList.remove("hidden");
   document.querySelector("#scan-summary-title").textContent = opportunitiesFound > 0
     ? "Scan complete"
-    : counts.watching > 0 ? "No ready signals yet" : "No clean setups right now.";
+    : counts.watching > 0 ? "No ready setups yet" : "No clean setups right now.";
   document.querySelector("#scan-summary-opportunities").textContent = `${counts.ready} ready · ${counts.watching} watching · ${counts.avoidTrade || 0} avoid`;
   document.querySelector("#scan-summary-markets").textContent = `${marketsScanned} market${marketsScanned === 1 ? "" : "s"} scanned`;
   document.querySelector("#scan-summary-timeframes").textContent = `${timeframesScanned} timeframes scanned`;
@@ -8501,7 +8515,7 @@ function renderScanSummary(opportunitiesFound, marketsScanned, timeframesScanned
     : "No credits used";
   document.querySelector("#scan-summary-next").textContent = `Suggested next scan: ${formatSuggestedScanTime()}`;
   document.querySelector("#scan-summary-reason").textContent = opportunitiesFound > 0
-    ? `Ready signals appear below. ${counts.watching ? `${counts.watching} additional setup${counts.watching === 1 ? " is" : "s are"} still being monitored.` : "No additional setups are being watched."}`
+    ? `Ready setups appear below. ${counts.watching ? `${counts.watching} additional setup${counts.watching === 1 ? " is" : "s are"} still being monitored.` : "No additional setups are being watched."}`
     : counts.watching > 0
       ? "Probable setups were found, but confirmation or entry readiness is still incomplete. No credits used."
       : "SignalForge scanned the market but did not find enough confirmation for a valid setup. No credits used.";
@@ -8597,13 +8611,13 @@ function renderScanResults(setups, errors, diagnostics = null, scanSummary = nul
         <div class="compact-actions"><button type="button" data-scan-again>Scan again</button></div>
       </article>
     `;
-    statusLine.textContent = "No high-probability setups right now. Trial credits were not used.";
+    statusLine.textContent = "No setups match the rules right now. No unlock credits were used.";
     if (options.scroll !== false) scanSummaryPanel.scrollIntoView({ behavior: "smooth", block: "start" });
     return;
   }
 
   signalsGrid.innerHTML = setups.map((setup) => renderScanCard(setup)).join("");
-  statusLine.textContent = `Found ${setups.length} high-probability setup${setups.length === 1 ? "" : "s"}. Unlocking one will use a trial credit.`;
+  statusLine.textContent = `Found ${setups.length} setup${setups.length === 1 ? "" : "s"} that match the rules. Unlocking one uses an unlock credit.`;
   if (options.scroll !== false) scanSummaryPanel.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
@@ -8647,7 +8661,7 @@ function renderScanCard(setup) {
           <strong>${getDisplaySymbol(setup.symbol)}</strong>
           <span>${setup.timeframe} · ${setup.marketType || getMarketType(setup.symbol)} · ${getProviderSymbolLabel(setup.symbol)}</span>
         </div>
-        <strong class="direction ${setup.direction}">${setup.direction}</strong>
+        <strong class="direction setup-direction ${setup.direction}">${escapeHtml(formatSetupDirection(setup.direction))}</strong>
       </div>
       ${renderSignalValidity(setup)}
       <div class="signal-metrics">
@@ -8661,7 +8675,7 @@ function renderScanCard(setup) {
       </div>
       ${renderLockedSignalQuality(setup)}
       <div class="compact-actions">
-        <button data-unlock-symbol="${setup.symbol}" data-unlock-timeframe="${setup.timeframe}" data-unlock-setup-key="${escapeHtml(setup.setupKey || "")}" type="button" ${getSignalValidityState(setup).status === "expired" ? "disabled" : ""}>${getSignalValidityState(setup).status === "expired" ? "Expired" : "Unlock Signal"}</button>
+        <button data-unlock-symbol="${setup.symbol}" data-unlock-timeframe="${setup.timeframe}" data-unlock-setup-key="${escapeHtml(setup.setupKey || "")}" type="button" ${getSignalValidityState(setup).status === "expired" ? "disabled" : ""}>${getSignalValidityState(setup).status === "expired" ? "Expired" : "Unlock Setup"}</button>
         <button class="secondary-action" data-signal-details="${key}" type="button">${expanded ? "Hide Details" : "View Details"}</button>
       </div>
       <div class="signal-details ${expanded ? "" : "hidden"}">
@@ -8682,11 +8696,12 @@ function renderSignalCard(signal) {
           <strong>${getDisplaySymbol(signal.symbol)}</strong>
           <span>${signal.timeframe} · ${getMarketType(signal.symbol)} · ${getProviderSymbolLabel(signal.symbol)}</span>
         </div>
-        <strong class="direction ${signal.direction}">${signal.direction}</strong>
+        <strong class="direction setup-direction ${signal.direction}">${escapeHtml(formatSetupDirection(signal.direction))}</strong>
       </div>
       ${renderSignalValidity(signal)}
       <div class="signal-metrics">
         <div><span>Setup type</span><strong>${signal.setupType || "Qualified setup"}</strong></div>
+        <div class="setup-levels-heading">Setup levels</div>
         <div><span>Entry</span><strong>${formatCurrency(signal.entryPrice)}</strong></div>
         <div><span>Stop loss</span><strong>${formatCurrency(signal.stopLoss)}</strong></div>
         <div><span>Take profit</span><strong>${formatCurrency(signal.takeProfit)}</strong></div>
@@ -8715,7 +8730,8 @@ function renderModeDetails(signal, locked = false) {
     return `
       <section class="basic-signal-details">
         ${locked ? "" : `<div class="signal-metrics">
-          <div><span>Direction</span><strong class="direction ${signal.direction}">${String(signal.direction || "").toUpperCase()}</strong></div>
+          <div><span>Direction</span><strong class="direction setup-direction ${signal.direction}">${escapeHtml(formatSetupDirection(signal.direction))}</strong></div>
+          <div class="setup-levels-heading">Setup levels</div>
           <div><span>Entry</span><strong>${formatCurrency(signal.entryPrice)}</strong></div>
           <div><span>Stop loss</span><strong>${formatCurrency(signal.stopLoss)}</strong></div>
           <div><span>Take profit</span><strong>${formatCurrency(signal.takeProfit)}</strong></div>
@@ -8727,7 +8743,7 @@ function renderModeDetails(signal, locked = false) {
           <p class="reasoning">${escapeHtml(getShortSignalReason(signal))}</p>
           <div class="signal-disclaimer">
             <strong>Educational tool only. Not financial advice.</strong>
-            <span>Confidence reflects rule alignment and setup quality. It is not a guarantee.</span>
+            <span>Confidence reflects rule alignment and setup quality. It is not a probability of profit.</span>
           </div>
         </section>
         ${locked ? "" : renderRiskEngineCard(signal)}
@@ -8748,7 +8764,7 @@ function renderModeDetails(signal, locked = false) {
 
   return `
     <section class="advanced-signal-details">
-      <p class="reasoning">${escapeHtml(signal.reasoning || "Advanced signal context is based on rule alignment.")}</p>
+      <p class="reasoning">${escapeHtml(displayReasoning(signal.reasoning) || "Advanced signal context is based on rule alignment.")}</p>
       ${renderSignalTransparency(signal)}
       ${renderSignalQuality(signal)}
       ${renderPatternContext(signal.patternContext || signal.indicators?.patternContext)}
@@ -9087,7 +9103,7 @@ function renderConfidenceSummary(signal) {
   return `
     <section class="unlocked-confidence-summary">
       <span>Confidence summary ${renderConfidenceHelp()}</span>
-      <strong>${getConfidenceBand(signal.confidenceScore)} · ${Number(signal.confidenceScore || 0)}%</strong>
+      <strong>${escapeHtml(getConfidenceBand(signal.confidenceScore))} · ${Number(signal.confidenceScore || 0)}%</strong>
       <small>${passed}/${confirmations.length} confirmations passed. Confidence reflects calibrated setup alignment, not probability of profit.</small>
     </section>
   `;
@@ -9098,7 +9114,7 @@ function renderConfidenceHelp() {
     <span class="confidence-help" tabindex="0" aria-label="About SignalForge confidence">
       <span aria-hidden="true">i</span>
       <span class="confidence-tooltip" role="tooltip">
-        Confidence reflects setup alignment after historical calibration. It is not a win probability.
+        How closely the market matches this setup's rules. It is not a probability of profit.
         <button type="button" data-how-it-works-link>Learn more</button>
       </span>
     </span>`;
@@ -9199,7 +9215,7 @@ function getSignalQualityData(signal) {
     categories,
     strengths: list.filter((item) => ["strong", "good"].includes(item.status)).map((item) => item.reason).slice(0, 4),
     risks: list.filter((item) => ["fair", "weak", "missing", "failed", "limited"].includes(item.status)).map((item) => item.reason).slice(0, 4),
-    confidenceExplanation: "Confidence reflects setup alignment after historical calibration. It is not a guaranteed win rate."
+    confidenceExplanation: "Confidence reflects setup alignment after historical calibration. It is not a probability of profit."
   };
 }
 
@@ -9261,16 +9277,16 @@ function renderUnlockedSignalDetails(signal) {
       ${renderConfidenceSummary(signal)}
       ${renderSignalQuality(signal)}
       <section class="unlocked-analysis-section">
-        <h4>Why this signal?</h4>
+        <h4>Why this setup?</h4>
         <p class="reasoning">${escapeHtml(getShortSignalReason(signal))}</p>
       </section>
       <details class="unlocked-analysis-section">
-        <summary>AI analyst explanation</summary>
+        <summary>Rule analysis explanation</summary>
         ${renderAiAnalyst(signal)}
       </details>
       <details class="unlocked-analysis-section">
         <summary>Full analysis context</summary>
-        <p class="reasoning long-analysis">${escapeHtml(signal.reasoning || "Advanced signal context is based on rule alignment.")}</p>
+        <p class="reasoning long-analysis">${escapeHtml(displayReasoning(signal.reasoning) || "Advanced signal context is based on rule alignment.")}</p>
         ${renderSignalConfluence(signal)}
         ${renderSmcExplanation(signal)}
         ${renderAdvancedStructureExplanation(signal)}
@@ -9310,7 +9326,7 @@ function renderSignalTransparency(signal) {
 
   return `
     <section class="signal-transparency">
-      <h4>Why this signal?</h4>
+      <h4>Why this setup?</h4>
       <div class="confidence-breakdown">
         <span>Confidence ${confidence}%</span>
         <div class="confidence-track" aria-label="${confidence}% confidence">
@@ -9365,9 +9381,9 @@ function renderAiAnalyst(signal) {
   const analyst = signal.analyst || {
     strategyVersion: signal.indicators?.strategyVersion || "legacy",
     overallQuality: signal.indicators?.analystOverallQuality || (
-      Number(signal.qualityScore) >= 90 ? "Excellent" :
-        Number(signal.qualityScore) >= 84 ? "Good" :
-          Number(signal.qualityScore) >= 78 ? "Average" : "Avoid"
+      Number(signal.qualityScore) >= 90 ? "Strong match" :
+        Number(signal.qualityScore) >= 84 ? "Good match" :
+          Number(signal.qualityScore) >= 78 ? "Partial match" : "Avoid"
     ),
     strengths: signal.indicators?.analystStrengths || [],
     weaknesses: signal.indicators?.analystWeaknesses || [],
@@ -9383,7 +9399,7 @@ function renderAiAnalyst(signal) {
   return `
     <section class="ai-analyst-card">
       <div class="ai-analyst-heading">
-        <div><span class="eyebrow">AI Signal Analyst</span><strong>Overall setup quality: ${escapeHtml(analyst.overallQuality || "Average")}</strong></div>
+        <div><span class="eyebrow">Rule analysis</span><strong>Overall setup quality: ${escapeHtml(displayAnalystQuality(analyst.overallQuality) || "Partial match")}</strong></div>
         <span>${escapeHtml(analyst.strategyVersion || "current")}</span>
       </div>
       <div class="analyst-columns">
@@ -9636,18 +9652,18 @@ function renderAlerts() {
         </div>
         <div>
           ${alert.readAt ? "" : `<span class="unread-label">New</span>`}
-          <strong class="direction ${alert.direction}">${alert.direction}</strong>
+          <strong class="direction setup-direction ${alert.direction}">${escapeHtml(formatSetupDirection(alert.direction))}</strong>
         </div>
       </div>
       <div class="signal-metrics">
         <div><span>Confidence ${renderConfidenceHelp()}</span><strong>${alert.confidenceScore}%</strong></div>
         <div><span>Risk/reward</span><strong>${alert.riskRewardRatio}:1</strong></div>
       </div>
-      <p class="reasoning">${alert.reasoning}</p>
+      <p class="reasoning">${escapeHtml(displayReasoning(alert.reasoning))}</p>
       ${renderSignalTransparency(alert)}
       <div class="alert-actions">
         ${alert.readAt ? "" : `<button class="secondary-action" data-alert-read="${alert.id}" type="button">Mark Read</button>`}
-        <button data-alert-unlock="${alert.symbol}" data-alert-timeframe="${alert.timeframe}" type="button">Unlock Full Signal</button>
+        <button data-alert-unlock="${alert.symbol}" data-alert-timeframe="${alert.timeframe}" type="button">Unlock Full Setup</button>
       </div>
     </article>
   `).join("");
@@ -11446,11 +11462,11 @@ function getOnboardingSteps() {
     },
     {
       id: "unlock",
-      title: "Unlock first signal",
+      title: "Unlock first setup",
       description: "Save a full signal to history with entry, stop, target, and outcome tracking.",
       done: unlockedCount > 0,
       action: "unlock",
-      cta: unlockedCount > 0 ? "View signals" : "Unlock signal"
+      cta: unlockedCount > 0 ? "View signals" : "Unlock a setup"
     }
   ];
 }
@@ -11553,7 +11569,7 @@ function getMarketType(symbol) {
 
 function getShortSignalReason(signal) {
   if (signal?.summary) return signal.summary;
-  if (signal?.reasoning) return String(signal.reasoning).split(".").slice(0, 2).join(". ").trim();
+  if (signal?.reasoning) return displayReasoning(String(signal.reasoning).split(".").slice(0, 2).join(". ").trim());
 
   const confirmations = signal?.confirmations || [];
   const passed = confirmations.filter((item) => item.passed).map((item) => item.name);
@@ -11619,10 +11635,11 @@ function renderPaperSignalReview() {
   const hasCurrentPrice = currentPrice !== null && currentPrice !== undefined && Number.isFinite(Number(currentPrice));
   paperSignalReview.innerHTML = `
     <div class="paper-signal-review-header">
-      <div><h4>${escapeHtml(getDisplaySymbol(review.symbol))}</h4><p>${escapeHtml(String(review.direction || "").toUpperCase())} · ${escapeHtml(review.timeframe)} · ${escapeHtml(titleCase(review.strategy || "Signal"))}</p></div>
+      <div><h4>${escapeHtml(getDisplaySymbol(review.symbol))}</h4><p>${escapeHtml(formatSetupDirection(review.direction))} · ${escapeHtml(review.timeframe)} · ${escapeHtml(titleCase(review.strategy || "Signal"))}</p></div>
       <div class="paper-signal-review-outcome"><strong class="${outcome.className}">${escapeHtml(outcome.label)}</strong><span>${escapeHtml(outcome.value)}</span></div>
     </div>
-    <div class="paper-signal-review-levels">
+    <p class="setup-levels-heading">Setup levels</p>
+    <div class="paper-signal-review-levels" aria-label="Setup levels">
       <div><span>Entry</span><strong>${formatPaperChartPrice(review.entry, null, { currency: true })}</strong></div>
       <div><span>Stop Loss</span><strong>${formatPaperChartPrice(review.stopLoss, null, { currency: true })}</strong></div>
       <div><span>Take Profit</span><strong>${formatPaperChartPrice(review.takeProfit, null, { currency: true })}</strong></div>
@@ -11781,11 +11798,11 @@ function renderUnlockReveal() {
     return;
   }
 
-  const confidenceBand = signal.confidenceBand || getConfidenceBand(signal.confidenceScore);
+  const confidenceBand = displayConfidenceBand(signal.confidenceBand, signal.confidenceScore);
   unlockRevealCard.innerHTML = `
     <button class="unlock-reveal-close" type="button" aria-label="Close unlocked signal" data-unlock-reveal-close>×</button>
     <header class="unlock-reveal-header">
-      <span class="unlock-reveal-kicker">Signal Unlocked</span>
+      <span class="unlock-reveal-kicker">Setup Unlocked</span>
       <div class="signal-view-toggle compact" data-signal-view-toggle role="group" aria-label="Signal view mode">
         <span>View:</span>
         <button type="button" data-signal-view-mode="beginner">Beginner</button>
@@ -11796,7 +11813,7 @@ function renderUnlockReveal() {
           <h2 id="unlock-reveal-title">${escapeHtml(getDisplaySymbol(signal.symbol))}</h2>
           <span>${escapeHtml(getProviderSymbolLabel(signal.symbol))}</span>
         </div>
-        <strong class="direction ${signal.direction}">${escapeHtml(String(signal.direction || "").toUpperCase())}</strong>
+        <strong class="direction setup-direction ${signal.direction}">${escapeHtml(formatSetupDirection(signal.direction))}</strong>
       </div>
       <div class="unlock-reveal-tags">
         <span>${escapeHtml(signal.timeframe)}</span>
@@ -11805,7 +11822,8 @@ function renderUnlockReveal() {
       </div>
       ${renderSignalValidity(signal, { compact: true })}
     </header>
-    <section class="unlock-critical-levels" aria-label="Critical trade levels">
+    <h3 class="setup-levels-heading">Setup levels</h3>
+    <section class="unlock-critical-levels" aria-label="Setup levels">
       <div class="entry"><span>Entry</span><strong>${formatCurrency(signal.entryPrice)}</strong></div>
       <div class="stop"><span>Stop Loss</span><strong>${formatCurrency(signal.stopLoss)}</strong></div>
       <div class="target"><span>Take Profit</span><strong>${formatCurrency(signal.takeProfit)}</strong></div>
@@ -11879,12 +11897,54 @@ async function copyUnlockedSignalLevels() {
   }
 }
 
+// Same thresholds as before (95 / 90 / 80); the two top bands now share one label.
 function getConfidenceBand(confidence) {
   const value = Number(confidence || 0);
-  if (value >= 95) return "Elite";
-  if (value >= 90) return "Excellent";
-  if (value >= 80) return "Strong";
-  return "Good";
+  if (value >= 95) return "Strong match";
+  if (value >= 90) return "Strong match";
+  if (value >= 80) return "Good match";
+  return "Partial match";
+}
+
+// Signals saved before the relabel carry the old band names in confidenceBand; show the new ones.
+const LEGACY_CONFIDENCE_BAND_LABELS = {
+  elite: "Strong match",
+  excellent: "Strong match",
+  strong: "Good match",
+  good: "Partial match"
+};
+
+function displayConfidenceBand(storedBand, confidence) {
+  const key = String(storedBand || "").trim().toLowerCase();
+  if (LEGACY_CONFIDENCE_BAND_LABELS[key]) return LEGACY_CONFIDENCE_BAND_LABELS[key];
+  if (key.endsWith(" match")) return String(storedBand).trim();
+  return getConfidenceBand(confidence);
+}
+
+const LEGACY_ANALYST_QUALITY_LABELS = {
+  excellent: "Strong match",
+  good: "Good match",
+  average: "Partial match"
+};
+
+function displayAnalystQuality(label) {
+  const value = String(label || "").trim();
+  return LEGACY_ANALYST_QUALITY_LABELS[value.toLowerCase()] || value;
+}
+
+// Analyst summaries saved before the relabel start with "LONG …" and end with an old quality label.
+function displayReasoning(text) {
+  if (!text) return text;
+  return String(text)
+    .replace(/^(LONG|SHORT) /, (match, direction) => `${formatSetupDirection(direction)}: `)
+    .replace(/Overall setup quality: (Excellent|Good|Average)\b/g, (match, label) => `Overall setup quality: ${displayAnalystQuality(label)}`);
+}
+
+function formatSetupDirection(direction) {
+  const value = String(direction || "").trim().toLowerCase();
+  if (value === "long") return "Long setup";
+  if (value === "short") return "Short setup";
+  return value ? `${value.charAt(0).toUpperCase()}${value.slice(1)} setup` : "Setup";
 }
 
 function scrollToSignalKey(key) {

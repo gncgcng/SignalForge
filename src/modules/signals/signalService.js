@@ -1031,7 +1031,7 @@ async function finalizeManualScanContext(context) {
       scanUniverse: context.universe.summary,
       skippedMarkets: context.universe.skipped,
       marketBrief,
-      message: context.setups.length ? "Valid setups found." : "No high-probability setups right now"
+      message: context.setups.length ? "Valid setups found." : "No setups match the rules right now"
     },
     fullSetups: context.fullSetups
   };

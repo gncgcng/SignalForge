@@ -30,7 +30,8 @@ import { recordStripeDiscountRedemption } from "../promo-codes/promoCodeReposito
 
 const stripeApiBase = "https://api.stripe.com/v1";
 
-export async function createCheckout(user, { plan, pack }) {
+export async function createCheckout(user, { plan, pack } = {}) {
+  assertCheckoutEnabled();
   assertStripeCheckoutConfigured(user);
   assertStripeRedirectsConfigured(user);
   const planConfig = plan ? BILLING_PLANS[plan] : null;
@@ -799,6 +800,15 @@ async function stripeGet(path) {
     }
   });
   return readStripeResponse(response);
+}
+
+// Checked before anything touches Stripe, so a paused checkout makes no API call at all.
+function assertCheckoutEnabled() {
+  if (appConfig.stripe.checkoutEnabled) return;
+  const error = new Error("New purchases are paused while a new plan is prepared. Everything in your account stays free until then.");
+  error.statusCode = 403;
+  error.code = "checkout_paused";
+  throw error;
 }
 
 function assertStripeCheckoutConfigured(user) {

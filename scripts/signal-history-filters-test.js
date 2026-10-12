@@ -108,7 +108,7 @@ assert.match(app, /state\.signals = \(signals \|\| \[\]\)\.map\(normalizeSignal\
 
 for (const text of [
   "No active signals right now.",
-  "No take-profit signals yet.",
+  "No take-profit outcomes yet.",
   "No stop-loss signals yet.",
   "No expired signals yet.",
   "Go to Scanner",

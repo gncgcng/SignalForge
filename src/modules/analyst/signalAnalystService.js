@@ -157,8 +157,8 @@ export function buildSignalAnalystReport(candidate, profile = null) {
   );
   add(
     candidate.regime !== "Low Volatility",
-    `${candidate.regime} volatility context is tradable`,
-    "Low volatility does not justify a trade"
+    `${candidate.regime} volatility is inside the rule range`,
+    "Low volatility is outside the rule range"
   );
 
   const overallQuality = qualityLabel(candidate.qualityScore, candidate.valid);
@@ -168,7 +168,7 @@ export function buildSignalAnalystReport(candidate, profile = null) {
     explanation: "Historical adaptation unavailable."
   };
   const summary = [
-    `${candidate.direction.toUpperCase()} ${candidate.setupType || "setup"} in a ${candidate.regime} regime.`,
+    `${candidate.direction === "short" ? "Short" : "Long"} setup: ${candidate.setupType || "rule-based setup"} in a ${candidate.regime} regime.`,
     `Multi-timeframe context is ${candidate.confluence.badge.toLowerCase()} at ${candidate.confluence.score}/100.`,
     `${candidate.session.explanation}`,
     `${candidate.newsRisk.explanation}`,
@@ -299,9 +299,9 @@ function factorDetail(factors, name) {
 
 function qualityLabel(score, valid = true) {
   if (!valid || score < 78) return "Avoid";
-  if (score >= 90) return "Excellent";
-  if (score >= 84) return "Good";
-  return "Average";
+  if (score >= 90) return "Strong match";
+  if (score >= 84) return "Good match";
+  return "Partial match";
 }
 
 function definition(key, label, category, read) {

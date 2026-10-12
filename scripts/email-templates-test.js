@@ -212,7 +212,10 @@ try {
   const welcomeAgain = emailsTo(email).filter(isWelcome).at(-1);
   assert.match(welcomeAgain.text, /starts without free unlocks/);
   assert.doesNotMatch(welcomeAgain.text, /you have 3 free/);
-  assert.ok(welcomeAgain.text.includes(`View plans: ${APP_URL}/#billing`));
+  // Checkout is paused, so the no-trial welcome points to scanning, not to plans or credit packs.
+  assert.ok(welcomeAgain.text.includes(`Run your first scan: ${APP_URL}/#scanner`));
+  assert.match(welcomeAgain.text, /A new plan is coming soon\./);
+  assert.doesNotMatch(welcomeAgain.text, /choose a plan|credit pack/i);
   assert.ok(again.trialAlreadyUsed);
   results.copyMatchesTrialState = true;
 

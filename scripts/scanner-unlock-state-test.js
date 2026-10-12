@@ -185,6 +185,7 @@ function createHarness({ historySignal = null, unlockResponse = null, unlockErro
     renderLockedSignalQuality: () => "",
     getSignalValidityState: () => ({ status: "active" }),
     escapeHtml: (value) => String(value),
+    formatSetupDirection: (direction) => `${direction} setup`,
     renderModeDetails: () => "",
     renderSignalCard: (signal) => String(signal.id).startsWith("history-")
       ? `<article data-history-card="${signal.id}"></article>`

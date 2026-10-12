@@ -29,8 +29,8 @@ assert.match(app, /Paper trading/);
 assert.match(app, /Risk management/);
 assert.match(app, /Learning engine/);
 assert.match(app, /It is not a probability of profit\./);
-// 54be6a4 reworded the confidence tooltip when confidence became calibrated from outcomes.
-assert.match(app, /Confidence reflects setup alignment after historical calibration\. It is not a win probability\./);
+// Pivot phase 0: the tooltip says what confidence measures and that it is not a probability of profit.
+assert.match(app, /How closely the market matches this setup's rules\. It is not a probability of profit\./);
 assert.match(app, /function renderMobileSignalConfidence\(/);
 assert.match(app, /New to SignalForge\?[^]*data-how-it-works-link/);
 assert.match(app, /SignalForge is an educational market analysis tool\. It is not financial advice, investment advice, or a guarantee of results\./);
