@@ -199,7 +199,7 @@ assert.match(calibratedMigration, /ADD COLUMN IF NOT EXISTS confidence_version/)
 assert.match(calibratedMigration, /ADD COLUMN IF NOT EXISTS calibration_reason/);
 
 assert.match(service, /status = 'Hit TP' THEN risk_reward WHEN status = 'Hit SL' THEN -1 WHEN status = 'Expired' THEN -0\.35/);
-assert.match(service, /Historical performance is diagnostic only/);
+assert.match(service, /Rule match reflects current setup alignment\. It is not a chance of winning/);
 assert.match(service, /HIGH_CONFIDENCE_EXPECTANCY_CAP = 88/);
 assert.match(service, /EXACT_SOURCE_STRATEGY_TIMEFRAME_MIN_CLOSED = 20/);
 assert.match(service, /source_strategy_timeframe/);
@@ -234,6 +234,6 @@ assert.match(service, /underconfidentWinners/);
 assert.match(service, /capRecovery/);
 assert.match(service, /Strong performer/);
 assert.match(signalService, /confidenceCalibration: undefined/);
-assert.match(quality, /Historical performance is diagnostic only/);
+assert.match(quality, /Rule match reflects current setup alignment\. It is not a chance of winning/);
 
 console.log("Signal confidence calibration, loss analysis, quarantine, admin diagnostics, and privacy tests passed.");
