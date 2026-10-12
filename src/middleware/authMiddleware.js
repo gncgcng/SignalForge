@@ -16,7 +16,8 @@ export function requiresAuthAttachment(pathname) {
     "/api/auth/restore",
     "/api/auth/verify-email",
     "/api/auth/password-reset/request",
-    "/api/auth/password-reset/confirm"
+    "/api/auth/password-reset/confirm",
+    "/api/track-records"
   ].includes(pathname);
 }
 

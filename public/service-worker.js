@@ -1,4 +1,4 @@
-const CACHE_VERSION = "signalforge-static-v38-email-legal-links-001";
+const CACHE_VERSION = "signalforge-static-v39-track-records-001";
 const OFFLINE_URL = "/offline.html";
 const CRITICAL_ASSET_PATHS = new Set([
   "/index.html",
@@ -8,6 +8,7 @@ const CRITICAL_ASSET_PATHS = new Set([
   "/signalFilters.js",
   "/signalValidity.js",
   "/riskCalculator.js",
+  "/trackRecords.js",
   "/paperChartUtils.js",
   "/styles.css"
 ]);
@@ -21,6 +22,7 @@ const STATIC_ASSETS = [
   "/signalFilters.js",
   "/signalValidity.js",
   "/riskCalculator.js",
+  "/trackRecords.js",
   "/paperChartUtils.js",
   "/manifest.json",
   OFFLINE_URL,

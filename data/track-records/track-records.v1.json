@@ -1,0 +1,1853 @@
+{
+  "schema": "signalforge.track-records",
+  "version": 1,
+  "generated_at": "2026-10-12T16:28:11.685Z",
+  "harness": {
+    "commit": "2100547fe4bfaf6d7d757512a631a16578c13299",
+    "branch": "research/replay-harness",
+    "verdictsGeneratedAt": "2026-10-11T20:43:14.520Z",
+    "phase1Signals": 19461
+  },
+  "variant": {
+    "id": "V1",
+    "label": "longs only",
+    "reason": "Production blocks short setups (signal_strategy_statuses direction:short = disabled_by_admin since 2026-10-10), which is the harness's V1 'longs only' variant. No daily-trend gate (V2-V4) is in production code."
+  },
+  "period": {
+    "from": "2022-01-29",
+    "to": "2026-10-10",
+    "holdoutIncluded": true,
+    "note": "Every replayed month is included, the research hold-out too. This describes history; it is not a test."
+  },
+  "pairs": [
+    "AAVE-USD",
+    "ADA-USD",
+    "AERO-USD",
+    "ARB-USD",
+    "ATOM-USD",
+    "AVAX-USD",
+    "BCH-USD",
+    "BTC-USD",
+    "DOGE-USD",
+    "DOT-USD",
+    "ETH-USD",
+    "HYPE-USD",
+    "ICP-USD",
+    "INJ-USD",
+    "LINK-USD",
+    "LTC-USD",
+    "NEAR-USD",
+    "PUMP-USD",
+    "QNT-USD",
+    "SOL-USD",
+    "STRK-USD",
+    "SUI-USD",
+    "TIA-USD",
+    "UNI-USD",
+    "XRP-USD",
+    "ZEC-USD"
+  ],
+  "timeframes": [
+    "5m",
+    "15m",
+    "1h",
+    "4h"
+  ],
+  "approximateTimeframes": [
+    "5m"
+  ],
+  "directions": [
+    "long"
+  ],
+  "fees": {
+    "headlineRoundTrip": 0.002,
+    "retailRoundTrip": 0.012,
+    "retailAvailable": true,
+    "method": "Fee in R = round-trip fee / stop distance, both as a fraction of the entry price. Applied to every resolved setup, expired ones included."
+  },
+  "statistics": {
+    "n": "TP + SL. Expired setups are reported separately.",
+    "winRate": "TP / (TP + SL), with a Wilson 95% interval.",
+    "breakEvenWinRate": "1 / (1 + the record's average planned reward-to-risk).",
+    "avgR": "Average R per resolved setup after the headline fee, expired ones included (TP = planned R, SL = -1R, expired = 0R).",
+    "avgR95": "95% interval from a block bootstrap by calendar month (10000 samples, seed 20261011)."
+  },
+  "labelRules": [
+    "n < 30: \"Not enough history yet\"",
+    "upper 95% bound of average R after fees < 0: \"Has lost money historically\"",
+    "lower 95% bound > 0: \"Has made money historically\"",
+    "otherwise: \"No clear edge either way\""
+  ],
+  "labelCounts": {
+    "Not enough history yet": 23,
+    "Has lost money historically": 7,
+    "Has made money historically": 0,
+    "No clear edge either way": 5
+  },
+  "fidelity": {
+    "recall": 92.9,
+    "precision": 87.5,
+    "pass": true,
+    "recallWindow": {
+      "from": "2026-09-14",
+      "to": "2026-10-10",
+      "timeframes": [
+        "5m",
+        "15m",
+        "1h",
+        "4h"
+      ]
+    },
+    "recallCounts": {
+      "liveSignals": 56,
+      "matched": 52
+    },
+    "precisionWindow": {
+      "from": "2026-09-14",
+      "to": "2026-09-28",
+      "timeframes": [
+        "15m"
+      ]
+    },
+    "precisionCounts": {
+      "replaySignalsOnScannedBars": 24,
+      "matched": 21
+    },
+    "perTimeframeRecall": {
+      "5m": {
+        "live": 16,
+        "matched": 13,
+        "recall": 81.3
+      },
+      "15m": {
+        "live": 23,
+        "matched": 22,
+        "recall": 95.7
+      },
+      "1h": {
+        "live": 8,
+        "matched": 8,
+        "recall": 100
+      },
+      "4h": {
+        "live": 9,
+        "matched": 9,
+        "recall": 100
+      }
+    },
+    "fiveMinutePrecisionVerified": false,
+    "fiveMinuteNote": "5m precision could not be verified against live (every 5m bar with live scan evidence was a bar where live itself signalled), so 5m records are approximate."
+  },
+  "counts": {
+    "resolvedSetups": 7273,
+    "unresolvedExcluded": 0,
+    "records": 36
+  },
+  "records": [
+    {
+      "key": "all-setups",
+      "scope": "all",
+      "strategy": "All setups",
+      "direction": "long",
+      "timeframe": "all",
+      "approximate": false,
+      "n": 5774,
+      "tp": 1427,
+      "sl": 4347,
+      "expired": 1499,
+      "resolved": 7273,
+      "winRate": 24.7,
+      "winRate95": {
+        "low": 23.6,
+        "high": 25.8
+      },
+      "avgPlannedR": 2.47,
+      "breakEvenWinRate": 28.8,
+      "grossAvgR": -0.12,
+      "avgR": -0.382,
+      "avgR95": {
+        "low": -0.43,
+        "high": -0.327,
+        "months": 58
+      },
+      "retailAvgR": -1.692,
+      "byYear": [
+        {
+          "year": 2022,
+          "n": 162,
+          "expired": 70,
+          "avgR": -0.263
+        },
+        {
+          "year": 2023,
+          "n": 193,
+          "expired": 65,
+          "avgR": -0.084
+        },
+        {
+          "year": 2024,
+          "n": 1270,
+          "expired": 387,
+          "avgR": -0.265
+        },
+        {
+          "year": 2025,
+          "n": 1624,
+          "expired": 428,
+          "avgR": -0.384
+        },
+        {
+          "year": 2026,
+          "n": 2525,
+          "expired": 549,
+          "avgR": -0.477
+        }
+      ],
+      "label": "Has lost money historically"
+    },
+    {
+      "key": "breakout retest|long|5m",
+      "scope": "setup",
+      "strategy": "Breakout retest",
+      "direction": "long",
+      "timeframe": "5m",
+      "approximate": true,
+      "n": 344,
+      "tp": 94,
+      "sl": 250,
+      "expired": 63,
+      "resolved": 407,
+      "winRate": 27.3,
+      "winRate95": {
+        "low": 22.9,
+        "high": 32.3
+      },
+      "avgPlannedR": 2.5,
+      "breakEvenWinRate": 28.6,
+      "grossAvgR": -0.037,
+      "avgR": -0.446,
+      "avgR95": {
+        "low": -0.635,
+        "high": -0.259,
+        "months": 13
+      },
+      "retailAvgR": -2.49,
+      "byYear": [
+        {
+          "year": 2025,
+          "n": 78,
+          "expired": 15,
+          "avgR": -0.531
+        },
+        {
+          "year": 2026,
+          "n": 266,
+          "expired": 48,
+          "avgR": -0.421
+        }
+      ],
+      "label": "Has lost money historically"
+    },
+    {
+      "key": "breakout retest|long|15m",
+      "scope": "setup",
+      "strategy": "Breakout retest",
+      "direction": "long",
+      "timeframe": "15m",
+      "approximate": false,
+      "n": 379,
+      "tp": 75,
+      "sl": 304,
+      "expired": 121,
+      "resolved": 500,
+      "winRate": 19.8,
+      "winRate95": {
+        "low": 16.1,
+        "high": 24.1
+      },
+      "avgPlannedR": 2.49,
+      "breakEvenWinRate": 28.6,
+      "grossAvgR": -0.236,
+      "avgR": -0.426,
+      "avgR95": {
+        "low": -0.529,
+        "high": -0.326,
+        "months": 34
+      },
+      "retailAvgR": -1.378,
+      "byYear": [
+        {
+          "year": 2024,
+          "n": 149,
+          "expired": 55,
+          "avgR": -0.319
+        },
+        {
+          "year": 2025,
+          "n": 122,
+          "expired": 41,
+          "avgR": -0.503
+        },
+        {
+          "year": 2026,
+          "n": 108,
+          "expired": 25,
+          "avgR": -0.496
+        }
+      ],
+      "label": "Has lost money historically"
+    },
+    {
+      "key": "breakout retest|long|1h",
+      "scope": "setup",
+      "strategy": "Breakout retest",
+      "direction": "long",
+      "timeframe": "1h",
+      "approximate": false,
+      "n": 144,
+      "tp": 34,
+      "sl": 110,
+      "expired": 52,
+      "resolved": 196,
+      "winRate": 23.6,
+      "winRate95": {
+        "low": 17.4,
+        "high": 31.2
+      },
+      "avgPlannedR": 2.5,
+      "breakEvenWinRate": 28.6,
+      "grossAvgR": -0.131,
+      "avgR": -0.23,
+      "avgR95": {
+        "low": -0.419,
+        "high": -0.033,
+        "months": 57
+      },
+      "retailAvgR": -0.727,
+      "byYear": [
+        {
+          "year": 2022,
+          "n": 27,
+          "expired": 9,
+          "avgR": -0.458
+        },
+        {
+          "year": 2023,
+          "n": 22,
+          "expired": 8,
+          "avgR": -0.066
+        },
+        {
+          "year": 2024,
+          "n": 40,
+          "expired": 16,
+          "avgR": -0.121
+        },
+        {
+          "year": 2025,
+          "n": 32,
+          "expired": 13,
+          "avgR": -0.1
+        },
+        {
+          "year": 2026,
+          "n": 23,
+          "expired": 6,
+          "avgR": -0.531
+        }
+      ],
+      "label": "Has lost money historically"
+    },
+    {
+      "key": "breakout retest|long|4h",
+      "scope": "setup",
+      "strategy": "Breakout retest",
+      "direction": "long",
+      "timeframe": "4h",
+      "approximate": false,
+      "n": 41,
+      "tp": 9,
+      "sl": 32,
+      "expired": 31,
+      "resolved": 72,
+      "winRate": 22,
+      "winRate95": {
+        "low": 12,
+        "high": 36.7
+      },
+      "avgPlannedR": 2.49,
+      "breakEvenWinRate": 28.6,
+      "grossAvgR": -0.132,
+      "avgR": -0.177,
+      "avgR95": {
+        "low": -0.405,
+        "high": 0.067,
+        "months": 30
+      },
+      "retailAvgR": -0.401,
+      "byYear": [
+        {
+          "year": 2022,
+          "n": 4,
+          "expired": 3,
+          "avgR": -0.624
+        },
+        {
+          "year": 2023,
+          "n": 11,
+          "expired": 8,
+          "avgR": 0.11
+        },
+        {
+          "year": 2024,
+          "n": 7,
+          "expired": 10,
+          "avgR": -0.04
+        },
+        {
+          "year": 2025,
+          "n": 12,
+          "expired": 6,
+          "avgR": -0.323
+        },
+        {
+          "year": 2026,
+          "n": 7,
+          "expired": 4,
+          "avgR": -0.359
+        }
+      ],
+      "label": "No clear edge either way"
+    },
+    {
+      "key": "liquidity sweep reversal|long|5m",
+      "scope": "setup",
+      "strategy": "Liquidity sweep reversal",
+      "direction": "long",
+      "timeframe": "5m",
+      "approximate": true,
+      "n": 28,
+      "tp": 13,
+      "sl": 15,
+      "expired": 2,
+      "resolved": 30,
+      "winRate": 46.4,
+      "winRate95": {
+        "low": 29.5,
+        "high": 64.2
+      },
+      "avgPlannedR": 1.81,
+      "breakEvenWinRate": 35.6,
+      "grossAvgR": 0.28,
+      "avgR": -0.381,
+      "avgR95": {
+        "low": -0.894,
+        "high": 0.031,
+        "months": 12
+      },
+      "retailAvgR": -3.686,
+      "byYear": [
+        {
+          "year": 2025,
+          "n": 7,
+          "expired": 0,
+          "avgR": -1.017
+        },
+        {
+          "year": 2026,
+          "n": 21,
+          "expired": 2,
+          "avgR": -0.187
+        }
+      ],
+      "label": "Not enough history yet"
+    },
+    {
+      "key": "liquidity sweep reversal|long|15m",
+      "scope": "setup",
+      "strategy": "Liquidity sweep reversal",
+      "direction": "long",
+      "timeframe": "15m",
+      "approximate": false,
+      "n": 42,
+      "tp": 16,
+      "sl": 26,
+      "expired": 1,
+      "resolved": 43,
+      "winRate": 38.1,
+      "winRate95": {
+        "low": 25,
+        "high": 53.2
+      },
+      "avgPlannedR": 1.8,
+      "breakEvenWinRate": 35.7,
+      "grossAvgR": 0.065,
+      "avgR": -0.243,
+      "avgR95": {
+        "low": -0.625,
+        "high": 0.149,
+        "months": 22
+      },
+      "retailAvgR": -1.783,
+      "byYear": [
+        {
+          "year": 2024,
+          "n": 12,
+          "expired": 1,
+          "avgR": -0.155
+        },
+        {
+          "year": 2025,
+          "n": 18,
+          "expired": 0,
+          "avgR": -0.38
+        },
+        {
+          "year": 2026,
+          "n": 12,
+          "expired": 0,
+          "avgR": -0.132
+        }
+      ],
+      "label": "No clear edge either way"
+    },
+    {
+      "key": "liquidity sweep reversal|long|1h",
+      "scope": "setup",
+      "strategy": "Liquidity sweep reversal",
+      "direction": "long",
+      "timeframe": "1h",
+      "approximate": false,
+      "n": 19,
+      "tp": 4,
+      "sl": 15,
+      "expired": 0,
+      "resolved": 19,
+      "winRate": 21.1,
+      "winRate95": {
+        "low": 8.5,
+        "high": 43.3
+      },
+      "avgPlannedR": 1.84,
+      "breakEvenWinRate": 35.2,
+      "grossAvgR": -0.411,
+      "avgR": -0.531,
+      "avgR95": {
+        "low": -0.948,
+        "high": -0.172,
+        "months": 13
+      },
+      "retailAvgR": -1.136,
+      "byYear": [
+        {
+          "year": 2022,
+          "n": 3,
+          "expired": 0,
+          "avgR": -0.203
+        },
+        {
+          "year": 2023,
+          "n": 1,
+          "expired": 0,
+          "avgR": -1.124
+        },
+        {
+          "year": 2024,
+          "n": 4,
+          "expired": 0,
+          "avgR": -0.403
+        },
+        {
+          "year": 2025,
+          "n": 8,
+          "expired": 0,
+          "avgR": -0.762
+        },
+        {
+          "year": 2026,
+          "n": 3,
+          "expired": 0,
+          "avgR": -0.221
+        }
+      ],
+      "label": "Not enough history yet"
+    },
+    {
+      "key": "liquidity sweep reversal|long|4h",
+      "scope": "setup",
+      "strategy": "Liquidity sweep reversal",
+      "direction": "long",
+      "timeframe": "4h",
+      "approximate": false,
+      "n": 2,
+      "tp": 0,
+      "sl": 2,
+      "expired": 0,
+      "resolved": 2,
+      "winRate": 0,
+      "winRate95": {
+        "low": 0,
+        "high": 65.8
+      },
+      "avgPlannedR": 1.8,
+      "breakEvenWinRate": 35.7,
+      "grossAvgR": -1,
+      "avgR": -1.063,
+      "avgR95": {
+        "low": -1.081,
+        "high": -1.044,
+        "months": 2
+      },
+      "retailAvgR": -1.375,
+      "byYear": [
+        {
+          "year": 2024,
+          "n": 1,
+          "expired": 0,
+          "avgR": -1.081
+        },
+        {
+          "year": 2025,
+          "n": 1,
+          "expired": 0,
+          "avgR": -1.044
+        }
+      ],
+      "label": "Not enough history yet"
+    },
+    {
+      "key": "mean reversion|long|5m",
+      "scope": "setup",
+      "strategy": "Mean reversion",
+      "direction": "long",
+      "timeframe": "5m",
+      "approximate": true,
+      "n": 13,
+      "tp": 1,
+      "sl": 12,
+      "expired": 2,
+      "resolved": 15,
+      "winRate": 7.7,
+      "winRate95": {
+        "low": 1.4,
+        "high": 33.3
+      },
+      "avgPlannedR": 1.81,
+      "breakEvenWinRate": 35.6,
+      "grossAvgR": -0.68,
+      "avgR": -1.281,
+      "avgR95": {
+        "low": -1.694,
+        "high": -0.728,
+        "months": 8
+      },
+      "retailAvgR": -4.284,
+      "byYear": [
+        {
+          "year": 2025,
+          "n": 2,
+          "expired": 0,
+          "avgR": -1.458
+        },
+        {
+          "year": 2026,
+          "n": 11,
+          "expired": 2,
+          "avgR": -1.253
+        }
+      ],
+      "label": "Not enough history yet"
+    },
+    {
+      "key": "mean reversion|long|15m",
+      "scope": "setup",
+      "strategy": "Mean reversion",
+      "direction": "long",
+      "timeframe": "15m",
+      "approximate": false,
+      "n": 16,
+      "tp": 7,
+      "sl": 9,
+      "expired": 1,
+      "resolved": 17,
+      "winRate": 43.8,
+      "winRate95": {
+        "low": 23.1,
+        "high": 66.8
+      },
+      "avgPlannedR": 1.8,
+      "breakEvenWinRate": 35.7,
+      "grossAvgR": 0.212,
+      "avgR": -0.095,
+      "avgR95": {
+        "low": -0.793,
+        "high": 0.406,
+        "months": 12
+      },
+      "retailAvgR": -1.628,
+      "byYear": [
+        {
+          "year": 2024,
+          "n": 6,
+          "expired": 0,
+          "avgR": 0.108
+        },
+        {
+          "year": 2025,
+          "n": 6,
+          "expired": 1,
+          "avgR": -0.36
+        },
+        {
+          "year": 2026,
+          "n": 4,
+          "expired": 0,
+          "avgR": 0.064
+        }
+      ],
+      "label": "Not enough history yet"
+    },
+    {
+      "key": "mean reversion|long|1h",
+      "scope": "setup",
+      "strategy": "Mean reversion",
+      "direction": "long",
+      "timeframe": "1h",
+      "approximate": false,
+      "n": 1,
+      "tp": 1,
+      "sl": 0,
+      "expired": 0,
+      "resolved": 1,
+      "winRate": 100,
+      "winRate95": {
+        "low": 20.7,
+        "high": 100
+      },
+      "avgPlannedR": 1.8,
+      "breakEvenWinRate": 35.7,
+      "grossAvgR": 1.8,
+      "avgR": 1.643,
+      "avgR95": null,
+      "retailAvgR": 0.86,
+      "byYear": [
+        {
+          "year": 2023,
+          "n": 1,
+          "expired": 0,
+          "avgR": 1.643
+        }
+      ],
+      "label": "Not enough history yet"
+    },
+    {
+      "key": "mean reversion|long|4h",
+      "scope": "setup",
+      "strategy": "Mean reversion",
+      "direction": "long",
+      "timeframe": "4h",
+      "approximate": false,
+      "n": 2,
+      "tp": 1,
+      "sl": 1,
+      "expired": 0,
+      "resolved": 2,
+      "winRate": 50,
+      "winRate95": {
+        "low": 9.5,
+        "high": 90.5
+      },
+      "avgPlannedR": 1.8,
+      "breakEvenWinRate": 35.7,
+      "grossAvgR": 0.4,
+      "avgR": 0.322,
+      "avgR95": {
+        "low": -1.071,
+        "high": 1.715,
+        "months": 2
+      },
+      "retailAvgR": -0.067,
+      "byYear": [
+        {
+          "year": 2024,
+          "n": 1,
+          "expired": 0,
+          "avgR": 1.715
+        },
+        {
+          "year": 2025,
+          "n": 1,
+          "expired": 0,
+          "avgR": -1.071
+        }
+      ],
+      "label": "Not enough history yet"
+    },
+    {
+      "key": "momentum breakout|long|5m",
+      "scope": "setup",
+      "strategy": "Momentum breakout",
+      "direction": "long",
+      "timeframe": "5m",
+      "approximate": true,
+      "n": 1367,
+      "tp": 319,
+      "sl": 1048,
+      "expired": 294,
+      "resolved": 1661,
+      "winRate": 23.3,
+      "winRate95": {
+        "low": 21.2,
+        "high": 25.7
+      },
+      "avgPlannedR": 2.49,
+      "breakEvenWinRate": 28.6,
+      "grossAvgR": -0.156,
+      "avgR": -0.586,
+      "avgR95": {
+        "low": -0.651,
+        "high": -0.532,
+        "months": 13
+      },
+      "retailAvgR": -2.738,
+      "byYear": [
+        {
+          "year": 2025,
+          "n": 304,
+          "expired": 77,
+          "avgR": -0.624
+        },
+        {
+          "year": 2026,
+          "n": 1063,
+          "expired": 217,
+          "avgR": -0.575
+        }
+      ],
+      "label": "Has lost money historically"
+    },
+    {
+      "key": "momentum breakout|long|15m",
+      "scope": "setup",
+      "strategy": "Momentum breakout",
+      "direction": "long",
+      "timeframe": "15m",
+      "approximate": false,
+      "n": 1690,
+      "tp": 395,
+      "sl": 1295,
+      "expired": 466,
+      "resolved": 2156,
+      "winRate": 23.4,
+      "winRate95": {
+        "low": 21.4,
+        "high": 25.4
+      },
+      "avgPlannedR": 2.49,
+      "breakEvenWinRate": 28.7,
+      "grossAvgR": -0.15,
+      "avgR": -0.352,
+      "avgR95": {
+        "low": -0.412,
+        "high": -0.294,
+        "months": 34
+      },
+      "retailAvgR": -1.363,
+      "byYear": [
+        {
+          "year": 2024,
+          "n": 677,
+          "expired": 185,
+          "avgR": -0.328
+        },
+        {
+          "year": 2025,
+          "n": 609,
+          "expired": 170,
+          "avgR": -0.343
+        },
+        {
+          "year": 2026,
+          "n": 404,
+          "expired": 111,
+          "avgR": -0.404
+        }
+      ],
+      "label": "Has lost money historically"
+    },
+    {
+      "key": "momentum breakout|long|1h",
+      "scope": "setup",
+      "strategy": "Momentum breakout",
+      "direction": "long",
+      "timeframe": "1h",
+      "approximate": false,
+      "n": 620,
+      "tp": 150,
+      "sl": 470,
+      "expired": 179,
+      "resolved": 799,
+      "winRate": 24.2,
+      "winRate95": {
+        "low": 21,
+        "high": 27.7
+      },
+      "avgPlannedR": 2.47,
+      "breakEvenWinRate": 28.8,
+      "grossAvgR": -0.13,
+      "avgR": -0.228,
+      "avgR95": {
+        "low": -0.313,
+        "high": -0.144,
+        "months": 58
+      },
+      "retailAvgR": -0.718,
+      "byYear": [
+        {
+          "year": 2022,
+          "n": 94,
+          "expired": 37,
+          "avgR": -0.356
+        },
+        {
+          "year": 2023,
+          "n": 97,
+          "expired": 21,
+          "avgR": -0.268
+        },
+        {
+          "year": 2024,
+          "n": 171,
+          "expired": 50,
+          "avgR": -0.16
+        },
+        {
+          "year": 2025,
+          "n": 153,
+          "expired": 37,
+          "avgR": -0.158
+        },
+        {
+          "year": 2026,
+          "n": 105,
+          "expired": 34,
+          "avgR": -0.277
+        }
+      ],
+      "label": "Has lost money historically"
+    },
+    {
+      "key": "momentum breakout|long|4h",
+      "scope": "setup",
+      "strategy": "Momentum breakout",
+      "direction": "long",
+      "timeframe": "4h",
+      "approximate": false,
+      "n": 157,
+      "tp": 43,
+      "sl": 114,
+      "expired": 98,
+      "resolved": 255,
+      "winRate": 27.4,
+      "winRate95": {
+        "low": 21,
+        "high": 34.8
+      },
+      "avgPlannedR": 2.44,
+      "breakEvenWinRate": 29.1,
+      "grossAvgR": -0.052,
+      "avgR": -0.099,
+      "avgR95": {
+        "low": -0.259,
+        "high": 0.06,
+        "months": 46
+      },
+      "retailAvgR": -0.335,
+      "byYear": [
+        {
+          "year": 2022,
+          "n": 18,
+          "expired": 17,
+          "avgR": -0.008
+        },
+        {
+          "year": 2023,
+          "n": 26,
+          "expired": 26,
+          "avgR": -0.153
+        },
+        {
+          "year": 2024,
+          "n": 35,
+          "expired": 29,
+          "avgR": 0.116
+        },
+        {
+          "year": 2025,
+          "n": 45,
+          "expired": 15,
+          "avgR": -0.418
+        },
+        {
+          "year": 2026,
+          "n": 33,
+          "expired": 11,
+          "avgR": 0.014
+        }
+      ],
+      "label": "No clear edge either way"
+    },
+    {
+      "key": "multi-timeframe continuation|long|5m",
+      "scope": "setup",
+      "strategy": "Multi-timeframe continuation",
+      "direction": "long",
+      "timeframe": "5m",
+      "approximate": true,
+      "n": 389,
+      "tp": 96,
+      "sl": 293,
+      "expired": 67,
+      "resolved": 456,
+      "winRate": 24.7,
+      "winRate95": {
+        "low": 20.7,
+        "high": 29.2
+      },
+      "avgPlannedR": 2.48,
+      "breakEvenWinRate": 28.7,
+      "grossAvgR": -0.131,
+      "avgR": -0.583,
+      "avgR95": {
+        "low": -0.727,
+        "high": -0.46,
+        "months": 13
+      },
+      "retailAvgR": -2.844,
+      "byYear": [
+        {
+          "year": 2025,
+          "n": 68,
+          "expired": 15,
+          "avgR": -0.498
+        },
+        {
+          "year": 2026,
+          "n": 321,
+          "expired": 52,
+          "avgR": -0.602
+        }
+      ],
+      "label": "Has lost money historically"
+    },
+    {
+      "key": "multi-timeframe continuation|long|15m",
+      "scope": "setup",
+      "strategy": "Multi-timeframe continuation",
+      "direction": "long",
+      "timeframe": "15m",
+      "approximate": false,
+      "n": 271,
+      "tp": 88,
+      "sl": 183,
+      "expired": 66,
+      "resolved": 337,
+      "winRate": 32.5,
+      "winRate95": {
+        "low": 27.2,
+        "high": 38.3
+      },
+      "avgPlannedR": 2.48,
+      "breakEvenWinRate": 28.7,
+      "grossAvgR": 0.098,
+      "avgR": -0.101,
+      "avgR95": {
+        "low": -0.274,
+        "high": 0.053,
+        "months": 33
+      },
+      "retailAvgR": -1.097,
+      "byYear": [
+        {
+          "year": 2024,
+          "n": 118,
+          "expired": 23,
+          "avgR": -0.248
+        },
+        {
+          "year": 2025,
+          "n": 99,
+          "expired": 25,
+          "avgR": 0.007
+        },
+        {
+          "year": 2026,
+          "n": 54,
+          "expired": 18,
+          "avgR": 0.001
+        }
+      ],
+      "label": "No clear edge either way"
+    },
+    {
+      "key": "multi-timeframe continuation|long|1h",
+      "scope": "setup",
+      "strategy": "Multi-timeframe continuation",
+      "direction": "long",
+      "timeframe": "1h",
+      "approximate": false,
+      "n": 144,
+      "tp": 53,
+      "sl": 91,
+      "expired": 26,
+      "resolved": 170,
+      "winRate": 36.8,
+      "winRate95": {
+        "low": 29.4,
+        "high": 44.9
+      },
+      "avgPlannedR": 2.44,
+      "breakEvenWinRate": 29.1,
+      "grossAvgR": 0.207,
+      "avgR": 0.099,
+      "avgR95": {
+        "low": -0.098,
+        "high": 0.292,
+        "months": 45
+      },
+      "retailAvgR": -0.443,
+      "byYear": [
+        {
+          "year": 2022,
+          "n": 10,
+          "expired": 3,
+          "avgR": 0.623
+        },
+        {
+          "year": 2023,
+          "n": 31,
+          "expired": 1,
+          "avgR": 0.468
+        },
+        {
+          "year": 2024,
+          "n": 31,
+          "expired": 8,
+          "avgR": -0.329
+        },
+        {
+          "year": 2025,
+          "n": 34,
+          "expired": 3,
+          "avgR": -0.089
+        },
+        {
+          "year": 2026,
+          "n": 38,
+          "expired": 11,
+          "avgR": 0.201
+        }
+      ],
+      "label": "No clear edge either way"
+    },
+    {
+      "key": "pullback bounce|long|5m",
+      "scope": "setup",
+      "strategy": "Pullback bounce",
+      "direction": "long",
+      "timeframe": "5m",
+      "approximate": true,
+      "n": 4,
+      "tp": 1,
+      "sl": 3,
+      "expired": 0,
+      "resolved": 4,
+      "winRate": 25,
+      "winRate95": {
+        "low": 4.6,
+        "high": 69.9
+      },
+      "avgPlannedR": 2.45,
+      "breakEvenWinRate": 29,
+      "grossAvgR": -0.1,
+      "avgR": -0.51,
+      "avgR95": {
+        "low": -1.44,
+        "high": 2.091,
+        "months": 3
+      },
+      "retailAvgR": -2.561,
+      "byYear": [
+        {
+          "year": 2026,
+          "n": 4,
+          "expired": 0,
+          "avgR": -0.51
+        }
+      ],
+      "label": "Not enough history yet"
+    },
+    {
+      "key": "pullback bounce|long|15m",
+      "scope": "setup",
+      "strategy": "Pullback bounce",
+      "direction": "long",
+      "timeframe": "15m",
+      "approximate": false,
+      "n": 11,
+      "tp": 3,
+      "sl": 8,
+      "expired": 3,
+      "resolved": 14,
+      "winRate": 27.3,
+      "winRate95": {
+        "low": 9.7,
+        "high": 56.6
+      },
+      "avgPlannedR": 2.4,
+      "breakEvenWinRate": 29.5,
+      "grossAvgR": -0.069,
+      "avgR": -0.301,
+      "avgR95": {
+        "low": -0.924,
+        "high": 0.518,
+        "months": 12
+      },
+      "retailAvgR": -1.458,
+      "byYear": [
+        {
+          "year": 2024,
+          "n": 1,
+          "expired": 1,
+          "avgR": 1.058
+        },
+        {
+          "year": 2025,
+          "n": 5,
+          "expired": 2,
+          "avgR": -0.42
+        },
+        {
+          "year": 2026,
+          "n": 5,
+          "expired": 0,
+          "avgR": -0.678
+        }
+      ],
+      "label": "Not enough history yet"
+    },
+    {
+      "key": "pullback bounce|long|1h",
+      "scope": "setup",
+      "strategy": "Pullback bounce",
+      "direction": "long",
+      "timeframe": "1h",
+      "approximate": false,
+      "n": 3,
+      "tp": 0,
+      "sl": 3,
+      "expired": 1,
+      "resolved": 4,
+      "winRate": 0,
+      "winRate95": {
+        "low": 0,
+        "high": 56.2
+      },
+      "avgPlannedR": 2.09,
+      "breakEvenWinRate": 32.3,
+      "grossAvgR": -0.75,
+      "avgR": -0.845,
+      "avgR95": {
+        "low": -1.131,
+        "high": -0.325,
+        "months": 4
+      },
+      "retailAvgR": -1.321,
+      "byYear": [
+        {
+          "year": 2022,
+          "n": 1,
+          "expired": 0,
+          "avgR": -1.079
+        },
+        {
+          "year": 2023,
+          "n": 1,
+          "expired": 0,
+          "avgR": -1.148
+        },
+        {
+          "year": 2024,
+          "n": 1,
+          "expired": 0,
+          "avgR": -1.081
+        },
+        {
+          "year": 2026,
+          "n": 0,
+          "expired": 1,
+          "avgR": -0.073
+        }
+      ],
+      "label": "Not enough history yet"
+    },
+    {
+      "key": "range bounce|long|15m",
+      "scope": "setup",
+      "strategy": "Range bounce",
+      "direction": "long",
+      "timeframe": "15m",
+      "approximate": false,
+      "n": 1,
+      "tp": 0,
+      "sl": 1,
+      "expired": 0,
+      "resolved": 1,
+      "winRate": 0,
+      "winRate95": {
+        "low": 0,
+        "high": 79.3
+      },
+      "avgPlannedR": 1.8,
+      "breakEvenWinRate": 35.7,
+      "grossAvgR": -1,
+      "avgR": -1.561,
+      "avgR95": null,
+      "retailAvgR": -4.365,
+      "byYear": [
+        {
+          "year": 2025,
+          "n": 1,
+          "expired": 0,
+          "avgR": -1.561
+        }
+      ],
+      "label": "Not enough history yet"
+    },
+    {
+      "key": "support/resistance retest|long|5m",
+      "scope": "setup",
+      "strategy": "Support/resistance retest",
+      "direction": "long",
+      "timeframe": "5m",
+      "approximate": true,
+      "n": 5,
+      "tp": 0,
+      "sl": 5,
+      "expired": 3,
+      "resolved": 8,
+      "winRate": 0,
+      "winRate95": {
+        "low": 0,
+        "high": 43.4
+      },
+      "avgPlannedR": 2.52,
+      "breakEvenWinRate": 28.4,
+      "grossAvgR": -0.625,
+      "avgR": -1.079,
+      "avgR95": {
+        "low": -1.481,
+        "high": -0.593,
+        "months": 7
+      },
+      "retailAvgR": -3.352,
+      "byYear": [
+        {
+          "year": 2025,
+          "n": 1,
+          "expired": 1,
+          "avgR": -0.852
+        },
+        {
+          "year": 2026,
+          "n": 4,
+          "expired": 2,
+          "avgR": -1.155
+        }
+      ],
+      "label": "Not enough history yet"
+    },
+    {
+      "key": "support/resistance retest|long|15m",
+      "scope": "setup",
+      "strategy": "Support/resistance retest",
+      "direction": "long",
+      "timeframe": "15m",
+      "approximate": false,
+      "n": 4,
+      "tp": 1,
+      "sl": 3,
+      "expired": 0,
+      "resolved": 4,
+      "winRate": 25,
+      "winRate95": {
+        "low": 4.6,
+        "high": 69.9
+      },
+      "avgPlannedR": 2.6,
+      "breakEvenWinRate": 27.8,
+      "grossAvgR": -0.1,
+      "avgR": -0.399,
+      "avgR95": {
+        "low": -1.504,
+        "high": 1.542,
+        "months": 4
+      },
+      "retailAvgR": -1.891,
+      "byYear": [
+        {
+          "year": 2024,
+          "n": 1,
+          "expired": 0,
+          "avgR": -1.606
+        },
+        {
+          "year": 2025,
+          "n": 1,
+          "expired": 0,
+          "avgR": -1.195
+        },
+        {
+          "year": 2026,
+          "n": 2,
+          "expired": 0,
+          "avgR": 0.604
+        }
+      ],
+      "label": "Not enough history yet"
+    },
+    {
+      "key": "support/resistance retest|long|1h",
+      "scope": "setup",
+      "strategy": "Support/resistance retest",
+      "direction": "long",
+      "timeframe": "1h",
+      "approximate": false,
+      "n": 1,
+      "tp": 1,
+      "sl": 0,
+      "expired": 0,
+      "resolved": 1,
+      "winRate": 100,
+      "winRate95": {
+        "low": 20.7,
+        "high": 100
+      },
+      "avgPlannedR": 2,
+      "breakEvenWinRate": 33.3,
+      "grossAvgR": 2,
+      "avgR": 1.842,
+      "avgR95": null,
+      "retailAvgR": 1.052,
+      "byYear": [
+        {
+          "year": 2026,
+          "n": 1,
+          "expired": 0,
+          "avgR": 1.842
+        }
+      ],
+      "label": "Not enough history yet"
+    },
+    {
+      "key": "support/resistance retest|long|4h",
+      "scope": "setup",
+      "strategy": "Support/resistance retest",
+      "direction": "long",
+      "timeframe": "4h",
+      "approximate": false,
+      "n": 0,
+      "tp": 0,
+      "sl": 0,
+      "expired": 1,
+      "resolved": 1,
+      "winRate": null,
+      "winRate95": null,
+      "avgPlannedR": 2.6,
+      "breakEvenWinRate": 27.8,
+      "grossAvgR": 0,
+      "avgR": -0.059,
+      "avgR95": null,
+      "retailAvgR": -0.352,
+      "byYear": [
+        {
+          "year": 2025,
+          "n": 0,
+          "expired": 1,
+          "avgR": -0.059
+        }
+      ],
+      "label": "Not enough history yet"
+    },
+    {
+      "key": "trend continuation|long|5m",
+      "scope": "setup",
+      "strategy": "Trend continuation",
+      "direction": "long",
+      "timeframe": "5m",
+      "approximate": true,
+      "n": 8,
+      "tp": 5,
+      "sl": 3,
+      "expired": 2,
+      "resolved": 10,
+      "winRate": 62.5,
+      "winRate95": {
+        "low": 30.6,
+        "high": 86.3
+      },
+      "avgPlannedR": 2.53,
+      "breakEvenWinRate": 28.3,
+      "grossAvgR": 0.974,
+      "avgR": 0.476,
+      "avgR95": {
+        "low": -0.617,
+        "high": 1.537,
+        "months": 10
+      },
+      "retailAvgR": -2.014,
+      "byYear": [
+        {
+          "year": 2025,
+          "n": 2,
+          "expired": 1,
+          "avgR": -0.098
+        },
+        {
+          "year": 2026,
+          "n": 6,
+          "expired": 1,
+          "avgR": 0.722
+        }
+      ],
+      "label": "Not enough history yet"
+    },
+    {
+      "key": "trend continuation|long|15m",
+      "scope": "setup",
+      "strategy": "Trend continuation",
+      "direction": "long",
+      "timeframe": "15m",
+      "approximate": false,
+      "n": 4,
+      "tp": 0,
+      "sl": 4,
+      "expired": 0,
+      "resolved": 4,
+      "winRate": 0,
+      "winRate95": {
+        "low": 0,
+        "high": 49
+      },
+      "avgPlannedR": 2.6,
+      "breakEvenWinRate": 27.8,
+      "grossAvgR": -1,
+      "avgR": -1.18,
+      "avgR95": {
+        "low": -1.239,
+        "high": -1.133,
+        "months": 4
+      },
+      "retailAvgR": -2.082,
+      "byYear": [
+        {
+          "year": 2025,
+          "n": 4,
+          "expired": 0,
+          "avgR": -1.18
+        }
+      ],
+      "label": "Not enough history yet"
+    },
+    {
+      "key": "trend continuation|long|1h",
+      "scope": "setup",
+      "strategy": "Trend continuation",
+      "direction": "long",
+      "timeframe": "1h",
+      "approximate": false,
+      "n": 3,
+      "tp": 1,
+      "sl": 2,
+      "expired": 0,
+      "resolved": 3,
+      "winRate": 33.3,
+      "winRate95": {
+        "low": 6.1,
+        "high": 79.2
+      },
+      "avgPlannedR": 2.4,
+      "breakEvenWinRate": 29.4,
+      "grossAvgR": 0,
+      "avgR": -0.108,
+      "avgR95": {
+        "low": -1.116,
+        "high": 1.855,
+        "months": 3
+      },
+      "retailAvgR": -0.65,
+      "byYear": [
+        {
+          "year": 2022,
+          "n": 1,
+          "expired": 0,
+          "avgR": 1.855
+        },
+        {
+          "year": 2025,
+          "n": 2,
+          "expired": 0,
+          "avgR": -1.09
+        }
+      ],
+      "label": "Not enough history yet"
+    },
+    {
+      "key": "trend continuation|long|4h",
+      "scope": "setup",
+      "strategy": "Trend continuation",
+      "direction": "long",
+      "timeframe": "4h",
+      "approximate": false,
+      "n": 1,
+      "tp": 0,
+      "sl": 1,
+      "expired": 0,
+      "resolved": 1,
+      "winRate": 0,
+      "winRate95": {
+        "low": 0,
+        "high": 79.3
+      },
+      "avgPlannedR": 2.6,
+      "breakEvenWinRate": 27.8,
+      "grossAvgR": -1,
+      "avgR": -1.071,
+      "avgR95": null,
+      "retailAvgR": -1.429,
+      "byYear": [
+        {
+          "year": 2026,
+          "n": 1,
+          "expired": 0,
+          "avgR": -1.071
+        }
+      ],
+      "label": "Not enough history yet"
+    },
+    {
+      "key": "vwap reclaim/rejection|long|5m",
+      "scope": "setup",
+      "strategy": "VWAP reclaim/rejection",
+      "direction": "long",
+      "timeframe": "5m",
+      "approximate": true,
+      "n": 25,
+      "tp": 5,
+      "sl": 20,
+      "expired": 6,
+      "resolved": 31,
+      "winRate": 20,
+      "winRate95": {
+        "low": 8.9,
+        "high": 39.1
+      },
+      "avgPlannedR": 2.43,
+      "breakEvenWinRate": 29.2,
+      "grossAvgR": -0.243,
+      "avgR": -0.735,
+      "avgR95": {
+        "low": -1.157,
+        "high": -0.214,
+        "months": 12
+      },
+      "retailAvgR": -3.198,
+      "byYear": [
+        {
+          "year": 2025,
+          "n": 3,
+          "expired": 4,
+          "avgR": 0.109
+        },
+        {
+          "year": 2026,
+          "n": 22,
+          "expired": 2,
+          "avgR": -0.982
+        }
+      ],
+      "label": "Not enough history yet"
+    },
+    {
+      "key": "vwap reclaim/rejection|long|15m",
+      "scope": "setup",
+      "strategy": "VWAP reclaim/rejection",
+      "direction": "long",
+      "timeframe": "15m",
+      "approximate": false,
+      "n": 13,
+      "tp": 4,
+      "sl": 9,
+      "expired": 5,
+      "resolved": 18,
+      "winRate": 30.8,
+      "winRate95": {
+        "low": 12.7,
+        "high": 57.6
+      },
+      "avgPlannedR": 2.39,
+      "breakEvenWinRate": 29.5,
+      "grossAvgR": 0.017,
+      "avgR": -0.195,
+      "avgR95": {
+        "low": -0.723,
+        "high": 0.582,
+        "months": 11
+      },
+      "retailAvgR": -1.251,
+      "byYear": [
+        {
+          "year": 2024,
+          "n": 8,
+          "expired": 4,
+          "avgR": -0.009
+        },
+        {
+          "year": 2025,
+          "n": 3,
+          "expired": 0,
+          "avgR": -0.256
+        },
+        {
+          "year": 2026,
+          "n": 2,
+          "expired": 1,
+          "avgR": -0.876
+        }
+      ],
+      "label": "Not enough history yet"
+    },
+    {
+      "key": "vwap reclaim/rejection|long|1h",
+      "scope": "setup",
+      "strategy": "VWAP reclaim/rejection",
+      "direction": "long",
+      "timeframe": "1h",
+      "approximate": false,
+      "n": 15,
+      "tp": 3,
+      "sl": 12,
+      "expired": 2,
+      "resolved": 17,
+      "winRate": 20,
+      "winRate95": {
+        "low": 7,
+        "high": 45.2
+      },
+      "avgPlannedR": 2.37,
+      "breakEvenWinRate": 29.7,
+      "grossAvgR": -0.294,
+      "avgR": -0.394,
+      "avgR95": {
+        "low": -0.915,
+        "high": 0.198,
+        "months": 14
+      },
+      "retailAvgR": -0.892,
+      "byYear": [
+        {
+          "year": 2022,
+          "n": 3,
+          "expired": 0,
+          "avgR": -0.121
+        },
+        {
+          "year": 2023,
+          "n": 1,
+          "expired": 0,
+          "avgR": -1.062
+        },
+        {
+          "year": 2024,
+          "n": 7,
+          "expired": 1,
+          "avgR": -0.546
+        },
+        {
+          "year": 2025,
+          "n": 3,
+          "expired": 0,
+          "avgR": 0.064
+        },
+        {
+          "year": 2026,
+          "n": 1,
+          "expired": 1,
+          "avgR": -0.546
+        }
+      ],
+      "label": "Not enough history yet"
+    },
+    {
+      "key": "vwap reclaim/rejection|long|4h",
+      "scope": "setup",
+      "strategy": "VWAP reclaim/rejection",
+      "direction": "long",
+      "timeframe": "4h",
+      "approximate": false,
+      "n": 7,
+      "tp": 4,
+      "sl": 3,
+      "expired": 7,
+      "resolved": 14,
+      "winRate": 57.1,
+      "winRate95": {
+        "low": 25,
+        "high": 84.2
+      },
+      "avgPlannedR": 2.36,
+      "breakEvenWinRate": 29.7,
+      "grossAvgR": 0.443,
+      "avgR": 0.401,
+      "avgR95": {
+        "low": -0.241,
+        "high": 0.887,
+        "months": 10
+      },
+      "retailAvgR": 0.19,
+      "byYear": [
+        {
+          "year": 2022,
+          "n": 1,
+          "expired": 1,
+          "avgR": -0.535
+        },
+        {
+          "year": 2023,
+          "n": 2,
+          "expired": 1,
+          "avgR": 1.469
+        },
+        {
+          "year": 2024,
+          "n": 0,
+          "expired": 4,
+          "avgR": -0.037
+        },
+        {
+          "year": 2025,
+          "n": 0,
+          "expired": 1,
+          "avgR": -0.024
+        },
+        {
+          "year": 2026,
+          "n": 4,
+          "expired": 0,
+          "avgR": 0.611
+        }
+      ],
+      "label": "Not enough history yet"
+    }
+  ]
+}

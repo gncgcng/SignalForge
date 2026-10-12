@@ -18,6 +18,15 @@ import {
   signalFiltersToParams
 } from "./signalFilters.js";
 import { calculateRiskPosition } from "./riskCalculator.js";
+import {
+  buildTrackRecordView,
+  formatCount as formatTrackCount,
+  formatPercent as formatTrackPercent,
+  formatR as formatTrackR,
+  indexTrackRecords,
+  renderTrackRecordBlock,
+  sortTrackRecords
+} from "./trackRecords.js";
 import { formatSignalCountdown, getSignalValidityState } from "./signalValidity.js";
 import {
   addPaperDrawingPoint,
@@ -105,6 +114,9 @@ const state = {
   firstScanCompleted: getStoredFirstScanCompleted(),
   expandedSignalKeys: new Set(),
   unlockedRevealSignalId: null,
+  trackRecords: null,
+  trackRecordIndex: new Map(),
+  trackRecordSort: { column: "n", direction: "desc" },
   telegramExpiredNotice: null,
   riskCalculations: new Map(),
   lastScanSummary: null,
@@ -4001,6 +4013,7 @@ async function bootDashboard() {
     loadSignals(),
     loadCandidates(),
     loadMarketBrief(),
+    loadTrackRecordsData(),
     loadWatchlist(),
     loadAlerts(),
     loadNotifications(),
@@ -4578,6 +4591,136 @@ async function loadCandidates() {
   state.candidates = candidates || [];
   renderCandidates();
 }
+
+// Track records never block the dashboard: if they can't load, cards show "No track record yet".
+async function loadTrackRecordsData() {
+  try {
+    state.trackRecords = await api.request("/api/track-records");
+  } catch (error) {
+    console.warn("[track-records] unavailable", error);
+    state.trackRecords = { available: false };
+  }
+  state.trackRecordIndex = indexTrackRecords(state.trackRecords);
+  renderSignals();
+  renderSignalsHistory();
+  if (state.activeView === "track-records") renderTrackRecordsPage();
+}
+
+function renderSetupTrackRecord(setup) {
+  if (!state.trackRecords) return "";
+  return renderTrackRecordBlock(buildTrackRecordView(state.trackRecords, setup, state.trackRecordIndex), escapeHtml);
+}
+
+function formatTrackRecordDate(isoDate) {
+  if (!isoDate) return "unknown";
+  return new Intl.DateTimeFormat("en-US", { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" }).format(new Date(`${isoDate}T00:00:00Z`));
+}
+
+function renderTrackRecordsPage() {
+  const container = document.querySelector("#track-records-content");
+  if (!container) return;
+  const file = state.trackRecords;
+  if (!file) {
+    container.innerHTML = `<div class="empty-state"><strong>Loading track records...</strong></div>`;
+    return;
+  }
+  if (!file.available) {
+    container.innerHTML = `<div class="empty-state"><strong>Track records are not available right now.</strong><p class="reasoning">Cards show "No track record yet" until they are.</p></div>`;
+    return;
+  }
+  const fidelity = file.fidelity || {};
+  const fee = (value) => `${(Number(value) * 100).toFixed(2)}%`;
+  const approximate = (file.approximateTimeframes || []).join(", ");
+  const { column, direction } = state.trackRecordSort;
+  const rows = sortTrackRecords(file.records || [], column, direction);
+  const sortButton = (key, label) => {
+    const active = column === key;
+    const arrow = active ? (direction === "desc" ? " ↓" : " ↑") : "";
+    return `<button type="button" class="track-record-sort${active ? " active" : ""}" data-track-record-sort="${key}" aria-label="Sort by ${escapeHtml(label)}">${escapeHtml(label)}${arrow}</button>`;
+  };
+  const range = (interval, format) => interval ? `${format(interval.low)} to ${format(interval.high)}` : "n/a";
+  container.innerHTML = `
+    <article class="panel track-records-method">
+      <p class="track-records-lead">A track record shows what happened when SignalForge's current rules were replayed over past market data. It is a count of past outcomes, not a prediction, and it is separate from a setup's match score.</p>
+
+      <h3>What a replay is</h3>
+      <p>We fed past Coinbase candles, one bar at a time, through the same scanner code that runs live, and recorded every setup it would have published. Each setup was then followed on later candles until it reached its take profit, hit its stop loss, or expired. When one candle touched both levels, we counted the stop.</p>
+
+      <h3>What is covered</h3>
+      <p>Setups created from ${escapeHtml(formatTrackRecordDate(file.period?.from))} to ${escapeHtml(formatTrackRecordDate(file.period?.to))} on ${formatTrackCount((file.pairs || []).length)} pairs: ${escapeHtml((file.pairs || []).join(", "))}. Timeframes: ${escapeHtml((file.timeframes || []).join(", "))}. Long setups only, because short setups are switched off in the live scanner.${approximate ? ` Records on ${escapeHtml(approximate)} are marked approximate (see below).` : ""}</p>
+
+      <h3>Fees</h3>
+      <p>Every average subtracts a ${escapeHtml(fee(file.fees?.headlineRoundTrip))} round-trip fee, converted to R as the fee divided by the setup's stop distance. Expired setups pay the fee too. The second line on each card repeats the calculation at ${escapeHtml(fee(file.fees?.retailRoundTrip))} round trip, which is typical for retail taker orders (about 0.6% per side). Tight stops make fees large in R, so short timeframes are hit hardest.</p>
+
+      <h3>Why history may look better than it was</h3>
+      <p>The pairs were chosen because they are listed and liquid on Coinbase today. Coins that faded away or were delisted are missing, and that survivorship tends to flatter the past.</p>
+
+      <h3>How closely the replay matches live</h3>
+      <p>We compared the replay with what the live scanner actually published. ${fidelity.recallCounts ? `From ${escapeHtml(formatTrackRecordDate(fidelity.recallWindow?.from))} to ${escapeHtml(formatTrackRecordDate(fidelity.recallWindow?.to))}, the replay also found ${formatTrackCount(fidelity.recallCounts.matched)} of the ${formatTrackCount(fidelity.recallCounts.liveSignals)} live setups (${escapeHtml(Number(fidelity.recall).toFixed(1))}%).` : ""} ${fidelity.precisionCounts ? `On 15m bars that live verifiably scanned (${escapeHtml(formatTrackRecordDate(fidelity.precisionWindow?.from))} to ${escapeHtml(formatTrackRecordDate(fidelity.precisionWindow?.to))}), ${formatTrackCount(fidelity.precisionCounts.matched)} of ${formatTrackCount(fidelity.precisionCounts.replaySignalsOnScannedBars)} replay setups matched a live one (${escapeHtml(Number(fidelity.precision).toFixed(1))}%).` : ""} ${fidelity.fiveMinuteNote ? escapeHtml(fidelity.fiveMinuteNote) : ""}</p>
+
+      <h3>How to read a record</h3>
+      <ul>
+        <li><strong>Past cases</strong> counts setups that reached their target or their stop. Expired setups are listed separately.</li>
+        <li><strong>Won</strong> is the share of past cases that reached the target. <strong>Break-even needs</strong> is the win rate the setup's reward-to-risk requires just to break even.</li>
+        <li><strong>Average R per trade</strong> is the average result in units of the risk taken, after fees, across every resolved setup including expired ones. The range in the table is a 95% interval from resampling whole calendar months.</li>
+        <li>Each record gets exactly one label, decided in this order: fewer than 30 past cases is "Not enough history yet"; a whole 95% range below zero is "Has lost money historically"; a whole range above zero is "Has made money historically"; anything else is "No clear edge either way".</li>
+      </ul>
+
+      <p class="track-records-disclaimer"><strong>Past results do not guarantee future results.</strong> Markets change, and your own fills, fees and slippage will differ. SignalForge provides information and tools, not financial advice.</p>
+      <p class="reasoning">Data generated ${escapeHtml(formatTrackRecordDate(String(file.generated_at || "").slice(0, 10)))} from replay commit ${escapeHtml(String(file.harness?.commit || "").slice(0, 7))}. <button type="button" class="inline-trust-link" data-track-records-table-link>See every record</button></p>
+    </article>
+
+    <section class="panel track-records-table-panel" id="track-records-table">
+      <div class="section-title"><div><span class="eyebrow">Every record</span><h3>Track records by setup</h3></div></div>
+      <div class="track-records-sortbar" role="group" aria-label="Sort records">Sort by: ${sortButton("n", "Past cases")} · ${sortButton("winRate", "Won")} · ${sortButton("avgR", "Average R after fees")}</div>
+      <div class="track-records-table-wrap">
+        <table class="track-records-table">
+          <thead>
+            <tr>
+              <th scope="col">Setup</th>
+              <th scope="col">${sortButton("n", "Past cases")}</th>
+              <th scope="col">Expired</th>
+              <th scope="col">${sortButton("winRate", "Won")}</th>
+              <th scope="col">Break-even</th>
+              <th scope="col">${sortButton("avgR", "Average R after fees")}</th>
+              <th scope="col">At retail fees</th>
+              <th scope="col">By year</th>
+              <th scope="col">Label</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map((record) => `
+              <tr class="${record.key === "all-setups" ? "track-records-all" : ""}">
+                <th scope="row">${escapeHtml(record.key === "all-setups" ? "All setups" : `${record.strategy} · ${record.direction} · ${record.timeframe}`)}${record.approximate ? ` <span class="track-record-approx">approximate</span>` : ""}</th>
+                <td data-label="Past cases">${formatTrackCount(record.n)}</td>
+                <td data-label="Expired">${formatTrackCount(record.expired)}</td>
+                <td data-label="Won">${escapeHtml(formatTrackPercent(record.winRate))}<small>${escapeHtml(range(record.winRate95, formatTrackPercent))}</small></td>
+                <td data-label="Break-even">${escapeHtml(formatTrackPercent(record.breakEvenWinRate))}</td>
+                <td data-label="Average R after fees">${escapeHtml(formatTrackR(record.avgR))}<small>${escapeHtml(range(record.avgR95, (value) => formatTrackR(value)))}</small></td>
+                <td data-label="At retail fees">${escapeHtml(file.fees?.retailAvailable === false ? "worse" : formatTrackR(record.retailAvgR))}</td>
+                <td data-label="By year"><small>${(record.byYear || []).map((year) => `${escapeHtml(String(year.year))}: ${escapeHtml(formatTrackR(year.avgR))} (n ${formatTrackCount(year.n)})`).join("<br>")}</small></td>
+                <td data-label="Label"><span class="track-record-label track-record-${escapeHtml(record.label === "Has lost money historically" ? "loss" : record.label === "Has made money historically" ? "gain" : "neutral")}">${escapeHtml(record.label)}</span></td>
+              </tr>`).join("")}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `;
+}
+
+document.addEventListener("click", (event) => {
+  const sort = event.target.closest("[data-track-record-sort]");
+  if (sort) {
+    const column = sort.dataset.trackRecordSort;
+    const current = state.trackRecordSort;
+    state.trackRecordSort = { column, direction: current.column === column && current.direction === "desc" ? "asc" : "desc" };
+    renderTrackRecordsPage();
+    return;
+  }
+  if (event.target.closest("[data-track-records-table-link]")) {
+    document.querySelector("#track-records-table")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+});
 
 async function loadMarketBrief() {
   const { marketBrief } = await api.request("/api/signals/market-brief");
@@ -5932,7 +6075,7 @@ function removeHashParams(names) {
 }
 
 function applyViewState(view, options = {}) {
-  const allowedViews = ["scanner", "watchlist", "alerts", "notifications", "signals", "paper-portfolio", "journal", "backtesting", "performance", "how-it-works", "affiliate", "leaderboard", "profile", "settings", "support", "billing"];
+  const allowedViews = ["scanner", "watchlist", "alerts", "notifications", "signals", "paper-portfolio", "journal", "backtesting", "performance", "how-it-works", "track-records", "affiliate", "leaderboard", "profile", "settings", "support", "billing"];
   if (state.user?.isAdmin) {
     allowedViews.push("admin", "admin-signals", "admin-crypto-markets", "admin-support", "affiliate-admin", "webhook-events", "admin-promo-codes");
   }
@@ -5972,6 +6115,7 @@ function applyViewState(view, options = {}) {
     backtesting: ["Historical strategy research", "Backtesting Lab"],
     performance: ["Outcome analytics", "Performance"],
     "how-it-works": ["Product guide", "How SignalForge Works"],
+    "track-records": ["Methodology", "How we measure track records"],
     affiliate: ["Recurring commissions", "Affiliate Program"],
     leaderboard: ["Community rankings", "Leaderboard"],
     profile: ["Public identity", "Profile"],
@@ -5996,6 +6140,10 @@ function applyViewState(view, options = {}) {
 
   if (normalizedView === "alerts") {
     renderAlerts();
+  }
+
+  if (normalizedView === "track-records") {
+    renderTrackRecordsPage();
   }
 
   if (normalizedView === "admin") {
@@ -8236,6 +8384,7 @@ function renderMobileSignalHistoryCard(signal) {
         <span>${formatDateTime(signal.generatedAt)}</span>
       </div>
       ${renderSignalValidity(signal)}
+      ${renderSetupTrackRecord(signal)}
       <div class="mobile-signal-values" aria-label="Setup levels">
         <div class="setup-levels-heading">Setup levels</div>
         ${renderMobileSignalValue("Entry", formatCurrency(signal.entryPrice))}
@@ -8664,6 +8813,7 @@ function renderScanCard(setup) {
         <strong class="direction setup-direction ${setup.direction}">${escapeHtml(formatSetupDirection(setup.direction))}</strong>
       </div>
       ${renderSignalValidity(setup)}
+      ${renderSetupTrackRecord(setup)}
       <div class="signal-metrics">
         <div><span>Setup type</span><strong>${setup.setupType || "Qualified setup"}</strong></div>
         <div><span>Confidence ${renderConfidenceHelp()}</span><strong>${setup.confidenceScore}%</strong></div>
@@ -8699,6 +8849,7 @@ function renderSignalCard(signal) {
         <strong class="direction setup-direction ${signal.direction}">${escapeHtml(formatSetupDirection(signal.direction))}</strong>
       </div>
       ${renderSignalValidity(signal)}
+      ${renderSetupTrackRecord(signal)}
       <div class="signal-metrics">
         <div><span>Setup type</span><strong>${signal.setupType || "Qualified setup"}</strong></div>
         <div class="setup-levels-heading">Setup levels</div>
@@ -11829,6 +11980,7 @@ function renderUnlockReveal() {
       <div class="target"><span>Take Profit</span><strong>${formatCurrency(signal.takeProfit)}</strong></div>
       <div class="reward"><span>Risk / Reward</span><strong>${Number(signal.riskRewardRatio || 0).toFixed(2)}R</strong></div>
     </section>
+    ${renderSetupTrackRecord(signal)}
     ${renderUnlockSignalModeContent(signal)}
     <div class="unlock-reveal-primary">${renderPaperTradeAction(signal, true)}</div>
     <div class="unlock-reveal-actions">

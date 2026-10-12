@@ -37,6 +37,8 @@ import { startAvoidTradeLearningCleanupJob } from "./modules/signals/setupCandid
 import { startSignalOutcomeTracker } from "./modules/signals/signalOutcomeService.js";
 import { handleSubscriptionRoutes } from "./modules/subscriptions/subscriptionController.js";
 import { handleSupportRoutes } from "./modules/support/supportController.js";
+import { handleTrackRecordRoutes } from "./modules/track-records/trackRecordController.js";
+import { loadTrackRecords } from "./modules/track-records/trackRecordService.js";
 import { handleTesterAccessRoutes } from "./modules/tester-access/testerAccessController.js";
 import { sendError, sendJson } from "./shared/http.js";
 
@@ -108,6 +110,7 @@ const server = createServer(async (req, res) => {
       (await handlePaperTradingRoutes(req, res, url.pathname, url)) ||
       (await handleSubscriptionRoutes(req, res, url.pathname)) ||
       (await handleSupportRoutes(req, res, url.pathname, url)) ||
+      (await handleTrackRecordRoutes(req, res, url.pathname)) ||
       (await handleTesterAccessRoutes(req, res, url.pathname)) ||
       (await handleMarketDataRoutes(req, res, url.pathname, url)) ||
       (await handleIntelligenceRoutes(req, res, url.pathname)) ||
@@ -190,6 +193,7 @@ function safeServerReason(error) {
 
 logStripeConfiguration();
 logEmailConfiguration();
+loadTrackRecords();
 await verifyDatabaseConnection();
 await runPendingMigrations();
 await verifySessionSchema();

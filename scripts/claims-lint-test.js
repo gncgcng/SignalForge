@@ -36,6 +36,7 @@ export function userFacingSources() {
   return [
     ...htmlFiles,
     "public/app.js", // app copy, tooltips, signal cards and the legal-text renderer (legalDocuments)
+    "public/trackRecords.js", // track-record card wording
     "public/manifest.json",
     "src/modules/notifications/emailTemplates.js",
     "src/modules/notifications/notificationService.js" // Telegram message templates

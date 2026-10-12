@@ -233,7 +233,7 @@ const checks = {
     styles.includes("@media (max-width: 480px)") &&
     styles.includes("width: min(calc(100vw - 32px), 480px)"),
   pwaReceivesFix:
-    worker.includes('const CACHE_VERSION = "signalforge-static-v38-email-legal-links-001"') &&
+    worker.includes('const CACHE_VERSION = "signalforge-static-v39-track-records-001"') &&
     worker.includes('"/auth-bootstrap.js"') &&
     worker.includes("CRITICAL_ASSET_PATHS") &&
     worker.includes('fetch(request, { cache: "no-store" })'),
