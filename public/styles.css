@@ -9970,3 +9970,171 @@ polyline {
   color: var(--muted);
   font-size: 0.82rem;
 }
+
+/* Public /research page (server-rendered; reuses the landing styles). */
+.research-body {
+  background: var(--bg);
+}
+
+.research-page {
+  display: block;
+}
+
+.research-nav-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+}
+
+.research-nav-links a {
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.research-nav-links a:hover,
+.research-nav-links .research-nav-cta {
+  color: var(--text);
+}
+
+.research-hero h1 {
+  max-width: 820px;
+  margin: 8px 0 16px;
+  font-size: clamp(2rem, 5vw, 3.2rem);
+  line-height: 1.1;
+}
+
+.research-hero p,
+.research-explainer p,
+.research-why p,
+.research-test p {
+  max-width: 780px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.research-tests {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.research-test {
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.research-test h2 {
+  margin: 6px 0 10px;
+  font-size: 1.15rem;
+}
+
+.research-explainer h2,
+.research-why h2,
+.research-records h2,
+.research-method h2,
+.research-calculator h2 {
+  margin: 18px 0 8px;
+}
+
+.hero-research-link {
+  display: inline-block;
+  margin-top: 12px;
+}
+
+.fee-calculator {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+  max-width: 720px;
+}
+
+.fee-calculator label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.fee-calculator input {
+  height: var(--control-height);
+  padding: 0 var(--control-padding-x);
+  border: 1px solid var(--control-border);
+  border-radius: var(--control-radius);
+  background: var(--control-bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.fee-presets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.fee-presets button {
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.fee-results {
+  max-width: 720px;
+  margin-top: 16px;
+}
+
+.fee-outputs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+
+.fee-outputs div {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.fee-outputs dt {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.fee-outputs dd {
+  margin: 4px 0 0;
+  font-size: 1.2rem;
+  font-weight: 700;
+}
+
+.fee-sentence {
+  margin-top: 12px;
+  line-height: 1.55;
+}
+
+.fee-error {
+  color: #e8a3ae;
+}
+
+@media (max-width: 760px) {
+  .research-tests,
+  .fee-calculator,
+  .fee-outputs {
+    grid-template-columns: 1fr;
+  }
+
+  .research-nav-links {
+    gap: 10px;
+    font-size: 0.86rem;
+  }
+}

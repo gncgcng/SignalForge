@@ -39,6 +39,7 @@ import { handleSubscriptionRoutes } from "./modules/subscriptions/subscriptionCo
 import { handleSupportRoutes } from "./modules/support/supportController.js";
 import { handleTrackRecordRoutes } from "./modules/track-records/trackRecordController.js";
 import { loadTrackRecords } from "./modules/track-records/trackRecordService.js";
+import { handleResearchPage, loadResearchData } from "./modules/research/researchController.js";
 import { handleTesterAccessRoutes } from "./modules/tester-access/testerAccessController.js";
 import { sendError, sendJson } from "./shared/http.js";
 
@@ -72,6 +73,11 @@ const server = createServer(async (req, res) => {
     }, {
       "cache-control": "no-store"
     });
+  }
+
+  // The public research page is server-rendered from committed files: no session, no database.
+  if (handleResearchPage(req, res, url.pathname)) {
+    return;
   }
 
   // Static boot assets must never depend on PostgreSQL session availability.
@@ -194,6 +200,7 @@ function safeServerReason(error) {
 logStripeConfiguration();
 logEmailConfiguration();
 loadTrackRecords();
+loadResearchData();
 await verifyDatabaseConnection();
 await runPendingMigrations();
 await verifySessionSchema();

@@ -10,6 +10,7 @@ const {
   telegramPreferenceMatchesSetup
 } = await import("../src/modules/notifications/notificationService.js");
 const { sendTelegramMessage } = await import("../src/modules/notifications/telegramClient.js");
+const { loadTrackRecords } = await import("../src/modules/track-records/trackRecordService.js");
 
 const migration = readFileSync(new URL("../migrations/005_telegram_notifications.sql", import.meta.url), "utf8");
 const repositories = readFileSync(new URL("../src/db/repositories.js", import.meta.url), "utf8");
@@ -64,6 +65,24 @@ const setup = {
 };
 const message = formatTelegramSignalMessage(setup);
 const replyMarkup = formatTelegramSignalReplyMarkup(setup);
+
+// Track record line: same strategy + direction + timeframe mapping as the cards, from the committed file.
+const committedTrackRecords = loadTrackRecords();
+const momentum = committedTrackRecords.records.find((record) => record.key === "momentum breakout|long|15m");
+const momentumMessage = formatTelegramSignalMessage({ ...setup, setupType: "Momentum breakout", timeframe: "15m" }, { trackRecords: committedTrackRecords });
+const expectedMomentumLine = `Track record: ${momentum.label.charAt(0).toLowerCase()}${momentum.label.slice(1)} · won ${Math.round(momentum.winRate)}% (break-even ${Math.round(momentum.breakEvenWinRate)}%) · −${Math.abs(momentum.avgR).toFixed(2)}R after fees`;
+const lines = (text) => text.split("\n");
+if (!lines(momentumMessage).includes(expectedMomentumLine)) {
+  throw new Error(`Telegram track line missing: ${expectedMomentumLine}\n${momentumMessage}`);
+}
+const unmatchedMessage = formatTelegramSignalMessage({ ...setup, setupType: "Range bounce", timeframe: "4h" }, { trackRecords: committedTrackRecords });
+if (!lines(unmatchedMessage).includes("Track record: none yet")) throw new Error("Unmatched setup must say 'Track record: none yet'");
+if (!lines(message).includes("Track record: none yet")) throw new Error("Without loaded records the line must say 'Track record: none yet'");
+// A short never carries a track record line (as on the cards). Whether shorts are sent at all is the admin
+// direction:short setting (covered by admin-disabled-group-block-test), not the template's job.
+const shortMessage = formatTelegramSignalMessage({ ...setup, setupType: "Momentum breakout", timeframe: "15m", direction: "short" }, { trackRecords: committedTrackRecords });
+if (lines(shortMessage).some((line) => line.startsWith("Track record:"))) throw new Error(`A short alert must not carry a track record line:\n${shortMessage}`);
+console.log(`[telegram-test] example alert:\n${momentumMessage}`);
 let telegramRequest;
 
 globalThis.fetch = async (url, options) => {

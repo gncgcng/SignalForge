@@ -1,4 +1,4 @@
-const CACHE_VERSION = "signalforge-static-v39-track-records-001";
+const CACHE_VERSION = "signalforge-static-v40-research-001";
 const OFFLINE_URL = "/offline.html";
 const CRITICAL_ASSET_PATHS = new Set([
   "/index.html",
@@ -69,11 +69,15 @@ self.addEventListener("fetch", (event) => {
   }
 
   if (request.mode === "navigate") {
+    // Only the app shell is cached as /index.html; other pages (e.g. /research) are server-rendered documents.
+    const isAppShell = url.pathname === "/" || url.pathname === "/index.html";
     event.respondWith(
       fetch(request)
         .then((response) => {
-          const copy = response.clone();
-          caches.open(CACHE_VERSION).then((cache) => cache.put("/index.html", copy));
+          if (isAppShell && response.ok) {
+            const copy = response.clone();
+            caches.open(CACHE_VERSION).then((cache) => cache.put("/index.html", copy));
+          }
           return response;
         })
         .catch(() => caches.match(OFFLINE_URL))

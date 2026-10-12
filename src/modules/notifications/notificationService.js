@@ -9,6 +9,8 @@ import {
 } from "../../db/repositories.js";
 import { sendTelegramMessage } from "./telegramClient.js";
 import { formatSignalValidityWindow } from "../signals/signalValidityService.js";
+import { getTrackRecords } from "../track-records/trackRecordService.js";
+import { formatTrackRecordAlertLine } from "../../../public/trackRecords.js";
 
 const directions = new Set(["long", "short", "both"]);
 const timeframes = new Set(["5m", "15m", "1h", "4h"]);
@@ -195,7 +197,10 @@ export function evaluateTelegramSignalEligibility(settings, favoriteSymbols, set
   };
 }
 
-export function formatTelegramSignalMessage(setup) {
+export function formatTelegramSignalMessage(setup, { trackRecords = getTrackRecords() } = {}) {
+  // Same strategy + direction + timeframe mapping as the setup cards. A short gets no line at all, as on the cards;
+  // shorts are blocked by the admin direction:short setting, not here.
+  const trackRecordLine = formatTrackRecordAlertLine(trackRecords, setup);
   const confirmations = summarizeConfirmations(setup.confirmations || []);
   const passed = confirmations.filter((item) => item.passed).map((item) => item.name);
   const reason = passed.length
@@ -215,6 +220,7 @@ export function formatTelegramSignalMessage(setup) {
     `Setup: ${setup.setupType || "Qualified setup"}`,
     `Valid for: ${formatSignalValidityWindow(setup.timeframe)}`,
     "",
+    ...(trackRecordLine ? [trackRecordLine, ""] : []),
     "Preview reason:",
     reason,
     "",

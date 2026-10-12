@@ -1,0 +1,77 @@
+BTC / ETH in-or-out study - phase DEV - rules R1, R2, R3, R4, R5 x BTC-USD, ETH-USD fixed in docs/research/in-out-spec.md
+Data: Coinbase Exchange daily candles from the daily trend cache (asOf 2026-10-11); first candle BTC 2016-01-01, ETH 2016-05-18.
+Costs: base 0.30% per switch (fee 0.25% + slippage 0.05%); stress 0.65% (reported, not judged). Cash earns 0%. Bootstrap 5000 month-block resamples, seed 20261012.
+
+DEVELOPMENT 2016-01-01 -> 2021-12-31 (candles from 2022 not loaded); each cell starts when its rule's warm-up ends
+R1 BTC-USD 2016-07-19 -> 2021-12-31  ->  FAIL
+  rule: CAGR 82.0% maxDD 71.2% Sharpe 1.25 Calmar 1.15 | in market 66.8% | 38 switches (7.0/yr) | longest out 384d | P(Sharpe > hold) 0.290
+  hold: CAGR 117.0% maxDD 83.8% Sharpe 1.38 Calmar 1.40
+  stress fees (0.65%/switch): CAGR 77.6% maxDD 72.0% Sharpe 1.21 Calmar 1.08
+  years rule / hold: 2016 44% / 44%, 2017 1324% / 1324%, 2018 -59% / -73%, 2019 54% / 94%, 2020 169% / 305%, 2021 -24% / 59%
+  rule: maxDD <= 60% of hold NO | Sharpe >= hold & P >= 0.80 NO | Calmar >= 1.5x hold NO | <= 12 switches/yr yes
+R2 BTC-USD 2016-04-10 -> 2021-12-31  ->  FAIL
+  rule: CAGR 124.9% maxDD 66.9% Sharpe 1.61 Calmar 1.87 | in market 65.6% | 70 switches (12.2/yr) | longest out 150d | P(Sharpe > hold) 0.727
+  hold: CAGR 127.3% maxDD 83.8% Sharpe 1.44 Calmar 1.52
+  stress fees (0.65%/switch): CAGR 115.4% maxDD 69.1% Sharpe 1.54 Calmar 1.67
+  years rule / hold: 2016 89% / 132%, 2017 948% / 1324%, 2018 -49% / -73%, 2019 130% / 94%, 2020 159% / 305%, 2021 72% / 59%
+  rule: maxDD <= 60% of hold NO | Sharpe >= hold & P >= 0.80 NO | Calmar >= 1.5x hold NO | <= 12 switches/yr NO
+R3 BTC-USD 2016-07-19 -> 2021-12-31  ->  FAIL
+  rule: CAGR 97.7% maxDD 72.5% Sharpe 1.33 Calmar 1.35 | in market 67.5% | 9 switches (1.7/yr) | longest out 389d | P(Sharpe > hold) 0.416
+  hold: CAGR 117.0% maxDD 83.8% Sharpe 1.38 Calmar 1.40
+  stress fees (0.65%/switch): CAGR 96.6% maxDD 72.9% Sharpe 1.32 Calmar 1.32
+  years rule / hold: 2016 44% / 44%, 2017 1324% / 1324%, 2018 -51% / -73%, 2019 66% / 94%, 2020 110% / 305%, 2021 17% / 59%
+  rule: maxDD <= 60% of hold NO | Sharpe >= hold & P >= 0.80 NO | Calmar >= 1.5x hold NO | <= 12 switches/yr yes
+R4 BTC-USD 2016-07-19 -> 2021-12-31  ->  FAIL
+  rule: CAGR 96.7% maxDD 68.2% Sharpe 1.37 Calmar 1.42 | in market 67.3% | 22 switches (4.0/yr) | longest out 384d | P(Sharpe > hold) 0.470
+  hold: CAGR 117.0% maxDD 83.8% Sharpe 1.38 Calmar 1.40
+  stress fees (0.65%/switch): CAGR 93.9% maxDD 68.8% Sharpe 1.34 Calmar 1.36
+  years rule / hold: 2016 44% / 44%, 2017 1324% / 1324%, 2018 -55% / -73%, 2019 54% / 94%, 2020 166% / 305%, 2021 6% / 59%
+  rule: maxDD <= 60% of hold NO | Sharpe >= hold & P >= 0.80 NO | Calmar >= 1.5x hold NO | <= 12 switches/yr yes
+R5 BTC-USD 2016-04-01 -> 2021-12-31  ->  FAIL
+  rule: CAGR 112.9% maxDD 66.8% Sharpe 1.48 Calmar 1.69 | in market 67.4% | 62 switches (10.8/yr) | longest out 121d | P(Sharpe > hold) 0.530
+  hold: CAGR 126.8% maxDD 83.8% Sharpe 1.44 Calmar 1.51
+  stress fees (0.65%/switch): CAGR 104.9% maxDD 68.2% Sharpe 1.42 Calmar 1.54
+  years rule / hold: 2016 96% / 134%, 2017 1324% / 1324%, 2018 -46% / -73%, 2019 146% / 94%, 2020 44% / 305%, 2021 44% / 59%
+  rule: maxDD <= 60% of hold NO | Sharpe >= hold & P >= 0.80 NO | Calmar >= 1.5x hold NO | <= 12 switches/yr yes
+R1 ETH-USD 2016-12-06 -> 2021-12-31  ->  FAIL
+  rule: CAGR 217.5% maxDD 81.4% Sharpe 1.70 Calmar 2.67 | in market 66.4% | 31 switches (6.1/yr) | longest out 315d | P(Sharpe > hold) 0.515
+  hold: CAGR 246.3% maxDD 94.0% Sharpe 1.68 Calmar 2.62
+  stress fees (0.65%/switch): CAGR 210.7% maxDD 82.7% Sharpe 1.67 Calmar 2.55
+  years rule / hold: 2016 0% / 21%, 2017 6007% / 8984%, 2018 -35% / -82%, 2019 4% / -2%, 2020 106% / 474%, 2021 310% / 398%
+  rule: maxDD <= 60% of hold NO | Sharpe >= hold & P >= 0.80 NO | Calmar >= 1.5x hold NO | <= 12 switches/yr yes
+R2 ETH-USD 2016-08-28 -> 2021-12-31  ->  FAIL
+  rule: CAGR 155.7% maxDD 64.3% Sharpe 1.51 Calmar 2.42 | in market 62.0% | 74 switches (13.8/yr) | longest out 271d | P(Sharpe > hold) 0.433
+  hold: CAGR 195.8% maxDD 94.0% Sharpe 1.55 Calmar 2.08
+  stress fees (0.65%/switch): CAGR 143.6% maxDD 66.0% Sharpe 1.45 Calmar 2.18
+  years rule / hold: 2016 -11% / -27%, 2017 2596% / 8984%, 2018 -21% / -82%, 2019 51% / -2%, 2020 105% / 474%, 2021 157% / 398%
+  rule: maxDD <= 60% of hold NO | Sharpe >= hold & P >= 0.80 NO | Calmar >= 1.5x hold NO | <= 12 switches/yr NO
+R3 ETH-USD 2016-12-06 -> 2021-12-31  ->  FAIL
+  rule: CAGR 208.3% maxDD 87.4% Sharpe 1.66 Calmar 2.38 | in market 64.8% | 9 switches (1.8/yr) | longest out 374d | P(Sharpe > hold) 0.451
+  hold: CAGR 246.3% maxDD 94.0% Sharpe 1.68 Calmar 2.62
+  stress fees (0.65%/switch): CAGR 206.3% maxDD 87.5% Sharpe 1.66 Calmar 2.36
+  years rule / hold: 2016 0% / 21%, 2017 5629% / 8984%, 2018 -44% / -82%, 2019 -0% / -2%, 2020 121% / 474%, 2021 329% / 398%
+  rule: maxDD <= 60% of hold NO | Sharpe >= hold & P >= 0.80 NO | Calmar >= 1.5x hold NO | <= 12 switches/yr yes
+R4 ETH-USD 2016-12-06 -> 2021-12-31  ->  FAIL
+  rule: CAGR 216.1% maxDD 83.6% Sharpe 1.69 Calmar 2.58 | in market 66.0% | 21 switches (4.1/yr) | longest out 315d | P(Sharpe > hold) 0.512
+  hold: CAGR 246.3% maxDD 94.0% Sharpe 1.68 Calmar 2.62
+  stress fees (0.65%/switch): CAGR 211.5% maxDD 84.5% Sharpe 1.68 Calmar 2.50
+  years rule / hold: 2016 0% / 21%, 2017 6389% / 8984%, 2018 -42% / -82%, 2019 -2% / -2%, 2020 133% / 474%, 2021 298% / 398%
+  rule: maxDD <= 60% of hold NO | Sharpe >= hold & P >= 0.80 NO | Calmar >= 1.5x hold NO | <= 12 switches/yr yes
+R5 ETH-USD 2016-08-19 -> 2021-12-31  ->  FAIL
+  rule: CAGR 171.1% maxDD 76.6% Sharpe 1.56 Calmar 2.23 | in market 62.7% | 75 switches (14.0/yr) | longest out 222d | P(Sharpe > hold) 0.500
+  hold: CAGR 196.4% maxDD 94.0% Sharpe 1.55 Calmar 2.09
+  stress fees (0.65%/switch): CAGR 158.1% maxDD 78.4% Sharpe 1.50 Calmar 2.02
+  years rule / hold: 2016 -18% / -24%, 2017 5580% / 8984%, 2018 -17% / -82%, 2019 47% / -2%, 2020 25% / 474%, 2021 200% / 398%
+  rule: maxDD <= 60% of hold NO | Sharpe >= hold & P >= 0.80 NO | Calmar >= 1.5x hold NO | <= 12 switches/yr NO
+
+50/50 BTC/ETH, rebalanced monthly, no rebalancing cost (information only, not judged):
+  hold  2016-12-06 -> 2021-12-31: CAGR 212.8% maxDD 87.4% Sharpe 1.74 Calmar 2.43
+  R1    2016-12-06 -> 2021-12-31: CAGR 172.1% maxDD 66.9% Sharpe 1.75 Calmar 2.57
+  R2    2016-08-28 -> 2021-12-31: CAGR 173.9% maxDD 55.2% Sharpe 1.85 Calmar 3.15
+  R3    2016-12-06 -> 2021-12-31: CAGR 177.2% maxDD 76.6% Sharpe 1.74 Calmar 2.31
+  R4    2016-12-06 -> 2021-12-31: CAGR 182.0% maxDD 67.1% Sharpe 1.81 Calmar 2.71
+  R5    2016-08-19 -> 2021-12-31: CAGR 163.2% maxDD 70.6% Sharpe 1.74 Calmar 2.31
+
+Development verdicts: R1 BTC-USD FAIL, R2 BTC-USD FAIL, R3 BTC-USD FAIL, R4 BTC-USD FAIL, R5 BTC-USD FAIL, R1 ETH-USD FAIL, R2 ETH-USD FAIL, R3 ETH-USD FAIL, R4 ETH-USD FAIL, R5 ETH-USD FAIL
+Wrote C:\Users\monge\Documents\Codex\2026-05-24\build-a-modern-full-stack-web\.claude\worktrees\htf-alignment-report\docs\research\in-out\dev-results.json before any hold-out candle was loaded.
+Runtime 2.0s; replay cache 753.7 MB.
