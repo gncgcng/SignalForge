@@ -8295,7 +8295,7 @@ function renderMobileSignalAccordion(signal) {
         <p class="reasoning">${escapeHtml(getShortSignalReason(signal))}</p>
       </details>
       <details>
-        <summary>Why this signal?</summary>
+        <summary>Why this setup?</summary>
         <div class="confirmation-list mobile-confirmations">
           ${confirmations.map((item) => `
             <div class="confirmation-item ${item.passed ? "passed" : "failed"}">
