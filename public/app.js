@@ -26,6 +26,15 @@ import {
   renderTrackRecordTableHtml,
   sortTrackRecords
 } from "./trackRecords.js";
+import {
+  OWN_SETUP,
+  checkTrade,
+  formatMoney as formatTradeMoney,
+  formatUnits as formatTradeUnits,
+  prefillFromParams,
+  tradeCheckPrefillParams,
+  trackRecordOptions
+} from "./tradeCheck.js";
 import { formatSignalCountdown, getSignalValidityState } from "./signalValidity.js";
 import {
   addPaperDrawingPoint,
@@ -582,7 +591,7 @@ const legalDocuments = {
     title: "Risk Disclaimer",
     body: `
       <p><strong>Educational tool only. Not financial advice.</strong></p>
-      <p>Trading crypto, commodities, stocks, ETFs, or any other market involves substantial risk. You can lose money. SignalForge confidence scores and setup quality labels describe rule alignment, not a probability of profit.</p>
+      <p>Trading crypto, commodities, stocks, ETFs, or any other market involves substantial risk. You can lose money. SignalForge rule-match scores and setup quality labels describe rule alignment, not a probability of profit.</p>
       <p>Backtests, paper trading, alerts, and historical outcomes may exclude fees, slippage, liquidity constraints, execution quality, and future market changes. Past or simulated performance does not guarantee future results.</p>
       <p>Past results do not guarantee future results. SignalForge provides information and tools, not financial advice.</p>
       <p>Affiliate disclosure: Affiliates may earn commissions from paid subscriptions.</p>
@@ -603,7 +612,7 @@ const defaultSupportIssues = {
   "Billing / Subscription": ["Payment failed", "Subscription not active", "Cancel subscription", "Refund question", "Invoice question"],
   "Credits / Unlocks": ["Credits missing", "Signal charged twice", "Signal did not unlock", "Wrong credit balance"],
   "Telegram Alerts": ["Not receiving alerts", "Telegram not connecting", "Unlock link not opening app", "Duplicate alerts"],
-  "Signals / Scanner": ["Signal looks wrong", "TP/SL issue", "Confidence issue", "Scanner not finding setups"],
+  "Signals / Scanner": ["Signal looks wrong", "TP/SL issue", "Rule match issue", "Scanner not finding setups"],
   "Paper Trading": ["Order did not open", "TP/SL tracking issue", "Balance or P/L issue", "Chart or market data issue"],
   "Affiliate Program": ["Referral not tracked", "Commission missing", "Payout question", "Affiliate link issue"],
   "Bug Report": ["Page error", "Mobile layout issue", "Data not loading", "Unexpected behavior"],
@@ -4337,13 +4346,13 @@ function renderHowItWorksContent() {
 
       <section class="trust-confidence-card">
         <div>
-          <span class="eyebrow">Confidence explained</span>
+          <span class="eyebrow">Rule match explained</span>
           <h2>Rule alignment, not win probability.</h2>
-          <p>Confidence reflects how well a setup matches SignalForge's rules. It is not a probability of profit.</p>
+          <p>Rule match reflects how well a setup matches SignalForge's rules. It is not a chance of winning — see the track record for how this setup has actually done.</p>
         </div>
         <div class="trust-confidence-examples">
-          <article><strong>Higher confidence</strong><span>More required rules aligned and fewer material risk factors were found.</span></article>
-          <article><strong>Lower confidence</strong><span>Fewer confirmations aligned, or the setup carried more unresolved risk.</span></article>
+          <article><strong>Higher rule match</strong><span>More required rules aligned and fewer material risk factors were found.</span></article>
+          <article><strong>Lower rule match</strong><span>Fewer confirmations aligned, or the setup carried more unresolved risk.</span></article>
         </div>
       </section>
 
@@ -4603,6 +4612,10 @@ async function loadTrackRecordsData() {
   renderSignals();
   renderSignalsHistory();
   if (state.activeView === "track-records") renderTrackRecordsPage();
+  if (state.activeView === "trade-check") {
+    renderTradeCheckOptions();
+    renderTradeCheck();
+  }
 }
 
 function renderSetupTrackRecord(setup) {
@@ -4659,6 +4672,150 @@ document.addEventListener("click", (event) => {
   if (event.target.closest("[data-track-records-table-link]")) {
     document.querySelector("#track-records-table")?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
+});
+
+// ---- Trade checker (#trade-check): numbers only, never advice ----
+
+const tradeCheckForm = document.querySelector("#trade-check-form");
+const tradeCheckResults = document.querySelector("#trade-check-results");
+const tradeCheckField = (name) => document.querySelector(`#tc-${name}`);
+const TRADE_CHECK_PREFILL_KEYS = ["direction", "entry", "stop", "target", "targetMode", "setupType", "timeframe", "symbol"];
+
+// Dropdowns come from the track-records file; a wanted value survives the file loading later than the prefill.
+function setTradeCheckSelect(select, value) {
+  if (!select) return;
+  select.dataset.wanted = value ?? "";
+  if ([...select.options].some((option) => option.value === value)) select.value = value;
+}
+
+function renderTradeCheckOptions() {
+  const setupSelect = tradeCheckField("setup");
+  const timeframeSelect = tradeCheckField("timeframe");
+  if (!setupSelect || !timeframeSelect) return;
+  const { setupTypes, timeframes } = trackRecordOptions(state.trackRecords);
+  const wantedSetup = setupSelect.dataset.wanted || setupSelect.value || OWN_SETUP;
+  const wantedTimeframe = timeframeSelect.dataset.wanted ?? timeframeSelect.value ?? "";
+  setupSelect.innerHTML = [
+    `<option value="${OWN_SETUP}">My own setup</option>`,
+    ...setupTypes.map((type) => `<option value="${escapeHtml(type)}">${escapeHtml(type)}</option>`)
+  ].join("");
+  timeframeSelect.innerHTML = [
+    `<option value="">Any</option>`,
+    ...timeframes.map((timeframe) => `<option value="${escapeHtml(timeframe)}">${escapeHtml(timeframe)}</option>`)
+  ].join("");
+  setupSelect.value = [...setupSelect.options].some((option) => option.value === wantedSetup) ? wantedSetup : OWN_SETUP;
+  timeframeSelect.value = [...timeframeSelect.options].some((option) => option.value === wantedTimeframe) ? wantedTimeframe : "";
+}
+
+function syncTradeCheckTargetMode() {
+  const byR = tradeCheckField("target-mode")?.value === "r";
+  document.querySelector("#tc-target-price-label")?.classList.toggle("hidden", byR);
+  document.querySelector("#tc-target-r-label")?.classList.toggle("hidden", !byR);
+}
+
+function applyTradeCheckPrefill(prefill) {
+  if (prefill.direction) tradeCheckField("direction").value = prefill.direction;
+  if (prefill.symbol !== undefined) tradeCheckField("symbol").value = prefill.symbol;
+  if (prefill.entry) tradeCheckField("entry").value = prefill.entry;
+  if (prefill.stop) tradeCheckField("stop").value = prefill.stop;
+  if (prefill.target) {
+    tradeCheckField("target-mode").value = "price";
+    tradeCheckField("target").value = prefill.target;
+  }
+  setTradeCheckSelect(tradeCheckField("setup"), prefill.setupType || OWN_SETUP);
+  setTradeCheckSelect(tradeCheckField("timeframe"), prefill.timeframe || "");
+}
+
+function openTradeCheck() {
+  renderTradeCheckOptions();
+  const prefill = prefillFromParams(parseAppHash(location.hash).params);
+  if (Object.keys(prefill).length) {
+    applyTradeCheckPrefill(prefill);
+    renderTradeCheckOptions();
+    // Applied once; later edits in the form are the user's.
+    removeHashParams(TRADE_CHECK_PREFILL_KEYS);
+  }
+  syncTradeCheckTargetMode();
+  renderTradeCheck();
+}
+
+function readTradeCheckInput() {
+  const value = (name) => tradeCheckField(name)?.value ?? "";
+  return {
+    direction: value("direction"),
+    symbol: value("symbol"),
+    entry: value("entry"),
+    stop: value("stop"),
+    targetMode: value("target-mode"),
+    target: value("target"),
+    targetR: value("target-r"),
+    accountSize: value("account"),
+    riskPercent: value("risk"),
+    feePerSidePct: value("fee"),
+    slippagePerSidePct: value("slippage"),
+    setupType: value("setup"),
+    timeframe: value("timeframe")
+  };
+}
+
+function renderTradeCheck() {
+  if (!tradeCheckResults) return;
+  const input = readTradeCheckInput();
+  const result = checkTrade(input, { trackRecords: state.trackRecords, index: state.trackRecordIndex });
+  if (!result.ok) {
+    tradeCheckResults.innerHTML = `<p class="fee-error" role="alert">${escapeHtml(result.message)}</p>`;
+    return;
+  }
+  const record = result.record;
+  const recordBlock = record
+    ? `<section class="track-record track-record-${escapeHtml(record.tone)}" aria-label="Track record" data-track-record-key="${escapeHtml(record.key)}">
+        <strong class="track-record-heading">${escapeHtml(record.summary)}</strong>
+        ${record.approximate ? `<p class="track-record-note">Approximate: the 5m replay could not be fully checked against live.</p>` : ""}
+        <p class="track-record-detail"><a class="track-record-link" href="#track-records">How we measure this</a></p>
+      </section>`
+    : `<p class="reasoning" data-trade-check-record="none">${escapeHtml(result.direction === "short"
+      ? "Short setups have no published track record."
+      : input.setupType === OWN_SETUP || !input.setupType
+        ? "No track record for your own setup."
+        : "No track record for this setup type and timeframe.")}</p>`;
+  tradeCheckResults.innerHTML = `
+    ${recordBlock}
+    <dl class="fee-outputs trade-check-outputs">
+      <div><dt>Stop distance</dt><dd data-trade-check-output="stopDistance">${result.stopDistancePct.toFixed(2)}%</dd></div>
+      <div><dt>Costs in R</dt><dd data-trade-check-output="costR">${result.costR.toFixed(2)}R</dd></div>
+      <div><dt>Break-even win rate</dt><dd data-trade-check-output="breakEven">${(result.breakEvenWinRate * 100).toFixed(2)}%</dd></div>
+      <div><dt>Position size</dt><dd data-trade-check-output="size">${escapeHtml(formatTradeUnits(result.units))} · ${escapeHtml(formatTradeMoney(result.notional))}</dd></div>
+    </dl>
+    <p class="fee-sentence" data-trade-check-sentence="breakEven">${escapeHtml(result.sentences.breakEven)}</p>
+    <p class="fee-sentence" data-trade-check-sentence="costs">${escapeHtml(result.sentences.costs)}</p>
+    <p class="fee-sentence" data-trade-check-sentence="size">${escapeHtml(result.sentences.size)}</p>
+    <p class="fee-sentence" data-trade-check-sentence="outcomes">${escapeHtml(result.sentences.outcomes)}</p>
+    ${result.leverageWarning ? `<p class="trade-check-warning" role="alert" data-trade-check-sentence="leverage">${escapeHtml(result.leverageWarning)}</p>` : ""}`;
+}
+
+tradeCheckForm?.addEventListener("input", (event) => {
+  if (event.target.matches("select")) event.target.dataset.wanted = event.target.value;
+  if (event.target.id === "tc-target-mode") syncTradeCheckTargetMode();
+  renderTradeCheck();
+});
+tradeCheckForm?.addEventListener("submit", (event) => event.preventDefault());
+tradeCheckForm?.addEventListener("click", (event) => {
+  const preset = event.target.closest("[data-trade-check-fee]");
+  if (!preset) return;
+  tradeCheckField("fee").value = preset.dataset.tradeCheckFee;
+  renderTradeCheck();
+});
+
+document.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-check-trade]");
+  if (!button) return;
+  const id = button.dataset.checkTrade;
+  const signal = state.signals.find((item) => item.id === id) ||
+    (Array.isArray(state.scanResults) ? state.scanResults.find((item) => item.id === id) : null);
+  const params = signal ? tradeCheckPrefillParams(signal) : null;
+  if (!params) return;
+  if (!unlockReveal.classList.contains("hidden")) closeUnlockReveal();
+  navigateTo("trade-check", params);
 });
 
 async function loadMarketBrief() {
@@ -6014,7 +6171,7 @@ function removeHashParams(names) {
 }
 
 function applyViewState(view, options = {}) {
-  const allowedViews = ["scanner", "watchlist", "alerts", "notifications", "signals", "paper-portfolio", "journal", "backtesting", "performance", "how-it-works", "track-records", "affiliate", "leaderboard", "profile", "settings", "support", "billing"];
+  const allowedViews = ["scanner", "watchlist", "alerts", "notifications", "signals", "paper-portfolio", "journal", "backtesting", "performance", "how-it-works", "track-records", "trade-check", "affiliate", "leaderboard", "profile", "settings", "support", "billing"];
   if (state.user?.isAdmin) {
     allowedViews.push("admin", "admin-signals", "admin-crypto-markets", "admin-support", "affiliate-admin", "webhook-events", "admin-promo-codes");
   }
@@ -6055,6 +6212,7 @@ function applyViewState(view, options = {}) {
     performance: ["Outcome analytics", "Performance"],
     "how-it-works": ["Product guide", "How SignalForge Works"],
     "track-records": ["Methodology", "How we measure track records"],
+    "trade-check": ["Trade checker", "Check the numbers before you trade"],
     affiliate: ["Recurring commissions", "Affiliate Program"],
     leaderboard: ["Community rankings", "Leaderboard"],
     profile: ["Public identity", "Profile"],
@@ -6083,6 +6241,10 @@ function applyViewState(view, options = {}) {
 
   if (normalizedView === "track-records") {
     renderTrackRecordsPage();
+  }
+
+  if (normalizedView === "trade-check") {
+    openTradeCheck();
   }
 
   if (normalizedView === "admin") {
@@ -6697,7 +6859,7 @@ function renderSignalsHistory() {
           <th>Stop</th>
           <th>Take profit</th>
           <th>R/R</th>
-          <th>Confidence ${renderConfidenceHelp()}</th>
+          <th>Rule match ${renderConfidenceHelp()}</th>
           <th>Status</th>
           <th>Created</th>
         </tr>
@@ -8335,6 +8497,7 @@ function renderMobileSignalHistoryCard(signal) {
       ${renderRiskCalculator(signal)}
       ${renderPaperTradeAction(signal)}
       ${renderSignalReviewAction(signal)}
+      ${renderCheckTradeAction(signal)}
       ${renderConfidenceSummary(signal)}
       ${state.scannerMode === "advanced" ? renderSignalQuality(signal, { compact: true }) : ""}
       ${renderMobileSignalAccordion(signal)}
@@ -8354,7 +8517,7 @@ function renderMobileSignalValue(label, value) {
 function renderMobileSignalConfidence(confidenceScore) {
   return `
     <div>
-      <span>Confidence ${renderConfidenceHelp()}</span>
+      <span>Rule match ${renderConfidenceHelp()}</span>
       <strong>${Number(confidenceScore || 0)}%</strong>
     </div>
   `;
@@ -8755,7 +8918,7 @@ function renderScanCard(setup) {
       ${renderSetupTrackRecord(setup)}
       <div class="signal-metrics">
         <div><span>Setup type</span><strong>${setup.setupType || "Qualified setup"}</strong></div>
-        <div><span>Confidence ${renderConfidenceHelp()}</span><strong>${setup.confidenceScore}%</strong></div>
+        <div><span>Rule match ${renderConfidenceHelp()}</span><strong>${setup.confidenceScore}%</strong></div>
         <div><span>Risk/reward</span><strong>${setup.riskRewardRatio}:1</strong></div>
         ${state.scannerMode === "advanced" ? `
           <div><span>Validation</span><strong>${setup.validationPassed === false ? "Rejected" : "Passed"}</strong></div>
@@ -8796,7 +8959,7 @@ function renderSignalCard(signal) {
         <div><span>Stop loss</span><strong>${formatCurrency(signal.stopLoss)}</strong></div>
         <div><span>Take profit</span><strong>${formatCurrency(signal.takeProfit)}</strong></div>
         <div><span>Risk/reward</span><strong>${signal.riskRewardRatio}:1</strong></div>
-        <div><span>Confidence ${renderConfidenceHelp()}</span><strong>${signal.confidenceScore}%</strong></div>
+        <div><span>Rule match ${renderConfidenceHelp()}</span><strong>${signal.confidenceScore}%</strong></div>
         ${state.scannerMode === "advanced" ? `
           <div><span>Validation</span><strong>${signal.validationPassed === false ? "Rejected" : "Passed"}</strong></div>
           <div><span>Validation score</span><strong>${Number(signal.validationScore || 100)}/100</strong></div>
@@ -8807,6 +8970,7 @@ function renderSignalCard(signal) {
         <button class="secondary-action" data-signal-details="${key}" type="button">${expanded ? "Hide Details" : "View Details"}</button>
         ${renderPaperTradeAction(signal)}
         ${renderSignalReviewAction(signal)}
+        ${renderCheckTradeAction(signal)}
       </div>
       <div class="signal-details ${expanded ? "" : "hidden"}">
         ${renderModeDetails(signal)}
@@ -8826,14 +8990,14 @@ function renderModeDetails(signal, locked = false) {
           <div><span>Stop loss</span><strong>${formatCurrency(signal.stopLoss)}</strong></div>
           <div><span>Take profit</span><strong>${formatCurrency(signal.takeProfit)}</strong></div>
           <div><span>Risk/reward</span><strong>${signal.riskRewardRatio}:1</strong></div>
-          <div><span>Confidence ${renderConfidenceHelp()}</span><strong>${signal.confidenceScore}%</strong></div>
+          <div><span>Rule match ${renderConfidenceHelp()}</span><strong>${signal.confidenceScore}%</strong></div>
         </div>`}
         <section class="signal-transparency">
           <h4>${locked ? "Why this setup?" : "Why this setup?"}</h4>
           <p class="reasoning">${escapeHtml(getShortSignalReason(signal))}</p>
           <div class="signal-disclaimer">
             <strong>Educational tool only. Not financial advice.</strong>
-            <span>Confidence reflects rule alignment and setup quality. It is not a probability of profit.</span>
+            <span>Rule match reflects rule alignment and setup quality. It is not a chance of winning.</span>
           </div>
         </section>
         ${locked ? "" : renderRiskEngineCard(signal)}
@@ -9142,7 +9306,7 @@ function renderSignalConfluence(signal) {
         <strong>${score}/100</strong>
         <span class="alignment-badge ${getAlignmentClass(badge)}">${escapeHtml(badge || "Partial Alignment")}</span>
       </div>
-      <p class="reasoning">${escapeHtml(explanation || "Higher-timeframe evidence was included in confidence and quality scoring.")}</p>
+      <p class="reasoning">${escapeHtml(explanation || "Higher-timeframe evidence was included in rule-match and quality scoring.")}</p>
     </section>
   `;
 }
@@ -9151,6 +9315,12 @@ function getAlignmentClass(badge) {
   if (badge === "Full Alignment") return "full";
   if (badge === "Countertrend") return "countertrend";
   return "partial";
+}
+
+// "Check this trade": opens the trade checker with this card's levels, setup type and timeframe. Longs only.
+function renderCheckTradeAction(signal) {
+  if (!tradeCheckPrefillParams(signal)) return "";
+  return `<button class="secondary-action" type="button" data-check-trade="${escapeHtml(signal.id)}">Check this trade</button>`;
 }
 
 function renderPaperTradeAction(signal, primary = false) {
@@ -9192,19 +9362,19 @@ function renderConfidenceSummary(signal) {
   const passed = confirmations.filter((item) => item.passed).length;
   return `
     <section class="unlocked-confidence-summary">
-      <span>Confidence summary ${renderConfidenceHelp()}</span>
+      <span>Rule match summary ${renderConfidenceHelp()}</span>
       <strong>${escapeHtml(getConfidenceBand(signal.confidenceScore))} · ${Number(signal.confidenceScore || 0)}%</strong>
-      <small>${passed}/${confirmations.length} confirmations passed. Confidence reflects calibrated setup alignment, not probability of profit.</small>
+      <small>${passed}/${confirmations.length} confirmations passed. Rule match reflects calibrated setup alignment. It is not a chance of winning.</small>
     </section>
   `;
 }
 
 function renderConfidenceHelp() {
   return `
-    <span class="confidence-help" tabindex="0" aria-label="About SignalForge confidence">
+    <span class="confidence-help" tabindex="0" aria-label="About the rule match">
       <span aria-hidden="true">i</span>
       <span class="confidence-tooltip" role="tooltip">
-        How closely the market matches this setup's rules. It is not a probability of profit.
+        How closely the market matches this setup's rules. It is not a chance of winning — see the track record for how this setup has actually done.
         <button type="button" data-how-it-works-link>Learn more</button>
       </span>
     </span>`;
@@ -9239,7 +9409,7 @@ function renderSignalQuality(signal, { compact = false } = {}) {
       `).join("")}
     </div>
     <div class="signal-quality-explanation">
-      <section><strong>Why confidence is high</strong>${renderQualityReasonList(quality.strengths, "No strong category explanation is available yet.")}</section>
+      <section><strong>Why the rule match is high</strong>${renderQualityReasonList(quality.strengths, "No strong category explanation is available yet.")}</section>
       <section><strong>Risk factors</strong>${renderQualityReasonList(quality.risks, "No material weak category was recorded.")}</section>
     </div>
   `;
@@ -9305,7 +9475,7 @@ function getSignalQualityData(signal) {
     categories,
     strengths: list.filter((item) => ["strong", "good"].includes(item.status)).map((item) => item.reason).slice(0, 4),
     risks: list.filter((item) => ["fair", "weak", "missing", "failed", "limited"].includes(item.status)).map((item) => item.reason).slice(0, 4),
-    confidenceExplanation: "Confidence reflects setup alignment after historical calibration. It is not a probability of profit."
+    confidenceExplanation: "Rule match reflects setup alignment after historical calibration. It is not a chance of winning."
   };
 }
 
@@ -9356,7 +9526,7 @@ function renderUnlockedSignalDetails(signal) {
         <button class="secondary-action view-advanced-details" type="button" data-signal-view-mode="advanced">View advanced details</button>
         <div class="signal-disclaimer">
           <strong>Educational analysis only. Not financial advice.</strong>
-          <span>Confidence reflects rule alignment and setup quality. It is not a guarantee. <button class="inline-trust-link" type="button" data-how-it-works-link>Learn how signals work</button></span>
+          <span>Rule match reflects rule alignment and setup quality. It is not a chance of winning. <button class="inline-trust-link" type="button" data-how-it-works-link>Learn how signals work</button></span>
         </div>
       </div>`;
   }
@@ -9418,13 +9588,13 @@ function renderSignalTransparency(signal) {
     <section class="signal-transparency">
       <h4>Why this setup?</h4>
       <div class="confidence-breakdown">
-        <span>Confidence ${confidence}%</span>
-        <div class="confidence-track" aria-label="${confidence}% confidence">
+        <span>Rule match ${confidence}%</span>
+        <div class="confidence-track" aria-label="${confidence}% rule match">
           <span style="width: ${Math.min(100, Math.max(0, confidence))}%"></span>
         </div>
         <strong>${passedCount}/${totalCount} checks · ${alignment}% aligned</strong>
       </div>
-      <p class="reasoning">Confidence summarizes rule alignment and setup quality. It is not a forecast or probability of profit.</p>
+      <p class="reasoning">Rule match summarizes rule alignment and setup quality. It is not a forecast or a chance of winning.</p>
       ${renderAiAnalyst(signal)}
       <div class="confirmation-list">
         ${confirmations.map((item) => `
@@ -9459,7 +9629,7 @@ function renderLearningInsight(signal) {
     <section class="advanced-explanation learning-insight ${escapeHtml(insight.mode || "neutral")}">
       <div class="smc-heading">
         <span>Historical learning insight</span>
-        <strong>${Number(insight.adjustment || 0) > 0 ? "+" : ""}${Number(insight.adjustment || 0)} confidence</strong>
+        <strong>${Number(insight.adjustment || 0) > 0 ? "+" : ""}${Number(insight.adjustment || 0)} rule match</strong>
       </div>
       <p class="reasoning">${escapeHtml(insight.message)}</p>
       <span class="muted">${formatInteger(insight.sampleSize || 0)} similar completed signal${Number(insight.sampleSize || 0) === 1 ? "" : "s"} considered. Educational context only.</span>
@@ -9710,7 +9880,7 @@ function renderWatchlist() {
             </select>
           </label>
           <label>
-            Minimum confidence
+            Minimum rule match
             <input data-alert-confidence type="number" min="0" max="100" step="1" value="${preference.minimumConfidence}" />
           </label>
         </div>
@@ -9746,7 +9916,7 @@ function renderAlerts() {
         </div>
       </div>
       <div class="signal-metrics">
-        <div><span>Confidence ${renderConfidenceHelp()}</span><strong>${alert.confidenceScore}%</strong></div>
+        <div><span>Rule match ${renderConfidenceHelp()}</span><strong>${alert.confidenceScore}%</strong></div>
         <div><span>Risk/reward</span><strong>${alert.riskRewardRatio}:1</strong></div>
       </div>
       <p class="reasoning">${escapeHtml(displayReasoning(alert.reasoning))}</p>
@@ -11537,7 +11707,7 @@ function getOnboardingSteps() {
     {
       id: "alerts",
       title: "Choose alert preferences",
-      description: "Set timeframes, direction, alert scope, and minimum confidence.",
+      description: "Set timeframes, direction, alert scope, and minimum rule match.",
       done: telegramPreferencesChosen,
       action: "preferences",
       cta: telegramPreferencesChosen ? "Review alerts" : "Choose preferences"
@@ -11905,9 +12075,10 @@ function renderUnlockReveal() {
         </div>
         <strong class="direction setup-direction ${signal.direction}">${escapeHtml(formatSetupDirection(signal.direction))}</strong>
       </div>
+      ${renderSetupTrackRecord(signal)}
       <div class="unlock-reveal-tags">
         <span>${escapeHtml(signal.timeframe)}</span>
-        <span>${escapeHtml(confidenceBand)} · ${Number(signal.confidenceScore || 0)}%</span>
+        <span>Rule match: ${Number(signal.confidenceScore || 0)}% (${escapeHtml(confidenceBand)})</span>
         <span>${escapeHtml(signal.setupType || "Qualified setup")}</span>
       </div>
       ${renderSignalValidity(signal, { compact: true })}
@@ -11919,11 +12090,11 @@ function renderUnlockReveal() {
       <div class="target"><span>Take Profit</span><strong>${formatCurrency(signal.takeProfit)}</strong></div>
       <div class="reward"><span>Risk / Reward</span><strong>${Number(signal.riskRewardRatio || 0).toFixed(2)}R</strong></div>
     </section>
-    ${renderSetupTrackRecord(signal)}
     ${renderUnlockSignalModeContent(signal)}
     <div class="unlock-reveal-primary">${renderPaperTradeAction(signal, true)}</div>
     <div class="unlock-reveal-actions">
       ${renderSignalReviewAction(signal)}
+      ${renderCheckTradeAction(signal)}
       <button class="secondary-action" type="button" data-unlock-view-analysis>View full analysis</button>
       <button class="secondary-action" type="button" data-copy-signal-levels>Copy levels</button>
       <button class="text-action" type="button" data-unlock-reveal-close>Close</button>

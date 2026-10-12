@@ -77,6 +77,11 @@ if (!lines(momentumMessage).includes(expectedMomentumLine)) {
 }
 const unmatchedMessage = formatTelegramSignalMessage({ ...setup, setupType: "Range bounce", timeframe: "4h" }, { trackRecords: committedTrackRecords });
 if (!lines(unmatchedMessage).includes("Track record: none yet")) throw new Error("Unmatched setup must say 'Track record: none yet'");
+// The record comes before the rule match, so the rule match isn't read as a chance of winning; no "Confidence" wording.
+if (lines(momentumMessage).indexOf(expectedMomentumLine) >= lines(momentumMessage).indexOf("Rule match: 86% (Good match)")) {
+  throw new Error(`The track record line must come before the rule match line:\n${momentumMessage}`);
+}
+if (/confidence/i.test(momentumMessage)) throw new Error(`Alerts must say "Rule match", not "Confidence":\n${momentumMessage}`);
 if (!lines(message).includes("Track record: none yet")) throw new Error("Without loaded records the line must say 'Track record: none yet'");
 // A short never carries a track record line (as on the cards). Whether shorts are sent at all is the admin
 // direction:short setting (covered by admin-disabled-group-block-test), not the template's job.
@@ -157,8 +162,8 @@ const result = {
     validUntil: "not-a-date"
   }).reason === "invalid_expiration",
   messageIsPreviewOnly: ["Market: BTCUSD", "Provider: Coinbase · BTC-USD", "Timeframe: 1h",
-    "Direction: Long setup", "Confidence: 86% (Good match)", "Setup: Pullback bounce",
-    "It is not a probability of profit.",
+    "Direction: Long setup", "Rule match: 86% (Good match)", "Setup: Pullback bounce",
+    "How closely the market matches this setup's rules. It is not a chance of winning — see the track record for how this setup has actually done.",
     "Preview only. Unlock to view the setup levels."]
     .every((value) => message.includes(value)) &&
     !/Setup Ready|Direction: LONG|Excellent|near-perfect/.test(message),

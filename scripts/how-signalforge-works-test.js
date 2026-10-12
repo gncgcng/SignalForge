@@ -28,9 +28,10 @@ assert.match(app, /Unlocks and credits/);
 assert.match(app, /Paper trading/);
 assert.match(app, /Risk management/);
 assert.match(app, /Learning engine/);
-assert.match(app, /It is not a probability of profit\./);
-// Pivot phase 0: the tooltip says what confidence measures and that it is not a probability of profit.
-assert.match(app, /How closely the market matches this setup's rules\. It is not a probability of profit\./);
+assert.match(app, /It is not a chance of winning/);
+// Pivot phase 2b: the tooltip names the rule match, says it is not a chance of winning, and points to the track record.
+assert.match(app, /How closely the market matches this setup's rules\. It is not a chance of winning — see the track record for how this setup has actually done\./);
+assert.match(app, /<span class="eyebrow">Rule match explained<\/span>/);
 assert.match(app, /function renderMobileSignalConfidence\(/);
 assert.match(app, /New to SignalForge\?[^]*data-how-it-works-link/);
 assert.match(app, /SignalForge is an educational market analysis tool\. It is not financial advice, investment advice, or a guarantee of results\./);

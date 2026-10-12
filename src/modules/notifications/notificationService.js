@@ -197,6 +197,8 @@ export function evaluateTelegramSignalEligibility(settings, favoriteSymbols, set
   };
 }
 
+export const RULE_MATCH_EXPLANATION = "How closely the market matches this setup's rules. It is not a chance of winning — see the track record for how this setup has actually done.";
+
 export function formatTelegramSignalMessage(setup, { trackRecords = getTrackRecords() } = {}) {
   // Same strategy + direction + timeframe mapping as the setup cards. A short gets no line at all, as on the cards;
   // shorts are blocked by the admin direction:short setting, not here.
@@ -216,15 +218,17 @@ export function formatTelegramSignalMessage(setup, { trackRecords = getTrackReco
     `Provider: ${provider}`,
     `Timeframe: ${setup.timeframe}`,
     `Direction: ${formatSetupDirection(setup.direction)}`,
-    `Confidence: ${confidence}% (${getConfidenceTier(confidence)})`,
     `Setup: ${setup.setupType || "Qualified setup"}`,
     `Valid for: ${formatSignalValidityWindow(setup.timeframe)}`,
     "",
-    ...(trackRecordLine ? [trackRecordLine, ""] : []),
+    // The historical record comes before the rule match, so 86% is not read as a chance of winning.
+    ...(trackRecordLine ? [trackRecordLine] : []),
+    `Rule match: ${confidence}% (${getConfidenceTier(confidence)})`,
+    "",
     "Preview reason:",
     reason,
     "",
-    "Confidence is how closely the market matches this setup's rules. It is not a probability of profit.",
+    RULE_MATCH_EXPLANATION,
     "Preview only. Unlock to view the setup levels.",
     "Market conditions may change before the validity window ends.",
     "Educational tool only. Not financial advice."
@@ -267,7 +271,7 @@ function validateSettings(input) {
   }
 
   if (!Number.isInteger(minimumConfidence) || minimumConfidence < 0 || minimumConfidence > 100) {
-    throw validationError("Minimum confidence must be between 0 and 100.");
+    throw validationError("Minimum rule match must be between 0 and 100.");
   }
 
   return {

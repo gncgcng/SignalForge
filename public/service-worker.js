@@ -1,4 +1,4 @@
-const CACHE_VERSION = "signalforge-static-v40-research-001";
+const CACHE_VERSION = "signalforge-static-v41-trade-check-001";
 const OFFLINE_URL = "/offline.html";
 const CRITICAL_ASSET_PATHS = new Set([
   "/index.html",
@@ -9,6 +9,8 @@ const CRITICAL_ASSET_PATHS = new Set([
   "/signalValidity.js",
   "/riskCalculator.js",
   "/trackRecords.js",
+  "/feeCost.js",
+  "/tradeCheck.js",
   "/paperChartUtils.js",
   "/styles.css"
 ]);
@@ -23,6 +25,8 @@ const STATIC_ASSETS = [
   "/signalValidity.js",
   "/riskCalculator.js",
   "/trackRecords.js",
+  "/feeCost.js",
+  "/tradeCheck.js",
   "/paperChartUtils.js",
   "/manifest.json",
   OFFLINE_URL,

@@ -133,7 +133,7 @@ export function renderTrackRecordMethodologyHtml(file, { escapeHtml, tableLinkHt
   const fidelity = file.fidelity || {};
   const approximate = (file.approximateTimeframes || []).join(", ");
   return `
-      <p class="track-records-lead">A track record shows what happened when SignalForge's current rules were replayed over past market data. It is a count of past outcomes, not a prediction, and it is separate from a setup's match score.</p>
+      <p class="track-records-lead">A track record shows what happened when SignalForge's current rules were replayed over past market data. It is a count of past outcomes, not a prediction, and it is separate from a setup's rule match.</p>
 
       ${h("What a replay is")}
       <p>We fed past Coinbase candles, one bar at a time, through the same scanner code that runs live, and recorded every setup it would have published. Each setup was then followed on later candles until it reached its take profit, hit its stop loss, or expired. When one candle touched both levels, we counted the stop.</p>

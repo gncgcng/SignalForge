@@ -6,6 +6,7 @@ export const ROUTE_TO_VIEW = Object.freeze({
   performance: "performance",
   "how-it-works": "how-it-works",
   "track-records": "track-records",
+  "trade-check": "trade-check",
   watchlist: "watchlist",
   alerts: "alerts",
   notifications: "notifications",

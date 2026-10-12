@@ -13,7 +13,7 @@ const result = {
   historyUsesTransparency: app.includes("history-transparency"),
   // Pivot phase 0 renamed the heading so it doesn't read as a recommendation.
   whyThisSignalPresent: app.includes("Why this setup?") && !app.includes("Why this signal?"),
-  confidenceBreakdownPresent: app.includes("Confidence summarizes rule alignment"),
+  confidenceBreakdownPresent: app.includes("Rule match summarizes rule alignment"),
   riskGuidanceIsGeneral: app.includes("Define a consistent maximum loss") &&
     !app.includes("You should risk"),
   requiredConfirmationGroups: ["Trend", "RSI", "ATR", "Support/resistance"]
