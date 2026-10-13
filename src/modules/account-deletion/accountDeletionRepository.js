@@ -20,6 +20,8 @@ export const HARD_DELETE_TABLES = [
   ["paper_orders", "user_id"],
   ["paper_accounts", "user_id"],
   ["trade_journals", "user_id"],
+  // "My trades". The users row is anonymized, not deleted, so ON DELETE CASCADE alone would never fire here.
+  ["real_trades", "user_id"],
   ["tester_access_requests", "user_id"],
   ["scan_result_cache", "user_id"],
   ["setup_discovery_usage", "user_id"],

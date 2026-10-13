@@ -46,6 +46,9 @@ export function userFacingSources() {
     "public/trackRecords.js", // track-record card wording and the shared methodology text
     "public/feeCost.js", // fee-cost calculator sentence
     "public/tradeCheck.js", // trade checker sentences
+    "public/journalStats.js", // My trades: stats panel, labels, comparison line, empty state
+    "public/trackRecordStats.js", // shared label text
+    "src/modules/real-trades/realTradeService.js", // My trades validation messages
     "public/research.js", // /research calculator wiring
     "src/modules/research/researchPage.js", // public /research page template
     "public/manifest.json",
@@ -92,6 +95,19 @@ const { renderResearchPage } = await import("../src/modules/research/researchPag
 const renderedResearch = renderResearchPage({ trackRecords: loadTrackRecords(), summary: loadResearchSummary() });
 violations.push(...findClaimViolations(renderedResearch, "GET /research (rendered)"));
 sources.push("GET /research (rendered)");
+
+// The My trades stats panel is assembled from the user's trades, so lint a rendered panel with a comparison line too.
+const { journalStats, renderJournalStatsHtml } = await import("../public/journalStats.js");
+const { indexTrackRecords } = await import("../public/trackRecords.js");
+const sampleTrades = Array.from({ length: 12 }, (_, i) => ({
+  id: `t${i}`, status: "closed", direction: "long", setupKey: "momentum breakout|long|15m", timeframe: "15m", entryPrice: 100, stopPrice: 99,
+  exitPrice: i < 4 ? 103 : 98, sizeUnits: 1, feesPaid: null, feeRatePct: 0.6, openedAt: `2025-0${(i % 7) + 1}-10T10:00:00.000Z`
+}));
+const trackRecordsForPanel = loadTrackRecords();
+const panelStats = journalStats(sampleTrades, { trackRecords: trackRecordsForPanel, index: indexTrackRecords(trackRecordsForPanel) });
+assert.equal(panelStats.comparisons.length, 1, "the rendered sample includes the comparison line");
+violations.push(...findClaimViolations(renderJournalStatsHtml(panelStats, (value) => String(value)), "#my-trades stats panel (rendered)"));
+sources.push("#my-trades stats panel (rendered)");
 
 if (violations.length) {
   console.error(`Claims lint found ${violations.length} banned phrase(s):`);

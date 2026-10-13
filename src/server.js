@@ -22,6 +22,7 @@ import { startAutoCryptoAlertScanner } from "./modules/alerts/autoScanService.js
 import { handleAffiliateRoutes } from "./modules/affiliates/affiliateController.js";
 import { handleMarketDataRoutes } from "./modules/market-data/marketDataController.js";
 import { handleJournalRoutes } from "./modules/journal/journalController.js";
+import { handleRealTradeRoutes } from "./modules/real-trades/realTradeController.js";
 import { handleIntelligenceRoutes } from "./modules/intelligence/intelligenceController.js";
 import { handleLeaderboardRoutes } from "./modules/leaderboards/leaderboardController.js";
 import { recalculateLeaderboardStats } from "./modules/leaderboards/leaderboardService.js";
@@ -121,6 +122,7 @@ const server = createServer(async (req, res) => {
       (await handleMarketDataRoutes(req, res, url.pathname, url)) ||
       (await handleIntelligenceRoutes(req, res, url.pathname)) ||
       (await handleJournalRoutes(req, res, url.pathname, url)) ||
+      (await handleRealTradeRoutes(req, res, url.pathname)) ||
       (await handleBacktestRoutes(req, res, url.pathname, url)) ||
       (await handlePerformanceRoutes(req, res, url.pathname, url)) ||
       (await handlePromoCodeRoutes(req, res, url.pathname)) ||

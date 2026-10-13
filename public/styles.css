@@ -10173,3 +10173,144 @@ polyline {
   color: var(--muted);
   font-size: 0.82rem;
 }
+
+/* My trades (#my-trades): the user's own track record. Reuses the calculator form and the track-record block. */
+.trade-check-actions,
+.my-trades-form-actions,
+.my-trade-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.my-trades-form-actions {
+  grid-column: 1 / -1;
+  margin-top: 4px;
+}
+
+.my-trades-stats {
+  max-width: 900px;
+  margin-bottom: 16px;
+}
+
+.my-trades-stats .journal-breakdown {
+  margin-top: 16px;
+}
+
+.my-trades-stats .journal-breakdown h3 {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+}
+
+.journal-comparison {
+  margin-top: 10px;
+  font-size: 0.92rem;
+  line-height: 1.55;
+}
+
+.my-trades-form-panel,
+.my-trades-list-panel {
+  margin-bottom: 16px;
+}
+
+.my-trades-form textarea {
+  min-height: 72px;
+  padding: 8px var(--control-padding-x);
+  border: 1px solid var(--control-border);
+  border-radius: var(--control-radius);
+  background: var(--control-bg);
+  color: var(--text);
+  font: inherit;
+  resize: vertical;
+}
+
+.my-trades-notes,
+.my-trades-form .fee-error {
+  grid-column: 1 / -1;
+}
+
+.my-trades-list-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.my-trades-list-header h2 {
+  margin: 0;
+}
+
+.my-trades-list {
+  display: grid;
+  gap: 12px;
+}
+
+.my-trade {
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.my-trade-open {
+  border-left: 3px solid var(--amber);
+}
+
+.my-trade-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.my-trade-tag {
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.my-trade-open-tag {
+  border-color: rgba(248, 193, 74, 0.5);
+  color: var(--amber);
+}
+
+.my-trade-setup,
+.my-trade-times {
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.my-trade-levels,
+.my-trade-times,
+.my-trade-outcome {
+  margin: 6px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.my-trade-estimated {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-style: italic;
+}
+
+.my-trade-notes {
+  margin-top: 6px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.my-trade-confirm-text {
+  color: var(--amber);
+  font-size: 0.86rem;
+}
+
+.my-trade-close-form {
+  margin-top: 12px;
+}

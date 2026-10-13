@@ -79,6 +79,9 @@ export async function seedAccountData(userId, { affiliateId, adminId }) {
     VALUES ($1, $2, 'BTC-USD', '1h', 'long', 'market', 'Open', 1, 100, 90, 120)`, [s("po"), userId]);
   await query(`INSERT INTO paper_trades (id, user_id, saved_signal_id) VALUES ($1, $2, $3)`, [s("pt"), userId, plainSignal]);
   await query(`INSERT INTO trade_journals (paper_trade_id, user_id) VALUES ($1, $2)`, [s("pt"), userId]);
+  await query(`INSERT INTO real_trades (id, user_id, status, market, direction, entry_price, stop_price, size_units, opened_at, exit_price, closed_at)
+    VALUES ($1, $2, 'closed', 'BTC-USD', 'long', 100, 99, 1, now() - interval '1 day', 102, now()),
+           ($3, $2, 'open', 'ETH-USD', 'long', 2400, 2380, 1, now(), NULL, NULL)`, [s("rt_closed"), userId, s("rt_open")]);
   await query(`INSERT INTO tester_access_requests (id, user_id) VALUES ($1, $2)`, [s("tar"), userId]);
   await query(`INSERT INTO scan_result_cache (user_id, scan_key, result_json, expires_at) VALUES ($1, 'k', '{}', now() + interval '1 hour')`, [userId]);
   await query(`INSERT INTO setup_discovery_usage (id, user_id, scan_key, quantity) VALUES ($1, $2, 'k', 1)`, [s("sdu"), userId]);
