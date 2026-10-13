@@ -637,8 +637,9 @@
             <section class="nav-section" data-nav-section="portfolio">
               <button class="nav-section-toggle" type="button" data-nav-section-toggle="portfolio" aria-expanded="true">Portfolio</button>
               <div class="nav-section-links">
+                <a href="#my-trades" data-view-link="my-trades">My trades</a>
                 <a href="#paper-trading" data-view-link="paper-portfolio">Paper Trading</a>
-                <a href="#journal" data-view-link="journal">Journal</a>
+                <a href="#journal" data-view-link="journal">Paper journal</a>
               </div>
             </section>
             <section class="nav-section" data-nav-section="growth">
@@ -1099,6 +1100,44 @@
               </form>
               <div class="trade-check-results" id="trade-check-results" aria-live="polite"></div>
               <p class="reasoning">Educational tool only. Not financial advice. Estimates assume your fills at the entry and stop prices; real fills, funding and slippage can differ.</p>
+            </article>
+          </section>
+
+          <section class="page-view hidden my-trades-view" id="my-trades-view" data-view="my-trades">
+            <div class="my-trades-stats" id="my-trades-stats" aria-live="polite"></div>
+            <article class="panel my-trades-form-panel">
+              <h2 id="my-trades-form-title">Log a trade</h2>
+              <p class="reasoning">Real trades you made. Fees are estimated at your fee rate per side when you leave "Fees paid" empty.</p>
+              <form class="fee-calculator my-trades-form" id="my-trades-form" novalidate>
+                <input id="mt-id" name="id" type="hidden" />
+                <label>Status<select class="sf-select" id="mt-status" name="status"><option value="open">Open</option><option value="closed">Closed</option></select></label>
+                <label>Market<input id="mt-market" name="market" type="text" maxlength="32" autocomplete="off" placeholder="e.g. BTC-USD" /></label>
+                <label>Direction<select class="sf-select" id="mt-direction" name="direction"><option value="long">Long</option><option value="short">Short</option></select></label>
+                <label>Setup type<select class="sf-select" id="mt-setup" name="setupKey"><option value="">My own setup</option></select></label>
+                <label>Timeframe<select class="sf-select" id="mt-timeframe" name="timeframe"><option value="">None</option><option value="5m">5m</option><option value="15m">15m</option><option value="1h">1h</option><option value="4h">4h</option></select></label>
+                <label>Entry price<input id="mt-entry" name="entryPrice" type="number" inputmode="decimal" min="0" step="any" /></label>
+                <label>Stop price<input id="mt-stop" name="stopPrice" type="number" inputmode="decimal" min="0" step="any" /></label>
+                <label>Target price (optional)<input id="mt-target" name="targetPrice" type="number" inputmode="decimal" min="0" step="any" /></label>
+                <label>Size, units<input id="mt-size" name="sizeUnits" type="number" inputmode="decimal" min="0" step="any" /></label>
+                <label>Opened at<input id="mt-opened" name="openedAt" type="datetime-local" /></label>
+                <label class="mt-closed-field hidden">Exit price<input id="mt-exit" name="exitPrice" type="number" inputmode="decimal" min="0" step="any" /></label>
+                <label class="mt-closed-field hidden">Closed at<input id="mt-closed" name="closedAt" type="datetime-local" /></label>
+                <label>Fees paid, $ (optional)<input id="mt-fees" name="feesPaid" type="number" inputmode="decimal" min="0" step="any" /></label>
+                <label>Fee rate per side, %<input id="mt-fee-rate" name="feeRatePct" type="number" inputmode="decimal" min="0" step="0.01" value="0.60" /></label>
+                <label class="my-trades-notes">Notes (optional)<textarea id="mt-notes" name="notes" maxlength="2000" rows="3"></textarea></label>
+                <p class="fee-error hidden" id="my-trades-form-error" role="alert"></p>
+                <div class="my-trades-form-actions">
+                  <button class="primary-action" type="submit" id="my-trades-save">Save trade</button>
+                  <button class="secondary-action hidden" type="button" id="my-trades-cancel">Cancel edit</button>
+                </div>
+              </form>
+            </article>
+            <article class="panel my-trades-list-panel">
+              <div class="my-trades-list-header">
+                <h2>Your trades</h2>
+                <a class="secondary-action" id="my-trades-export" href="/api/trades/export.csv" download="my-trades.csv">Export CSV</a>
+              </div>
+              <div class="my-trades-list" id="my-trades-list"></div>
             </article>
           </section>
 
@@ -1713,7 +1752,7 @@
               <div>
                 <span class="eyebrow danger-eyebrow">Danger zone</span>
                 <h3>Delete account</h3>
-                <p class="reasoning">Permanently deletes your signals, watchlists, alerts, paper trades, journals, Telegram connection and support requests, and signs you out everywhere. Cancelling or deleting your account stops future billing immediately. Charges already made are non-refundable except in the case of a genuine billing error or duplicate charge — see our <button class="inline-trust-link" type="button" data-legal-doc="refund">Refund Policy</button>. Billing and credit records are kept for accounting but no longer identify you. This cannot be undone.</p>
+                <p class="reasoning">Permanently deletes your signals, watchlists, alerts, logged trades (My trades), paper trades, journals, Telegram connection and support requests, and signs you out everywhere. Cancelling or deleting your account stops future billing immediately. Charges already made are non-refundable except in the case of a genuine billing error or duplicate charge — see our <button class="inline-trust-link" type="button" data-legal-doc="refund">Refund Policy</button>. Billing and credit records are kept for accounting but no longer identify you. This cannot be undone.</p>
               </div>
               <button class="link-button danger" id="delete-account-start" type="button">Delete my account…</button>
               <form id="delete-account-form" class="delete-account-form hidden" autocomplete="off">
@@ -2424,7 +2463,7 @@
         var hash = getHashRoute();
         var hashParams = new URLSearchParams(String(window.location.hash || "").split("?")[1] || "");
         var debugEnabled = new URLSearchParams(window.location.search).get("debugAuth") === "1" || hashParams.get("debugAuth") === "1";
-        var protectedRoutes = ["#scanner", "#signals", "#paper-trading", "#backtesting", "#performance", "#track-records", "#trade-check", "#watchlist", "#alerts", "#notifications", "#journal", "#affiliate", "#leaderboard", "#profile", "#settings", "#support", "#billing", "#admin", "#admin-support", "#affiliate-admin", "#webhook-events"];
+        var protectedRoutes = ["#scanner", "#signals", "#paper-trading", "#backtesting", "#performance", "#track-records", "#trade-check", "#my-trades", "#watchlist", "#alerts", "#notifications", "#journal", "#affiliate", "#leaderboard", "#profile", "#settings", "#support", "#billing", "#admin", "#admin-support", "#affiliate-admin", "#webhook-events"];
         var authRoutes = ["#signin", "#signup", "#forgot-password", "#reset-password"];
 
         window.__SIGNALFORGE_BUILD_VERSION__ = buildVersion;

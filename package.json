@@ -58,6 +58,8 @@
     "test:track-records": "node scripts/track-records-test.js",
     "test:fee-cost": "node scripts/fee-cost-test.js",
     "test:trade-check": "node scripts/trade-check-test.js",
+    "test:my-trades": "node scripts/my-trades-test.js",
+    "test:my-trades-db": "node scripts/my-trades-db-test.js",
     "test:research-summary": "node scripts/research-summary-test.js",
     "test:research-page": "node scripts/research-page-test.js",
     "research:export-track-records": "node scripts/research/export-track-records.js",

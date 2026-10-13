@@ -1,33 +1,27 @@
 // Track-record statistics for the setup cards. Pure: no I/O, no clock, seeded randomness only.
 // Inputs are replay-harness records (scripts/replay on research/replay-harness): one resolved signal each, with
 // { strategy, direction, timeframe, createdAtMs, entryPrice, stopLoss, riskReward, outcome: { status, realizedR } }.
-import { wilsonInterval } from "../../weekly-realized-r-decomposition.js";
+import {
+  BOOTSTRAP,
+  LABELS,
+  MIN_CASES,
+  monthBlockBootstrap,
+  seededRandom,
+  trackRecordLabel,
+  wilsonInterval
+} from "../../../public/trackRecordStats.js";
+
+// The label rules, Wilson interval and month-block bootstrap live in public/trackRecordStats.js so the browser can
+// measure a user's own trades ("My trades") with exactly the same rules. Re-exported here unchanged.
+export { BOOTSTRAP, LABELS, MIN_CASES, monthBlockBootstrap, seededRandom, trackRecordLabel };
 
 export const SCHEMA = "signalforge.track-records";
 export const SCHEMA_VERSION = 1;
 export const ALL_SETUPS_KEY = "all-setups";
-export const MIN_CASES = 30;
 export const FEES = Object.freeze({
   headlineRoundTrip: 0.002, // the harness's higher fee setting
   retailRoundTrip: 0.012 // Coinbase retail taker, about 0.6% per side
 });
-// Same defaults as the harness's month-block bootstrap (scripts/research/daily-trend/metrics.js, research/in-out).
-export const BOOTSTRAP = Object.freeze({ samples: 10000, seed: 20261011 });
-
-// Fixed before looking at the output. Evaluated top to bottom; the first match wins.
-export const LABELS = Object.freeze({
-  notEnoughHistory: "Not enough history yet",
-  lostMoney: "Has lost money historically",
-  madeMoney: "Has made money historically",
-  noClearEdge: "No clear edge either way"
-});
-
-export function trackRecordLabel({ n, avgR95 }) {
-  if (!(n >= MIN_CASES)) return LABELS.notEnoughHistory;
-  if (avgR95 && avgR95.high < 0) return LABELS.lostMoney;
-  if (avgR95 && avgR95.low > 0) return LABELS.madeMoney;
-  return LABELS.noClearEdge;
-}
 
 // A round-trip fee as a fraction of price, in R: fee / stop distance (both as fractions of entry). Same formula as
 // the harness's feeInR. Returns null when the stop distance is unusable.
@@ -35,54 +29,6 @@ export function feeInR({ entryPrice, stopLoss }, roundTrip) {
   const entry = Number(entryPrice);
   const stopFraction = Math.abs(entry - Number(stopLoss)) / entry;
   return Number.isFinite(stopFraction) && stopFraction > 0 ? roundTrip / stopFraction : null;
-}
-
-// ---- ported verbatim from the harness helper (research/in-out: scripts/research/daily-trend/metrics.js) ----
-
-// mulberry32: small, fast, fully determined by its seed.
-export function seededRandom(seed) {
-  let state = seed >>> 0;
-  return () => {
-    state = (state + 0x6d2b79f5) >>> 0;
-    let value = state;
-    value = Math.imul(value ^ (value >>> 15), value | 1);
-    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
-    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-function percentile(sorted, p) {
-  const position = (sorted.length - 1) * p;
-  const lower = Math.floor(position);
-  return sorted[lower] + (sorted[Math.min(lower + 1, sorted.length - 1)] - sorted[lower]) * (position - lower);
-}
-
-// 95% percentile interval for the mean R per trade, resampling whole calendar months of entries (months that have
-// trades) with replacement. Trades in one month across products move together; resampling them as a block keeps that.
-export function monthBlockBootstrap(rows, { samples = BOOTSTRAP.samples, seed = BOOTSTRAP.seed } = {}) {
-  const blocks = new Map();
-  for (const row of rows) {
-    const block = blocks.get(row.month) || { sum: 0, count: 0 };
-    block.sum += row.r;
-    block.count += 1;
-    blocks.set(row.month, block);
-  }
-  const list = [...blocks.values()];
-  if (list.length < 2) return null;
-  const random = seededRandom(seed);
-  const means = new Float64Array(samples);
-  for (let sample = 0; sample < samples; sample += 1) {
-    let sum = 0;
-    let count = 0;
-    for (let draw = 0; draw < list.length; draw += 1) {
-      const block = list[Math.floor(random() * list.length)];
-      sum += block.sum;
-      count += block.count;
-    }
-    means[sample] = sum / count;
-  }
-  means.sort();
-  return { low: percentile(means, 0.025), high: percentile(means, 0.975), months: list.length };
 }
 
 // ---- record statistics ----

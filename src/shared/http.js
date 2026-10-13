@@ -1,6 +1,6 @@
-export async function readBody(req) {
+export async function readBody(req, { maxBytes = 1024 * 1024 } = {}) {
   const chunks = [];
-  const maxBodyBytes = 1024 * 1024;
+  const maxBodyBytes = maxBytes;
   let totalBytes = 0;
 
   for await (const chunk of req) {
@@ -20,8 +20,8 @@ export async function readBody(req) {
   return Buffer.concat(chunks).toString("utf8");
 }
 
-export async function readJson(req) {
-  const body = await readBody(req);
+export async function readJson(req, options = {}) {
+  const body = await readBody(req, options);
   try {
     return body ? JSON.parse(body) : {};
   } catch {

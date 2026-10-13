@@ -20,6 +20,7 @@ import {
 import { calculateRiskPosition } from "./riskCalculator.js";
 import {
   buildTrackRecordView,
+  formatR as formatRecordR,
   indexTrackRecords,
   renderTrackRecordBlock,
   renderTrackRecordMethodologyHtml,
@@ -35,6 +36,19 @@ import {
   tradeCheckPrefillParams,
   trackRecordOptions
 } from "./tradeCheck.js";
+import {
+  DEFAULT_FEE_RATE_PCT,
+  EMPTY_STATE,
+  MY_TRADES_PREFILL_KEYS,
+  OWN_SETUP_LABEL,
+  formatMoneySigned,
+  journalStats,
+  myTradesPrefill,
+  myTradesPrefillFromParams,
+  renderJournalStatsHtml,
+  setupLabel,
+  tradeMetrics
+} from "./journalStats.js";
 import { formatSignalCountdown, getSignalValidityState } from "./signalValidity.js";
 import {
   addPaperDrawingPoint,
@@ -583,6 +597,7 @@ const legalDocuments = {
     title: "Privacy Policy",
     body: `
       <p>SignalForge stores account information needed to operate the service, including your email, authentication records, credit balances, saved signals, alerts, journal entries, affiliate attribution, and subscription status.</p>
+      <p>Trades you log in My trades are stored only to show your own statistics. They are never sold or shared. You can export them at any time, and deleting your account deletes them.</p>
       <p>Payment information is handled by Stripe. Telegram alerts require Telegram connection details. Google sign-in is validated on the backend before an account is created or linked.</p>
       <p>We use security and anti-abuse signals such as IP-derived hashes and device fingerprints to protect free trials and subscriptions. We do not sell personal trading history.</p>
     `
@@ -4612,6 +4627,10 @@ async function loadTrackRecordsData() {
   renderSignals();
   renderSignalsHistory();
   if (state.activeView === "track-records") renderTrackRecordsPage();
+  if (state.activeView === "my-trades") {
+    renderMyTradesSetupOptions();
+    renderMyTrades();
+  }
   if (state.activeView === "trade-check") {
     renderTradeCheckOptions();
     renderTradeCheck();
@@ -4790,7 +4809,8 @@ function renderTradeCheck() {
     <p class="fee-sentence" data-trade-check-sentence="costs">${escapeHtml(result.sentences.costs)}</p>
     <p class="fee-sentence" data-trade-check-sentence="size">${escapeHtml(result.sentences.size)}</p>
     <p class="fee-sentence" data-trade-check-sentence="outcomes">${escapeHtml(result.sentences.outcomes)}</p>
-    ${result.leverageWarning ? `<p class="trade-check-warning" role="alert" data-trade-check-sentence="leverage">${escapeHtml(result.leverageWarning)}</p>` : ""}`;
+    ${result.leverageWarning ? `<p class="trade-check-warning" role="alert" data-trade-check-sentence="leverage">${escapeHtml(result.leverageWarning)}</p>` : ""}
+    <div class="trade-check-actions"><button class="secondary-action" type="button" data-save-to-my-trades>Save to My trades</button></div>`;
 }
 
 tradeCheckForm?.addEventListener("input", (event) => {
@@ -4816,6 +4836,349 @@ document.addEventListener("click", (event) => {
   if (!params) return;
   if (!unlockReveal.classList.contains("hidden")) closeUnlockReveal();
   navigateTo("trade-check", params);
+});
+
+// "Save to My trades": the checked trade's planned levels and size open the My trades form as an open trade.
+document.addEventListener("click", (event) => {
+  if (!event.target.closest("[data-save-to-my-trades]")) return;
+  const input = readTradeCheckInput();
+  const result = checkTrade(input, { trackRecords: state.trackRecords, index: state.trackRecordIndex });
+  const prefill = myTradesPrefill(input, result, state.trackRecordIndex || new Map());
+  if (!prefill) return;
+  navigateTo("my-trades", new URLSearchParams(prefill));
+});
+
+// ---- My trades (#my-trades): the user's own track record from real trades they log. Facts only. ----
+
+const myTradesStats = document.querySelector("#my-trades-stats");
+const myTradesForm = document.querySelector("#my-trades-form");
+const myTradesList = document.querySelector("#my-trades-list");
+const myTradesFormError = document.querySelector("#my-trades-form-error");
+const myTradesField = (name) => document.querySelector(`#mt-${name}`);
+state.myTrades = { loaded: false, trades: [], pendingDelete: null, closing: null, confirmEdit: false };
+
+// datetime-local works in local time; the API stores ISO timestamps.
+function toLocalDateTimeValue(iso) {
+  const date = iso ? new Date(iso) : new Date();
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+}
+
+function fromLocalDateTimeValue(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toISOString();
+}
+
+function renderMyTradesSetupOptions() {
+  const select = myTradesField("setup");
+  if (!select) return;
+  const wanted = select.dataset.wanted ?? select.value ?? "";
+  const records = (state.trackRecords?.available ? state.trackRecords.records : [])
+    .filter((record) => record.scope === "setup")
+    .sort((a, b) => a.strategy.localeCompare(b.strategy) || a.direction.localeCompare(b.direction) || a.timeframe.localeCompare(b.timeframe));
+  select.innerHTML = [
+    `<option value="">${escapeHtml(OWN_SETUP_LABEL)}</option>`,
+    ...records.map((record) => `<option value="${escapeHtml(record.key)}">${escapeHtml(`${record.strategy} · ${record.timeframe} · ${record.direction}`)}</option>`)
+  ].join("");
+  select.value = [...select.options].some((option) => option.value === wanted) ? wanted : "";
+}
+
+function syncMyTradesStatus() {
+  const closed = myTradesField("status")?.value === "closed";
+  document.querySelectorAll(".mt-closed-field").forEach((field) => field.classList.toggle("hidden", !closed));
+  if (closed && !myTradesField("closed").value) myTradesField("closed").value = toLocalDateTimeValue();
+}
+
+function setMyTradesFormError(message) {
+  if (!myTradesFormError) return;
+  myTradesFormError.textContent = message || "";
+  myTradesFormError.classList.toggle("hidden", !message);
+}
+
+function resetMyTradesForm() {
+  myTradesForm?.reset();
+  myTradesField("id").value = "";
+  myTradesField("setup").dataset.wanted = "";
+  myTradesField("opened").value = toLocalDateTimeValue();
+  myTradesField("fee-rate").value = DEFAULT_FEE_RATE_PCT.toFixed(2);
+  document.querySelector("#my-trades-form-title").textContent = "Log a trade";
+  document.querySelector("#my-trades-save").textContent = "Save trade";
+  document.querySelector("#my-trades-cancel").classList.add("hidden");
+  state.myTrades.confirmEdit = false;
+  setMyTradesFormError("");
+  renderMyTradesSetupOptions();
+  syncMyTradesStatus();
+}
+
+function fillMyTradesForm(trade) {
+  myTradesField("id").value = trade.id || "";
+  myTradesField("status").value = trade.status || "open";
+  myTradesField("market").value = trade.market || "";
+  myTradesField("direction").value = trade.direction || "long";
+  myTradesField("setup").dataset.wanted = trade.setupKey || "";
+  renderMyTradesSetupOptions();
+  myTradesField("timeframe").value = trade.timeframe || "";
+  myTradesField("entry").value = trade.entryPrice ?? "";
+  myTradesField("stop").value = trade.stopPrice ?? "";
+  myTradesField("target").value = trade.targetPrice ?? "";
+  myTradesField("size").value = trade.sizeUnits ?? "";
+  myTradesField("opened").value = toLocalDateTimeValue(trade.openedAt);
+  myTradesField("exit").value = trade.exitPrice ?? "";
+  myTradesField("closed").value = trade.closedAt ? toLocalDateTimeValue(trade.closedAt) : "";
+  myTradesField("fees").value = trade.feesPaid ?? "";
+  myTradesField("fee-rate").value = trade.feeRatePct ?? DEFAULT_FEE_RATE_PCT.toFixed(2);
+  myTradesField("notes").value = trade.notes || "";
+  syncMyTradesStatus();
+}
+
+function readMyTradesForm() {
+  const value = (name) => myTradesField(name)?.value ?? "";
+  const closed = value("status") === "closed";
+  return {
+    status: value("status"),
+    market: value("market"),
+    direction: value("direction"),
+    setupKey: value("setup") || null,
+    timeframe: value("timeframe") || null,
+    entryPrice: value("entry"),
+    stopPrice: value("stop"),
+    targetPrice: value("target") || null,
+    sizeUnits: value("size"),
+    openedAt: fromLocalDateTimeValue(value("opened")),
+    exitPrice: closed ? value("exit") : null,
+    closedAt: closed ? fromLocalDateTimeValue(value("closed")) : null,
+    feesPaid: value("fees") === "" ? null : value("fees"),
+    feeRatePct: value("fee-rate") === "" ? null : value("fee-rate"),
+    notes: value("notes")
+  };
+}
+
+async function loadMyTrades() {
+  const { trades } = await api.request("/api/trades");
+  state.myTrades.trades = trades || [];
+  state.myTrades.loaded = true;
+  renderMyTrades();
+}
+
+function openMyTrades() {
+  const prefill = myTradesPrefillFromParams(parseAppHash(location.hash).params);
+  if (Object.keys(prefill).length) {
+    resetMyTradesForm();
+    fillMyTradesForm({
+      status: "open",
+      market: prefill.market,
+      direction: prefill.direction,
+      setupKey: prefill.setupKey,
+      timeframe: prefill.timeframe,
+      entryPrice: prefill.entry,
+      stopPrice: prefill.stop,
+      targetPrice: prefill.target,
+      sizeUnits: prefill.size,
+      feeRatePct: prefill.feeRate
+    });
+    // Applied once; later edits in the form are the user's.
+    removeHashParams(MY_TRADES_PREFILL_KEYS);
+    myTradesField("market").focus?.();
+  } else if (!myTradesField("id").value && !myTradesField("entry").value) {
+    resetMyTradesForm();
+  }
+  renderMyTrades();
+  loadMyTrades().catch((error) => {
+    myTradesList.innerHTML = `<div class="empty-state"><strong>My trades unavailable</strong><p class="reasoning">${escapeHtml(error.message)}</p></div>`;
+  });
+}
+
+function renderMyTradeItem(trade) {
+  const metrics = tradeMetrics(trade);
+  const index = state.trackRecordIndex || new Map();
+  const id = escapeHtml(trade.id);
+  const levels = [
+    `Entry ${formatCurrency(trade.entryPrice)}`,
+    `Stop ${formatCurrency(trade.stopPrice)}`,
+    trade.targetPrice != null ? `Target ${formatCurrency(trade.targetPrice)}` : null,
+    `Size ${formatTradeUnits(trade.sizeUnits)}`
+  ].filter(Boolean).join(" · ");
+  const outcome = metrics.closed
+    ? `<p class="my-trade-outcome" data-my-trade-net-r="${metrics.netR.toFixed(3)}">
+        Exit ${escapeHtml(formatCurrency(trade.exitPrice))} · ${escapeHtml(formatRecordR(metrics.netR))} after fees · P&amp;L ${escapeHtml(formatMoneySigned(metrics.pnl))}
+        · fees ${escapeHtml(formatTradeMoney(metrics.fees))}${metrics.feesEstimated ? ` <span class="my-trade-estimated">estimated</span>` : ""}
+      </p>`
+    : "";
+  let actions = `
+    <button class="secondary-action" type="button" data-my-trade-edit="${id}">Edit</button>
+    ${metrics.closed ? "" : `<button class="secondary-action" type="button" data-my-trade-close="${id}">Close trade</button>`}
+    <button class="secondary-action" type="button" data-my-trade-delete="${id}">Delete</button>`;
+  if (state.myTrades.pendingDelete === trade.id) {
+    actions = `
+      <span class="my-trade-confirm-text">Delete this trade? This can't be undone.</span>
+      <button class="danger-button" type="button" data-my-trade-delete-confirm="${id}">Delete trade</button>
+      <button class="secondary-action" type="button" data-my-trade-delete-cancel="${id}">Keep it</button>`;
+  }
+  const closeForm = state.myTrades.closing === trade.id ? `
+    <form class="fee-calculator my-trade-close-form" data-my-trade-close-form="${id}" novalidate>
+      <label>Exit price<input name="exitPrice" type="number" inputmode="decimal" min="0" step="any" required /></label>
+      <label>Closed at<input name="closedAt" type="datetime-local" value="${escapeHtml(toLocalDateTimeValue())}" required /></label>
+      <label>Actual fees, $ (optional)<input name="feesPaid" type="number" inputmode="decimal" min="0" step="any" /></label>
+      <p class="fee-error hidden" data-my-trade-close-error role="alert"></p>
+      <div class="my-trades-form-actions">
+        <button class="primary-action" type="submit">Save close</button>
+        <button class="secondary-action" type="button" data-my-trade-close-cancel="${id}">Cancel</button>
+      </div>
+    </form>` : "";
+  return `
+    <article class="my-trade ${metrics.closed ? "my-trade-closed" : "my-trade-open"}" data-my-trade="${id}">
+      <header class="my-trade-header">
+        <strong>${escapeHtml(trade.market)} · ${trade.direction === "short" ? "Short" : "Long"}</strong>
+        ${metrics.closed ? `<span class="my-trade-tag">Closed</span>` : `<span class="my-trade-tag my-trade-open-tag">Open</span>`}
+        <span class="my-trade-setup">${escapeHtml(setupLabel(trade.setupKey, index))}${!trade.setupKey && trade.timeframe ? ` · ${escapeHtml(trade.timeframe)}` : ""}</span>
+      </header>
+      <p class="my-trade-levels">${escapeHtml(levels)}</p>
+      <p class="my-trade-times">Opened ${escapeHtml(formatDateTime(trade.openedAt))}${trade.closedAt ? ` · closed ${escapeHtml(formatDateTime(trade.closedAt))}` : ""}</p>
+      ${outcome}
+      ${trade.notes ? `<p class="reasoning my-trade-notes">${escapeHtml(trade.notes)}</p>` : ""}
+      <div class="my-trade-actions">${actions}</div>
+      ${closeForm}
+    </article>`;
+}
+
+function renderMyTrades() {
+  if (!myTradesStats || !myTradesList) return;
+  const trades = state.myTrades.trades;
+  if (!state.myTrades.loaded) {
+    myTradesStats.innerHTML = "";
+    myTradesList.innerHTML = `<div class="empty-state"><strong>Loading your trades...</strong></div>`;
+    return;
+  }
+  if (!trades.length) {
+    myTradesStats.innerHTML = `<div class="empty-state my-trades-empty"><strong>${escapeHtml(EMPTY_STATE)}</strong></div>`;
+    myTradesList.innerHTML = `<p class="reasoning">No trades yet.</p>`;
+    return;
+  }
+  const stats = journalStats(trades, { trackRecords: state.trackRecords, index: state.trackRecordIndex || new Map() });
+  myTradesStats.innerHTML = renderJournalStatsHtml(stats, escapeHtml);
+  myTradesList.innerHTML = trades.map(renderMyTradeItem).join("");
+}
+
+async function saveMyTradesForm() {
+  const id = myTradesField("id").value;
+  const body = JSON.stringify(readMyTradesForm());
+  const { trade } = id
+    ? await api.request(`/api/trades/${encodeURIComponent(id)}`, { method: "PATCH", body })
+    : await api.request("/api/trades", { method: "POST", body });
+  resetMyTradesForm();
+  await loadMyTrades();
+  showToast(id ? "Trade updated." : `Trade saved: ${trade.market}.`);
+}
+
+myTradesForm?.addEventListener("input", (event) => {
+  if (event.target.id === "mt-status") syncMyTradesStatus();
+  if (event.target.id === "mt-setup") event.target.dataset.wanted = event.target.value;
+});
+
+myTradesForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  setMyTradesFormError("");
+  const editing = Boolean(myTradesField("id").value);
+  const saveButton = document.querySelector("#my-trades-save");
+  // Editing a saved trade takes a second, deliberate click (no browser confirm dialog).
+  if (editing && !state.myTrades.confirmEdit) {
+    state.myTrades.confirmEdit = true;
+    saveButton.textContent = "Confirm changes";
+    setMyTradesFormError("Press Confirm changes to replace this trade's details.");
+    return;
+  }
+  saveButton.disabled = true;
+  try {
+    await saveMyTradesForm();
+  } catch (error) {
+    setMyTradesFormError(error.message);
+    state.myTrades.confirmEdit = false;
+    saveButton.textContent = editing ? "Save changes" : "Save trade";
+  } finally {
+    saveButton.disabled = false;
+  }
+});
+
+document.querySelector("#my-trades-cancel")?.addEventListener("click", () => resetMyTradesForm());
+
+myTradesList?.addEventListener("click", async (event) => {
+  const find = (attribute) => event.target.closest(`[${attribute}]`)?.getAttribute(attribute);
+  const trade = (id) => state.myTrades.trades.find((item) => item.id === id);
+
+  const editId = find("data-my-trade-edit");
+  if (editId && trade(editId)) {
+    resetMyTradesForm();
+    fillMyTradesForm(trade(editId));
+    document.querySelector("#my-trades-form-title").textContent = "Edit trade";
+    document.querySelector("#my-trades-save").textContent = "Save changes";
+    document.querySelector("#my-trades-cancel").classList.remove("hidden");
+    myTradesForm.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+
+  const closeId = find("data-my-trade-close");
+  if (closeId) {
+    state.myTrades.closing = closeId;
+    state.myTrades.pendingDelete = null;
+    renderMyTrades();
+    return;
+  }
+  if (find("data-my-trade-close-cancel")) {
+    state.myTrades.closing = null;
+    renderMyTrades();
+    return;
+  }
+
+  const deleteId = find("data-my-trade-delete");
+  if (deleteId) {
+    state.myTrades.pendingDelete = deleteId;
+    state.myTrades.closing = null;
+    renderMyTrades();
+    return;
+  }
+  if (find("data-my-trade-delete-cancel")) {
+    state.myTrades.pendingDelete = null;
+    renderMyTrades();
+    return;
+  }
+  const confirmId = find("data-my-trade-delete-confirm");
+  if (confirmId) {
+    try {
+      await api.request(`/api/trades/${encodeURIComponent(confirmId)}`, { method: "DELETE" });
+      state.myTrades.pendingDelete = null;
+      if (myTradesField("id").value === confirmId) resetMyTradesForm();
+      await loadMyTrades();
+      showToast("Trade deleted.");
+    } catch (error) {
+      showToast(error.message);
+    }
+  }
+});
+
+myTradesList?.addEventListener("submit", async (event) => {
+  const form = event.target.closest("[data-my-trade-close-form]");
+  if (!form) return;
+  event.preventDefault();
+  const errorLine = form.querySelector("[data-my-trade-close-error]");
+  const data = new FormData(form);
+  try {
+    await api.request(`/api/trades/${encodeURIComponent(form.dataset.myTradeCloseForm)}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        status: "closed",
+        exitPrice: data.get("exitPrice"),
+        closedAt: fromLocalDateTimeValue(String(data.get("closedAt") || "")),
+        // Left empty, any fees already on the trade stay (or the estimate is used).
+        ...(data.get("feesPaid") === "" ? {} : { feesPaid: data.get("feesPaid") })
+      })
+    });
+    state.myTrades.closing = null;
+    await loadMyTrades();
+    showToast("Trade closed.");
+  } catch (error) {
+    errorLine.textContent = error.message;
+    errorLine.classList.remove("hidden");
+  }
 });
 
 async function loadMarketBrief() {
@@ -6171,7 +6534,7 @@ function removeHashParams(names) {
 }
 
 function applyViewState(view, options = {}) {
-  const allowedViews = ["scanner", "watchlist", "alerts", "notifications", "signals", "paper-portfolio", "journal", "backtesting", "performance", "how-it-works", "track-records", "trade-check", "affiliate", "leaderboard", "profile", "settings", "support", "billing"];
+  const allowedViews = ["scanner", "watchlist", "alerts", "notifications", "signals", "paper-portfolio", "journal", "backtesting", "performance", "how-it-works", "track-records", "trade-check", "my-trades", "affiliate", "leaderboard", "profile", "settings", "support", "billing"];
   if (state.user?.isAdmin) {
     allowedViews.push("admin", "admin-signals", "admin-crypto-markets", "admin-support", "affiliate-admin", "webhook-events", "admin-promo-codes");
   }
@@ -6213,6 +6576,7 @@ function applyViewState(view, options = {}) {
     "how-it-works": ["Product guide", "How SignalForge Works"],
     "track-records": ["Methodology", "How we measure track records"],
     "trade-check": ["Trade checker", "Check the numbers before you trade"],
+    "my-trades": ["Your own track record", "My trades"],
     affiliate: ["Recurring commissions", "Affiliate Program"],
     leaderboard: ["Community rankings", "Leaderboard"],
     profile: ["Public identity", "Profile"],
@@ -6245,6 +6609,10 @@ function applyViewState(view, options = {}) {
 
   if (normalizedView === "trade-check") {
     openTradeCheck();
+  }
+
+  if (normalizedView === "my-trades") {
+    openMyTrades();
   }
 
   if (normalizedView === "admin") {
