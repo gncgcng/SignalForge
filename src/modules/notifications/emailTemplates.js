@@ -40,45 +40,31 @@ export function appLink(path = "/") {
 
 // --- Templates --------------------------------------------------------------------------------
 
-export function buildVerifyEmail({ verificationUrl, trialAvailable = true, expiresInHours = 24 }) {
-  const unlocks = appConfig.freeSignalAllowance;
+export function buildVerifyEmail({ verificationUrl, expiresInHours = 24 }) {
   return renderEmail({
     subject: "Confirm your SignalForge email",
-    preheader: trialAvailable
-      ? `One click to start scanning and activate your ${unlocks} free unlocks.`
-      : "One click to start scanning and unlocking signals.",
+    preheader: "One click to start scanning.",
     heading: "Confirm your email",
     paragraphs: [
       "Thanks for creating a SignalForge account.",
-      trialAvailable
-        ? `Confirm this is your email address to start scanning markets and to activate your ${unlocks} free signal unlocks.`
-        : "Confirm this is your email address to start scanning markets and unlocking signals."
+      "Confirm this is your email address to start scanning markets."
     ],
     button: { label: "Confirm email", url: verificationUrl },
     note: `This link expires in ${hoursLabel(expiresInHours)}. If you didn't create a SignalForge account, you can ignore this email.`
   });
 }
 
-// Sent once the email is verified (email signups) or at signup (Google, already verified), so
-// the account can scan and, with unlocks, unlock signals right now.
-export function buildWelcomeEmail({ username = "", trialGranted = true }) {
-  const unlocks = appConfig.freeSignalAllowance;
+// Sent once the email is verified (email signups) or at signup (Google, already verified).
+export function buildWelcomeEmail({ username = "" }) {
   return renderEmail({
     subject: "Welcome to SignalForge",
-    preheader: trialGranted
-      ? `Your account is ready and your ${unlocks} free signal unlocks are waiting.`
-      : "Your account is ready. Run your first scan.",
+    preheader: "Your account is ready. Run your first scan.",
     heading: "Welcome to SignalForge",
     greeting: username,
-    paragraphs: trialGranted
-      ? [
-          `Your account is ready, and you have ${unlocks} free signal unlocks.`,
-          "Run a scan to see current setups, then unlock the ones you want to study. Each unlocked setup shows its setup levels (entry, stop and target) and is tracked to its outcome."
-        ]
-      : [
-          "Your account is ready. You can run scans and review setups now.",
-          "This email or device has already used SignalForge's free trial, so this account starts without free unlocks. A new plan is coming soon. Until then, scanning and reviewing setups stay free."
-        ],
+    paragraphs: [
+      "Your account is ready. Free accounts see setups with their levels (entry, stop and target) on BTC-USD and ETH-USD, each with its track record, plus the fee calculator and paper trading.",
+      "Every other market, Telegram alerts, the trade checker and My trades are part of the SignalForge plan: $9.99 a month or $89.99 a year, with a 7-day free trial. You can start it from Billing whenever you like."
+    ],
     button: { label: "Run your first scan", url: appLink("/#scanner") }
   });
 }
@@ -97,32 +83,105 @@ export function buildPasswordResetEmail({ resetUrl, expiresInMinutes = 60 }) {
   });
 }
 
-export function buildSubscriptionConfirmationEmail({ planName, monthlyUnlockGrant = 0 }) {
-  const name = planName || "paid";
+// --- Billing (one plan, 7-day trial with card) ----------------------------------------------------
+
+const BILLING_LINK = () => appLink("/#billing");
+const CANCEL_LINE = "You can cancel any time in Settings → Billing. Cancelling keeps your access until the end of the period you've paid for.";
+
+// amountCents + interval ("month" | "year") -> "$9.99 a month"
+export function formatPlanCharge(amountCents, interval) {
+  return `${formatCents(amountCents)} ${interval === "year" ? "a year" : "a month"}`;
+}
+
+// "21 Oct 2026", in UTC so the date matches Stripe's.
+export function formatBillingDate(value) {
+  if (!value) return "";
+  return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }).format(new Date(value));
+}
+
+export function buildTrialStartedEmail({ firstChargeDate, amountCents, interval }) {
+  const date = formatBillingDate(firstChargeDate);
   return renderEmail({
-    subject: `Your SignalForge ${name} subscription is active`,
-    preheader: `Thanks for subscribing to SignalForge ${name}.`,
+    subject: "Your SignalForge free trial has started",
+    preheader: `Nothing is charged until ${date}.`,
+    heading: "Your 7-day free trial has started",
+    paragraphs: [
+      "You now have the full SignalForge plan: setups and levels on every market, Telegram alerts, the trade checker and My trades.",
+      `Your card will be charged ${formatCents(amountCents)} on ${date}, and then ${formatPlanCharge(amountCents, interval)} until you cancel.`,
+      `To avoid being charged, cancel before ${date}. ${CANCEL_LINE}`
+    ],
+    button: { label: "Manage billing", url: BILLING_LINK() }
+  });
+}
+
+export function buildTrialEndingEmail({ firstChargeDate, amountCents, interval }) {
+  const date = formatBillingDate(firstChargeDate);
+  return renderEmail({
+    subject: `Your SignalForge trial ends on ${date}`,
+    preheader: `Your card will be charged ${formatCents(amountCents)} on ${date} unless you cancel.`,
+    heading: "Your free trial ends soon",
+    paragraphs: [
+      `Your SignalForge free trial ends on ${date}. On that day your card will be charged ${formatCents(amountCents)}, and then ${formatPlanCharge(amountCents, interval)} until you cancel.`,
+      `If you don't want to continue, cancel before ${date} and you won't be charged. ${CANCEL_LINE}`
+    ],
+    button: { label: "Open Settings → Billing", url: BILLING_LINK() }
+  });
+}
+
+export function buildTrialCardAlreadyUsedEmail({ amountCents, interval }) {
+  return renderEmail({
+    subject: "Your SignalForge subscription started today",
+    preheader: "This card was already used for a free trial.",
+    heading: "Your subscription started today",
+    paragraphs: [
+      "This card was already used for a free trial, so your subscription started today.",
+      `Your card is charged ${formatPlanCharge(amountCents, interval)} from today until you cancel. ${CANCEL_LINE}`,
+      "One free trial per person and per card. If you think this is a mistake, contact Support and we'll look at it."
+    ],
+    button: { label: "Manage billing", url: BILLING_LINK() }
+  });
+}
+
+export function buildSubscriptionConfirmationEmail({ amountCents, interval, nextChargeDate }) {
+  const next = formatBillingDate(nextChargeDate);
+  return renderEmail({
+    subject: "Your SignalForge subscription is active",
+    preheader: `Thanks for subscribing to SignalForge.`,
     heading: "Subscription confirmed",
     paragraphs: [
-      `Your SignalForge ${name} subscription is active.`,
-      monthlyUnlockGrant > 0
-        ? `Your plan adds ${formatNumber(monthlyUnlockGrant)} unlock credits each billing period, and unused credits carry over. Your balance and invoices are in Billing.`
-        : "Your balance and invoices are in Billing."
+      `We charged ${formatCents(amountCents)} for SignalForge. Your plan renews at ${formatPlanCharge(amountCents, interval)}${next ? `; the next charge is on ${next}` : ""}.`,
+      CANCEL_LINE
     ],
-    button: { label: "View billing", url: appLink("/#billing") }
+    button: { label: "View billing", url: BILLING_LINK() }
   });
 }
 
 export function buildFailedPaymentEmail() {
   return renderEmail({
     subject: "Action needed: your SignalForge payment didn't go through",
-    preheader: "Update your payment method to keep your plan active.",
+    preheader: "Update your card to keep your plan.",
     heading: "Your payment didn't go through",
     paragraphs: [
-      "We couldn't collect the latest payment for your SignalForge subscription.",
-      "Update your payment method in Billing to keep your plan and its monthly unlock credits active."
+      "We couldn't collect the latest payment for your SignalForge subscription. Stripe will try the card again over the next few days, and your access stays on while it does.",
+      "To update your card: open Settings → Billing, choose Update card, and enter the new card. The next retry uses it automatically."
     ],
-    button: { label: "Update payment method", url: appLink("/#billing") }
+    button: { label: "Update card", url: BILLING_LINK() }
+  });
+}
+
+export function buildSubscriptionCanceledEmail({ accessUntil }) {
+  const date = formatBillingDate(accessUntil);
+  return renderEmail({
+    subject: "Your SignalForge subscription is cancelled",
+    preheader: date ? `You keep access until ${date}.` : "Your subscription is cancelled.",
+    heading: "Subscription cancelled",
+    paragraphs: [
+      date
+        ? `Your SignalForge subscription is cancelled and won't renew. You keep full access until ${date}, and you won't be charged again.`
+        : "Your SignalForge subscription is cancelled and won't renew. You won't be charged again.",
+      "Your My trades history stays in your account afterwards, readable and exportable. You can subscribe again from Billing at any time."
+    ],
+    button: { label: "View billing", url: BILLING_LINK() }
   });
 }
 

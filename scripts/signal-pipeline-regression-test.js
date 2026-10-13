@@ -446,7 +446,7 @@ async function exerciseTelegramBoundary() {
     });
   }
 
-  const queued = await notificationModule.enqueueMatchingTelegramNotifications({ id: "usr_regression" }, [ready89, ready90]);
+  const queued = await notificationModule.enqueueMatchingTelegramNotifications({ id: "usr_regression", role: "user", subscription: { status: "trialing", providerSubscriptionId: "sub_regression" } }, [ready89, ready90]);
   await runtime("queued notification is not reported as sent", () => {
     assert.equal(queued.length, 1);
     assert.equal(getTelegramQueueRows()[0].status, "queued");
@@ -465,7 +465,7 @@ async function exerciseTelegramBoundary() {
 
   resetDatabaseTransport();
   setTelegramSettings("usr_regression");
-  await notificationModule.enqueueMatchingTelegramNotifications({ id: "usr_regression" }, [ready90]);
+  await notificationModule.enqueueMatchingTelegramNotifications({ id: "usr_regression", role: "user", subscription: { status: "trialing", providerSubscriptionId: "sub_regression" } }, [ready90]);
   globalThis.fetch = async () => new Response(JSON.stringify({ ok: false, description: "fixture delivery failed" }), {
     status: 500,
     headers: { "content-type": "application/json" }

@@ -85,7 +85,9 @@ export async function handleAuthRoutes(req, res, pathname) {
         appConfig.googleOAuth.clientSecret &&
         appConfig.googleOAuth.redirectUri
       ),
-      emailFeaturesEnabled: appConfig.email.featuresEnabled
+      emailFeaturesEnabled: appConfig.email.featuresEnabled,
+      // Lets the public pricing card say "opens soon" while BILLING_CHECKOUT_ENABLED is off.
+      checkoutEnabled: Boolean(appConfig.stripe.checkoutEnabled)
     }, {
       "cache-control": "no-store"
     });
@@ -350,7 +352,8 @@ export async function handleAuthRoutes(req, res, pathname) {
       const body = await readJson(req);
       return sendJson(res, 200, await completePasswordReset({
         token: body.token,
-        password: body.password
+        password: body.password,
+        keepSessionId: req.sessionId || null
       }), authResponseHeaders());
     } catch (error) {
       return sendError(res, error.statusCode || 400, error.message);

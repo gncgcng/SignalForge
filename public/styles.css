@@ -10314,3 +10314,123 @@ polyline {
 .my-trade-close-form {
   margin-top: 12px;
 }
+
+/* One plan, 7-day trial (pivot phase 3): pricing toggle, billing status, past-due banner, paid gates. */
+.plan-interval-toggle {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  margin: 8px 0;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-2);
+}
+
+.plan-interval-toggle button {
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.86rem;
+  cursor: pointer;
+}
+
+.plan-interval-toggle button[aria-pressed="true"] {
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 700;
+}
+
+.pricing-heading strong small {
+  font-size: 0.55em;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.pricing-trial-note {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+
+.billing-status-panel,
+.billing-plan-panel {
+  margin-bottom: 16px;
+}
+
+.billing-status-panel h3 {
+  margin: 4px 0 6px;
+}
+
+.billing-status-panel[data-tone="good"] {
+  border-left: 3px solid var(--green, #3fb950);
+}
+
+.billing-status-panel[data-tone="warning"] {
+  border-left: 3px solid var(--amber);
+}
+
+.billing-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.billing-plan-panel ul {
+  margin: 12px 0;
+  padding-left: 18px;
+  line-height: 1.7;
+}
+
+.billing-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 0 0 16px;
+  padding: 10px 14px;
+  border: 1px solid rgba(248, 193, 74, 0.5);
+  border-radius: 10px;
+  background: rgba(248, 193, 74, 0.08);
+  color: var(--amber);
+}
+
+.billing-banner span {
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.billing-banner button {
+  margin-left: auto;
+}
+
+.billing-banner.hidden,
+.paid-gate.hidden {
+  display: none;
+}
+
+.paid-locked > :not(.paid-gate) {
+  display: none !important;
+}
+
+.paid-gate {
+  max-width: 640px;
+}
+
+.paid-gate h3 {
+  margin: 4px 0 8px;
+}
+
+.my-trades-read-only-note {
+  margin-bottom: 16px;
+}
+
+.my-trades-read-only .my-trades-form-panel,
+.my-trades-read-only [data-my-trade-edit],
+.my-trades-read-only [data-my-trade-close] {
+  display: none !important;
+}

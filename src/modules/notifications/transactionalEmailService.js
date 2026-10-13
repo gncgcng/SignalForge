@@ -1,12 +1,15 @@
 import { appConfig } from "../../config/appConfig.js";
-import { BILLING_PLANS } from "../subscriptions/subscriptionService.js";
 import {
   buildAdminSupportNoticeEmail,
   buildAffiliateCommissionEmail,
   buildFailedPaymentEmail,
   buildPasswordResetEmail,
+  buildSubscriptionCanceledEmail,
   buildSubscriptionConfirmationEmail,
   buildSupportConfirmationEmail,
+  buildTrialCardAlreadyUsedEmail,
+  buildTrialEndingEmail,
+  buildTrialStartedEmail,
   buildWelcomeEmail
 } from "./emailTemplates.js";
 
@@ -71,22 +74,34 @@ function sendTemplate(to, category, email) {
   return sendTransactionalEmail({ to, category, ...email });
 }
 
-// Only once the account is verified: after the verification link (email signups) or at signup
-// (Google). trialGranted picks the copy, so it never promises unlocks the account doesn't have.
-export function sendWelcomeEmail(user, { trialGranted = true } = {}) {
-  return sendTemplate(user.email, "welcome", buildWelcomeEmail({ username: user.username, trialGranted }));
+// Only once the account is verified: after the verification link (email signups) or at signup (Google).
+export function sendWelcomeEmail(user) {
+  return sendTemplate(user.email, "welcome", buildWelcomeEmail({ username: user.username }));
 }
 
 export function sendPasswordResetEmail(user, resetUrl, { expiresInMinutes = 60 } = {}) {
   return sendTemplate(user.email, "password_reset", buildPasswordResetEmail({ resetUrl, expiresInMinutes }));
 }
 
-export function sendSubscriptionConfirmationEmail(user, plan) {
-  const details = BILLING_PLANS[plan];
-  return sendTemplate(user.email, "subscription_confirmation", buildSubscriptionConfirmationEmail({
-    planName: details?.name || planLabel(plan),
-    monthlyUnlockGrant: details?.monthlyUnlockGrant || 0
-  }));
+// Billing emails. Each takes plain facts (dates, amount in cents, "month" | "year"); the templates word them.
+export function sendSubscriptionConfirmationEmail(user, { amountCents, interval, nextChargeDate }) {
+  return sendTemplate(user.email, "subscription_confirmation", buildSubscriptionConfirmationEmail({ amountCents, interval, nextChargeDate }));
+}
+
+export function sendTrialStartedEmail(user, { firstChargeDate, amountCents, interval }) {
+  return sendTemplate(user.email, "trial_started", buildTrialStartedEmail({ firstChargeDate, amountCents, interval }));
+}
+
+export function sendTrialEndingEmail(user, { firstChargeDate, amountCents, interval }) {
+  return sendTemplate(user.email, "trial_ending", buildTrialEndingEmail({ firstChargeDate, amountCents, interval }));
+}
+
+export function sendTrialCardAlreadyUsedEmail(user, { amountCents, interval }) {
+  return sendTemplate(user.email, "trial_card_already_used", buildTrialCardAlreadyUsedEmail({ amountCents, interval }));
+}
+
+export function sendSubscriptionCanceledEmail(user, { accessUntil }) {
+  return sendTemplate(user.email, "subscription_canceled", buildSubscriptionCanceledEmail({ accessUntil }));
 }
 
 export function sendFailedPaymentEmail(user) {
@@ -95,7 +110,7 @@ export function sendFailedPaymentEmail(user) {
 
 export function sendAffiliateCommissionEmail(user, { plan, commissionCents }) {
   return sendTemplate(user.email, "affiliate_commission", buildAffiliateCommissionEmail({
-    planName: BILLING_PLANS[plan]?.name || planLabel(plan),
+    planName: plan === "signalforge" ? "SignalForge" : planLabel(plan),
     commissionCents
   }));
 }

@@ -4,6 +4,7 @@ import {
   createCheckout,
   createCustomerPortal,
   getStripeWebhookHistory,
+  getTrialEligibility,
   processStripeEvent,
   retryStripeWebhookEvent,
   verifyStripeSignature
@@ -75,12 +76,18 @@ export async function handleSubscriptionRoutes(req, res, pathname) {
 
   try {
     if (pathname === "/api/subscriptions/me" && req.method === "GET") {
-      return sendJson(res, 200, { subscription: getSubscriptionSummary(req.user) });
+      const eligibility = await getTrialEligibility(req.user);
+      return sendJson(res, 200, {
+        subscription: {
+          ...getSubscriptionSummary(req.user, { trialEligible: eligibility.eligible }),
+          trialIneligibleReason: eligibility.reason
+        }
+      });
     }
     if (pathname === "/api/subscriptions/checkout" && req.method === "POST") {
-      const body = await readJson(req);
+      const body = await readJson(req, { maxBytes: 4 * 1024 });
       return sendJson(res, 200, {
-        checkout: await createCheckout(req.user, body)
+        checkout: await createCheckout(req.user, { interval: body.interval })
       });
     }
     if (pathname === "/api/subscriptions/portal" && req.method === "POST") {

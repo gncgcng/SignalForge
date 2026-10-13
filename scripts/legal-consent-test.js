@@ -39,7 +39,7 @@ const result = {
     app.includes("legalConsentAccepted: true"),
   signalAndCheckoutDisclaimers:
     html.includes("Educational tool only. Not financial advice.") &&
-    html.includes("Subscriptions and credit packs provide access to research tools only."),
+    html.includes("The plan gives access to research tools only."),
   affiliateDisclosure:
     html.includes("Affiliates may earn commissions from paid subscriptions.") &&
     app.includes("Affiliate disclosure: Affiliates may earn commissions from paid subscriptions."),

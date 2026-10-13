@@ -1,18 +1,15 @@
 import { randomInt } from "node:crypto";
 import { appConfig } from "../config/appConfig.js";
 import { createId } from "../shared/ids.js";
-import { trialIdentities } from "../modules/auth/trialIdentity.js";
-import {
-  consumeSignalUnlockCredit,
-  refundSignalCreditForTerminalOutcome
-} from "../modules/credits/signalCreditLedgerRepository.js";
 import { query, transaction } from "./client.js";
+import { MRR_SQL, getBillingAdminSummary, listBillingAnomalies } from "../modules/subscriptions/billingRepository.js";
 
 export async function findUserByEmail(email) {
   const result = await query(`
     SELECT u.*, s.status AS subscription_status, s.provider, s.provider_customer_id,
       s.provider_subscription_id, s.price_id, s.current_period_start, s.current_period_end,
-      s.cancel_at_period_end, s.stripe_mode, c.free_signal_allowance, c.paid_credits,
+      s.cancel_at_period_end, s.stripe_mode, s.trial_end, s.first_subscribed_at, s.billing_interval,
+      c.free_signal_allowance, c.paid_credits,
       c.unlock_credits_balance, c.lifetime_unlocks_used,
       COALESCE((
         SELECT SUM(d.quantity) FROM setup_discovery_usage d
@@ -38,7 +35,8 @@ export async function findUserByUsername(username) {
   const result = await query(`
     SELECT u.*, s.status AS subscription_status, s.provider, s.provider_customer_id,
       s.provider_subscription_id, s.price_id, s.current_period_start, s.current_period_end,
-      s.cancel_at_period_end, s.stripe_mode, c.free_signal_allowance, c.paid_credits,
+      s.cancel_at_period_end, s.stripe_mode, s.trial_end, s.first_subscribed_at, s.billing_interval,
+      c.free_signal_allowance, c.paid_credits,
       c.unlock_credits_balance, c.lifetime_unlocks_used,
       COALESCE((
         SELECT SUM(d.quantity) FROM setup_discovery_usage d
@@ -61,7 +59,8 @@ export async function findUserById(id) {
   const result = await query(`
     SELECT u.*, s.status AS subscription_status, s.provider, s.provider_customer_id,
       s.provider_subscription_id, s.price_id, s.current_period_start, s.current_period_end,
-      s.cancel_at_period_end, s.stripe_mode, c.free_signal_allowance, c.paid_credits,
+      s.cancel_at_period_end, s.stripe_mode, s.trial_end, s.first_subscribed_at, s.billing_interval,
+      c.free_signal_allowance, c.paid_credits,
       c.unlock_credits_balance, c.lifetime_unlocks_used,
       COALESCE((
         SELECT SUM(d.quantity) FROM setup_discovery_usage d
@@ -186,7 +185,7 @@ async function insertNewUser({
 
     await client.query(`
       INSERT INTO subscriptions (id, user_id, status, provider)
-      VALUES ($1, $2, 'trialing', 'stripe')
+      VALUES ($1, $2, 'none', 'stripe')
     `, [createId("sub"), id]);
 
     await client.query(`
@@ -448,17 +447,12 @@ export async function getAdminProductAnalytics() {
     query(`
       SELECT
         COUNT(*)::integer AS total_users,
+        -- Paying (active or past due) subscriptions; trials have paid nothing yet.
         COUNT(*) FILTER (
-          WHERE COALESCE(s.status, '') IN ('active', 'trialing')
-            AND COALESCE(u.plan, 'free') IN ('pro', 'elite')
+          WHERE COALESCE(s.status, '') IN ('active', 'past_due')
+            AND s.provider_subscription_id IS NOT NULL
         )::integer AS paid_users,
-        COALESCE(SUM(
-          CASE
-            WHEN COALESCE(s.status, '') IN ('active', 'trialing') AND u.plan = 'pro' THEN 2900
-            WHEN COALESCE(s.status, '') IN ('active', 'trialing') AND u.plan = 'elite' THEN 9900
-            ELSE 0
-          END
-        ), 0)::integer AS monthly_recurring_revenue_cents
+        (${MRR_SQL}) AS monthly_recurring_revenue_cents
       FROM users u
       LEFT JOIN subscriptions s ON s.user_id = u.id
       WHERE u.role <> 'tester'
@@ -567,28 +561,23 @@ export async function getAdminOperationsDashboard() {
           WHERE created_at >= now() - interval '7 days' AND user_id IS NOT NULL) AS active_week,
         (SELECT COUNT(*)::integer FROM users
           WHERE created_at >= date_trunc('day', now()) AND COALESCE(role, 'user') <> 'tester') AS new_users_today,
-        (SELECT COUNT(*)::integer FROM users
-          WHERE plan = 'pro' AND updated_at >= date_trunc('day', now()) AND COALESCE(role, 'user') <> 'tester') AS new_pro,
-        (SELECT COUNT(*)::integer FROM users
-          WHERE plan = 'elite' AND updated_at >= date_trunc('day', now()) AND COALESCE(role, 'user') <> 'tester') AS new_elite,
-        COALESCE((SELECT SUM(CASE WHEN u.plan = 'pro' THEN 2900 WHEN u.plan = 'elite' THEN 9900 ELSE 0 END)
-          FROM users u
-          LEFT JOIN subscriptions s ON s.user_id = u.id
-          WHERE COALESCE(s.status, '') IN ('active', 'trialing')
-            AND u.plan IN ('pro', 'elite')
-            AND COALESCE(u.role, 'user') <> 'tester'), 0)::integer AS mrr_cents,
-        COALESCE((SELECT SUM(amount_cents) FROM product_analytics_events
-          WHERE event_type IN ('subscription', 'checkout_completed')
-            AND created_at >= date_trunc('day', now())), 0)::integer AS revenue_today_cents,
-        COALESCE((SELECT SUM(amount_cents) FROM product_analytics_events
-          WHERE event_type IN ('subscription', 'checkout_completed')
-            AND created_at >= date_trunc('month', now())), 0)::integer AS revenue_month_cents,
+        (SELECT COUNT(*)::integer FROM product_analytics_events
+          WHERE event_type = 'trial_started' AND created_at >= date_trunc('day', now())) AS new_trials,
+        (SELECT COUNT(DISTINCT stripe_subscription_id)::integer FROM billing_invoices i
+          WHERE i.paid_at >= date_trunc('day', now())
+            AND NOT EXISTS (SELECT 1 FROM billing_invoices e
+              WHERE e.stripe_subscription_id = i.stripe_subscription_id AND e.paid_at < i.paid_at)) AS new_paid,
+        (${MRR_SQL}) AS mrr_cents,
+        -- Real invoice amounts, refunds subtracted.
+        COALESCE((SELECT SUM(amount_paid_cents - amount_refunded_cents) FROM billing_invoices
+          WHERE paid_at >= date_trunc('day', now())), 0)::integer AS revenue_today_cents,
+        COALESCE((SELECT SUM(amount_paid_cents - amount_refunded_cents) FROM billing_invoices
+          WHERE paid_at >= date_trunc('month', now())), 0)::integer AS revenue_month_cents,
         (SELECT COUNT(*)::integer FROM stripe_webhook_events
           WHERE (event_type = 'invoice.payment_failed' OR status = 'failed')
             AND received_at >= date_trunc('month', now())) AS failed_payments,
-        (SELECT COUNT(*)::integer FROM stripe_webhook_events
-          WHERE event_type = 'invoice.payment_succeeded'
-            AND received_at >= date_trunc('day', now())) AS renewals_today,
+        (SELECT COUNT(*)::integer FROM billing_invoices
+          WHERE paid_at >= date_trunc('day', now())) AS renewals_today,
         (SELECT COUNT(*)::integer FROM saved_signals
           WHERE created_at >= date_trunc('day', now())) AS signals_generated_today,
         (SELECT COUNT(*)::integer FROM saved_signals
@@ -726,17 +715,12 @@ export async function getAdminOperationsDashboard() {
     `),
     query(`
       SELECT
-        (SELECT COUNT(*)::integer
-          FROM users u
-          LEFT JOIN subscriptions s ON s.user_id = u.id
-          WHERE u.plan IN ('pro', 'elite')
-            AND COALESCE(s.status, '') IN ('active', 'trialing')) AS active_subscriptions,
-        (SELECT COUNT(*)::integer FROM stripe_webhook_events
-          WHERE event_type = 'invoice.payment_succeeded') AS renewals,
+        (SELECT COUNT(*)::integer FROM subscriptions s
+          WHERE s.status = 'active' AND s.provider_subscription_id IS NOT NULL) AS active_subscriptions,
+        (SELECT COUNT(*)::integer FROM billing_invoices) AS renewals,
         (SELECT COUNT(*)::integer FROM stripe_webhook_events
           WHERE event_type = 'invoice.payment_failed') AS failed_renewals,
-        (SELECT COUNT(*)::integer FROM stripe_webhook_events
-          WHERE event_type LIKE '%refund%') AS refunds,
+        (SELECT COUNT(*)::integer FROM billing_invoices WHERE amount_refunded_cents > 0) AS refunds,
         (SELECT COUNT(*)::integer FROM stripe_webhook_events
           WHERE status = 'failed') AS webhook_failures
     `),
@@ -745,7 +729,7 @@ export async function getAdminOperationsDashboard() {
         s.provider_subscription_id, s.current_period_end, s.updated_at
       FROM subscriptions s
       JOIN users u ON u.id = s.user_id
-      WHERE u.plan IN ('pro', 'elite')
+      WHERE s.provider_subscription_id IS NOT NULL OR s.status NOT IN ('none', 'trialing')
       ORDER BY s.updated_at DESC
       LIMIT 8
     `),
@@ -788,6 +772,7 @@ export async function getAdminOperationsDashboard() {
   const row = overview.rows[0] || {};
   const affiliateRow = affiliates.rows[0] || {};
   const stripeRow = stripe.rows[0] || {};
+  const [billingSummary, billingAnomalies] = await Promise.all([getBillingAdminSummary(), listBillingAnomalies({ limit: 20 })]);
   const systemRow = systemActivity.rows[0] || {};
 
   return {
@@ -797,8 +782,8 @@ export async function getAdminOperationsDashboard() {
         activeToday: Number(row.active_today || 0),
         activeThisWeek: Number(row.active_week || 0),
         newUsersToday: Number(row.new_users_today || 0),
-        newPro: Number(row.new_pro || 0),
-        newElite: Number(row.new_elite || 0)
+        newTrials: Number(row.new_trials || 0),
+        newPaid: Number(row.new_paid || 0)
       },
       revenue: {
         monthlyRecurringRevenueCents: Number(row.mrr_cents || 0),
@@ -885,6 +870,17 @@ export async function getAdminOperationsDashboard() {
         activeReferrals: Number(item.active_referrals || 0),
         monthlyCommissionsCents: Number(item.monthly_commissions_cents || 0),
         lifetimeEarningsCents: Number(item.lifetime_earnings_cents || 0)
+      }))
+    },
+    // Trials, subscriptions, anomalies and invoice-based revenue (admin billing cards).
+    billing: {
+      ...billingSummary,
+      anomalies: billingAnomalies.map((item) => ({
+        kind: item.kind,
+        reference: item.reference,
+        occurrences: Number(item.occurrences || 0),
+        firstSeenAt: item.first_seen_at,
+        lastSeenAt: item.last_seen_at
       }))
     },
     stripe: {
@@ -1291,14 +1287,9 @@ export async function verifyEmailToken(tokenHash) {
       WHERE id = $1
     `, [token.user_id]);
 
-    const { trialGranted, trialBlockedBy } = await applyFreeTrialGrant(client, {
-      userId: token.user_id,
-      deviceFingerprintHash: token.device_fingerprint_hash,
-      identities: trialIdentities({ email: token.email }),
-      eligible: !token.trial_used
-    });
-
-    return { userId: token.user_id, trialGranted, trialBlockedBy, alreadyVerified: Boolean(token.email_verified_at) };
+    // Verification no longer grants free unlocks (retired with the single plan), so it claims no trial identity:
+    // the one free trial is now the 7-day card trial, claimed when it starts.
+    return { userId: token.user_id, trialGranted: false, trialBlockedBy: null, alreadyVerified: Boolean(token.email_verified_at) };
   });
 }
 
@@ -1361,7 +1352,10 @@ export async function setInitialUserPassword(userId, password) {
   return result.rowCount === 1;
 }
 
-export async function resetPasswordWithToken(tokenHash, password) {
+// A reset signs the account out everywhere else, the same way a logged-in password change does: every other session
+// is deleted and every restore token revoked. keepSessionId (the browser doing the reset, if it is signed in to this
+// account) stays.
+export async function resetPasswordWithToken(tokenHash, password, { keepSessionId = null } = {}) {
   return transaction(async (client) => {
     const result = await client.query(`
       SELECT t.*, u.email
@@ -1384,8 +1378,21 @@ export async function resetPasswordWithToken(tokenHash, password) {
       SET password_salt = $2, password_hash = $3, updated_at = now()
       WHERE id = $1
     `, [token.user_id, password.salt, password.hash]);
+    const sessions = await client.query(`
+      DELETE FROM sessions WHERE user_id = $1 AND id IS DISTINCT FROM $2
+    `, [token.user_id, keepSessionId || null]);
+    const restoreTokens = await client.query(`
+      UPDATE auth_restore_tokens
+      SET revoked_at = now(), updated_at = now()
+      WHERE user_id = $1 AND revoked_at IS NULL
+    `, [token.user_id]);
 
-    return { userId: token.user_id, email: token.email };
+    return {
+      userId: token.user_id,
+      email: token.email,
+      sessionsRevoked: sessions.rowCount,
+      restoreTokensRevoked: restoreTokens.rowCount
+    };
   });
 }
 
@@ -1518,77 +1525,25 @@ export async function linkOAuthIdentity({
   return findUserById(userId);
 }
 
-// Google signup, or a Google sign-in that verifies an unverified account. Both the Google subject
-// and the Google email count as identities that may each earn one trial.
-export async function grantOAuthFreeTrial(userId, deviceFingerprintHash, { email = null, googleSubject = null } = {}) {
-  return transaction((client) => applyFreeTrialGrant(client, {
-    userId,
-    deviceFingerprintHash,
-    identities: trialIdentities({ email, googleSubjects: [googleSubject] })
-  }));
+// Google signup or sign-in. Free unlocks are retired, so this grants nothing and claims no identity; kept so the
+// OAuth flow's call site stays the same.
+export async function grantOAuthFreeTrial() {
+  return { trialGranted: false, trialBlockedBy: null };
 }
 
-// The one place free unlocks are granted (email verification and Google). A grant needs every
-// identity unclaimed (trial_identity_claims) and, when there is a device fingerprint, a device
-// that has never had a trial (device_trial_history). Identities are claimed first and released
-// again if the device then blocks the grant, so only granted trials leave claims behind.
-// Concurrent claims of one identity serialize on its primary key; the loser sees it as taken.
-async function applyFreeTrialGrant(client, { userId, deviceFingerprintHash, identities, eligible = true }) {
-  let trialBlockedBy = eligible ? null : "device";
-  let claimedHashes = [];
-
-  if (!trialBlockedBy && identities.length) {
-    const claimed = await client.query(`
-      INSERT INTO trial_identity_claims (identity_hash, kind)
-      SELECT * FROM unnest($1::text[], $2::text[])
-      ON CONFLICT (identity_hash) DO NOTHING
-      RETURNING identity_hash
-    `, [identities.map((identity) => identity.hash), identities.map((identity) => identity.kind)]);
-    claimedHashes = claimed.rows.map((row) => row.identity_hash);
-    if (claimedHashes.length < identities.length) trialBlockedBy = "identity";
-  }
-
-  if (!trialBlockedBy && deviceFingerprintHash) {
-    const reservation = await client.query(`
-      INSERT INTO device_trial_history (device_fingerprint_hash, first_user_id)
-      VALUES ($1, $2)
-      ON CONFLICT (device_fingerprint_hash) DO NOTHING
-      RETURNING device_fingerprint_hash
-    `, [deviceFingerprintHash, userId]);
-    if (!reservation.rows[0]) trialBlockedBy = "device";
-  }
-
-  if (trialBlockedBy && claimedHashes.length) {
-    await client.query(`DELETE FROM trial_identity_claims WHERE identity_hash = ANY($1)`, [claimedHashes]);
-  }
-
-  if (!trialBlockedBy) {
-    await client.query(`
-      UPDATE credit_balances
-      SET free_signal_allowance = $2,
-        unlock_credits_balance = GREATEST(unlock_credits_balance, $2),
-        updated_at = now()
-      WHERE user_id = $1
-    `, [userId, appConfig.freeSignalAllowance]);
-  } else {
-    const flag = trialBlockedBy === "identity" ? "repeated_trial_identity" : "repeated_trial_device";
-    await client.query(`
-      UPDATE users
-      SET abuse_score = LEAST(100, abuse_score + 50),
-        abuse_flags = (
-          SELECT jsonb_agg(DISTINCT value)
-          FROM jsonb_array_elements(abuse_flags || jsonb_build_array($2::text))
-        ),
-        abuse_review_status = 'flagged',
-        updated_at = now()
-      WHERE id = $1
-    `, [userId, flag]);
-  }
-
-  return { trialGranted: !trialBlockedBy, trialBlockedBy };
+// Claimed when the 7-day card trial starts. Kept after account deletion, so the same email or Google account
+// can't start another trial.
+export async function claimTrialIdentities(identities) {
+  if (!identities.length) return 0;
+  const result = await query(`
+    INSERT INTO trial_identity_claims (identity_hash, kind)
+    SELECT * FROM unnest($1::text[], $2::text[])
+    ON CONFLICT (identity_hash) DO NOTHING
+  `, [identities.map((identity) => identity.hash), identities.map((identity) => identity.kind)]);
+  return result.rowCount;
 }
 
-// Read-only, for telling a new account up front that its email already had a trial.
+// Read-only: has this person (email or Google account) already had a free trial?
 export async function isTrialIdentityClaimed(identities) {
   if (!identities.length) return false;
   const result = await query(`
@@ -1719,7 +1674,9 @@ export async function updateStripeSubscription({
   periodStart,
   periodEnd,
   stripeMode,
-  cancelAtPeriodEnd = false
+  cancelAtPeriodEnd = false,
+  trialEnd = null,
+  billingInterval = null
 }) {
   return transaction(async (client) => {
     // Same row lock account deletion takes: a webhook racing a deletion either commits first
@@ -1727,6 +1684,11 @@ export async function updateStripeSubscription({
     // so it can never restore a cleared customer id onto a deleted account.
     const locked = await client.query(`SELECT deleted_at FROM users WHERE id = $1 FOR UPDATE`, [userId]);
     if (locked.rows[0]?.deleted_at) return false;
+    // The state before this change, so callers can tell e.g. "cancellation just requested" or "trial cancelled".
+    const before = (await client.query(`
+      SELECT status, provider_subscription_id, cancel_at_period_end, trial_end, first_subscribed_at
+      FROM subscriptions WHERE user_id = $1
+    `, [userId])).rows[0] || null;
     await client.query(`
       UPDATE users SET plan = $2, updated_at = now() WHERE id = $1
     `, [userId, plan]);
@@ -1740,6 +1702,9 @@ export async function updateStripeSubscription({
         current_period_end = $7,
         cancel_at_period_end = $8,
         stripe_mode = $9,
+        trial_end = COALESCE($10, trial_end),
+        billing_interval = COALESCE($11, billing_interval),
+        first_subscribed_at = CASE WHEN $3::text IS NOT NULL THEN COALESCE(first_subscribed_at, now()) ELSE first_subscribed_at END,
         updated_at = now()
       WHERE user_id = $1
     `, [
@@ -1751,9 +1716,22 @@ export async function updateStripeSubscription({
       periodStart,
       periodEnd,
       cancelAtPeriodEnd,
-      stripeMode
+      stripeMode,
+      trialEnd,
+      billingInterval
     ]);
-    return true;
+    return {
+      applied: true,
+      previous: before
+        ? {
+          status: before.status,
+          subscriptionId: before.provider_subscription_id,
+          cancelAtPeriodEnd: Boolean(before.cancel_at_period_end),
+          trialEnd: before.trial_end,
+          firstSubscribedAt: before.first_subscribed_at
+        }
+        : null
+    };
   });
 }
 
@@ -1991,26 +1969,19 @@ export async function saveUnlockedSignal(userId, signal) {
       throw error;
     }
 
+    // Viewing levels no longer uses credits: access (paid plan, or a free market) is checked by the caller with
+    // canViewLevels. The unlock-credit ledger tables are kept for history only.
     const account = await client.query(`
-      SELECT u.role, u.email_verified_at, c.unlock_credits_balance
+      SELECT u.role, u.email_verified_at
       FROM users u
-      JOIN credit_balances c ON c.user_id = u.id
       WHERE u.id = $1
-      FOR UPDATE OF c
     `, [userId]);
     const billing = account.rows[0];
 
     if (billing?.role !== "tester" && !billing?.email_verified_at) {
-      const error = new Error("Verify your email before using signal unlock credits.");
+      const error = new Error("Verify your email before viewing setup levels.");
       error.code = "EMAIL_VERIFICATION_REQUIRED";
       error.statusCode = 403;
-      throw error;
-    }
-
-    if (billing?.role !== "tester" && Number(billing?.unlock_credits_balance || 0) <= 0) {
-      const error = new Error("Unlock credit limit reached.");
-      error.code = "UNLOCK_LIMIT";
-      error.statusCode = 402;
       throw error;
     }
 
@@ -2055,36 +2026,6 @@ export async function saveUnlockedSignal(userId, signal) {
       INSERT INTO signal_outcomes (saved_signal_id, status, updated_at)
       VALUES ($1, 'Active', now())
     `, [signal.id]);
-
-    if (billing.role !== "tester") {
-      const charge = await consumeSignalUnlockCredit(client, {
-        transactionId: createId("sctx"),
-        userId,
-        savedSignalId: signal.id
-      });
-      if (!charge.charged) {
-        const error = new Error("Unlock credit could not be consumed for this signal.");
-        error.code = "UNLOCK_CREDIT_TRANSACTION_FAILED";
-        error.statusCode = 409;
-        throw error;
-      }
-      await client.query(`
-        UPDATE users
-        SET trial_signals_used = trial_signals_used + CASE WHEN plan = 'free' THEN 1 ELSE 0 END,
-          trial_used = true,
-          updated_at = now()
-        WHERE id = $1
-      `, [userId]);
-      await client.query(`
-        UPDATE device_trial_history d
-        SET trial_used = true,
-          trial_used_at = COALESCE(trial_used_at, now()),
-          updated_at = now()
-        FROM users u
-        WHERE u.id = $1
-          AND u.device_fingerprint_hash = d.device_fingerprint_hash
-      `, [userId]);
-    }
 
     const saved = await client.query(
       signalSelectSql("WHERE s.id = $1 AND s.user_id = $2"),
@@ -2329,12 +2270,7 @@ export async function expireActiveSignalsPastValidity() {
     `);
     const ids = expired.rows.map((row) => row.id);
     if (!ids.length) return [];
-    for (const savedSignalId of ids) {
-      await refundSignalCreditForTerminalOutcome(client, {
-        savedSignalId,
-        status: "Expired"
-      });
-    }
+    // Unlock credits are retired, so an expiry no longer refunds one (the ledger is kept for history).
     const result = await client.query(
       signalSelectSql("WHERE s.id = ANY($1::text[])"),
       [ids]
@@ -2345,7 +2281,8 @@ export async function expireActiveSignalsPastValidity() {
 
 export async function updateSignalOutcome(signal) {
   return transaction(async (client) => {
-    const outcome = await client.query(`
+    // Unlock credits are retired, so a stop-loss or expiry no longer refunds one.
+    await client.query(`
       INSERT INTO signal_outcomes (
         saved_signal_id, status, status_reason, resolved_at, last_tracking_error,
         last_tracking_attempt_at, updated_at
@@ -2368,10 +2305,6 @@ export async function updateSignalOutcome(signal) {
       signal.lastTrackingError || null,
       signal.lastTrackingAttemptAt || null
     ]);
-    await refundSignalCreditForTerminalOutcome(client, {
-      savedSignalId: signal.id,
-      status: outcome.rows[0]?.status || signal.status || "Active"
-    });
   });
 }
 
@@ -3929,7 +3862,7 @@ function mapUser(row) {
     discoveriesToday: Number(row.discoveries_today || 0),
     discoveriesPeriod: Number(row.discoveries_period || 0),
     subscription: {
-      status: row.subscription_status || "trialing",
+      status: row.subscription_status || "none",
       provider: row.provider || "stripe",
       providerCustomerId: row.provider_customer_id,
       stripeMode: row.stripe_mode,
@@ -3938,6 +3871,9 @@ function mapUser(row) {
       currentPeriodStart: row.current_period_start,
       currentPeriodEnd: row.current_period_end,
       cancelAtPeriodEnd: Boolean(row.cancel_at_period_end),
+      trialEnd: row.trial_end || null,
+      firstSubscribedAt: row.first_subscribed_at || null,
+      billingInterval: row.billing_interval || null,
       createdAt: row.created_at
     },
     createdAt: row.created_at

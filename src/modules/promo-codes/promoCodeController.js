@@ -4,20 +4,14 @@ import {
   createPromoCode,
   getPromoCodeRedemptions,
   listPromoCodes,
-  redeemPromoCode,
   setPromoCodeActiveState
 } from "./promoCodeService.js";
 
 export async function handlePromoCodeRoutes(req, res, pathname) {
+  // Unlock credits are retired with the single plan, so credit-grant codes can no longer be redeemed.
   if (pathname === "/api/promo-codes/redeem" && req.method === "POST") {
     if (!req.user) return sendError(res, 401, "Authentication required.");
-    try {
-      const body = await readJson(req);
-      const result = await redeemPromoCode(req.user, body.code);
-      return sendJson(res, 200, { redeemed: true, creditsGranted: result.quantity });
-    } catch (error) {
-      return sendError(res, error.statusCode || 400, error.message);
-    }
+    return sendError(res, 410, "Promo codes for unlock credits are no longer available. SignalForge now has one plan with a 7-day free trial.", { code: "PROMO_CREDITS_RETIRED" });
   }
 
   if (!pathname.startsWith("/api/admin/promo-codes")) return false;

@@ -1,3 +1,4 @@
+import { hasPaidAccess } from "../subscriptions/subscriptionService.js";
 import { appConfig } from "../../config/appConfig.js";
 import {
   disconnectTelegramSettings,
@@ -102,6 +103,10 @@ export async function sendTelegramTestAlert(user) {
 }
 
 export async function enqueueMatchingTelegramNotifications(user, setups) {
+  // Telegram alerts are paid only: a free, cancelled or lapsed account gets none.
+  if (!hasPaidAccess(user)) {
+    return [];
+  }
   const settings = await getTelegramSettingsByUser(user.id);
 
   if (!settings?.enabled || !appConfig.telegram.botToken) {
@@ -229,7 +234,6 @@ export function formatTelegramSignalMessage(setup, { trackRecords = getTrackReco
     reason,
     "",
     RULE_MATCH_EXPLANATION,
-    "Preview only. Unlock to view the setup levels.",
     "Market conditions may change before the validity window ends.",
     "Educational tool only. Not financial advice."
   ].join("\n");
@@ -243,7 +247,7 @@ export function formatTelegramSignalReplyMarkup(setup) {
     reply_markup: {
       inline_keyboard: [[
         {
-          text: "Unlock setup",
+          text: "View levels",
           url
         }
       ]]

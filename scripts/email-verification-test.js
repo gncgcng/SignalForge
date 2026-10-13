@@ -6,7 +6,7 @@ process.env.APP_URL = "http://localhost:4173";
 
 const {
   canDiscoverSetups,
-  canGenerateSignal
+  hasPaidAccess
 } = await import("../src/modules/subscriptions/subscriptionService.js");
 
 const repositories = readFileSync(
@@ -48,24 +48,23 @@ const tester = { ...baseUser, role: "tester" };
 const verified = { ...baseUser, emailVerifiedAt: new Date() };
 
 const result = {
+  // Pivot phase 3: no unlock credits. Verification still gates scanning and viewing levels on a free account.
   unverifiedCreditsBlocked:
-    canGenerateSignal(baseUser) === false &&
     canDiscoverSetups(baseUser) === false,
   verifiedCreditsAllowed:
-    canGenerateSignal(verified) === true &&
     canDiscoverSetups(verified) === true,
   testersRemainUnlimited:
-    canGenerateSignal(tester) === true &&
+    hasPaidAccess(tester) === true &&
     canDiscoverSetups(tester) === true,
   atomicDatabaseGuards:
-    repositories.includes("u.email_verified_at, c.unlock_credits_balance") &&
-    repositories.includes("Verify your email before using signal unlock credits.") &&
+    repositories.includes("Verify your email before viewing setup levels.") &&
     repositories.includes("SELECT u.role, u.email_verified_at") &&
     repositories.includes("Verify your email before using setup discovery credits."),
   trialGrantedOnlyAfterVerification:
     repositories.includes("verifyEmailToken") &&
     repositories.includes("UPDATE users SET email_verified_at") &&
-    repositories.includes("unlock_credits_balance = GREATEST") &&
+    // Verification grants nothing now: the one free trial is the 7-day card trial.
+    repositories.includes("return { userId: token.user_id, trialGranted: false, trialBlockedBy: null") &&
     authService.includes("emailVerifiedAt: options.bypassVerification ? new Date() : null") &&
     authService.includes("freeSignalAllowance: options.bypassVerification ?"),
   resendSupportedAndThrottled:

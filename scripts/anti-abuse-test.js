@@ -58,8 +58,10 @@ const result = {
   temporaryRateLimits: authService.includes("assertSignupVelocity") &&
     repositories.includes("created_at >= now() - interval '1 day'") &&
     repositories.includes("created_at >= now() - interval '7 days'"),
-  deviceTrialDeduplicated: repositories.includes("ON CONFLICT (device_fingerprint_hash) DO NOTHING") &&
-    repositories.includes("repeated_trial_device"),
+  // Pivot phase 3: the free-unlock device trial is retired. One trial per person (email / Google identity claims),
+  // per card (trial_card_claims) and per account (an earlier subscription) is enforced at checkout and in the webhook.
+  deviceTrialDeduplicated: !repositories.includes("repeated_trial_device") &&
+    repositories.includes("export async function claimTrialIdentities"),
   disposableEmailBlocked: authService.includes("isDisposableEmail") &&
     authService.includes("Temporary or disposable email addresses are not supported."),
   verificationRoutes: authController.includes("/api/auth/verify-email") &&

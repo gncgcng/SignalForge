@@ -16,7 +16,7 @@ const bootstrap = read("../public/auth-bootstrap.js");
 const passed = [];
 const check = async (name, fn) => { await fn(); passed.push(name); };
 
-const SIGNUP = { hash: "#signup", mode: "signup", heading: "Create your free account", submit: "Create account – get 3 free unlocks" };
+const SIGNUP = { hash: "#signup", mode: "signup", heading: "Create your free account", submit: "Create free account" };
 const SIGNIN = { hash: "#signin", mode: "signin", heading: "Sign in", submit: "Sign in" };
 
 // ---------- 1. inventory ----------
@@ -30,8 +30,9 @@ const isCreateAccountCta = ({ attrs }) =>
 const publicMarkup = html.slice(0, html.indexOf('id="auth-screen"'));
 const publicCtas = controls(publicMarkup).filter(isCreateAccountCta).map((control) => control.label);
 const templateCtas = controls(app).filter(isCreateAccountCta).map((control) => control.label);
-// Choose Pro / Choose Elite were removed while new checkouts are paused (BILLING_CHECKOUT_ENABLED).
-const EXPECTED_HTML_CTAS = ["Start Free 3 Free Setup Unlocks", "Unlock Preview", "Start Free", "Become an Affiliate", "Start Free", "Start scanning"];
+// Pivot phase 3: one plan. The pricing card's plan button opens sign-up ("Create a free account"); once signed in,
+// Billing starts the 7-day trial.
+const EXPECTED_HTML_CTAS = ["Start Free BTC &amp; ETH setups with levels", "Open the app", "Create a free account", "Create a free account", "Become an Affiliate", "Start Free", "Start scanning"];
 const EXPECTED_TEMPLATE_CTAS = ["Start scanning"];
 
 await check("inventory: the create-account CTAs are exactly the classified ones", () => {

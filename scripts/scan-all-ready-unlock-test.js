@@ -52,32 +52,32 @@ try {
   assert.equal(unlocked.body.signal.setupType, "Breakout retest");
   assert.equal(new Date(unlocked.body.signal.validUntil).toISOString(), ready.validUntil);
   assert.equal(providerCalls, 0, "exact Scan All unlock performed a second market scan");
-  assert.equal(transport.getUnlockPersistence().creditDebits, 1);
+  assert.equal(transport.getUnlockPersistence().creditDebits, 0, "viewing levels uses no credit");
 
   const wrongKey = await postGenerate(handleSignalRoutes, user, {
     symbol: "READY-USD", timeframe: "15m", setupKey: "wrong-123"
   });
   assert.equal(wrongKey.statusCode, 404);
-  assert.equal(transport.getUnlockPersistence().creditDebits, 1);
+  assert.equal(transport.getUnlockPersistence().creditDebits, 0, "viewing levels uses no credit");
 
   const wrongUser = await postGenerate(handleSignalRoutes, otherUser, {
     symbol: "READY-USD", timeframe: "15m", setupKey: ready.setupKey
   });
   assert.equal(wrongUser.statusCode, 404);
-  assert.equal(transport.getUnlockPersistence().creditDebits, 1);
+  assert.equal(transport.getUnlockPersistence().creditDebits, 0, "viewing levels uses no credit");
 
   const expiredResult = await postGenerate(handleSignalRoutes, user, {
     symbol: "READY-USD", timeframe: "15m", setupKey: expired.setupKey
   });
   assert.equal(expiredResult.statusCode, 410);
-  assert.equal(transport.getUnlockPersistence().creditDebits, 1);
+  assert.equal(transport.getUnlockPersistence().creditDebits, 0, "viewing levels uses no credit");
 
   const duplicate = await postGenerate(handleSignalRoutes, user, {
     symbol: "READY-USD", timeframe: "15m", setupKey: ready.setupKey
   });
   assert.equal(duplicate.statusCode, 200);
   assert.equal(duplicate.body.alreadyUnlocked, true);
-  assert.equal(transport.getUnlockPersistence().creditDebits, 1);
+  assert.equal(transport.getUnlockPersistence().creditDebits, 0, "viewing levels uses no credit");
   assert.equal(transport.getUnlockPersistence().savedSignalInserts, 1);
   assert.equal(providerCalls, 0);
 
@@ -162,6 +162,8 @@ function buildUser(id) {
     plan: "pro",
     emailVerifiedAt: new Date(NOW - 86_400_000).toISOString(),
     unlockCreditsBalance: 3,
+    // Pivot phase 3: viewing levels on this fixture market needs the paid plan (a trial counts).
+    subscription: { status: "trialing", providerSubscriptionId: "sub_fixture" },
     lifetimeUnlocksUsed: 0,
     trialSignalsUsed: 0
   };

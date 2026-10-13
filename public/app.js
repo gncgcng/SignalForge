@@ -49,6 +49,15 @@ import {
   setupLabel,
   tradeMetrics
 } from "./journalStats.js";
+import {
+  FREE_FEATURES,
+  LEVELS_TRIAL_MESSAGE,
+  PAID_FEATURES,
+  PLAN_PRICES,
+  checkoutButtonLabel,
+  describeBillingStatus,
+  pricingNote
+} from "./billingView.js";
 import { formatSignalCountdown, getSignalValidityState } from "./signalValidity.js";
 import {
   addPaperDrawingPoint,
@@ -500,10 +509,6 @@ const adminPromoList = document.querySelector("#admin-promo-list");
 const adminPromoRedemptions = document.querySelector("#admin-promo-redemptions");
 const adminPromoRedemptionsTitle = document.querySelector("#admin-promo-redemptions-title");
 const adminPromoRedemptionList = document.querySelector("#admin-promo-redemption-list");
-const promoRedeemForm = document.querySelector("#promo-redeem-form");
-const promoRedeemCode = document.querySelector("#promo-redeem-code");
-const promoRedeemSubmit = document.querySelector("#promo-redeem-submit");
-const promoRedeemMessage = document.querySelector("#promo-redeem-message");
 const adminRequestList = document.querySelector("#admin-request-list");
 const adminRequestCount = document.querySelector("#admin-request-count");
 const verificationNote = document.querySelector("#verification-note");
@@ -511,10 +516,7 @@ const resendVerificationButton = document.querySelector("#resend-verification");
 const billingCurrentPlan = document.querySelector("#billing-current-plan");
 const billingDiscoveryCredits = document.querySelector("#billing-discovery-credits");
 const billingUnlockCredits = document.querySelector("#billing-unlock-credits");
-const billingPlanGrid = document.querySelector("#billing-plan-grid");
-const billingPackGrid = document.querySelector("#billing-pack-grid");
 const billingStatus = document.querySelector("#billing-status");
-const manageSubscriptionButton = document.querySelector("#manage-subscription-button");
 const affiliateLink = document.querySelector("#affiliate-link");
 const affiliateStatus = document.querySelector("#affiliate-status");
 const affiliatePayoutForm = document.querySelector("#affiliate-payout-form");
@@ -590,7 +592,10 @@ const legalDocuments = {
     body: `
       <p>SignalForge provides market research tools, scanners, alerts, backtesting, paper trading, and educational analytics. You are responsible for how you use the information shown in the app.</p>
       <p>SignalForge does not place trades, connect to external trading accounts, manage money, or provide personalized investment recommendations. You agree not to misuse the service, bypass usage limits, abuse trials, or rely on SignalForge as your sole basis for trading decisions.</p>
-      <p>Subscriptions, unlock credits, affiliate links, and notifications are provided subject to availability and may change as the product evolves.</p>
+      <p><strong>Subscription.</strong> SignalForge has one paid plan: $9.99 a month or $89.99 a year, plus taxes where they apply. It renews automatically at the end of each billing period until you cancel.</p>
+      <p><strong>Free trial.</strong> New subscribers get a 7-day free trial, and a card is required to start it. Unless you cancel before the trial ends, your card is charged automatically at the end of the trial, and then every month or year. We email you 3 days before the first charge. One free trial per person and per card: an account, email address, Google account or card that has already had a trial starts the subscription without one.</p>
+      <p><strong>Cancelling.</strong> You can cancel any time in Settings → Billing. Cancelling stops the next renewal; you keep access until the end of the period you've paid for (or the end of the trial), and you won't be charged again.</p>
+      <p>Affiliate links and notifications are provided subject to availability and may change as the product evolves.</p>
     `
   },
   privacy: {
@@ -599,7 +604,8 @@ const legalDocuments = {
       <p>SignalForge stores account information needed to operate the service, including your email, authentication records, credit balances, saved signals, alerts, journal entries, affiliate attribution, and subscription status.</p>
       <p>Trades you log in My trades are stored only to show your own statistics. They are never sold or shared. You can export them at any time, and deleting your account deletes them.</p>
       <p>Payment information is handled by Stripe. Telegram alerts require Telegram connection details. Google sign-in is validated on the backend before an account is created or linked.</p>
-      <p>We use security and anti-abuse signals such as IP-derived hashes and device fingerprints to protect free trials and subscriptions. We do not sell personal trading history.</p>
+      <p>We use security and anti-abuse signals such as IP-derived hashes and device fingerprints to protect free trials and subscriptions. To allow one free trial per person, we keep keyed hashes of your email address and Google account, including after account deletion. We do not sell personal trading history.</p>
+      <p>When you start a free trial, Stripe gives us a fingerprint of your card: a code that identifies the card, not the card number. We store only a keyed hash of it, use it only to enforce one free trial per card, and keep it after account deletion for that purpose.</p>
     `
   },
   risk: {
@@ -615,9 +621,11 @@ const legalDocuments = {
   refund: {
     title: "Refund Policy",
     body: `
-      <p>SignalForge does not offer refunds for subscription charges or unlock credit purchases, except in the case of a genuine billing error or duplicate charge. If you believe you were charged in error — for example, billed twice for the same period, or charged after cancellation — contact support with your account email and the date of the charge, and we will review and correct confirmed errors.</p>
-      <p>Cancelling a subscription stops future billing immediately but does not refund the current period already paid for. Unlock credit packs are one-time purchases and are non-refundable once purchased, except under the billing-error exception above.</p>
-      <p>This policy does not limit any rights you have under applicable law that cannot be waived by agreement.</p>
+      <p><strong>Monthly plans.</strong> No partial refunds. Cancelling stops the next charge, and you keep access until the end of the month you've paid for.</p>
+      <p><strong>Annual plans.</strong> If you ask within 14 days of an annual charge, we refund that charge in full. After 14 days, cancelling stops the next renewal and you keep access until the end of the paid year.</p>
+      <p><strong>Free trial.</strong> Nothing is charged during the 7-day trial. Cancel before it ends and you won't be charged at all.</p>
+      <p><strong>Billing errors.</strong> A genuine billing error — for example a duplicate charge, or a charge after you cancelled — is always corrected and refunded. Contact support with your account email and the date of the charge.</p>
+      <p>If the law where you live gives you more rights, those apply.</p>
     `
   }
 };
@@ -625,8 +633,8 @@ const legalDocuments = {
 const defaultSupportIssues = {
   "Account / Login": ["Cannot sign in", "Google login issue", "Password reset issue", "Session keeps expiring", "Account settings issue"],
   "Billing / Subscription": ["Payment failed", "Subscription not active", "Cancel subscription", "Refund question", "Invoice question"],
-  "Credits / Unlocks": ["Credits missing", "Signal charged twice", "Signal did not unlock", "Wrong credit balance"],
-  "Telegram Alerts": ["Not receiving alerts", "Telegram not connecting", "Unlock link not opening app", "Duplicate alerts"],
+  "Free trial": ["Trial didn't start", "Charged after the trial", "Card already used for a trial", "Trial question"],
+  "Telegram Alerts": ["Not receiving alerts", "Telegram not connecting", "Alert link not opening app", "Duplicate alerts"],
   "Signals / Scanner": ["Signal looks wrong", "TP/SL issue", "Rule match issue", "Scanner not finding setups"],
   "Paper Trading": ["Order did not open", "TP/SL tracking issue", "Balance or P/L issue", "Chart or market data issue"],
   "Affiliate Program": ["Referral not tracked", "Commission missing", "Payout question", "Affiliate link issue"],
@@ -692,6 +700,7 @@ const api = {
         error.statusCode = response.status;
         error.code = payload.code ||
           (typeof payload.error === "string" ? payload.error : payload.error?.code) ||
+          payload.error?.details?.code ||
           "request_failed";
         error.details = payload.error?.details;
         error.responseSummary = summarizeAuthResponse(payload);
@@ -1618,25 +1627,80 @@ document.querySelector("#upgrade-button").addEventListener("click", async () => 
   navigateTo("billing");
 });
 
-billingPlanGrid.addEventListener("click", async (event) => {
-  const button = event.target.closest("[data-billing-plan]");
-  if (button) await startCheckout(button, { plan: button.dataset.billingPlan });
+// ---- Pricing card and Billing (one plan, 7-day trial with card) ----
+state.planInterval = "month";
+state.publicCheckoutEnabled = false;
+
+// The monthly/annual toggle, the trial date and the checkout button, on the landing card and the Billing page.
+function renderPlanCards() {
+  const interval = state.planInterval === "year" ? "year" : "month";
+  const price = PLAN_PRICES[interval];
+  const summary = state.subscription || null;
+  const checkoutEnabled = summary ? summary.checkoutEnabled === true : state.publicCheckoutEnabled === true;
+  // Summaries from other endpoints may not know trial eligibility (null); keep the last answer from Billing.
+  if (typeof summary?.trialEligible === "boolean") state.trialEligible = summary.trialEligible;
+  const trialEligible = state.trialEligible !== false;
+  document.querySelectorAll("[data-plan-price]").forEach((element) => {
+    element.innerHTML = `${escapeHtml(price.label)}<small>/${escapeHtml(price.per)}</small>`;
+  });
+  document.querySelectorAll("[data-plan-price-line]").forEach((element) => {
+    element.textContent = interval === "year"
+      ? "$89.99 a year (save 25% compared with monthly), or $9.99 a month."
+      : "$9.99 a month, or $89.99 a year (save 25%).";
+  });
+  document.querySelectorAll("[data-plan-interval-choice]").forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.planIntervalChoice === interval));
+    button.classList.toggle("active", button.dataset.planIntervalChoice === interval);
+  });
+  document.querySelectorAll("[data-pricing-note]").forEach((element) => {
+    element.textContent = pricingNote({ now: new Date(), trialEligible });
+    element.classList.toggle("hidden", !checkoutEnabled);
+  });
+  document.querySelectorAll("[data-checkout-paused-note]").forEach((element) => element.classList.toggle("hidden", checkoutEnabled));
+  document.querySelectorAll("[data-plan-cta]").forEach((button) => {
+    button.textContent = checkoutEnabled ? checkoutButtonLabel({ trialEligible }) : "Create a free account";
+  });
+  const billingCheckout = document.querySelector("#billing-checkout-button");
+  if (billingCheckout) {
+    billingCheckout.textContent = checkoutEnabled ? checkoutButtonLabel({ trialEligible }) : "Opens soon";
+    billingCheckout.disabled = !checkoutEnabled;
+  }
+  const features = document.querySelector("#billing-plan-features");
+  if (features) features.innerHTML = PAID_FEATURES.map((feature) => `<li>${escapeHtml(feature)}</li>`).join("");
+}
+
+document.addEventListener("click", (event) => {
+  const choice = event.target.closest("[data-plan-interval-choice]");
+  if (!choice) return;
+  state.planInterval = choice.dataset.planIntervalChoice === "year" ? "year" : "month";
+  renderPlanCards();
 });
 
-billingPackGrid.addEventListener("click", async (event) => {
-  const button = event.target.closest("[data-billing-pack]");
-  if (button) await startCheckout(button, { pack: button.dataset.billingPack });
+document.querySelector("#billing-checkout-button")?.addEventListener("click", async (event) => {
+  await startCheckout(event.currentTarget, { interval: state.planInterval });
 });
 
-manageSubscriptionButton.addEventListener("click", async () => {
+// "Cancel subscription" and "Update card" both open the Stripe Customer Portal.
+async function openBillingPortal(button) {
   try {
-    manageSubscriptionButton.disabled = true;
+    if (button) button.disabled = true;
     billingStatus.textContent = "Opening Stripe billing portal...";
     const { portal } = await api.request("/api/subscriptions/portal", { method: "POST" });
     location.assign(portal.url);
   } catch (error) {
     billingStatus.textContent = error.message;
-    manageSubscriptionButton.disabled = false;
+    if (button) button.disabled = false;
+  }
+}
+
+document.addEventListener("click", async (event) => {
+  const portalButton = event.target.closest("[data-billing-portal]");
+  if (portalButton) {
+    await openBillingPortal(portalButton);
+    return;
+  }
+  if (event.target.closest("[data-billing-update-card]")) {
+    navigateTo("billing");
   }
 });
 
@@ -1777,39 +1841,6 @@ adminPromoList.addEventListener("click", async (event) => {
 document.querySelector("#admin-promo-redemptions-close").addEventListener("click", () => {
   state.adminPromoCodes.selectedId = null;
   adminPromoRedemptions.classList.add("hidden");
-});
-
-promoRedeemForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  if (promoRedeemForm.dataset.busy === "true") return;
-  const code = promoRedeemCode.value;
-  if (!code.trim()) {
-    promoRedeemMessage.textContent = "Enter a promo code.";
-    return;
-  }
-
-  promoRedeemForm.dataset.busy = "true";
-  promoRedeemSubmit.disabled = true;
-  promoRedeemSubmit.textContent = "Redeeming...";
-  promoRedeemMessage.textContent = "";
-  try {
-    const result = await api.request("/api/promo-codes/redeem", {
-      method: "POST",
-      body: JSON.stringify({ code })
-    });
-    promoRedeemCode.value = "";
-    const credits = Number(result.creditsGranted || 0);
-    promoRedeemMessage.textContent = `Code redeemed: ${credits} unlock credit${credits === 1 ? "" : "s"} added.`;
-    await loadSubscription().catch(() => {
-      promoRedeemMessage.textContent += " Refresh to see your updated balance.";
-    });
-  } catch (error) {
-    promoRedeemMessage.textContent = error.message;
-  } finally {
-    delete promoRedeemForm.dataset.busy;
-    promoRedeemSubmit.disabled = false;
-    promoRedeemSubmit.textContent = "Redeem";
-  }
 });
 
 document.querySelector("#webhook-events-view").addEventListener("click", async (event) => {
@@ -2321,7 +2352,7 @@ generateButton.addEventListener("click", async () => {
       markFirstScanCompleted();
       if (state.scanResults.length) renderSignals();
       else renderNoSetup(analysis);
-      statusLine.textContent = "No valid setup found. No unlock credit was used.";
+      statusLine.textContent = "No valid setup found.";
       return;
     }
 
@@ -3206,9 +3237,10 @@ signalsGrid.addEventListener("click", async (event) => {
     return;
   }
 
+  if (!ensureLevelsAccess(button.dataset.unlockSymbol)) return;
   try {
     button.disabled = true;
-    statusLine.textContent = `Unlocking ${button.dataset.unlockSymbol} ${button.dataset.unlockTimeframe}...`;
+    statusLine.textContent = `Opening ${button.dataset.unlockSymbol} ${button.dataset.unlockTimeframe}...`;
     const { signal, subscription, analysis, alreadyUnlocked } = await api.request("/api/signals/generate", {
       method: "POST",
       body: JSON.stringify({
@@ -3223,8 +3255,8 @@ signalsGrid.addEventListener("click", async (event) => {
 
     if (!signal) {
       renderSignals();
-      statusLine.textContent = "Setup no longer qualifies. No unlock credit was used.";
-      showToast("Unlock failed. Current Scan All results were preserved.");
+      statusLine.textContent = "This setup no longer qualifies.";
+      showToast("Setup no longer qualifies. Current Scan All results were preserved.");
       return;
     }
 
@@ -3327,9 +3359,10 @@ document.addEventListener("keydown", (event) => {
 });
 
 async function unlockSignal(button, symbol, timeframe) {
+  if (!ensureLevelsAccess(symbol)) return;
   try {
     button.disabled = true;
-    statusLine.textContent = `Unlocking ${symbol} ${timeframe}...`;
+    statusLine.textContent = `Opening ${symbol} ${timeframe}...`;
     const { signal, subscription, analysis, alreadyUnlocked } = await api.request("/api/signals/generate", {
       method: "POST",
       body: JSON.stringify({ symbol, timeframe, setupKey: button.dataset.unlockSetupKey })
@@ -3340,8 +3373,8 @@ async function unlockSignal(button, symbol, timeframe) {
 
     if (!signal) {
       renderSignals();
-      statusLine.textContent = "Setup no longer qualifies. No unlock credit was used.";
-      showToast("Unlock failed. Current Scan All results were preserved.");
+      statusLine.textContent = "This setup no longer qualifies.";
+      showToast("Setup no longer qualifies. Current Scan All results were preserved.");
       return;
     }
 
@@ -3534,7 +3567,7 @@ async function init() {
       landingPage.classList.remove("hidden");
     }
     if (getPendingTelegramUnlockKey()) {
-      authNote.textContent = "Sign in to unlock this Telegram signal preview.";
+      authNote.textContent = "Sign in to open this Telegram setup.";
     }
     if (oauthError) {
       authNote.textContent = googleOAuthErrorMessage(oauthError);
@@ -3601,6 +3634,8 @@ async function loadAuthConfig({ signal } = {}) {
 
 function applyAuthConfig(authConfig = {}) {
   emailFeaturesEnabled = Boolean(authConfig.emailFeaturesEnabled);
+  state.publicCheckoutEnabled = authConfig.checkoutEnabled === true;
+  renderPlanCards();
   passwordResetUnavailable?.classList.toggle("hidden", emailFeaturesEnabled);
   passwordResetEmailField?.classList.toggle("hidden", !emailFeaturesEnabled);
   passwordResetSubmit?.classList.toggle("hidden", !emailFeaturesEnabled);
@@ -4107,7 +4142,7 @@ async function processPendingTelegramUnlock() {
   if (!setupKey) return;
 
   try {
-    statusLine.textContent = "Unlocking Telegram signal preview...";
+    statusLine.textContent = "Opening the Telegram setup...";
     const { signal, subscription, alreadyUnlocked, expired, message, historicalAnalysis } = await api.request("/api/signals/telegram-unlock", {
       method: "POST",
       body: JSON.stringify({ setupKey })
@@ -4126,7 +4161,7 @@ async function processPendingTelegramUnlock() {
     }
 
     if (!signal) {
-      statusLine.textContent = "Telegram signal preview could not be unlocked.";
+      statusLine.textContent = "The Telegram setup could not be opened.";
       return;
     }
 
@@ -4178,7 +4213,7 @@ function getAuthMode() {
 }
 
 function authSubmitLabel(mode) {
-  return mode === "signup" ? "Create account – get 3 free unlocks" : "Sign in";
+  return mode === "signup" ? "Create free account" : "Sign in";
 }
 
 // One form, two modes: "#signup" is "Create your free account" (email, password, the two
@@ -4201,7 +4236,7 @@ function showAuthForm() {
   if (submit && !loginInProgress) submit.textContent = authSubmitLabel(mode);
   if (authNote && !loginInProgress) {
     authNote.textContent = mode === "signup"
-      ? "Your first 3 signal unlocks are included."
+      ? "Free accounts see BTC-USD and ETH-USD setups with levels. No card needed."
       : "Sign in to continue to your SignalForge dashboard.";
   }
 }
@@ -4349,7 +4384,7 @@ function renderHowItWorksContent() {
           "Checks trend, momentum, volume, structure, volatility, and risk/reward.",
           "Watches developing setups before promoting them.",
           "Alerts users when a validated setup becomes ready.",
-          "Lets users unlock full details, paper trade, and review outcomes."
+          "Shows full levels (free on BTC-USD and ETH-USD), paper trading, and outcome reviews."
         ], "does")}
         ${renderTrustCard("What it does not do", "Clear limits matter.", [
           "Does not guarantee profit or provide financial advice.",
@@ -4383,10 +4418,10 @@ function renderHowItWorksContent() {
           "Volume or risk/reward is weak.",
           "Price is overextended or too close to opposing structure."
         ], "avoid")}
-        ${renderTrustCard("Unlocks and credits", "Pay only for eligible full signal details.", [
-          "Previews appear before unlock; Entry, Stop Loss, and Take Profit remain protected.",
-          "A credit is used only when an eligible signal is unlocked.",
-          "Expired signals do not charge as fresh unlocks.",
+        ${renderTrustCard("Free and paid", "One plan, a 7-day free trial.", [
+          "Free: setups with levels on BTC-USD and ETH-USD, the research page, track records, paper trading.",
+          "The plan ($9.99 a month or $89.99 a year): every market, Telegram alerts, the trade checker, My trades, backtesting.",
+          "The trial needs a card and charges automatically after 7 days unless you cancel in Settings.",
           "Watching setups and Avoid Trade cards are free to view."
         ], "credits")}
         ${renderTrustCard("Paper trading", "Simulated practice, never a real order.", [
@@ -6607,7 +6642,9 @@ function applyViewState(view, options = {}) {
     renderTrackRecordsPage();
   }
 
-  if (normalizedView === "trade-check") {
+  applyPaidGate(normalizedView);
+
+  if (normalizedView === "trade-check" && (!state.subscription || hasPaidAccessClient())) {
     openTradeCheck();
   }
 
@@ -6687,7 +6724,7 @@ function applyViewState(view, options = {}) {
     });
   }
 
-  if (normalizedView === "performance") {
+  if (normalizedView === "performance" && (!state.subscription || hasPaidAccessClient())) {
     loadPerformance().catch((error) => {
       document.querySelector("#performance-filter-label").textContent = error.message;
     });
@@ -7019,30 +7056,68 @@ function renderMultiTimeframeConfluence(confluence) {
   ].join("");
 }
 
+function hasPaidAccessClient() {
+  return state.subscription?.hasPaidAccess === true;
+}
+
+// Free accounts see levels on BTC-USD and ETH-USD; everything else needs the plan (the server checks this too).
+function canViewLevelsClient(symbol) {
+  if (hasPaidAccessClient()) return true;
+  const free = state.subscription?.freeLevelMarkets || ["BTC-USD", "ETH-USD"];
+  return free.includes(String(symbol || "").toUpperCase());
+}
+
+function levelsButtonLabel(symbol) {
+  return canViewLevelsClient(symbol) ? "View levels" : "Start free trial";
+}
+
+// Returns false (and points to Billing) when this market's levels need the plan.
+function ensureLevelsAccess(symbol) {
+  if (canViewLevelsClient(symbol)) return true;
+  statusLine.textContent = LEVELS_TRIAL_MESSAGE;
+  showToast(LEVELS_TRIAL_MESSAGE);
+  navigateTo("billing");
+  return false;
+}
+
 function renderSubscription() {
   if (!state.subscription) return;
-  document.querySelector("#trial-count").textContent = state.subscription.unlimitedSignals
-    ? "Unlimited access"
-    : `${state.subscription.unlockCreditsRemaining} unlocks left`;
-  verificationNote.classList.toggle("hidden", state.subscription.emailVerified);
-  resendVerificationButton.classList.toggle("hidden", state.subscription.emailVerified);
-  if (!state.subscription.emailVerified) {
-    verificationNote.textContent = "Verify your email before using setup or unlock credits.";
+  const subscription = state.subscription;
+  const status = describeBillingStatus(subscription);
+  document.querySelector("#trial-count").textContent = subscription.plan === "tester"
+    ? "Tester · full access"
+    : subscription.status === "trialing"
+      ? "Free trial"
+      : subscription.hasPaidAccess
+        ? "SignalForge plan"
+        : "Free plan";
+  verificationNote.classList.toggle("hidden", subscription.emailVerified);
+  resendVerificationButton.classList.toggle("hidden", subscription.emailVerified);
+  if (!subscription.emailVerified) {
+    verificationNote.textContent = "Verify your email to scan and view setup levels.";
   }
+  document.querySelector("#billing-past-due-banner")?.classList.toggle("hidden", !status.banner);
   renderBilling();
+  applyPaidGate(state.activeView);
 }
 
 function renderBilling() {
   if (!state.subscription) return;
   const subscription = state.subscription;
+  const status = describeBillingStatus(subscription);
+  const panel = document.querySelector("#billing-status-panel");
+  if (panel) panel.dataset.tone = status.tone;
+  document.querySelector("#billing-status-headline").textContent = status.headline;
+  document.querySelector("#billing-status-detail").textContent = status.detail;
+  document.querySelector("#billing-manage-actions")?.classList.toggle("hidden", !(status.manage && subscription.customerPortalAvailable));
+  document.querySelector("#billing-cancel-button")?.classList.toggle("hidden", subscription.cancelAtPeriodEnd || !["trialing", "active", "past_due"].includes(subscription.status));
   billingCurrentPlan.textContent = subscription.planName;
-  billingDiscoveryCredits.textContent = subscription.unlimitedSignals
+  billingDiscoveryCredits.textContent = subscription.setupDiscoveries?.limit == null
     ? "Unlimited"
-    : `${subscription.setupDiscoveries.remaining} / ${subscription.setupDiscoveries.limit} ${subscription.setupDiscoveries.period}`;
-  billingUnlockCredits.textContent = subscription.unlimitedSignals
-    ? "Unlimited"
-    : String(subscription.unlockCreditsRemaining);
-  manageSubscriptionButton.classList.toggle("hidden", !subscription.customerPortalAvailable);
+    : `${subscription.setupDiscoveries.remaining} / ${subscription.setupDiscoveries.limit} today`;
+  billingUnlockCredits.textContent = subscription.hasPaidAccess ? "Every market" : (subscription.freeLevelMarkets || ["BTC-USD", "ETH-USD"]).join(", ");
+  // The plan card is for accounts without the plan; subscribers manage theirs above.
+  document.querySelector("#billing-plan-panel")?.classList.toggle("hidden", Boolean(subscription.hasPaidAccess));
   if (subscription.stripeConfiguration) {
     const config = subscription.stripeConfiguration;
     const checkoutMissing = [
@@ -7060,49 +7135,49 @@ function renderBilling() {
         ? `Stripe ${config.mode} mode is configured.`
         : `Checkout is configured. Webhooks are missing STRIPE_WEBHOOK_SECRET.`;
   }
-
-  // New purchases are paused unless the server reports BILLING_CHECKOUT_ENABLED; show the
-  // coming-soon note instead of plan and credit-pack buttons that would only be refused.
-  const checkoutEnabled = subscription.checkoutEnabled === true;
-  document.querySelector("#billing-coming-soon")?.classList.toggle("hidden", checkoutEnabled);
-  document.querySelector("#billing-plans-section")?.classList.toggle("hidden", !checkoutEnabled);
-  document.querySelector("#billing-packs-section")?.classList.toggle("hidden", !checkoutEnabled);
-  if (!checkoutEnabled) {
-    billingPlanGrid.innerHTML = "";
-    billingPackGrid.innerHTML = "";
-    return;
-  }
-
-  billingPlanGrid.innerHTML = subscription.plans.map((plan) => {
-    const current = subscription.plan === plan.id;
-    return `
-      <article class="panel billing-plan ${current ? "current" : ""}">
-        <div><span class="eyebrow">${current ? "Current plan" : "Subscription"}</span><h3>${escapeHtml(plan.name)}</h3></div>
-        <strong>${plan.discoveryLimit} setup discoveries / ${plan.discoveryPeriod}</strong>
-        <span>${plan.id === "free" ? "3 lifetime unlocks" : `${plan.monthlyUnlockGrant} unlocks / month`}</span>
-        <span>${plan.id === "free" ? "Lifetime unlock limit" : "Unused unlocks roll over"}</span>
-        ${plan.id === "free"
-          ? `<button class="secondary-action" type="button" disabled>${current ? "Current plan" : "Free"}</button>`
-          : `<button data-billing-plan="${plan.id}" type="button" ${current ? "disabled" : ""}>${current ? "Current plan" : `Upgrade to ${plan.name}`}</button>`}
-      </article>
-    `;
-  }).join("");
-
-  billingPackGrid.innerHTML = subscription.creditPacks.map((pack) => `
-    <article class="panel billing-pack">
-      <span class="eyebrow">Credit pack</span>
-      <h3>${escapeHtml(pack.name)}</h3>
-      <span>One-time purchase</span>
-      <button data-billing-pack="${pack.id}" type="button">Buy credits</button>
-    </article>
-  `).join("");
+  renderPlanCards();
 }
+
+// Paid pages: the trade checker, backtesting and performance need the plan. My trades stays readable and
+// exportable without it; only adding and editing are locked. The server enforces the same rules.
+const PAID_VIEWS = new Set(["trade-check", "backtesting", "performance"]);
+const PAID_VIEW_NAMES = { "trade-check": "The trade checker", backtesting: "The backtesting lab", performance: "The performance page" };
+
+function applyPaidGate(view) {
+  const locked = Boolean(state.subscription) && !hasPaidAccessClient();
+  for (const name of PAID_VIEWS) {
+    const section = document.querySelector(`[data-view="${name}"]`);
+    if (!section) continue;
+    const gated = locked;
+    section.classList.toggle("paid-locked", gated);
+    let gate = section.querySelector(":scope > .paid-gate");
+    if (gated && !gate) {
+      gate = document.createElement("article");
+      gate.className = "panel paid-gate";
+      gate.innerHTML = `
+        <span class="eyebrow">SignalForge plan</span>
+        <h3>${escapeHtml(PAID_VIEW_NAMES[name])} is part of the plan</h3>
+        <p class="reasoning">$9.99 a month or $89.99 a year, with a 7-day free trial. Card required; cancel any time in Settings.</p>
+        <button type="button" data-paid-gate-billing>See the plan</button>`;
+      section.prepend(gate);
+    }
+    gate?.classList.toggle("hidden", !gated);
+  }
+  const myTradesLocked = locked;
+  document.querySelector("#my-trades-view")?.classList.toggle("my-trades-read-only", myTradesLocked);
+  document.querySelector("#my-trades-read-only-note")?.classList.toggle("hidden", !myTradesLocked);
+  return view;
+}
+
+document.addEventListener("click", (event) => {
+  if (event.target.closest("[data-paid-gate-billing]")) navigateTo("billing");
+});
 
 function renderCheckoutReturnStatus() {
   const hashQuery = location.hash.split("?")[1] || "";
   const checkoutStatus = new URLSearchParams(hashQuery).get("checkout");
   if (checkoutStatus === "success") {
-    billingStatus.textContent = "Purchase completed. Billing updates may take a moment.";
+    billingStatus.textContent = "Checkout complete. Your trial or subscription appears here as soon as Stripe confirms it.";
     refreshBillingAfterCheckout();
   } else if (checkoutStatus === "cancelled") {
     billingStatus.textContent = "Checkout was cancelled. No charge was made.";
@@ -7118,17 +7193,17 @@ async function refreshBillingAfterCheckout() {
     try {
       await loadSubscription();
       if (billingSnapshot() !== baseline) {
-        billingStatus.textContent = "Purchase confirmed. Billing credits are updated.";
+        billingStatus.textContent = "Confirmed. Your plan is active.";
         removeHashParams(["checkout"]);
         return;
       }
-      billingStatus.textContent = `Purchase received. Waiting for Stripe confirmation (${attempt}/20)...`;
+      billingStatus.textContent = `Waiting for Stripe to confirm (${attempt}/20)...`;
     } catch {
-      billingStatus.textContent = "Purchase received. Retrying billing refresh...";
+      billingStatus.textContent = "Retrying the billing refresh...";
     }
   }
 
-  billingStatus.textContent = "Purchase received. Billing will update when Stripe confirms payment.";
+  billingStatus.textContent = "Billing will update when Stripe confirms it.";
   removeHashParams(["checkout"]);
 }
 
@@ -7136,7 +7211,7 @@ function billingSnapshot() {
   return JSON.stringify({
     plan: state.subscription?.plan,
     status: state.subscription?.status,
-    unlocks: state.subscription?.unlockCreditsRemaining,
+    trialEnd: state.subscription?.trialEnd,
     periodStart: state.subscription?.currentPeriodStart
   });
 }
@@ -7195,7 +7270,7 @@ function renderSignalsHistory() {
       ${renderTelegramExpiredNotice()}
       <div class="empty-state">
         <strong>No saved signals yet</strong>
-        <p class="reasoning">Unlock a setup from Scan All or Unlock Current to save it in your Signals history.</p>
+        <p class="reasoning">Open a setup's levels from Scan All or View levels to save it in your Signals history.</p>
         ${renderSignalEmptyActions()}
       </div>
     `;
@@ -7256,13 +7331,13 @@ function renderTelegramExpiredNotice() {
       <div>
         <span class="status-pill status-expired">Expired</span>
         <strong>${escapeHtml(notice.message || "This signal has expired and is no longer valid as a fresh setup.")}</strong>
-        <p>It was not unlocked and no credit was charged.</p>
+        <p>Its levels were not saved.</p>
       </div>
       <button class="secondary-action" type="button" data-expired-history>View historical analysis</button>
       <div class="expired-history-details hidden" data-expired-history-details>
         <span>${escapeHtml(getDisplaySymbol(signal.symbol || "Signal"))} · ${escapeHtml(signal.timeframe || "")}</span>
         <strong>${escapeHtml(signal.setupType || "Historical setup")}</strong>
-        <p>${escapeHtml(displayReasoning(signal.reasoning) || "This setup is retained for learning context only. Entry levels are not available without a valid unlock.")}</p>
+        <p>${escapeHtml(displayReasoning(signal.reasoning) || "This setup is retained for learning context only. Entry levels are not available for this setup.")}</p>
       </div>
     </section>
   `;
@@ -7453,7 +7528,7 @@ function prefillPaperOrderFromSignal(signal) {
     paperOrderQuantity.value = formatCalculatorNumber(sizing.quantity, 8);
     paperOrderSize.value = formatCalculatorNumber(sizing.positionSize, 2);
   }
-  paperOrderNotes.value = `${signal.setupType || "SignalForge setup"} · unlocked signal`;
+  paperOrderNotes.value = `${signal.setupType || "SignalForge setup"} · saved setup`;
   state.paperTrading.direction = signal.direction;
   renderPaperOrderTicket();
   paperOrderWarning.textContent = closeToEntry
@@ -8324,7 +8399,7 @@ function renderJournal() {
     journalList.innerHTML = `
       <div class="empty-state">
         <strong>No journal entries match these filters</strong>
-        <p class="reasoning">Add an unlocked signal to Paper Trading, then record the plan, emotions, and review here.</p>
+        <p class="reasoning">Add a saved setup to Paper Trading, then record the plan, emotions, and review here.</p>
       </div>
     `;
     return;
@@ -9129,15 +9204,15 @@ function renderScanSummary(opportunitiesFound, marketsScanned, timeframesScanned
   document.querySelector("#scan-summary-skipped").textContent = skippedCount;
   document.querySelector("#scan-summary-provider-errors").textContent = providerErrors;
   document.querySelector("#scan-summary-no-data").textContent = noData;
-  document.querySelector("#scan-summary-credits").textContent = opportunitiesFound > 0
-    ? "No unlock credits used yet"
-    : "No credits used";
+  document.querySelector("#scan-summary-credits").textContent = hasPaidAccessClient()
+    ? "Every market"
+    : "BTC-USD, ETH-USD";
   document.querySelector("#scan-summary-next").textContent = `Suggested next scan: ${formatSuggestedScanTime()}`;
   document.querySelector("#scan-summary-reason").textContent = opportunitiesFound > 0
     ? `Ready setups appear below. ${counts.watching ? `${counts.watching} additional setup${counts.watching === 1 ? " is" : "s are"} still being monitored.` : "No additional setups are being watched."}`
     : counts.watching > 0
-      ? "Probable setups were found, but confirmation or entry readiness is still incomplete. No credits used."
-      : "SignalForge scanned the market but did not find enough confirmation for a valid setup. No credits used.";
+      ? "Probable setups were found, but confirmation or entry readiness is still incomplete."
+      : "SignalForge scanned the market but did not find enough confirmation for a valid setup.";
   document.querySelector("#scan-summary-diagnostics-content").innerHTML = `
     ${scanUniverse ? `<p><strong>Scanner universe:</strong> ${formatInteger(scanUniverse.selectedMarkets ?? scanUniverse.selectedManual ?? marketsScanned)} selected · ${formatInteger(scanUniverse.scannedMarkets ?? scanUniverse.selectedManual ?? marketsScanned)} scanned · ${formatInteger(scanUniverse.scanTasks || 0)} checks · ${formatInteger(scanUniverse.crypto || 0)} crypto · ${formatInteger(scanUniverse.commodities || 0)} commodities · ${formatInteger(scanUniverse.skipped || skippedCount)} skipped</p>` : ""}
     <p><strong>Most common avoid reason:</strong> ${escapeHtml(summary?.topAvoidReason || summary?.topRejectionReason || diagnostics?.topReasons?.[0]?.reason || "Strategy not matched")}</p>
@@ -9230,13 +9305,13 @@ function renderScanResults(setups, errors, diagnostics = null, scanSummary = nul
         <div class="compact-actions"><button type="button" data-scan-again>Scan again</button></div>
       </article>
     `;
-    statusLine.textContent = "No setups match the rules right now. No unlock credits were used.";
+    statusLine.textContent = "No setups match the rules right now.";
     if (options.scroll !== false) scanSummaryPanel.scrollIntoView({ behavior: "smooth", block: "start" });
     return;
   }
 
   signalsGrid.innerHTML = setups.map((setup) => renderScanCard(setup)).join("");
-  statusLine.textContent = `Found ${setups.length} setup${setups.length === 1 ? "" : "s"} that match the rules. Unlocking one uses an unlock credit.`;
+  statusLine.textContent = `Found ${setups.length} setup${setups.length === 1 ? "" : "s"} that match the rules.${hasPaidAccessClient() ? "" : " Levels are free on BTC-USD and ETH-USD."}`;
   if (options.scroll !== false) scanSummaryPanel.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
@@ -9295,11 +9370,11 @@ function renderScanCard(setup) {
       </div>
       ${renderLockedSignalQuality(setup)}
       <div class="compact-actions">
-        <button data-unlock-symbol="${setup.symbol}" data-unlock-timeframe="${setup.timeframe}" data-unlock-setup-key="${escapeHtml(setup.setupKey || "")}" type="button" ${getSignalValidityState(setup).status === "expired" ? "disabled" : ""}>${getSignalValidityState(setup).status === "expired" ? "Expired" : "Unlock Setup"}</button>
+        <button data-unlock-symbol="${setup.symbol}" data-unlock-timeframe="${setup.timeframe}" data-unlock-setup-key="${escapeHtml(setup.setupKey || "")}" type="button" ${getSignalValidityState(setup).status === "expired" ? "disabled" : ""}>${getSignalValidityState(setup).status === "expired" ? "Expired" : escapeHtml(levelsButtonLabel(setup.symbol))}</button>
         <button class="secondary-action" data-signal-details="${key}" type="button">${expanded ? "Hide Details" : "View Details"}</button>
       </div>
       <div class="signal-details ${expanded ? "" : "hidden"}">
-        <p class="reasoning">Passed confirmations: ${passed || "No confirmation detail available."}. Unlock the full signal to save entry, stop loss, and take profit.</p>
+        <p class="reasoning">Passed confirmations: ${passed || "No confirmation detail available."}. ${canViewLevelsClient(setup.symbol) ? "View the levels to save entry, stop loss and take profit." : escapeHtml(LEVELS_TRIAL_MESSAGE)}</p>
         ${renderModeDetails(setup, true)}
       </div>
     </article>
@@ -9379,7 +9454,7 @@ function renderModeDetails(signal, locked = false) {
         <p class="reasoning">${escapeHtml(getShortSignalReason(signal))}</p>
         ${renderLockedSignalQuality(signal)}
         ${renderAdvancedPreviewChecks(signal)}
-        <p class="locked-preview-note">Entry, stop loss, take profit, and full analysis remain hidden until unlock.</p>
+        <p class="locked-preview-note">${canViewLevelsClient(signal.symbol) ? "Open the setup to see entry, stop loss, take profit and the full analysis." : escapeHtml(LEVELS_TRIAL_MESSAGE)}</p>
       </section>
     `;
   }
@@ -9603,7 +9678,7 @@ function renderRiskEngineCard(signal, locked = false) {
           <span>${escapeHtml(plan.stopStyle)} · ${Number(plan.stopMultiplier || 0).toFixed(2)}x ATR</span>
           <span>${escapeHtml(plan.targetStyle)} · ${Number(plan.targetMultiple || signal.riskRewardRatio || 0).toFixed(2)}R</span>
         </div>
-        <p class="reasoning">${escapeHtml(plan.explanation || "Unlock the signal to calculate position size.")}</p>
+        <p class="reasoning">${escapeHtml(plan.explanation || "Open the setup's levels to calculate position size.")}</p>
       </section>
     `;
   }
@@ -10291,7 +10366,7 @@ function renderAlerts() {
       ${renderSignalTransparency(alert)}
       <div class="alert-actions">
         ${alert.readAt ? "" : `<button class="secondary-action" data-alert-read="${alert.id}" type="button">Mark Read</button>`}
-        <button data-alert-unlock="${alert.symbol}" data-alert-timeframe="${alert.timeframe}" type="button">Unlock Full Setup</button>
+        <button data-alert-unlock="${alert.symbol}" data-alert-timeframe="${alert.timeframe}" type="button">${escapeHtml(levelsButtonLabel(alert.symbol))}</button>
       </div>
     </article>
   `).join("");
@@ -10734,8 +10809,8 @@ function renderAdminOperationsDashboard() {
     ["Active today", overview.users?.activeToday],
     ["Active this week", overview.users?.activeThisWeek],
     ["New users today", overview.users?.newUsersToday],
-    ["New Pro", overview.users?.newPro],
-    ["New Elite", overview.users?.newElite]
+    ["New trials today", overview.users?.newTrials],
+    ["New paid subscriptions today", overview.users?.newPaid]
   ]);
   renderMetricRows("#admin-overview-revenue", [
     ["Monthly recurring revenue", formatCents(overview.revenue?.monthlyRecurringRevenueCents)],
@@ -10902,12 +10977,29 @@ function renderAdminAffiliates() {
 function renderAdminStripe() {
   const stripe = state.adminDashboard?.stripe || {};
   renderMetricRows("#admin-stripe-metrics", [
-    ["Latest subscriptions", stripe.activeSubscriptions],
-    ["Renewals", stripe.renewals],
+    ["Active subscriptions", stripe.activeSubscriptions],
+    ["Paid invoices", stripe.renewals],
     ["Failed renewals", stripe.failedRenewals],
     ["Refunds", stripe.refunds],
     ["Webhook failures", stripe.webhookFailures]
   ]);
+  // Trials, subscriptions and revenue from real invoice amounts (refunds subtracted).
+  const billing = state.adminDashboard?.billing || {};
+  renderMetricRows("#admin-billing-metrics", [
+    ["Trials started", formatInteger(billing.trialsStarted)],
+    ["Trials converted", formatInteger(billing.trialsConverted)],
+    ["Trials cancelled", formatInteger(billing.trialsCanceled)],
+    ["In trial now", formatInteger(billing.trialing)],
+    ["Active subscriptions", formatInteger(billing.activeSubscriptions)],
+    ["Past due", formatInteger(billing.pastDue)],
+    ["Billing anomalies", formatInteger(billing.billingAnomalies)],
+    ["MRR (from invoices)", formatCents(billing.monthlyRecurringRevenueCents)],
+    ["Revenue this month", formatCents(billing.revenueThisMonthCents)],
+    ["Refunded", formatCents(billing.refundedCents)]
+  ], { rawValues: true });
+  renderAdminRows("#admin-billing-anomalies", billing.anomalies || [], (item) => `
+    <div><strong>${escapeHtml(item.kind)} · ${escapeHtml(item.reference)}</strong><span>${formatInteger(item.occurrences)} time${item.occurrences === 1 ? "" : "s"} · last ${formatDateTime(item.lastSeenAt)}</span></div>
+  `);
   renderAdminRows("#admin-stripe-latest", stripe.latestSubscriptions || [], (item) => `
     <div><strong>${escapeHtml(item.username || item.email || item.userId)}</strong><span>${escapeHtml(String(item.plan || "free").toUpperCase())} · ${escapeHtml(item.status || "unknown")} · ${formatDateTime(item.updatedAt)}</span></div>
   `);
@@ -12090,11 +12182,11 @@ function getOnboardingSteps() {
     },
     {
       id: "unlock",
-      title: "Unlock first setup",
-      description: "Save a full signal to history with entry, stop, target, and outcome tracking.",
+      title: "Open your first setup",
+      description: "Save a setup's levels to history with entry, stop, target, and outcome tracking.",
       done: unlockedCount > 0,
       action: "unlock",
-      cta: unlockedCount > 0 ? "View signals" : "Unlock a setup"
+      cta: unlockedCount > 0 ? "View signals" : "Open a setup"
     }
   ];
 }
@@ -12243,9 +12335,9 @@ async function completeSignalUnlock({ signal, subscription, alreadyUnlocked, sou
 
   const sourceLabel = source === "telegram" ? " from Telegram" : "";
   statusLine.textContent = alreadyUnlocked
-    ? "Already unlocked. No additional credit was used."
-    : `Signal unlocked${sourceLabel}. One unlock credit deducted.`;
-  showToast(alreadyUnlocked ? "Already unlocked" : "Signal unlocked");
+    ? "Already saved in your Signals history."
+    : `Setup levels${sourceLabel} saved to your Signals history.`;
+  showToast(alreadyUnlocked ? "Already saved" : "Levels saved");
 }
 
 function renderPaperSignalReview() {

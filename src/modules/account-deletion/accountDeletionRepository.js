@@ -43,6 +43,11 @@ export const RETAINED_TABLES = [
   ["billing_credit_grants", "user_id"],
   ["billing_entitlement_grants", "user_id"],
   ["promo_code_redemptions", "user_id"],
+  // Real invoice amounts and refunds, kept for accounting; user_id points at the anonymized users row.
+  ["billing_invoices", "user_id"],
+  // HMAC of a card fingerprint + the account that first used it for a trial: one free trial per card, kept so a
+  // deleted account's card can't start a second trial on a new account.
+  ["trial_card_claims", "first_user_id"],
   // Only the device hash, trial flags/timestamps and first_user_id (now the anonymized user).
   // Kept so a new signup from the same device is still recognised as a repeat trial.
   ["device_trial_history", "first_user_id"],
@@ -83,13 +88,16 @@ export async function deleteAccountData({ userId, email, loginEmailHash }) {
 
     // Before oauth_accounts goes: make sure an account that had its free trial leaves its claims
     // behind. Accounts granted a trial before trial_identity_claims existed get theirs here.
+    // An account that had a subscription (the 7-day card trial included) leaves its claims too.
     const trial = (await client.query(`
       SELECT c.free_signal_allowance,
+        (SELECT s.first_subscribed_at FROM subscriptions s WHERE s.user_id = $1) AS first_subscribed_at,
         ARRAY(SELECT provider_subject FROM oauth_accounts WHERE user_id = $1 AND provider = 'google') AS google_subjects
-      FROM credit_balances c
-      WHERE c.user_id = $1
+      FROM users u
+      LEFT JOIN credit_balances c ON c.user_id = u.id
+      WHERE u.id = $1
     `, [userId])).rows[0];
-    if (Number(trial?.free_signal_allowance || 0) > 0) {
+    if (Number(trial?.free_signal_allowance || 0) > 0 || trial?.first_subscribed_at) {
       const identities = trialIdentities({ email, googleSubjects: trial.google_subjects });
       if (identities.length) {
         await client.query(`

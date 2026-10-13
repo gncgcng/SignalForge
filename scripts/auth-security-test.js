@@ -37,6 +37,7 @@ const userA = getSubscriptionSummary({
   id: "usr_a",
   plan: "trial",
   trialSignalsUsed: 1,
+  discoveriesToday: 1,
   freeSignalAllowance: 3,
   paidCredits: 0,
   subscription: { status: "trialing" }
@@ -83,7 +84,8 @@ const result = {
   queryScopedToUser: capturedSql.includes("WHERE s.user_id = $1") &&
     capturedParams.length === 1 &&
     capturedParams[0] === "usr_a",
-  separateCredits: userA.trialSignalsRemaining === 2 && userB.trialSignalsRemaining === 3,
+  // Pivot phase 3: per-account usage is the free daily discovery allowance (unlock credits are retired).
+  separateCredits: userA.setupDiscoveries.remaining === 9 && userB.setupDiscoveries.remaining === 10,
   malformedCookieSafe: parseCookies("signalforge_session=%E0%A4%A").signalforge_session === "",
   oversizedBodyRejected: oversizedRejected,
   invalidJsonRejected

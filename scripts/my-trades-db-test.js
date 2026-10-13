@@ -39,8 +39,10 @@ const row = (id) => query(`SELECT * FROM real_trades WHERE id = $1`, [id]).then(
 const TRADE = { status: "open", market: "btc-usd", direction: "long", entryPrice: 100, stopPrice: 99, targetPrice: 102, sizeUnits: 10, openedAt: "2026-01-05T10:00:00Z", notes: "plan" };
 
 try {
-  const userA = { id: await fixtures.createHelperUser("rt_a") };
-  const userB = { id: await fixtures.createHelperUser("rt_b") };
+  // Pivot phase 3: adding and editing trades needs the paid plan; these accounts are in their trial.
+  const PAID = { role: "user", subscription: { status: "trialing", providerSubscriptionId: "sub_my_trades" } };
+  const userA = { id: await fixtures.createHelperUser("rt_a"), ...PAID };
+  const userB = { id: await fixtures.createHelperUser("rt_b"), ...PAID };
   helperIds.push(userA.id, userB.id);
 
   // ---- create, list, close ----
@@ -156,7 +158,7 @@ try {
   // The cascade, for a hard delete of the users row.
   const userC = await fixtures.createHelperUser("rt_c");
   helperIds.push(userC);
-  await call({ id: userC }, "POST", "/api/trades", TRADE);
+  await call({ id: userC, ...PAID }, "POST", "/api/trades", TRADE);
   await query(`DELETE FROM users WHERE id = $1`, [userC]);
   deletion.cascade = { after: (await query(`SELECT COUNT(*)::integer AS n FROM real_trades WHERE user_id = $1`, [userC])).rows[0].n };
   assert.equal(deletion.cascade.after, 0);
@@ -181,8 +183,10 @@ try {
     const client = new pg.Client({ connectionString: url.toString() });
     await client.connect();
     await client.query(`DROP TABLE real_trades; DELETE FROM schema_migrations WHERE filename = '067_real_trades.sql'`);
-    const latest = (await client.query(`SELECT max(filename) AS f FROM schema_migrations`)).rows[0].f;
-    assert.equal(latest, "066_trial_identity_claims.sql");
+    // 067 is undone; 066 (and any later migration, e.g. 068) stays applied.
+    const applied = (await client.query(`SELECT filename FROM schema_migrations`)).rows.map((row) => row.filename);
+    assert.ok(applied.includes("066_trial_identity_claims.sql"));
+    assert.ok(!applied.includes("067_real_trades.sql"));
     const at066 = migrate();
     assert.equal(at066.status, 0, at066.stderr);
     assert.equal(at066.stdout.trim().split("\n").filter((line) => line.includes("Applied migration")).join("|"), "[database] Applied migration 067_real_trades.sql");
@@ -198,7 +202,8 @@ try {
     migration.index = "(user_id, opened_at DESC)";
     migration.cascade = "ON DELETE CASCADE";
   } finally {
-    await query(`DROP DATABASE IF EXISTS ${scratch}`);
+    // FORCE: a failed assertion can leave the scratch connection open; don't let cleanup hang and hide it.
+    await query(`DROP DATABASE IF EXISTS ${scratch} WITH (FORCE)`);
   }
   results.migration = migration;
 

@@ -103,6 +103,9 @@ export async function seedAccountData(userId, { affiliateId, adminId }) {
   await query(`INSERT INTO device_trial_history (device_fingerprint_hash, first_user_id, trial_used, trial_used_at) VALUES ($1, $2, true, now())`,
     [deviceHash, userId]);
   await query(`INSERT INTO billing_credit_grants (id, user_id, external_reference, source, quantity) VALUES ($1, $2, $1, 'test', 10)`, [s("bcg"), userId]);
+  await query(`INSERT INTO billing_invoices (stripe_invoice_id, user_id, stripe_subscription_id, amount_paid_cents, billing_interval) VALUES ($1, $2, $3, 999, 'month')`,
+    [s("in"), userId, s("sub_stripe")]);
+  await query(`INSERT INTO trial_card_claims (card_fingerprint_hash, first_user_id) VALUES ($1, $2)`, [s("cardhash"), userId]);
   await query(`INSERT INTO billing_entitlement_grants (id, user_id, external_reference, plan, scan_credits, unlock_credits) VALUES ($1, $2, $1, 'pro', 1, 1)`, [s("beg"), userId]);
   await query(`INSERT INTO affiliate_referrals (id, affiliate_user_id, referred_user_id, subscription_plan, monthly_commission_cents, lifetime_commission_cents, active)
     VALUES ($1, $2, $3, 'pro', 870, 870, true)`, [s("ref"), affiliateId, userId]);
@@ -265,5 +268,7 @@ export async function cleanupTestUsers(userIds) {
   await query(`DELETE FROM promo_codes WHERE created_by_admin_id = ANY($1)`, [userIds]);
   await query(`DELETE FROM stripe_webhook_events WHERE user_id = ANY($1)`, [userIds]);
   await query(`DELETE FROM device_trial_history WHERE first_user_id = ANY($1)`, [userIds]);
+  await query(`DELETE FROM trial_card_claims WHERE first_user_id = ANY($1)`, [userIds]);
+  await query(`DELETE FROM billing_invoices WHERE user_id = ANY($1)`, [userIds]);
   await query(`DELETE FROM users WHERE id = ANY($1)`, [userIds]);
 }

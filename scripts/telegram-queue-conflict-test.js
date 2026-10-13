@@ -66,6 +66,8 @@ assert.doesNotMatch(enqueueSource, /ON CONFLICT\s*\(\s*user_id\s*,\s*setup_key\s
 assert.doesNotMatch(enqueueSource, /SELECT[\s\S]*INSERT INTO telegram_notification_queue/i);
 
 const baseSetup = buildSetup();
+// Pivot phase 3: Telegram alerts are paid-only, so the caller is an account in its trial.
+const PAID_USER = { id: "user-queue", role: "user", subscription: { status: "trialing", providerSubscriptionId: "sub_queue" } };
 const legacy = await exerciseSchema("legacy", baseSetup);
 assert.equal(legacy.firstInserted, true);
 assert.equal(legacy.duplicate, null);
@@ -87,8 +89,8 @@ assert.equal(transport.insertProductionVariant({
 }), true, "Production schema must permit a distinct alert type.");
 
 transport.reset("production", buildSettings("chat-a"));
-const callerFirst = await enqueueMatchingTelegramNotifications({ id: "user-queue" }, [baseSetup]);
-const callerDuplicate = await enqueueMatchingTelegramNotifications({ id: "user-queue" }, [baseSetup]);
+const callerFirst = await enqueueMatchingTelegramNotifications(PAID_USER, [baseSetup]);
+const callerDuplicate = await enqueueMatchingTelegramNotifications(PAID_USER, [baseSetup]);
 assert.equal(callerFirst.length, 1);
 assert.deepEqual(callerDuplicate, [], "Existing caller must interpret null as a skipped duplicate.");
 assert.equal(transport.snapshot().length, 1);

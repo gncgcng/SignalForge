@@ -33,7 +33,7 @@ const result = {
     !html.includes("track records are coming soon") &&
     html.includes("href=\"/research\">See our research</a>") &&
     html.includes("Start Free") &&
-    html.includes("3 Free Setup Unlocks") &&
+    html.includes("BTC &amp; ETH setups with levels") &&
     html.includes("Watch Demo") &&
     html.includes("Telegram Ready") &&
     html.includes("Educational Tool Only. Not Financial Advice."),
@@ -54,10 +54,13 @@ const result = {
     html.includes("Telegram trading alerts") &&
     html.includes("Paper trading journal") &&
     !/trading signals/i.test(html.slice(0, html.indexOf('id="auth-screen"'))),
+  // Pivot phase 3: one plan, monthly or annual, with the trial terms on the card.
   pricingPaused:
-    html.includes("<h2>Start free. A new plan is coming soon.</h2>") &&
-    html.includes("A new plan is coming soon. Everything in your account stays free until then.") &&
-    !html.includes("$9.99") &&
+    html.includes("<h2>One plan. A 7-day free trial.</h2>") &&
+    html.includes("$9.99") &&
+    html.includes("$89.99") &&
+    html.includes("One free trial per person and per card.") &&
+    html.includes("data-checkout-paused-note") &&
     !html.includes("$19.99") &&
     !html.includes("Choose Pro") &&
     !html.includes("Choose Elite"),
@@ -74,12 +77,12 @@ const result = {
     html.includes('id="landing-run-scan"') &&
     html.includes("Setup Found") &&
     !html.includes("AI-assisted") &&
-    html.includes("Unlock Preview") &&
+    html.includes("Open the app") &&
     html.includes('class="landing-band performance-preview hidden"'),
   landingDemoDoesNotLeakFakeLevels:
-    /<span>Entry<\/span>\s*<strong>Unlock to view<\/strong>/.test(landingMockup) &&
-    /<span>Take Profit<\/span>\s*<strong>Unlock to view<\/strong>/.test(landingMockup) &&
-    /<span>Stop Loss<\/span>\s*<strong>Unlock to view<\/strong>/.test(landingMockup) &&
+    /<span>Entry<\/span>\s*<strong>In the app<\/strong>/.test(landingMockup) &&
+    /<span>Take Profit<\/span>\s*<strong>In the app<\/strong>/.test(landingMockup) &&
+    /<span>Stop Loss<\/span>\s*<strong>In the app<\/strong>/.test(landingMockup) &&
     !/68,?420|70,?060|67,?730/.test(landingMockup),
   mobileResponsiveStyles:
     styles.includes(".premium-hero-layout") &&

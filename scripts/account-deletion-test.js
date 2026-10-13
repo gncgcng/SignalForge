@@ -77,7 +77,8 @@ try {
   assert.equal(await findUserByEmail(seeded.email), null);
   await rejects(registerOrLogin({ email: `deleted-user-${userId}@signalforge.invalid`, password: "helper-password" }, req), 401);
 
-  // A new signup on the deleted account's device is still a repeat trial, on both signup paths.
+  // A new signup on the deleted account's device gets no free unlocks (they're retired), and the deleted account's
+  // trial records stay: its device history and its card claim (one free trial per card).
   const oauthResignup = await fixtures.createHelperUser("resignup_oauth");
   const emailResignup = await fixtures.createHelperUser("resignup_email");
   helperIds.push(oauthResignup, emailResignup);
@@ -86,10 +87,8 @@ try {
   await createEmailVerificationToken(emailResignup, `tok_${emailResignup}`, new Date(Date.now() + 3600_000));
   const verified = await verifyEmailToken(`tok_${emailResignup}`);
   assert.equal(verified.trialGranted, false, "email re-signup granted a second trial");
-  for (const id of [oauthResignup, emailResignup]) {
-    const flags = (await query(`SELECT abuse_flags FROM users WHERE id = $1`, [id])).rows[0].abuse_flags;
-    assert.ok(flags.includes("repeated_trial_device"), `${id} not flagged as a repeat trial device`);
-  }
+  assert.equal((await query(`SELECT COUNT(*)::integer AS n FROM trial_card_claims WHERE first_user_id = $1`, [userId])).rows[0].n, 1,
+    "the deleted account's card claim is kept");
   const trialOwner = (await query(`SELECT first_user_id FROM device_trial_history WHERE device_fingerprint_hash = $1`, [seeded.deviceHash])).rows[0];
   assert.equal(trialOwner.first_user_id, userId, "trial history reassigned to the new signup");
 

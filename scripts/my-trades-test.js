@@ -20,7 +20,7 @@ import { checkTrade, tradeCheckPrefill } from "../public/tradeCheck.js";
 import { BOOTSTRAP, LABELS, monthBlockBootstrap, trackRecordLabel, wilsonInterval } from "../public/trackRecordStats.js";
 import { indexTrackRecords } from "../public/trackRecords.js";
 import { wilsonInterval as weeklyWilsonInterval } from "./weekly-realized-r-decomposition.js";
-import { csvCell, tradesToCsv, validateRealTrade } from "../src/modules/real-trades/realTradeService.js";
+import { csvCell, csvNumber, tradesToCsv, validateRealTrade } from "../src/modules/real-trades/realTradeService.js";
 import { loadTrackRecords } from "../src/modules/track-records/trackRecordService.js";
 
 const trackRecords = loadTrackRecords();
@@ -209,10 +209,30 @@ check("CSV: formula-injection prefix, commas and quotes escaped", () => {
   const csv = tradesToCsv([{ ...LONG, id: "rt_1", market: "BTC-USD", setupKey: null, timeframe: null, targetPrice: null, notes: "=cmd|' /C calc'!A0, \"x\"" }]);
   const [header, row] = csv.trimEnd().split("\r\n");
   assert.ok(header.startsWith("id,status,market,direction,setup_key,timeframe,entry_price"));
-  assert.match(row, /^rt_1,closed,BTC-USD,long,,,100,99,,10,2026-01-05T10:00:00.000Z,102,2026-01-05T12:00:00.000Z,,0.6,12.12,yes,2.000,0.788,7.88,/);
+  assert.match(row, /^rt_1,closed,BTC-USD,long,,,100,99,,10,2026-01-05T10:00:00.000Z,102,2026-01-05T12:00:00.000Z,,0.6,12.12,yes,2,0.788,7.88,/);
   assert.ok(row.endsWith(",\"'=cmd|' /C calc'!A0, \"\"x\"\"\""), row);
-  // A losing trade's negative R is prefixed too, so no cell can start a formula.
-  assert.match(tradesToCsv([{ ...LONG, id: "rt_2", market: "X", exitPrice: 98, notes: "" }]), /,'-3\.\d{3},'-/);
+});
+
+check("CSV: numeric columns are plain numbers; the formula guard is on text columns only", () => {
+  // A stop-out with $5 of fees: gross -1R, fees 0.5R, net -1.5R, P&L -$15.
+  const losing = { ...LONG, id: "rt_2", market: "-X", setupKey: null, timeframe: null, targetPrice: null, exitPrice: 99, feesPaid: 5, notes: "=HYPERLINK(\"http://evil\",\"x\")" };
+  close(tradeMetrics(losing).netR, -1.5);
+  const [, row] = tradesToCsv([losing]).trimEnd().split("\r\n");
+  const cells = row.split(",");
+  const column = (name) => cells[["id", "status", "market", "direction", "setup_key", "timeframe", "entry_price", "stop_price",
+    "target_price", "size_units", "opened_at", "exit_price", "closed_at", "fees_paid", "fee_rate_pct", "fees_used",
+    "fees_estimated", "gross_r", "net_r", "pnl_after_fees"].indexOf(name)];
+  assert.equal(column("net_r"), "-1.5");
+  assert.equal(column("gross_r"), "-1");
+  assert.equal(column("pnl_after_fees"), "-15");
+  assert.equal(column("fees_used"), "5");
+  assert.equal(column("fees_estimated"), "no");
+  assert.equal(column("market"), "'-X", "a text cell starting with - is still guarded");
+  assert.ok(row.endsWith(",\"'=HYPERLINK(\"\"http://evil\"\",\"\"x\"\")\""), row);
+  assert.ok(!/'-?\d/.test(cells.slice(6, 20).join(",")), "no number carries the text prefix");
+  assert.equal(csvNumber(-1.5), "-1.5");
+  assert.equal(csvNumber(null), "");
+  assert.equal(csvNumber("abc"), "");
 });
 
 check("validation: clear 400 messages", () => {

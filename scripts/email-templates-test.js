@@ -132,18 +132,19 @@ const user = { email: "sender-check@example.com", username: "sender_check" };
 const ticket = { id: "sup_test", subject: "Help", topic: "Billing", priority: "urgent" };
 sent.length = 0;
 await sendVerificationEmail(user, "tok123");
-await senders.sendWelcomeEmail(user, { trialGranted: true });
+await senders.sendWelcomeEmail(user);
 await senders.sendPasswordResetEmail(user, `${APP_URL}/?reset=tok`);
-await senders.sendSubscriptionConfirmationEmail(user, "pro");
+await senders.sendSubscriptionConfirmationEmail(user, { amountCents: 999, interval: "month", nextChargeDate: "2026-11-21T00:00:00Z" });
 await senders.sendFailedPaymentEmail(user);
-await senders.sendAffiliateCommissionEmail(user, { plan: "elite", commissionCents: 1980 });
+await senders.sendAffiliateCommissionEmail(user, { plan: "signalforge", commissionCents: 200 });
 await senders.sendSupportConfirmationEmail(user, ticket);
 await senders.sendSupportAdminNotificationEmail("admin@example.com", ticket);
 assert.equal(sent.length, 8);
 for (const payload of sent) {
   assert.ok(payload.subject && payload.html?.startsWith("<!DOCTYPE html>") && payload.text?.length > 80, `incomplete payload: ${payload.subject}`);
 }
-assert.ok(sent.find((payload) => payload.subject.includes("Pro subscription")).text.includes("100 unlock credits"));
+assert.ok(sent.find((payload) => payload.subject === "Your SignalForge subscription is active").text.includes("renews at $9.99 a month; the next charge is on 21 Nov 2026"));
+assert.ok(!sent.some((payload) => /unlock credit/i.test(payload.text)), "no email mentions unlock credits");
 results.sendersSendHtmlAndText = true;
 
 // --- Welcome timing (DB-backed) ---------------------------------------------------------------
@@ -188,13 +189,15 @@ try {
   await settle();
   assert.deepEqual(emailsTo(email).map((payload) => payload.subject), ["Confirm your SignalForge email"],
     "something other than the verification email was sent at signup");
-  assert.match(emailsTo(email)[0].text, /activate your 3 free signal unlocks/);
+  assert.match(emailsTo(email)[0].text, /Confirm this is your email address to start scanning markets\./);
+  assert.doesNotMatch(emailsTo(email)[0].text, /unlock/i);
 
-  // The welcome is sent once the link is used, with copy for an account that has its unlocks.
+  // The welcome is sent once the link is used. Pivot phase 3: one plan, no free unlocks.
   await verifyEmail(tokenFrom(emailsTo(email)[0]));
   await waitFor(() => emailsTo(email).some(isWelcome), "the welcome email");
   const welcome = emailsTo(email).find(isWelcome);
-  assert.match(welcome.text, /you have 3 free signal unlocks/);
+  assert.match(welcome.text, /Free accounts see setups with their levels \(entry, stop and target\) on BTC-USD and ETH-USD/);
+  assert.match(welcome.text, /\$9\.99 a month or \$89\.99 a year, with a 7-day free trial/);
   assert.ok(welcome.text.includes(`Run your first scan: ${APP_URL}/#scanner`));
   // Reusing the link fails and sends nothing more.
   await assert.rejects(verifyEmail(tokenFrom(emailsTo(email)[0])));
@@ -202,21 +205,18 @@ try {
   assert.equal(emailsTo(email).filter(isWelcome).length, 1);
   results.welcomeOnlyAfterVerification = true;
 
-  // Same email after deletion: no trial left, and neither email promises one.
+  // Same email after deletion: the account never started a card trial, so it isn't marked as having used one, and
+  // neither email promises free unlocks.
   await helpers.deleteUser(signup.user.id);
   const again = await signUp(email);
   const verifyAgain = emailsTo(email).filter((payload) => payload.subject === "Confirm your SignalForge email").at(-1);
-  assert.doesNotMatch(verifyAgain.text, /free signal unlocks/);
+  assert.doesNotMatch(verifyAgain.text, /unlock/i);
   await verifyEmail(tokenFrom(verifyAgain));
   await waitFor(() => emailsTo(email).filter(isWelcome).length === 2, "the second welcome");
   const welcomeAgain = emailsTo(email).filter(isWelcome).at(-1);
-  assert.match(welcomeAgain.text, /starts without free unlocks/);
-  assert.doesNotMatch(welcomeAgain.text, /you have 3 free/);
-  // Checkout is paused, so the no-trial welcome points to scanning, not to plans or credit packs.
+  assert.doesNotMatch(welcomeAgain.text, /unlock|credit pack/i);
   assert.ok(welcomeAgain.text.includes(`Run your first scan: ${APP_URL}/#scanner`));
-  assert.match(welcomeAgain.text, /A new plan is coming soon\./);
-  assert.doesNotMatch(welcomeAgain.text, /choose a plan|credit pack/i);
-  assert.ok(again.trialAlreadyUsed);
+  assert.equal(again.trialAlreadyUsed, false);
   results.copyMatchesTrialState = true;
 
   // Google signups are verified at signup, so they're welcomed right away.

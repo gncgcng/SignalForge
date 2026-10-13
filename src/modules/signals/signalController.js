@@ -54,7 +54,8 @@ export async function handleSignalRoutes(req, res, pathname) {
       return sendJson(res, 200, await scanMarketSetup(req.user, body));
     } catch (error) {
       return sendError(res, error.statusCode || 400, error.message, {
-        subscription: error.subscription
+        subscription: error.subscription,
+        code: error.code
       });
     }
   }
@@ -78,7 +79,8 @@ export async function handleSignalRoutes(req, res, pathname) {
       return sendJson(res, 202, result);
     } catch (error) {
       return sendError(res, error.statusCode || 400, error.message, {
-        subscription: error.subscription
+        subscription: error.subscription,
+        code: error.code
       });
     }
   }
@@ -126,7 +128,8 @@ export async function handleSignalRoutes(req, res, pathname) {
       });
     } catch (error) {
       return sendError(res, error.statusCode || 400, error.message, {
-        subscription: error.subscription
+        subscription: error.subscription,
+        code: error.code
       });
     }
   }
@@ -138,7 +141,8 @@ export async function handleSignalRoutes(req, res, pathname) {
       return sendJson(res, result.signal && !result.alreadyUnlocked ? 201 : 200, result);
     } catch (error) {
       return sendError(res, error.statusCode || 400, error.message, {
-        subscription: error.subscription
+        subscription: error.subscription,
+        code: error.code
       });
     }
   }
@@ -150,7 +154,8 @@ export async function handleSignalRoutes(req, res, pathname) {
       return sendJson(res, result.signal && !result.alreadyUnlocked ? 201 : 200, result);
     } catch (error) {
       return sendError(res, error.statusCode || 400, error.message, {
-        subscription: error.subscription
+        subscription: error.subscription,
+        code: error.code
       });
     }
   }

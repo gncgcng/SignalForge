@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 const { isAdminUser, toPublicUser } = await import("../src/modules/auth/authService.js");
 const { getPendingTesterRequests } = await import("../src/modules/tester-access/testerAccessService.js");
 const {
-  canGenerateSignal,
+  hasPaidAccess,
   getSubscriptionSummary,
   recordSignalUsage
 } = await import("../src/modules/subscriptions/subscriptionService.js");
@@ -76,9 +76,9 @@ const result = {
     repositories.includes("appConfig.testerCreditAllowance"),
   rejectionDoesNotUpgrade: repositories.indexOf("if (decision === \"approved\")") <
     repositories.indexOf("SET role = 'tester'"),
-  testerUnlimited: canGenerateSignal(tester) &&
+  testerUnlimited: hasPaidAccess(tester) &&
     testerSummary.unlimitedSignals === true &&
-    testerSummary.trialSignalsRemaining === null,
+    testerSummary.setupDiscoveries.limit === null,
   testerUsageNotDeducted: tester.trialSignalsUsed === 3,
   adminRoutesProtected: controller.includes("getPendingTesterRequests(req.user)") &&
     controller.includes("decideTesterRequest(req.user"),

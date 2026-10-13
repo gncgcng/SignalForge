@@ -5,42 +5,96 @@ import {
 } from "../../config/appConfig.js";
 import { consumeDiscoveryCredits } from "../../db/repositories.js";
 
-export const BILLING_PLANS = {
-  free: {
-    id: "free",
-    name: "Free",
-    discoveryLimit: 10,
-    discoveryPeriod: "day",
-    monthlyUnlockGrant: 0,
-    lifetimeUnlockGrant: 3
-  },
-  pro: {
-    id: "pro",
-    name: "Pro",
-    discoveryLimit: 300,
-    discoveryPeriod: "month",
-    monthlyUnlockGrant: 100,
-    lifetimeUnlockGrant: 0
-  },
-  elite: {
-    id: "elite",
-    name: "Elite",
-    discoveryLimit: 1000,
-    discoveryPeriod: "month",
-    monthlyUnlockGrant: 500,
-    lifetimeUnlockGrant: 0
+// One plan: $9.99 a month or $89.99 a year, with a 7-day free trial (card required).
+export const PLAN = Object.freeze({
+  id: "signalforge",
+  name: "SignalForge",
+  trialDays: 7,
+  intervals: Object.freeze({
+    month: Object.freeze({ priceKey: "monthly", amountCents: 999, label: "$9.99/month" }),
+    year: Object.freeze({ priceKey: "annual", amountCents: 8999, label: "$89.99/year" })
+  })
+});
+
+// Free accounts see setups with levels on these markets; every other market needs the plan.
+export const FREE_LEVEL_MARKETS = Object.freeze(["BTC-USD", "ETH-USD"]);
+// Free accounts can run this many setup discoveries a day. Paid access isn't metered.
+export const FREE_DISCOVERY_LIMIT = 10;
+
+// Stripe's own subscription statuses that keep paid access. past_due keeps access while Stripe retries the card;
+// the app shows "Payment failed — update your card".
+export const PAID_ACCESS_STATUSES = Object.freeze(["trialing", "active", "past_due"]);
+
+export const LEVELS_TRIAL_MESSAGE = "Start your 7-day free trial to see levels on every market.";
+export const PAID_FEATURE_MESSAGE = "This is part of the SignalForge plan. Start your 7-day free trial to use it.";
+
+// The one function that decides paid access, on the server. Testers and admins always have it.
+export function hasPaidAccess(user) {
+  if (!user) return false;
+  if (user.role === "tester") return true;
+  if (user.email && appConfig.adminEmails.has(String(user.email).toLowerCase())) return true;
+  const subscription = user.subscription || {};
+  if (!PAID_ACCESS_STATUSES.includes(subscription.status)) return false;
+  if (!subscription.providerSubscriptionId) return false;
+  // A subscription from the other Stripe mode (e.g. old test-mode subscriptions under a live key) never pays here.
+  const currentMode = getStripeMode();
+  const knownModes = ["test", "live"];
+  if (knownModes.includes(currentMode) && knownModes.includes(subscription.stripeMode) && subscription.stripeMode !== currentMode) {
+    return false;
   }
-};
+  return true;
+}
 
-export const CREDIT_PACKS = {
-  pack10: { id: "pack10", name: "10 unlocks", quantity: 10 },
-  pack50: { id: "pack50", name: "50 unlocks", quantity: 50 },
-  pack100: { id: "pack100", name: "100 unlocks", quantity: 100 },
-};
+export function isPastDue(user) {
+  return hasPaidAccess(user) && user.subscription?.status === "past_due";
+}
 
-export function ensureTrialSubscription(user) {
+export function canViewLevels(user, symbol) {
+  return hasPaidAccess(user) || FREE_LEVEL_MARKETS.includes(String(symbol || "").toUpperCase());
+}
+
+export function paidAccessError(message = PAID_FEATURE_MESSAGE) {
+  const error = new Error(message);
+  error.statusCode = 402;
+  error.code = "PAID_ACCESS_REQUIRED";
+  return error;
+}
+
+export function assertPaidAccess(user, message) {
+  if (!hasPaidAccess(user)) throw paidAccessError(message);
+}
+
+export function assertCanViewLevels(user, symbol) {
+  if (!canViewLevels(user, symbol)) throw paidAccessError(LEVELS_TRIAL_MESSAGE);
+}
+
+export function intervalForPrice(priceId) {
+  if (!priceId) return null;
+  if (priceId === appConfig.stripe.prices.monthly) return "month";
+  if (priceId === appConfig.stripe.prices.annual) return "year";
+  return null;
+}
+
+export function priceIdForInterval(interval) {
+  const key = PLAN.intervals[interval]?.priceKey;
+  return key ? appConfig.stripe.prices[key] || "" : "";
+}
+
+export function amountCentsForInterval(interval) {
+  return PLAN.intervals[interval]?.amountCents ?? null;
+}
+
+// Legacy rows (old default 'trialing' with no Stripe subscription) read as 'none'.
+export function subscriptionStatus(user) {
+  const subscription = user?.subscription || {};
+  if (!subscription.status) return "none";
+  if (!subscription.providerSubscriptionId && ["trialing", "active"].includes(subscription.status)) return "none";
+  return subscription.status;
+}
+
+export function ensureSubscriptionShape(user) {
   user.subscription = user.subscription || {
-    status: "trialing",
+    status: "none",
     provider: "stripe",
     providerCustomerId: null,
     stripeMode: null,
@@ -48,24 +102,27 @@ export function ensureTrialSubscription(user) {
     currentPeriodStart: null,
     currentPeriodEnd: null,
     cancelAtPeriodEnd: false,
+    trialEnd: null,
+    firstSubscribedAt: null,
+    billingInterval: null,
     createdAt: new Date().toISOString()
   };
 }
 
+// Kept for older callers; the subscription row now defaults to 'none'.
+export const ensureTrialSubscription = ensureSubscriptionShape;
+
 export function normalizePlan(plan) {
-  if (plan === "trial") return "free";
-  return BILLING_PLANS[plan] ? plan : "free";
+  return plan === PLAN.id ? PLAN.id : "free";
 }
 
-export function getSubscriptionSummary(user) {
-  ensureTrialSubscription(user);
+// What the Billing page and the client need. Trial eligibility needs the database, so the controller adds it.
+export function getSubscriptionSummary(user, { trialEligible = null } = {}) {
+  ensureSubscriptionShape(user);
   const isTester = user.role === "tester";
-  const planId = isTester ? "tester" : normalizePlan(user.plan);
-  const plan = BILLING_PLANS[planId] || null;
-  const discoveriesUsed = plan?.discoveryPeriod === "day"
-    ? Number(user.discoveriesToday || 0)
-    : Number(user.discoveriesPeriod || 0);
-  const unlockBalance = getUnlockBalance(user);
+  const paid = hasPaidAccess(user);
+  const status = subscriptionStatus(user);
+  const discoveriesUsed = Number(user.discoveriesToday || 0);
   const showStripeDiagnostics = !appConfig.isProduction ||
     appConfig.adminEmails.has(String(user.email || "").toLowerCase());
   const currentStripeMode = getStripeMode();
@@ -73,6 +130,10 @@ export function getSubscriptionSummary(user) {
     user.subscription.providerCustomerId &&
     user.subscription.stripeMode !== currentStripeMode
   );
+  const interval = user.subscription.billingInterval || intervalForPrice(user.subscription.priceId) || null;
+  const nextChargeAt = status === "trialing"
+    ? user.subscription.trialEnd || user.subscription.currentPeriodEnd
+    : user.subscription.currentPeriodEnd;
   const stripeConfiguration = showStripeDiagnostics
     ? {
       ...getStripeConfigurationStatus(),
@@ -82,32 +143,34 @@ export function getSubscriptionSummary(user) {
         : null
     }
     : null;
+  const unlimited = isTester || paid;
 
   return {
-    plan: planId,
-    planName: isTester ? "Tester" : plan.name,
+    plan: isTester ? "tester" : (paid ? PLAN.id : "free"),
+    planName: isTester ? "Tester" : (paid ? PLAN.name : "Free"),
     role: user.role || "user",
-    unlimitedSignals: isTester,
-    status: user.subscription.status,
-    setupDiscoveries: {
-      limit: isTester ? null : plan.discoveryLimit,
-      used: isTester ? 0 : discoveriesUsed,
-      remaining: isTester ? null : Math.max(0, plan.discoveryLimit - discoveriesUsed),
-      period: isTester ? "unlimited" : plan.discoveryPeriod
-    },
-    unlockCreditsRemaining: isTester ? null : unlockBalance,
-    unlockCreditsRollover: !isTester && planId !== "free",
-    monthlyUnlockGrant: isTester ? null : plan.monthlyUnlockGrant,
-    lifetimeUnlocksUsed: Number(user.lifetimeUnlocksUsed || user.trialSignalsUsed || 0),
-    trialSignalsUsed: Number(user.trialSignalsUsed || 0),
-    trialSignalsRemaining: isTester ? null : unlockBalance,
-    freeSignalAllowance: appConfig.freeSignalAllowance,
-    paidCredits: Number(user.paidCredits || 0),
-    emailVerified: Boolean(user.emailVerifiedAt),
-    trialUsed: Boolean(user.trialUsed),
+    hasPaidAccess: paid,
+    pastDue: paid && status === "past_due",
+    status,
+    billingInterval: interval,
+    nextChargeAt: paid && !user.subscription.cancelAtPeriodEnd ? nextChargeAt || null : null,
+    nextChargeCents: paid && !user.subscription.cancelAtPeriodEnd && interval ? amountCentsForInterval(interval) : null,
+    trialEnd: user.subscription.trialEnd || null,
     currentPeriodStart: user.subscription.currentPeriodStart,
     currentPeriodEnd: user.subscription.currentPeriodEnd,
     cancelAtPeriodEnd: Boolean(user.subscription.cancelAtPeriodEnd),
+    // Only /api/subscriptions/me checks the identity claims (it needs the database). Everywhere else an account that
+    // has subscribed before is still known to have no trial; otherwise it's unknown (null).
+    trialEligible: trialEligible ?? (user.subscription.firstSubscribedAt || user.subscription.providerSubscriptionId ? false : null),
+    freeLevelMarkets: FREE_LEVEL_MARKETS,
+    setupDiscoveries: {
+      limit: unlimited ? null : FREE_DISCOVERY_LIMIT,
+      used: unlimited ? 0 : discoveriesUsed,
+      remaining: unlimited ? null : Math.max(0, FREE_DISCOVERY_LIMIT - discoveriesUsed),
+      period: unlimited ? "unlimited" : "day"
+    },
+    unlimitedSignals: isTester,
+    emailVerified: Boolean(user.emailVerifiedAt),
     stripeReady: true,
     checkoutConfigured: Boolean(appConfig.stripe.secretKey),
     checkoutEnabled: Boolean(appConfig.stripe.checkoutEnabled),
@@ -117,51 +180,36 @@ export function getSubscriptionSummary(user) {
       !customerModeMismatch
     ),
     stripeConfiguration,
-    plans: Object.values(BILLING_PLANS),
-    creditPacks: Object.values(CREDIT_PACKS)
+    pricing: {
+      trialDays: PLAN.trialDays,
+      monthly: { interval: "month", amountCents: PLAN.intervals.month.amountCents, label: PLAN.intervals.month.label },
+      annual: { interval: "year", amountCents: PLAN.intervals.year.amountCents, label: PLAN.intervals.year.label }
+    }
   };
 }
 
-export function canGenerateSignal(user) {
-  if (user.role === "tester") return true;
-  if (!user.emailVerifiedAt) return false;
-  return getUnlockBalance(user) > 0;
-}
-
 export function canDiscoverSetups(user) {
-  if (user.role === "tester") return true;
+  if (user.role === "tester" || hasPaidAccess(user)) return true;
   if (!user.emailVerifiedAt) return false;
-  const summary = getSubscriptionSummary(user);
-  return summary.setupDiscoveries.remaining > 0;
+  return getSubscriptionSummary(user).setupDiscoveries.remaining > 0;
 }
 
 export async function recordDiscoveryUsage(user, quantity, scanKey) {
-  if (user.role === "tester" || quantity <= 0) {
+  if (user.role === "tester" || hasPaidAccess(user) || quantity <= 0) {
     return getSubscriptionSummary(user);
   }
 
-  const plan = BILLING_PLANS[normalizePlan(user.plan)];
-  const periodStart = plan.discoveryPeriod === "day"
-    ? startOfUtcDay()
-    : user.subscription?.currentPeriodStart || startOfUtcMonth();
-
   await consumeDiscoveryCredits(user.id, {
     quantity,
-    limit: plan.discoveryLimit,
-    periodStart,
+    limit: FREE_DISCOVERY_LIMIT,
+    periodStart: startOfUtcDay(),
     scanKey
   });
-
-  if (plan.discoveryPeriod === "day") {
-    user.discoveriesToday = Number(user.discoveriesToday || 0) + quantity;
-  } else {
-    user.discoveriesPeriod = Number(user.discoveriesPeriod || 0) + quantity;
-  }
+  user.discoveriesToday = Number(user.discoveriesToday || 0) + quantity;
   return getSubscriptionSummary(user);
 }
 
-// Kept for older callers and tester regression coverage. Unlock debit is now atomic
-// with saving the signal in the repository.
+// Kept for older callers. Viewing levels no longer uses credits.
 export async function recordSignalUsage() {
   return undefined;
 }
@@ -170,22 +218,4 @@ function startOfUtcDay() {
   const date = new Date();
   date.setUTCHours(0, 0, 0, 0);
   return date;
-}
-
-function startOfUtcMonth() {
-  const date = new Date();
-  date.setUTCDate(1);
-  date.setUTCHours(0, 0, 0, 0);
-  return date;
-}
-
-function getUnlockBalance(user) {
-  if (user.unlockCreditsBalance !== undefined && user.unlockCreditsBalance !== null) {
-    return Number(user.unlockCreditsBalance);
-  }
-  return Math.max(
-    0,
-    Number(user.freeSignalAllowance ?? appConfig.freeSignalAllowance) -
-      Number(user.trialSignalsUsed || 0)
-  ) + Number(user.paidCredits || 0);
 }

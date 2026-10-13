@@ -3,12 +3,10 @@ import { readFileSync } from "node:fs";
 
 process.env.NODE_ENV = "development";
 process.env.STRIPE_SECRET_KEY = "sk_test_webhook_check";
-process.env.STRIPE_PRO_PRICE_ID = "price_pro_webhook";
-process.env.STRIPE_ELITE_PRICE_ID = "price_elite_webhook";
+process.env.STRIPE_PRICE_MONTHLY = "price_monthly_webhook";
+process.env.STRIPE_PRICE_ANNUAL = "price_annual_webhook";
 
-const { getPlanEntitlementsForPrice } = await import(
-  "../src/modules/subscriptions/stripeService.js"
-);
+const { intervalForPrice } = await import("../src/modules/subscriptions/subscriptionService.js");
 
 const migration = readFileSync(
   new URL("../migrations/015_stripe_webhook_processing.sql", import.meta.url),
@@ -30,22 +28,21 @@ const controller = readFileSync(
 const frontend = readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
 const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
 
-assert.deepEqual(getPlanEntitlementsForPrice("price_pro_webhook"), {
-  plan: "pro",
-  scanCredits: 300,
-  unlockCredits: 100
-});
-assert.deepEqual(getPlanEntitlementsForPrice("price_elite_webhook"), {
-  plan: "elite",
-  scanCredits: 1000,
-  unlockCredits: 500
-});
+// One plan: the two prices map to an interval; anything else is unknown (and grants nothing).
+assert.equal(intervalForPrice("price_monthly_webhook"), "month");
+assert.equal(intervalForPrice("price_annual_webhook"), "year");
+assert.equal(intervalForPrice("price_something_else"), null);
 
 const result = {
   requiredEventsHandled:
     stripe.includes('event.type === "checkout.session.completed"') &&
-    stripe.includes('event.type === "invoice.payment_succeeded"') &&
-    stripe.includes('event.type === "customer.subscription.deleted"'),
+    stripe.includes('event.type === "invoice.paid"') &&
+    stripe.includes('event.type === "invoice.payment_failed"') &&
+    stripe.includes('event.type === "customer.subscription.created"') &&
+    stripe.includes('event.type === "customer.subscription.updated"') &&
+    stripe.includes('event.type === "customer.subscription.deleted"') &&
+    stripe.includes('event.type === "customer.subscription.trial_will_end"') &&
+    stripe.includes('event.type === "charge.refunded"'),
   productionWebhookRoute:
     controller.includes('pathname === "/api/stripe/webhook"') &&
     controller.includes('pathname === "/api/subscriptions/webhook"') &&
@@ -53,22 +50,21 @@ const result = {
       controller.indexOf('if (!pathname.startsWith("/api/subscriptions"))') &&
     controller.includes("verifyStripeSignature(rawBody, req.headers[\"stripe-signature\"]") &&
     controller.includes("processStripeEvent(event)"),
+  // Pivot phase 3: checkout reads the subscription's own status from Stripe; nothing assumes "active".
   checkoutSyncsSubscription:
     stripe.includes('stripeGet(`/subscriptions/${encodeURIComponent(subscriptionId)}`)') &&
-    stripe.includes('processSubscriptionChanged(subscription, "customer.subscription.created")'),
+    stripe.includes('processSubscriptionChanged(subscription, "checkout.session.completed"'),
   invoiceUpdatesSubscription:
-    stripe.includes("processInvoicePaymentSucceeded") &&
+    stripe.includes("async function processInvoicePaid(") &&
     stripe.includes("updateStripeSubscription({") &&
-    stripe.includes('status: subscription?.status || "active"'),
-  proAndEliteCredits:
-    stripe.includes("scanCredits: plan.discoveryLimit") &&
-    stripe.includes("unlockCredits: plan.monthlyUnlockGrant"),
+    !stripe.includes('status: subscription?.status || "active"'),
+  noCreditGrants:
+    !stripe.includes("grantSubscriptionEntitlements") &&
+    !stripe.includes("grantUnlockCredits") &&
+    stripe.includes('return { action: "zero_amount_invoice_ignored", userId: null };'),
   entitlementGrantPersisted:
-    migration.includes("CREATE TABLE IF NOT EXISTS billing_entitlement_grants") &&
-    migration.includes("scan_credits") &&
-    migration.includes("unlock_credits") &&
-    repositories.includes("grantSubscriptionEntitlements") &&
-    repositories.includes("unlock_credits_balance = unlock_credits_balance + $2"),
+    // Kept for history only: the table stays, nothing writes to it any more.
+    migration.includes("CREATE TABLE IF NOT EXISTS billing_entitlement_grants"),
   safeMigration:
     migration.includes("ADD COLUMN IF NOT EXISTS status") &&
     migration.includes("CREATE INDEX IF NOT EXISTS") &&
@@ -88,10 +84,9 @@ const result = {
     stripe.includes('throw retryableWebhookError("Unable to resolve the checkout user.")') &&
     stripe.includes('throw retryableWebhookError("Unable to resolve the invoice user.")') &&
     stripe.includes('throw retryableWebhookError("Unable to resolve the subscription user.")'),
-  checkoutUpgradesImmediately:
-    stripe.includes('status: "active"') &&
-    stripe.includes("plan: planId") &&
-    stripe.includes("activateAffiliateReferral(userId, planId)"),
+  checkoutNeverAssumesActive:
+    !stripe.includes('status: "active"') &&
+    !stripe.includes("activateAffiliateReferral(userId"),
   durableEventHistory:
     historyMigration.includes("ADD COLUMN IF NOT EXISTS payload_json jsonb") &&
     historyMigration.includes("ADD COLUMN IF NOT EXISTS result_json jsonb") &&
@@ -113,12 +108,12 @@ const result = {
     controller.includes("Stripe webhook rejected.") &&
     !controller.includes("STRIPE_SECRET_KEY"),
   cancellationDowngrades:
-    stripe.includes('eventType.endsWith(".deleted") ? "canceled"') &&
-    stripe.includes('const plan = active ? planFromPrice(priceId) : "free"'),
+    stripe.includes('const status = deleted ? "canceled" : String(subscription.status || "incomplete");') &&
+    stripe.includes('plan: paid ? PLAN.id : "free"'),
   billingAutoRefresh:
     frontend.includes("refreshBillingAfterCheckout()") &&
     frontend.includes("await loadSubscription()") &&
-    frontend.includes("Purchase confirmed. Billing credits are updated.")
+    frontend.includes("Confirmed. Your plan is active.")
 };
 
 for (const [name, passed] of Object.entries(result)) {

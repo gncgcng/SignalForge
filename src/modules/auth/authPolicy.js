@@ -14,7 +14,7 @@ export function isDemoOrTesterIdentity(email = "") {
 // Bump whenever the Terms, Privacy Policy, or Risk Disclaimer text in public/app.js
 // (legalDocuments) changes materially. Recorded on each new account; nothing enforces
 // re-consent against it yet.
-export const CURRENT_LEGAL_CONSENT_VERSION = "2026-10-12";
+export const CURRENT_LEGAL_CONSENT_VERSION = "2026-10-12.2";
 
 // Columns written on account creation. Only confirmations the user actually gave are stamped,
 // so accounts created without them (demo sessions) keep NULLs rather than a false record.
