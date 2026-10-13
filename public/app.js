@@ -1637,7 +1637,9 @@ function renderPlanCards() {
   const price = PLAN_PRICES[interval];
   const summary = state.subscription || null;
   const checkoutEnabled = summary ? summary.checkoutEnabled === true : state.publicCheckoutEnabled === true;
-  const trialEligible = summary ? summary.trialEligible !== false : true;
+  // Summaries from other endpoints may not know trial eligibility (null); keep the last answer from Billing.
+  if (typeof summary?.trialEligible === "boolean") state.trialEligible = summary.trialEligible;
+  const trialEligible = state.trialEligible !== false;
   document.querySelectorAll("[data-plan-price]").forEach((element) => {
     element.innerHTML = `${escapeHtml(price.label)}<small>/${escapeHtml(price.per)}</small>`;
   });

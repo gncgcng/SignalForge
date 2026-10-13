@@ -159,7 +159,9 @@ export function getSubscriptionSummary(user, { trialEligible = null } = {}) {
     currentPeriodStart: user.subscription.currentPeriodStart,
     currentPeriodEnd: user.subscription.currentPeriodEnd,
     cancelAtPeriodEnd: Boolean(user.subscription.cancelAtPeriodEnd),
-    trialEligible,
+    // Only /api/subscriptions/me checks the identity claims (it needs the database). Everywhere else an account that
+    // has subscribed before is still known to have no trial; otherwise it's unknown (null).
+    trialEligible: trialEligible ?? (user.subscription.firstSubscribedAt || user.subscription.providerSubscriptionId ? false : null),
     freeLevelMarkets: FREE_LEVEL_MARKETS,
     setupDiscoveries: {
       limit: unlimited ? null : FREE_DISCOVERY_LIMIT,
