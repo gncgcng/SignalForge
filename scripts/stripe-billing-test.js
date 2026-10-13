@@ -1,52 +1,45 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import {
-  BILLING_PLANS,
-  CREDIT_PACKS,
-  canGenerateSignal,
+
+// Pivot phase 3: one plan ($9.99/month or $89.99/year, 7-day trial). Unlock credits are retired; the free plan keeps
+// its 10 setup discoveries a day, paid access isn't metered.
+process.env.STRIPE_SECRET_KEY = "sk_test_billing_check";
+const {
+  FREE_DISCOVERY_LIMIT,
+  PLAN,
+  canDiscoverSetups,
   getSubscriptionSummary
-} from "../src/modules/subscriptions/subscriptionService.js";
+} = await import("../src/modules/subscriptions/subscriptionService.js");
 
 const migration = readFileSync(new URL("../migrations/013_stripe_billing.sql", import.meta.url), "utf8");
 const repositories = readFileSync(new URL("../src/db/repositories.js", import.meta.url), "utf8");
-const signalCreditLedger = readFileSync(new URL("../src/modules/credits/signalCreditLedgerRepository.js", import.meta.url), "utf8");
 const signals = readFileSync(new URL("../src/modules/signals/signalService.js", import.meta.url), "utf8");
-const stripe = readFileSync(
-  new URL("../src/modules/subscriptions/stripeService.js", import.meta.url),
-  "utf8"
-);
-const controller = readFileSync(
-  new URL("../src/modules/subscriptions/subscriptionController.js", import.meta.url),
-  "utf8"
-);
+const stripe = readFileSync(new URL("../src/modules/subscriptions/stripeService.js", import.meta.url), "utf8");
+const controller = readFileSync(new URL("../src/modules/subscriptions/subscriptionController.js", import.meta.url), "utf8");
 const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
 const app = readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
 
-assert.equal(BILLING_PLANS.free.discoveryLimit, 10);
-assert.equal(BILLING_PLANS.free.lifetimeUnlockGrant, 3);
-assert.equal(BILLING_PLANS.pro.discoveryLimit, 300);
-assert.equal(BILLING_PLANS.pro.monthlyUnlockGrant, 100);
-assert.equal(BILLING_PLANS.elite.discoveryLimit, 1000);
-assert.equal(BILLING_PLANS.elite.monthlyUnlockGrant, 500);
-assert.equal(CREDIT_PACKS.pack100.quantity, 100);
+assert.equal(PLAN.trialDays, 7);
+assert.equal(PLAN.intervals.month.amountCents, 999);
+assert.equal(PLAN.intervals.year.amountCents, 8999);
+assert.equal(FREE_DISCOVERY_LIMIT, 10);
 
-const proSummary = getSubscriptionSummary({
-  id: "usr_pro",
-  role: "user",
-  plan: "pro",
-  emailVerifiedAt: new Date(),
-  unlockCreditsBalance: 137,
-  discoveriesPeriod: 25,
-  subscription: { status: "active", currentPeriodStart: new Date() }
+const free = getSubscriptionSummary({ id: "usr_free", role: "user", plan: "free", emailVerifiedAt: new Date(), discoveriesToday: 4, subscription: { status: "none" } });
+assert.equal(free.plan, "free");
+assert.equal(free.hasPaidAccess, false);
+assert.equal(free.setupDiscoveries.remaining, 6);
+assert.deepEqual(free.freeLevelMarkets, ["BTC-USD", "ETH-USD"]);
+const trial = getSubscriptionSummary({
+  id: "usr_trial", role: "user", plan: "signalforge", emailVerifiedAt: new Date(),
+  subscription: { status: "trialing", providerSubscriptionId: "sub_1", stripeMode: "test", billingInterval: "month", trialEnd: "2026-10-21T00:00:00Z" }
 });
-assert.equal(proSummary.setupDiscoveries.remaining, 275);
-assert.equal(proSummary.unlockCreditsRemaining, 137);
-assert.equal(proSummary.unlockCreditsRollover, true);
-assert.equal(canGenerateSignal({
-  role: "user",
-  emailVerifiedAt: new Date(),
-  unlockCreditsBalance: 1
-}), true);
+assert.equal(trial.plan, "signalforge");
+assert.equal(trial.hasPaidAccess, true);
+assert.equal(trial.setupDiscoveries.limit, null, "paid access isn't metered");
+assert.equal(trial.nextChargeCents, 999);
+assert.equal(trial.nextChargeAt, "2026-10-21T00:00:00Z");
+assert.equal(canDiscoverSetups({ role: "user", emailVerifiedAt: null, subscription: { status: "trialing", providerSubscriptionId: "sub_1", stripeMode: "test" } }), true);
+assert.equal("unlockCreditsRemaining" in free, false, "no unlock credits in the summary");
 
 const result = {
   safeBillingMigration: migration.includes("ADD COLUMN IF NOT EXISTS unlock_credits_balance") &&
@@ -54,40 +47,39 @@ const result = {
     migration.includes("CREATE TABLE IF NOT EXISTS scan_result_cache") &&
     migration.includes("CREATE TABLE IF NOT EXISTS stripe_webhook_events") &&
     !migration.includes("DELETE FROM users"),
-  separateCreditLedgers: repositories.includes("consumeDiscoveryCredits") &&
-    repositories.includes("consumeSignalUnlockCredit") &&
-    signalCreditLedger.includes("unlock_credits_balance = c.unlock_credits_balance - 1") &&
-    signalCreditLedger.includes("lifetime_unlocks_used = c.lifetime_unlocks_used + 1"),
+  // The ledger tables stay for history; nothing debits or refunds credits any more.
+  creditsRetired: !repositories.includes("consumeSignalUnlockCredit") &&
+    !repositories.includes("refundSignalCreditForTerminalOutcome") &&
+    !repositories.includes("unlock_credits_balance <= 0"),
   noSetupNoCharge: signals.includes("const quantity = result.publicResult.valid ? 1 : 0") &&
     signals.includes("recordDiscoveryUsage(user, quantity, scanKey)") &&
     signals.includes("result.publicResult.valid ? 1 : 0, scanKey"),
   cacheIsFiveMinutesAndFree: signals.includes("getCachedScanResult") &&
     signals.includes("cached: true") &&
     repositories.includes("ttlSeconds = 300"),
-  scanAllMetersReturnedSetups: signals.includes("allowedSetups.length") &&
-    signals.includes("limitedByCredits"),
-  unlockDebitIsAtomicWithSave: repositories.indexOf("FOR UPDATE OF c") <
-    repositories.indexOf("INSERT INTO saved_signals"),
-  rolloverGrantIsAdditive: repositories.includes(
-    "unlock_credits_balance = unlock_credits_balance + $2"
-  ),
-  webhookIdempotency: migration.includes("external_reference text NOT NULL UNIQUE") &&
-    stripe.includes("claimStripeWebhookEvent") &&
-    stripe.includes("invoice:${invoice.id}"),
+  levelsCheckedOnTheServer: signals.includes("assertCanViewLevels(user, symbol)") &&
+    signals.includes("assertCanViewLevels(user, queuedSetup.symbol)"),
+  webhookIdempotency: stripe.includes("claimStripeWebhookEvent") &&
+    stripe.includes("return { duplicate: true }") &&
+    stripe.includes("invoice_already_recorded"),
   signedWebhooks: stripe.includes("createHmac(\"sha256\"") &&
     stripe.includes("timingSafeEqual") &&
     controller.includes('req.headers["stripe-signature"]'),
   checkoutAndPortal: stripe.includes('"/checkout/sessions"') &&
-    stripe.includes('"/billing_portal/sessions"'),
+    stripe.includes('"/billing_portal/sessions"') &&
+    stripe.includes('payment_method_collection: "always"') &&
+    stripe.includes('"subscription_data[trial_period_days]": String(PLAN.trialDays)') &&
+    !stripe.includes("allow_promotion_codes"),
   billingUiComplete: html.includes("Setup discoveries") &&
-    html.includes("Unlock credit packs") &&
-    html.includes("Manage subscription") &&
-    app.includes("data-billing-plan") &&
-    app.includes("data-billing-pack"),
+    html.includes(">Cancel subscription</button>") &&
+    html.includes(">Update card</button>") &&
+    !html.includes("Unlock credit packs") &&
+    app.includes("data-plan-interval-choice") &&
+    !app.includes("data-billing-pack"),
   testerUnlimited: getSubscriptionSummary({
     role: "tester",
     plan: "tester",
-    subscription: { status: "active" }
+    subscription: { status: "none" }
   }).unlimitedSignals === true
 };
 

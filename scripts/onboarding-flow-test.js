@@ -24,7 +24,7 @@ includes(app, "Create username", "username checklist copy");
 includes(app, "Connect Telegram", "telegram checklist copy");
 includes(app, "Choose alert preferences", "alert preferences checklist copy");
 includes(app, "Run first scan", "first scan checklist copy");
-includes(app, "Unlock first setup", "unlock checklist copy");
+includes(app, "Open your first setup", "first setup checklist copy");
 includes(app, "data-onboarding-action", "onboarding action buttons");
 includes(app, 'navigateTo("notifications")', "notifications onboarding routing");
 includes(app, 'navigateTo("profile")', "profile onboarding routing");

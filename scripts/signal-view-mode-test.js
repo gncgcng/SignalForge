@@ -30,7 +30,7 @@ assert.match(app, /Candidate and watch history/);
 assert.doesNotMatch(app.slice(app.indexOf("function renderAdvancedPreviewChecks"), app.indexOf("function renderSignalValidation")), /JSON\.stringify/);
 
 assert.match(app, /locked \? "" : `<div class="signal-metrics">/);
-assert.match(app, /Entry, stop loss, take profit, and full analysis remain hidden until unlock/);
+assert.match(app, /Open the setup to see entry, stop loss, take profit and the full analysis\./);
 assert.match(app, /const advanced = state\.scannerMode === "advanced"/);
 assert.match(app, /Why not a signal yet/);
 assert.match(app, /What would improve it/);

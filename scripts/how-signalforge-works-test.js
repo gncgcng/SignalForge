@@ -16,7 +16,7 @@ assert.match(html, /data-view="how-it-works"/);
 assert.match(html, /data-view-link="how-it-works"/);
 assert.match(html, /data-public-how-it-works/);
 assert.match(html, /Built for structured trading, not hype\./);
-assert.match(html, /See how credits and signals work/);
+assert.match(html, /<a href="#how-it-works" data-public-how-it-works>How SignalForge works<\/a>/);
 
 assert.match(app, /function renderHowItWorksContent\(\)/);
 assert.match(app, /function showPublicHowItWorks\(/);
@@ -24,7 +24,7 @@ assert.match(app, /history\.replaceState\(\{\}, "", `\$\{location\.pathname\}\$\
 assert.match(app, /What it does not do/);
 assert.match(app, /Watching setups/);
 assert.match(app, /Avoid trade zones/);
-assert.match(app, /Unlocks and credits/);
+assert.match(app, /renderTrustCard\("Free and paid", "One plan, a 7-day free trial\."/);
 assert.match(app, /Paper trading/);
 assert.match(app, /Risk management/);
 assert.match(app, /Learning engine/);

@@ -252,7 +252,7 @@
   }
 
   function authSubmitLabel(mode) {
-    return mode === "signup" ? "Create account – get 3 free unlocks" : "Sign in";
+    return mode === "signup" ? "Create free account" : "Sign in";
   }
 
   function applyAuthMode() {

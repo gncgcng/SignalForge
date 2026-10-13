@@ -5,11 +5,9 @@ process.env.NODE_ENV = "development";
 delete process.env.APP_URL;
 process.env.STRIPE_SECRET_KEY = "sk_test_configuration_check";
 delete process.env.STRIPE_WEBHOOK_SECRET;
-process.env.STRIPE_PRO_PRICE_ID = "price_test_pro";
-process.env.STRIPE_ELITE_PRICE_ID = "price_test_elite";
-process.env.STRIPE_CREDITS_10_PRICE_ID = "price_test_10";
-process.env.STRIPE_CREDITS_50_PRICE_ID = "price_test_50";
-process.env.STRIPE_CREDITS_100_PRICE_ID = "price_test_100";
+// Pivot phase 3: one plan with a monthly and an annual price.
+process.env.STRIPE_PRICE_MONTHLY = "price_test_monthly";
+process.env.STRIPE_PRICE_ANNUAL = "price_test_annual";
 // These checks cover checkout itself, so they run with new checkouts enabled (default is paused).
 process.env.BILLING_CHECKOUT_ENABLED = "true";
 
@@ -20,7 +18,6 @@ const {
   resolveAppUrl,
   stripeEnvironmentKeys
 } = await import("../src/config/appConfig.js");
-const { CREDIT_PACKS } = await import("../src/modules/subscriptions/subscriptionService.js");
 const { createCheckout } = await import("../src/modules/subscriptions/stripeService.js");
 
 const configSource = readFileSync(new URL("../src/config/appConfig.js", import.meta.url), "utf8");
@@ -60,9 +57,11 @@ try {
     subscription: {
       providerCustomerId: "cus_test_signalforge",
       stripeMode: "test",
-      providerSubscriptionId: null
+      providerSubscriptionId: null,
+      // Subscribed before: no trial, and no database lookup for trial claims.
+      firstSubscribedAt: new Date("2026-01-01T00:00:00Z")
     }
-  }, { pack: "pack10" });
+  }, { interval: "month" });
 } finally {
   globalThis.fetch = originalFetch;
 }
@@ -81,11 +80,8 @@ try {
 const expectedKeys = [
   "STRIPE_SECRET_KEY",
   "STRIPE_WEBHOOK_SECRET",
-  "STRIPE_PRO_PRICE_ID",
-  "STRIPE_ELITE_PRICE_ID",
-  "STRIPE_CREDITS_10_PRICE_ID",
-  "STRIPE_CREDITS_50_PRICE_ID",
-  "STRIPE_CREDITS_100_PRICE_ID"
+  "STRIPE_PRICE_MONTHLY",
+  "STRIPE_PRICE_ANNUAL"
 ];
 
 const checkoutFunction = stripeSource.match(
@@ -104,12 +100,13 @@ const result = {
     !configSource.includes("STRIPE_CREDIT_PACK_300_PRICE_ID") &&
     !envExample.includes("STRIPE_CREDIT_PACK_"),
   exactPriceMapping:
-    appConfig.stripe.prices.pack10 === "price_test_10" &&
-    appConfig.stripe.prices.pack50 === "price_test_50" &&
-    appConfig.stripe.prices.pack100 === "price_test_100",
-  packQuantitiesMatch: CREDIT_PACKS.pack10.quantity === 10 &&
-    CREDIT_PACKS.pack50.quantity === 50 &&
-    CREDIT_PACKS.pack100.quantity === 100,
+    appConfig.stripe.prices.monthly === "price_test_monthly" &&
+    appConfig.stripe.prices.annual === "price_test_annual" &&
+    Object.keys(appConfig.stripe.prices).join(",") === "monthly,annual",
+  creditPackKeysRemoved:
+    !configSource.includes("STRIPE_CREDITS_10_PRICE_ID") &&
+    !envExample.includes("STRIPE_CREDITS_10_PRICE_ID") &&
+    !configSource.includes("STRIPE_PRO_PRICE_ID"),
   testModeDetected: status.mode === "test" && status.checkoutConfigured === true,
   webhookIndependent: status.webhookConfigured === false &&
     !checkoutFunction.includes("webhookSecret") &&
@@ -118,7 +115,7 @@ const result = {
     startupLog.includes("STRIPE_SECRET_KEY") &&
     startupLog.includes("STRIPE_WEBHOOK_SECRET") &&
     !startupLog.includes(process.env.STRIPE_SECRET_KEY) &&
-    !startupLog.includes(process.env.STRIPE_PRO_PRICE_ID),
+    !startupLog.includes(process.env.STRIPE_PRICE_MONTHLY),
   appUrlRedirects:
     appConfig.stripe.successUrl === "http://localhost:4173/#billing?checkout=success" &&
     appConfig.stripe.cancelUrl === "http://localhost:4173/#billing?checkout=cancelled" &&
@@ -145,8 +142,9 @@ const result = {
     checkout.url.includes("checkout.stripe.com") &&
     checkoutRequest.url.endsWith("/checkout/sessions") &&
     checkoutRequest.authorization === `Bearer ${process.env.STRIPE_SECRET_KEY}` &&
-    checkoutRequest.body["line_items[0][price]"] === process.env.STRIPE_CREDITS_10_PRICE_ID &&
-    checkoutRequest.body.mode === "payment"
+    checkoutRequest.body["line_items[0][price]"] === process.env.STRIPE_PRICE_MONTHLY &&
+    checkoutRequest.body.mode === "subscription" &&
+    checkoutRequest.body.payment_method_collection === "always"
 };
 
 for (const [name, passed] of Object.entries(result)) {

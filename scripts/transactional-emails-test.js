@@ -82,7 +82,11 @@ const result = {
     googleOAuth.includes("authProvider: \"google\""),
   stripeTransactionalEmails:
     stripeService.includes("invoice.payment_failed") &&
-    stripeService.includes("sendSubscriptionConfirmationEmail(user, planId)") &&
+    stripeService.includes("sendSubscriptionConfirmationEmail(user, {") &&
+    stripeService.includes("sendTrialStartedEmail(user, {") &&
+    stripeService.includes("sendTrialEndingEmail(user, {") &&
+    stripeService.includes("sendSubscriptionCanceledEmail(user, {") &&
+    stripeService.includes("sendTrialCardAlreadyUsedEmail(user, {") &&
     stripeService.includes("sendFailedPaymentEmail(user)") &&
     stripeService.includes("sendAffiliateCommissionEmail") &&
     stripeService.includes("processInvoicePaymentFailed"),

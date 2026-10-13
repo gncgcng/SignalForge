@@ -45,7 +45,9 @@ const checks = {
   duplicateUnlockProtected:
     unlockRepository.includes("pg_advisory_xact_lock") &&
     unlockRepository.includes("mapped.alreadyUnlocked = true") &&
-    unlockRepository.indexOf("if (existing.rows[0])") < unlockRepository.indexOf("consumeSignalUnlockCredit"),
+    // An existing copy is returned before anything is inserted (credits are retired; nothing is charged).
+    unlockRepository.indexOf("if (existing.rows[0])") < unlockRepository.indexOf("INSERT INTO saved_signals") &&
+    !unlockRepository.includes("consumeSignalUnlockCredit"),
   telegramExactSignal:
     app.includes('source: "telegram"') &&
     app.includes("state.unlockedRevealSignalId = unlockedSignal.id") &&

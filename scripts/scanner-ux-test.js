@@ -85,7 +85,7 @@ const checks = {
     app.includes('navigateTo("signals"') &&
     app.includes("renderUnlockReveal()") &&
     app.includes("if (key) highlightSignalKey(key)") &&
-    app.includes("Signal unlocked"),
+    app.includes("Levels saved"),
   basicAdvancedModePersists:
     html.includes('data-signal-view-toggle') &&
     html.includes('data-signal-view-mode="beginner"') &&
@@ -102,10 +102,11 @@ const checks = {
     css.includes("#scanner-market-type") &&
     css.includes("#scan-all-button") &&
     css.includes(".chart-panel canvas"),
+  // Pivot phase 3: no credits at all; the scan summary says which markets show levels.
   creditsNotDeductedForScanning:
-    app.includes("No unlock credits used yet") &&
-    app.includes("No credits used") &&
-    app.includes("Unlocking one uses an unlock credit."),
+    app.includes('? "Every market"') &&
+    app.includes(': "BTC-USD, ETH-USD"') &&
+    !app.includes("Unlocking one uses an unlock credit."),
   tradingViewSymbolDisplay:
     marketDataService.includes("displaySymbol") &&
     marketDataService.includes('pair.symbol.replace("-", "")') &&

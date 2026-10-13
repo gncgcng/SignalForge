@@ -262,7 +262,7 @@ try {
     assert.match(form, /data-auth-mode="signin">New here\? <a href="#signup"[^>]*>Create a free account<\/a>/);
     assert.match(form, /data-auth-mode="signup">Already have an account\? <a href="#signin"[^>]*>Sign in<\/a>/);
     assert.match(app, /heading\.textContent = mode === "signup" \? "Create your free account" : "Sign in"/);
-    assert.match(app, /"Create account – get 3 free unlocks"/);
+    assert.match(app, /"Create free account"/);
     assert.match(app, /document\.querySelector\("#start-free-button"\)\.addEventListener\("click", \(\) => \{\n  openAuthMode\("signup"\);/);
     assert.match(app, /button\.addEventListener\("click", \(\) => \{\n    openAuthMode\("signup"\);/);
     assert.match(app, /credentials\.intent = getAuthMode\(\);/);

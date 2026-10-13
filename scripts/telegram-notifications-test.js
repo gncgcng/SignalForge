@@ -163,21 +163,22 @@ const result = {
   }).reason === "invalid_expiration",
   messageIsPreviewOnly: ["Market: BTCUSD", "Provider: Coinbase · BTC-USD", "Timeframe: 1h",
     "Direction: Long setup", "Rule match: 86% (Good match)", "Setup: Pullback bounce",
-    "How closely the market matches this setup's rules. It is not a chance of winning — see the track record for how this setup has actually done.",
-    "Preview only. Unlock to view the setup levels."]
+    "How closely the market matches this setup's rules. It is not a chance of winning — see the track record for how this setup has actually done."]
     .every((value) => message.includes(value)) &&
+    // Pivot phase 3: Telegram alerts are paid-only, so the "Unlock to view" line is gone.
+    !/unlock/i.test(message) &&
     !/Setup Ready|Direction: LONG|Excellent|near-perfect/.test(message),
   messageDoesNotLeakPaidLevels: !["Entry:", "Stop Loss:", "Take Profit:", "Risk/Reward:"]
     .some((value) => message.includes(value)),
   messageContainsReasonAndDisclaimer: message.includes("Preview reason:") &&
     message.includes("Trend") &&
     message.includes("Educational tool only. Not financial advice."),
-  telegramReplyMarkupUnlocksExactSetup: replyMarkup.reply_markup.inline_keyboard[0][0].text === "Unlock setup" &&
+  telegramReplyMarkupUnlocksExactSetup: replyMarkup.reply_markup.inline_keyboard[0][0].text === "View levels" &&
     replyMarkup.reply_markup.inline_keyboard[0][0].url.includes("telegramUnlock=BTC-USD%3A1h%3Along%3A1770000000"),
   telegramApiCalledSafely: telegramRequest.url.includes("/bottest-token/sendMessage") &&
     telegramRequest.body.chat_id === "123456789" &&
     telegramRequest.body.text === message &&
-    telegramRequest.body.reply_markup.inline_keyboard[0][0].text === "Unlock setup",
+    telegramRequest.body.reply_markup.inline_keyboard[0][0].text === "View levels",
   telegramPipelineLogs:
     autoScan.includes("[auto-scan] matched alert") &&
     queue.includes("[telegram] sending alert") &&
@@ -194,17 +195,18 @@ const result = {
     signalController.includes("unlockTelegramSignal") &&
     repositories.includes("findTelegramNotificationPayload") &&
     repositories.includes("saveUnlockedSignal"),
+  // Pivot phase 3: opening a Telegram setup charges nothing; the save is still idempotent per setup.
   telegramUnlockChargesOneCreditThroughIdempotentSave:
-    unlockRepository.indexOf("if (existing.rows[0])") < unlockRepository.indexOf("consumeSignalUnlockCredit") &&
+    unlockRepository.indexOf("if (existing.rows[0])") < unlockRepository.indexOf("INSERT INTO saved_signals") &&
     unlockRepository.includes("SELECT pg_advisory_xact_lock") &&
     unlockRepository.includes("mapped.alreadyUnlocked = true") &&
-    signalCreditLedger.includes("unlock_credits_balance = c.unlock_credits_balance - 1") &&
+    !unlockRepository.includes("consumeSignalUnlockCredit") &&
     signalCreditLedger.includes("ON CONFLICT (idempotency_key) DO NOTHING"),
   duplicateTelegramUnlockDoesNotDoubleCharge:
     repositories.includes("WHERE s.user_id = $1 AND s.setup_key = $2 LIMIT 1") &&
     repositories.includes("return mapped;") &&
     signalController.includes("result.alreadyUnlocked") &&
-    app.includes("Already unlocked. No additional credit was used."),
+    app.includes("Already saved in your Signals history."),
   telegramUnlockCreatesSavedSignal:
     repositories.includes("INSERT INTO saved_signals") &&
     repositories.includes("INSERT INTO unlocked_signals") &&
@@ -214,7 +216,7 @@ const result = {
     app.includes("if (key) highlightSignalKey(key)"),
   telegramUnlockFrontendPresent: app.includes("telegramUnlock") &&
     app.includes("/api/signals/telegram-unlock") &&
-    app.includes("Sign in to unlock this Telegram signal preview."),
+    app.includes("Sign in to open this Telegram setup."),
   notificationsPagePresent: html.includes('data-view="notifications"') &&
     html.includes("telegram-connect-form") &&
     html.includes("telegram-preferences-form") &&

@@ -150,9 +150,9 @@ test("production wiring is server-owned, transactional, and does not backfill un
   assert.match(ledger, /ON CONFLICT \(idempotency_key\) DO NOTHING/);
   assert.match(ledger, /JOIN signal_outcomes outcome/);
   assert.match(ledger, /outcome\.status = \$5/);
-  assert.match(repositories, /if \(billing\.role !== "tester"\)[\s\S]*consumeSignalUnlockCredit/);
-  assert.match(repositories, /expireActiveSignalsPastValidity[\s\S]*refundSignalCreditForTerminalOutcome/);
-  assert.match(repositories, /updateSignalOutcome[\s\S]*refundSignalCreditForTerminalOutcome/);
+  // Pivot phase 3: unlock credits are retired. The ledger module and its tables stay for history, but viewing levels
+  // no longer charges a credit and a stop-loss or expiry no longer refunds one.
+  assert.doesNotMatch(repositories, /consumeSignalUnlockCredit|refundSignalCreditForTerminalOutcome/);
   assert.doesNotMatch(autoScan, /consumeSignalUnlockCredit|refundSignalCreditForTerminalOutcome/);
   assert.match(signalService, /subscription: getSubscriptionSummary\(refreshedUser \|\| user\)/);
 });

@@ -54,13 +54,16 @@ const result = {
     migration.includes("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_affiliate_code"),
   recurringTwentyPercent:
     calculateAffiliateCommissionCents(10000) === 2000 &&
-    repository.includes('["pro", "elite"].includes(plan)') &&
+    repository.includes('["pro", "elite", "signalforge"].includes(plan)') &&
     stripe.includes("recordRecurringAffiliateCommission"),
+  // Pivot phase 3: commission only on an invoice that charged money; the $0 trial invoice and old credit-pack
+  // sessions pay none.
   freeAndCreditPacksExcluded:
-    repository.includes('if (!["pro", "elite"].includes(plan)') &&
-    stripe.includes('session.metadata?.kind === "credit_pack"') &&
-    stripe.includes("processInvoicePaymentSucceeded(object, event.id)") &&
-    stripe.includes("grossAmountCents: Number(invoice.amount_paid || 0)"),
+    repository.includes('if (!["pro", "elite", "signalforge"].includes(plan) || grossAmountCents <= 0) return null;') &&
+    stripe.includes("// Old credit-pack sessions: credit packs are retired, nothing is granted.") &&
+    stripe.includes("processInvoicePaid(object, event.id)") &&
+    stripe.includes("if (amountPaid <= 0) {") &&
+    stripe.includes("grossAmountCents: amountPaid"),
   refundAndCancellationRules:
     stripe.includes('event.type === "charge.refunded"') &&
     stripe.includes("reconcileAffiliateRefund") &&

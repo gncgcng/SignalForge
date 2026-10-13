@@ -586,6 +586,9 @@ async function processInvoicePaid(invoice, stripeEventId) {
       nextChargeDate: fromUnix(period.end) || fromUnix(getSubscriptionPeriod(subscription).end)
     });
   }
+  if (commission && recorded.firstPaidInvoice) {
+    await trackProductEvent({ eventType: "affiliate_conversion", userId: user.id, plan: PLAN.id, metadata: { source: "first_paid_invoice" } });
+  }
   if (commission?.affiliateUser?.email) {
     sendAffiliateCommissionEmail(commission.affiliateUser, {
       plan: PLAN.id,

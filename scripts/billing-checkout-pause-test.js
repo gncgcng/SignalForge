@@ -24,7 +24,7 @@ Object.assign(appConfig.stripe, {
   appUrl: "https://app.test",
   successUrl: "https://app.test/#billing?checkout=success",
   cancelUrl: "https://app.test/#billing?checkout=cancelled",
-  prices: { ...appConfig.stripe.prices, pro: "price_test_pro", pack10: "price_test_pack10" }
+  prices: { ...appConfig.stripe.prices, monthly: "price_test_monthly", annual: "price_test_annual" }
 });
 
 function testUser() {
@@ -36,10 +36,12 @@ function testUser() {
     plan: "free",
     emailVerifiedAt: new Date(),
     subscription: {
-      status: "trialing",
+      status: "canceled",
       providerCustomerId: "cus_test_existing",
       stripeMode: "test",
-      providerSubscriptionId: null
+      providerSubscriptionId: null,
+      // Subscribed before, so no trial (and no database lookup for trial claims).
+      firstSubscribedAt: new Date("2026-01-01T00:00:00Z")
     }
   };
 }
@@ -68,29 +70,30 @@ async function postCheckout(body) {
   return { status: res.statusCode, json: JSON.parse(res.body || "{}") };
 }
 
-// Flag off (the default): refused, JSON error, no Stripe call, for plans and credit packs alike.
+// Flag off (the default): refused, JSON error, no Stripe call, monthly and annual alike.
 assert.equal(process.env.BILLING_CHECKOUT_ENABLED, undefined, "run this test without BILLING_CHECKOUT_ENABLED set");
 assert.equal(appConfig.stripe.checkoutEnabled, false, "checkout must default to paused");
 assert.equal(getSubscriptionSummary(testUser()).checkoutEnabled, false);
 
-for (const body of [{ plan: "pro" }, { plan: "elite" }, { pack: "pack10" }]) {
+for (const body of [{ interval: "month" }, { interval: "year" }]) {
   const response = await postCheckout(body);
   assert.equal(response.status, 403, `paused checkout should be refused for ${JSON.stringify(body)}`);
   assert.match(response.json.error.message, /paused/i);
   assert.equal(response.json.error.details.code, "checkout_paused");
 }
-await assert.rejects(() => createCheckout(testUser(), { plan: "pro" }), (error) => error.code === "checkout_paused");
+await assert.rejects(() => createCheckout(testUser(), { interval: "month" }), (error) => error.code === "checkout_paused");
 assert.equal(stripeCalls.length, 0, "a paused checkout must not call Stripe");
 
 // Flag on: unchanged behaviour (existing customer reused, one Checkout Session request).
 appConfig.stripe.checkoutEnabled = true;
 assert.equal(getSubscriptionSummary(testUser()).checkoutEnabled, true);
-const enabled = await postCheckout({ plan: "pro" });
+const enabled = await postCheckout({ interval: "month" });
 assert.equal(enabled.status, 200);
 assert.deepEqual(enabled.json.checkout, {
   url: "https://checkout.stripe.test/session",
   id: "cs_test_pause",
-  mode: "subscription"
+  mode: "subscription",
+  trial: false
 });
 assert.deepEqual(stripeCalls.map((call) => `${call.method} ${call.url}`), [
   "POST https://api.stripe.com/v1/checkout/sessions"

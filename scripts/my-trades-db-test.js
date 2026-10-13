@@ -39,8 +39,10 @@ const row = (id) => query(`SELECT * FROM real_trades WHERE id = $1`, [id]).then(
 const TRADE = { status: "open", market: "btc-usd", direction: "long", entryPrice: 100, stopPrice: 99, targetPrice: 102, sizeUnits: 10, openedAt: "2026-01-05T10:00:00Z", notes: "plan" };
 
 try {
-  const userA = { id: await fixtures.createHelperUser("rt_a") };
-  const userB = { id: await fixtures.createHelperUser("rt_b") };
+  // Pivot phase 3: adding and editing trades needs the paid plan; these accounts are in their trial.
+  const PAID = { role: "user", subscription: { status: "trialing", providerSubscriptionId: "sub_my_trades" } };
+  const userA = { id: await fixtures.createHelperUser("rt_a"), ...PAID };
+  const userB = { id: await fixtures.createHelperUser("rt_b"), ...PAID };
   helperIds.push(userA.id, userB.id);
 
   // ---- create, list, close ----
@@ -156,7 +158,7 @@ try {
   // The cascade, for a hard delete of the users row.
   const userC = await fixtures.createHelperUser("rt_c");
   helperIds.push(userC);
-  await call({ id: userC }, "POST", "/api/trades", TRADE);
+  await call({ id: userC, ...PAID }, "POST", "/api/trades", TRADE);
   await query(`DELETE FROM users WHERE id = $1`, [userC]);
   deletion.cascade = { after: (await query(`SELECT COUNT(*)::integer AS n FROM real_trades WHERE user_id = $1`, [userC])).rows[0].n };
   assert.equal(deletion.cascade.after, 0);

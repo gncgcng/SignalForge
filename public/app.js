@@ -10807,8 +10807,8 @@ function renderAdminOperationsDashboard() {
     ["Active today", overview.users?.activeToday],
     ["Active this week", overview.users?.activeThisWeek],
     ["New users today", overview.users?.newUsersToday],
-    ["New Pro", overview.users?.newPro],
-    ["New Elite", overview.users?.newElite]
+    ["New trials today", overview.users?.newTrials],
+    ["New paid subscriptions today", overview.users?.newPaid]
   ]);
   renderMetricRows("#admin-overview-revenue", [
     ["Monthly recurring revenue", formatCents(overview.revenue?.monthlyRecurringRevenueCents)],
@@ -10975,12 +10975,29 @@ function renderAdminAffiliates() {
 function renderAdminStripe() {
   const stripe = state.adminDashboard?.stripe || {};
   renderMetricRows("#admin-stripe-metrics", [
-    ["Latest subscriptions", stripe.activeSubscriptions],
-    ["Renewals", stripe.renewals],
+    ["Active subscriptions", stripe.activeSubscriptions],
+    ["Paid invoices", stripe.renewals],
     ["Failed renewals", stripe.failedRenewals],
     ["Refunds", stripe.refunds],
     ["Webhook failures", stripe.webhookFailures]
   ]);
+  // Trials, subscriptions and revenue from real invoice amounts (refunds subtracted).
+  const billing = state.adminDashboard?.billing || {};
+  renderMetricRows("#admin-billing-metrics", [
+    ["Trials started", formatInteger(billing.trialsStarted)],
+    ["Trials converted", formatInteger(billing.trialsConverted)],
+    ["Trials cancelled", formatInteger(billing.trialsCanceled)],
+    ["In trial now", formatInteger(billing.trialing)],
+    ["Active subscriptions", formatInteger(billing.activeSubscriptions)],
+    ["Past due", formatInteger(billing.pastDue)],
+    ["Billing anomalies", formatInteger(billing.billingAnomalies)],
+    ["MRR (from invoices)", formatCents(billing.monthlyRecurringRevenueCents)],
+    ["Revenue this month", formatCents(billing.revenueThisMonthCents)],
+    ["Refunded", formatCents(billing.refundedCents)]
+  ], { rawValues: true });
+  renderAdminRows("#admin-billing-anomalies", billing.anomalies || [], (item) => `
+    <div><strong>${escapeHtml(item.kind)} · ${escapeHtml(item.reference)}</strong><span>${formatInteger(item.occurrences)} time${item.occurrences === 1 ? "" : "s"} · last ${formatDateTime(item.lastSeenAt)}</span></div>
+  `);
   renderAdminRows("#admin-stripe-latest", stripe.latestSubscriptions || [], (item) => `
     <div><strong>${escapeHtml(item.username || item.email || item.userId)}</strong><span>${escapeHtml(String(item.plan || "free").toUpperCase())} · ${escapeHtml(item.status || "unknown")} · ${formatDateTime(item.updatedAt)}</span></div>
   `);

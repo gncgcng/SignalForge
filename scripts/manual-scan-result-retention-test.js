@@ -476,6 +476,11 @@ function renderActualScanCard(setup, validityStatus) {
     renderSignalValidity: () => "",
     renderConfidenceHelp: () => "",
     renderLockedSignalQuality: () => "",
+    // Access helpers (pivot phase 3): this account can view these levels.
+    levelsButtonLabel: () => "View levels",
+    canViewLevelsClient: () => true,
+    ensureLevelsAccess: () => true,
+    LEVELS_TRIAL_MESSAGE: "Start your 7-day free trial to see levels on every market.",
     renderModeDetails: () => "",
     escapeHtml: (value) => String(value),
     formatSetupDirection: (direction) => `${direction} setup`,

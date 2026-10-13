@@ -330,6 +330,8 @@ function buildUser(id) {
     plan: "elite",
     emailVerifiedAt: new Date(FIXED_NOW_MS - 86_400_000).toISOString(),
     unlockCreditsBalance: 3,
+    // Pivot phase 3: viewing levels on this fixture market needs the paid plan (a trial counts).
+    subscription: { status: "trialing", providerSubscriptionId: "sub_fixture" },
     lifetimeUnlocksUsed: 0,
     trialSignalsUsed: 0
   };

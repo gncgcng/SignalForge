@@ -47,7 +47,7 @@ export async function query(sql, params = []) {
     return { rows: row ? [structuredClone(row)] : [] };
   }
   if (normalized.includes("select pg_advisory_xact_lock")) return { rows: [] };
-  if (normalized.includes("select u.role, u.email_verified_at, c.unlock_credits_balance")) {
+  if (normalized.includes("select u.role, u.email_verified_at")) {
     const row = users.get(params[0]);
     return { rows: row ? [structuredClone(row)] : [] };
   }

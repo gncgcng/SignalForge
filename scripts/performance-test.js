@@ -52,7 +52,7 @@ const result = {
     .every((id) => html.includes(`id="${id}"`)),
   premiumUiPresent:
     html.includes("Performance Dashboard") &&
-    html.includes("Total unlocked signals") &&
+    html.includes("Setups tracked") &&
     html.includes("Net R") &&
     html.includes("Recent closed signals") &&
     html.includes('data-performance-range="30"') &&
