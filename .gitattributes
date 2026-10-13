@@ -1,0 +1,9 @@
+# Keep these files LF in the repository and in every working copy, including Windows checkouts with
+# core.autocrlf=true. Several tests compare source text and failed on CRLF working copies.
+*.js   text eol=lf
+*.json text eol=lf
+*.sql  text eol=lf
+*.md   text eol=lf
+*.html text eol=lf
+*.css  text eol=lf
+*.txt  text eol=lf
