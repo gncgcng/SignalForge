@@ -69,6 +69,6 @@ try {
   console.log(JSON.stringify(results, null, 2));
 } finally {
   await client.end().catch(() => {});
-  await admin.query(`DROP DATABASE IF EXISTS ${scratch}`);
+  await admin.query(`DROP DATABASE IF EXISTS ${scratch} WITH (FORCE)`);
   await admin.end();
 }

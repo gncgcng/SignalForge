@@ -183,8 +183,10 @@ try {
     const client = new pg.Client({ connectionString: url.toString() });
     await client.connect();
     await client.query(`DROP TABLE real_trades; DELETE FROM schema_migrations WHERE filename = '067_real_trades.sql'`);
-    const latest = (await client.query(`SELECT max(filename) AS f FROM schema_migrations`)).rows[0].f;
-    assert.equal(latest, "066_trial_identity_claims.sql");
+    // 067 is undone; 066 (and any later migration, e.g. 068) stays applied.
+    const applied = (await client.query(`SELECT filename FROM schema_migrations`)).rows.map((row) => row.filename);
+    assert.ok(applied.includes("066_trial_identity_claims.sql"));
+    assert.ok(!applied.includes("067_real_trades.sql"));
     const at066 = migrate();
     assert.equal(at066.status, 0, at066.stderr);
     assert.equal(at066.stdout.trim().split("\n").filter((line) => line.includes("Applied migration")).join("|"), "[database] Applied migration 067_real_trades.sql");
@@ -200,7 +202,8 @@ try {
     migration.index = "(user_id, opened_at DESC)";
     migration.cascade = "ON DELETE CASCADE";
   } finally {
-    await query(`DROP DATABASE IF EXISTS ${scratch}`);
+    // FORCE: a failed assertion can leave the scratch connection open; don't let cleanup hang and hide it.
+    await query(`DROP DATABASE IF EXISTS ${scratch} WITH (FORCE)`);
   }
   results.migration = migration;
 
