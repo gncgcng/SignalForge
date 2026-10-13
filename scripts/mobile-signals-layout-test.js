@@ -43,7 +43,7 @@ const checks = {
     app.includes("state.unlockedRevealSignalId = unlockedSignal.id") &&
     app.includes("if (key) highlightSignalKey(key)") &&
     app.includes("getPendingTelegramUnlockKey()") &&
-    app.includes("Sign in to unlock this Telegram signal preview."),
+    app.includes("Sign in to open this Telegram setup."),
   mobileHeaderPolish:
     css.includes("overflow-x: hidden;") &&
     css.includes(".topbar .eyebrow") &&
