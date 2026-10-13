@@ -154,8 +154,10 @@ export async function removeTrade(user, id) {
 
 // ---- CSV export ----
 
-// Cells starting with = + - @ (or a tab / carriage return) are prefixed with ' so a spreadsheet can't run them as
-// formulas. Then the usual CSV quoting: wrap in quotes when the cell holds a comma, quote or line break.
+// Text cells starting with = + - @ (or a tab / carriage return) are prefixed with ' so a spreadsheet can't run them
+// as formulas. Then the usual CSV quoting: wrap in quotes when the cell holds a comma, quote or line break.
+// Numeric columns don't go through this: they come from validated numeric columns or the maths, can't carry a
+// formula, and must stay numbers (a negative R has to add up in a spreadsheet).
 export function csvCell(value) {
   if (value === null || value === undefined) return "";
   let text = String(value);
@@ -170,23 +172,31 @@ export const CSV_COLUMNS = [
   "gross_r", "net_r", "pnl_after_fees", "notes"
 ];
 
-const fixed = (value, digits) => (value === null || value === undefined || !Number.isFinite(value) ? "" : value.toFixed(digits));
+// A plain number, rounded and without trailing zeros: -1.5, 0.788, 12.12. Anything non-finite is an empty cell.
+export function csvNumber(value, digits = 8) {
+  if (value === null || value === undefined || value === "") return "";
+  const number = Number(value);
+  return Number.isFinite(number) ? String(Number(number.toFixed(digits))) : "";
+}
 
 export function tradesToCsv(trades) {
   const lines = [CSV_COLUMNS.join(",")];
+  const text = csvCell;
   for (const trade of trades) {
     const metrics = tradeMetrics(trade);
+    const closedNumber = (value, digits) => (metrics.closed ? csvNumber(value, digits) : "");
     lines.push([
-      trade.id, trade.status, trade.market, trade.direction, trade.setupKey, trade.timeframe, trade.entryPrice,
-      trade.stopPrice, trade.targetPrice, trade.sizeUnits, trade.openedAt, trade.exitPrice, trade.closedAt,
-      trade.feesPaid, trade.feeRatePct,
-      metrics.closed ? fixed(metrics.fees, 2) : "",
-      metrics.closed ? (metrics.feesEstimated ? "yes" : "no") : "",
-      metrics.closed ? fixed(metrics.grossR, 3) : "",
-      metrics.closed ? fixed(metrics.netR, 3) : "",
-      metrics.closed ? fixed(metrics.pnl, 2) : "",
-      trade.notes
-    ].map(csvCell).join(","));
+      text(trade.id), text(trade.status), text(trade.market), text(trade.direction), text(trade.setupKey),
+      text(trade.timeframe), csvNumber(trade.entryPrice), csvNumber(trade.stopPrice), csvNumber(trade.targetPrice),
+      csvNumber(trade.sizeUnits), text(trade.openedAt), csvNumber(trade.exitPrice), text(trade.closedAt),
+      csvNumber(trade.feesPaid), csvNumber(trade.feeRatePct),
+      closedNumber(metrics.fees, 2),
+      text(metrics.closed ? (metrics.feesEstimated ? "yes" : "no") : ""),
+      closedNumber(metrics.grossR, 4),
+      closedNumber(metrics.netR, 4),
+      closedNumber(metrics.pnl, 2),
+      text(trade.notes)
+    ].join(","));
   }
   return `${lines.join("\r\n")}\r\n`;
 }
