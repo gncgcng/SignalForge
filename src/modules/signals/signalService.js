@@ -18,6 +18,7 @@ import { evaluateLiquidityFloor } from "../markets/marketLiquidityService.js";
 import { appConfig } from "../../config/appConfig.js";
 import { getMultiTimeframeMarketData } from "../market-data/multiTimeframeService.js";
 import {
+  assertCanViewLevels,
   canDiscoverSetups,
   getSubscriptionSummary,
   recordDiscoveryUsage
@@ -73,6 +74,8 @@ const scanAllJobs = new Map();
 const SCAN_JOB_TTL_MS = 60 * 60 * 1000;
 
 export async function createSignal(user, { symbol, timeframe, setupKey }) {
+  // Levels on markets outside the free list need the plan (checked on the server, not just in the UI).
+  assertCanViewLevels(user, symbol);
   const requestedSetupKey = String(setupKey || "").trim();
   if (requestedSetupKey) {
     return unlockPreviouslyDiscoveredSetup(user, {
@@ -160,12 +163,6 @@ export async function createSignal(user, { symbol, timeframe, setupKey }) {
       timeframe
     });
   }
-  if (user.role !== "tester" && !savedSignal?.alreadyUnlocked) {
-    user.unlockCreditsBalance = Math.max(0, Number(user.unlockCreditsBalance || 0) - 1);
-    user.lifetimeUnlocksUsed = Number(user.lifetimeUnlocksUsed || 0) + 1;
-    user.trialSignalsUsed = Number(user.trialSignalsUsed || 0) +
-      (user.plan === "free" || user.plan === "trial" ? 1 : 0);
-  }
 
   return {
     signal: toUserSignal(savedSignal),
@@ -176,6 +173,7 @@ export async function createSignal(user, { symbol, timeframe, setupKey }) {
 }
 
 async function unlockPreviouslyDiscoveredSetup(user, { symbol, timeframe, setupKey }) {
+  assertCanViewLevels(user, symbol);
   const existing = await findSignalBySetupKey(user.id, setupKey);
   if (existing) {
     existing.alreadyUnlocked = true;
@@ -227,12 +225,6 @@ async function unlockPreviouslyDiscoveredSetup(user, { symbol, timeframe, setupK
       timeframe: signal.timeframe,
       metadata: { source: "scan_all_snapshot" }
     });
-  }
-  if (user.role !== "tester" && !savedSignal?.alreadyUnlocked) {
-    user.unlockCreditsBalance = Math.max(0, Number(user.unlockCreditsBalance || 0) - 1);
-    user.lifetimeUnlocksUsed = Number(user.lifetimeUnlocksUsed || 0) + 1;
-    user.trialSignalsUsed = Number(user.trialSignalsUsed || 0) +
-      (user.plan === "free" || user.plan === "trial" ? 1 : 0);
   }
 
   return {
@@ -317,6 +309,7 @@ export async function unlockTelegramSignal(user, { setupKey }) {
     error.statusCode = 404;
     throw error;
   }
+  assertCanViewLevels(user, queuedSetup.symbol);
 
 
   const existing = await findSignalBySetupKey(user.id, key);
@@ -390,12 +383,6 @@ export async function unlockTelegramSignal(user, { setupKey }) {
     });
   }
 
-  if (user.role !== "tester" && !savedSignal?.alreadyUnlocked) {
-    user.unlockCreditsBalance = Math.max(0, Number(user.unlockCreditsBalance || 0) - 1);
-    user.lifetimeUnlocksUsed = Number(user.lifetimeUnlocksUsed || 0) + 1;
-    user.trialSignalsUsed = Number(user.trialSignalsUsed || 0) +
-      (user.plan === "free" || user.plan === "trial" ? 1 : 0);
-  }
 
   return {
     signal: toUserSignal(savedSignal),

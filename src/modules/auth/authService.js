@@ -529,10 +529,10 @@ export async function requestPasswordReset(email) {
   return passwordResetRequestResult(!appConfig.isProduction ? resetUrl : null);
 }
 
-export async function completePasswordReset({ token, password }) {
+export async function completePasswordReset({ token, password, keepSessionId = null }) {
   assertValidNewPassword(password);
 
-  const result = await resetPasswordWithToken(hashPasswordResetToken(token), hashPassword(password));
+  const result = await resetPasswordWithToken(hashPasswordResetToken(token), hashPassword(password), { keepSessionId });
   if (!result) {
     const error = new Error("Password reset link is invalid or expired.");
     error.statusCode = 400;

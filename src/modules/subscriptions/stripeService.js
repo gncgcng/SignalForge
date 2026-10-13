@@ -7,93 +7,123 @@ import {
   findUserById,
   findUserByStripeCustomer,
   getRetryableStripeWebhookEvent,
-  grantSubscriptionEntitlements,
-  grantUnlockCredits,
+  claimTrialIdentities,
+  isTrialIdentityClaimed,
   listStripeWebhookEvents,
   updateStripeCustomer,
   updateStripeSubscription
 } from "../../db/repositories.js";
 import {
-  activateAffiliateReferral,
   deactivateAffiliateReferral,
   reconcileAffiliateRefund,
   recordRecurringAffiliateCommission
 } from "../affiliates/affiliateRepository.js";
 import { trackProductEvent } from "../analytics/productAnalyticsService.js";
+import { trialIdentities } from "../auth/trialIdentity.js";
 import {
   sendAffiliateCommissionEmail,
   sendFailedPaymentEmail,
-  sendSubscriptionConfirmationEmail
+  sendSubscriptionCanceledEmail,
+  sendSubscriptionConfirmationEmail,
+  sendTrialCardAlreadyUsedEmail,
+  sendTrialEndingEmail,
+  sendTrialStartedEmail
 } from "../notifications/transactionalEmailService.js";
-import { BILLING_PLANS, CREDIT_PACKS, normalizePlan } from "./subscriptionService.js";
-import { recordStripeDiscountRedemption } from "../promo-codes/promoCodeRepository.js";
+import {
+  PAID_ACCESS_STATUSES,
+  PLAN,
+  amountCentsForInterval,
+  hasPaidAccess,
+  intervalForPrice,
+  priceIdForInterval
+} from "./subscriptionService.js";
+import {
+  claimTrialCard,
+  hasPaidInvoice,
+  listGoogleSubjects,
+  recordBillingAnomaly,
+  recordInvoiceRefund,
+  recordPaidInvoice
+} from "./billingRepository.js";
 
 const stripeApiBase = "https://api.stripe.com/v1";
 
-export async function createCheckout(user, { plan, pack } = {}) {
+// ---- Checkout: one plan, monthly or annual, with a 7-day card-required trial ----
+
+export async function createCheckout(user, { interval } = {}) {
   assertCheckoutEnabled();
   assertStripeCheckoutConfigured(user);
   assertStripeRedirectsConfigured(user);
-  const planConfig = plan ? BILLING_PLANS[plan] : null;
-  const packConfig = pack ? CREDIT_PACKS[pack] : null;
-
-  if ((!planConfig || plan === "free") && !packConfig) {
-    throw validationError("Choose a valid subscription plan or credit pack.");
+  const billingInterval = interval === "year" || interval === "annual" ? "year" : interval === "month" || interval === "monthly" ? "month" : null;
+  if (!billingInterval) {
+    throw validationError("Choose monthly or annual billing.");
   }
-  const customerId = await ensureStripeCustomer(user);
-  if (
-    planConfig &&
-    user.subscription?.providerSubscriptionId &&
-    user.subscription?.stripeMode === getStripeMode()
-  ) {
-    return {
-      ...(await createCustomerPortal(user)),
-      mode: "portal"
-    };
-  }
-
-  const priceId = planConfig
-    ? appConfig.stripe.prices[plan]
-    : appConfig.stripe.prices[pack];
-
+  const priceId = priceIdForInterval(billingInterval);
   if (!priceId) {
-    throw missingStripeConfiguration(
-      appConfig.stripe.priceEnvironmentKeys[plan || pack],
-      user
-    );
+    throw missingStripeConfiguration(appConfig.stripe.priceEnvironmentKeys[PLAN.intervals[billingInterval].priceKey], user);
+  }
+  // Already subscribed (trial, active or past due): manage it in the Customer Portal instead of a second checkout.
+  if (hasPaidAccess(user) && user.subscription?.providerSubscriptionId && user.subscription?.stripeMode === getStripeMode()) {
+    return { ...(await createCustomerPortal(user)), mode: "portal" };
   }
 
-  const kind = planConfig ? "subscription" : "credit_pack";
-  const session = await stripeRequest("/checkout/sessions", {
-    mode: planConfig ? "subscription" : "payment",
-    customer: customerId,
-    "line_items[0][price]": priceId,
-    "line_items[0][quantity]": "1",
-    success_url: appConfig.stripe.successUrl,
-    cancel_url: appConfig.stripe.cancelUrl,
-    allow_promotion_codes: appConfig.stripe.promotionCodesEnabled ? "true" : undefined,
-    "metadata[user_id]": user.id,
-    "metadata[kind]": kind,
-    "metadata[plan]": planConfig?.id || "",
-    "metadata[pack]": packConfig?.id || "",
-    "metadata[unlock_quantity]": String(packConfig?.quantity || 0),
-    ...(planConfig ? {
-      "subscription_data[metadata][user_id]": user.id,
-      "subscription_data[metadata][plan]": planConfig.id
-    } : {})
-  });
+  const eligibility = await getTrialEligibility(user);
+  const customerId = await ensureStripeCustomer(user);
+  const session = await stripeRequest("/checkout/sessions", buildCheckoutSessionParams({
+    user,
+    customerId,
+    priceId,
+    interval: billingInterval,
+    trial: eligibility.eligible
+  }));
   await trackProductEvent({
     eventType: "checkout_started",
     userId: user.id,
-    plan: planConfig?.id || null,
-    amountCents: planMonthlyAmountCents(planConfig?.id),
-    metadata: {
-      kind,
-      pack: packConfig?.id || null
-    }
+    plan: PLAN.id,
+    amountCents: amountCentsForInterval(billingInterval),
+    metadata: { kind: "subscription", interval: billingInterval, trial: eligibility.eligible }
   });
 
-  return { url: session.url, id: session.id, mode: kind };
+  return { url: session.url, id: session.id, mode: "subscription", trial: eligibility.eligible };
+}
+
+// The Checkout Session payload. Promotion codes are never offered. The card is always collected, even for the
+// trial, and the trial (7 days) is left out for an account that has already had one.
+export function buildCheckoutSessionParams({ user, customerId, priceId, interval, trial }) {
+  return {
+    mode: "subscription",
+    customer: customerId,
+    client_reference_id: user.id,
+    "line_items[0][price]": priceId,
+    "line_items[0][quantity]": "1",
+    payment_method_collection: "always",
+    success_url: appConfig.stripe.successUrl,
+    cancel_url: appConfig.stripe.cancelUrl,
+    "metadata[user_id]": user.id,
+    "metadata[kind]": "subscription",
+    "metadata[plan]": PLAN.id,
+    "metadata[interval]": interval,
+    "subscription_data[metadata][user_id]": user.id,
+    "subscription_data[metadata][plan]": PLAN.id,
+    ...(trial ? {
+      "subscription_data[trial_period_days]": String(PLAN.trialDays),
+      "subscription_data[trial_settings][end_behavior][missing_payment_method]": "cancel"
+    } : {})
+  };
+}
+
+// No trial for an account that has had any subscription before, or whose email / Google account already had a
+// free trial (trial_identity_claims, kept after account deletion). The card rule is checked later, in the webhook,
+// because the card isn't known until it is entered.
+export async function getTrialEligibility(user) {
+  if (user?.subscription?.firstSubscribedAt || user?.subscription?.providerSubscriptionId) {
+    return { eligible: false, reason: "previous_subscription" };
+  }
+  const identities = trialIdentities({ email: user?.email, googleSubjects: await listGoogleSubjects(user.id) });
+  if (await isTrialIdentityClaimed(identities)) {
+    return { eligible: false, reason: "trial_used" };
+  }
+  return { eligible: true, reason: null };
 }
 
 export async function createCustomerPortal(user) {
@@ -196,20 +226,22 @@ export async function processStripeEvent(event) {
   try {
     let result = { action: "ignored", userId: null };
     if (event.type === "checkout.session.completed") {
-      result = await processCheckoutCompleted(object);
+      result = await processCheckoutCompleted(object, event.id);
     } else if (
       event.type === "invoice.payment_succeeded" ||
       event.type === "invoice.paid"
     ) {
-      result = await processInvoicePaymentSucceeded(object, event.id);
+      result = await processInvoicePaid(object, event.id);
     } else if (event.type === "invoice.payment_failed") {
-      result = await processInvoicePaymentFailed(object);
+      result = await processInvoicePaymentFailed(object, event.id);
     } else if (
       event.type === "customer.subscription.created" ||
       event.type === "customer.subscription.updated" ||
       event.type === "customer.subscription.deleted"
     ) {
-      result = await processSubscriptionChanged(object, event.type);
+      result = await processSubscriptionChanged(object, event.type, { eventId: event.id });
+    } else if (event.type === "customer.subscription.trial_will_end") {
+      result = await processTrialWillEnd(object, event.id);
     } else if (event.type === "charge.refunded") {
       result = await processChargeRefunded(object);
     }
@@ -222,7 +254,7 @@ export async function processStripeEvent(event) {
       `[stripe] Webhook processed event=${safeLogValue(event.id)} ` +
       `type=${safeLogValue(event.type)} action=${safeLogValue(result?.action)}`
     );
-    return { duplicate: false, action: result?.action || "ignored" };
+    return { duplicate: false, ...(result || {}), action: result?.action || "ignored" };
   } catch (error) {
     const safeError = sanitizeStripeError(error);
     await failStripeWebhookEvent(event.id, safeError);
@@ -292,101 +324,210 @@ export function shouldReuseStripeCustomer(customerId, storedMode, currentMode) {
   );
 }
 
-async function processCheckoutCompleted(session) {
+async function processCheckoutCompleted(session, stripeEventId) {
   const customerId = stripeId(session.customer);
-  const userId = session.metadata?.user_id ||
+  const userId = session.client_reference_id || session.metadata?.user_id ||
     (await findUserByStripeCustomer(customerId, getStripeMode()))?.id;
-  const kind = session.metadata?.kind;
-  if (!userId && ["subscription", "credit_pack"].includes(kind)) {
-    throw retryableWebhookError("Unable to resolve the checkout user.");
+  if (session.mode !== "subscription" && session.metadata?.kind !== "subscription") {
+    // Old credit-pack sessions: credit packs are retired, nothing is granted.
+    return { action: "checkout_ignored", userId: userId || null };
   }
-  if (!userId) return { action: "checkout_ignored", userId: null };
+  if (!userId) throw retryableWebhookError("Unable to resolve the checkout user.");
   if (isDeletedAccount(await findUserById(userId))) return deletedAccountResult();
 
   if (customerId) {
     await updateStripeCustomer(userId, customerId, getStripeMode());
   }
-  await recordPromoRedemptionFromCheckout(session, userId);
-  if (session.metadata?.kind === "credit_pack") {
-    const quantity = CREDIT_PACKS[session.metadata.pack]?.quantity || 0;
-    if (quantity <= 0) throw retryableWebhookError("Unknown Stripe credit pack.");
-    await grantUnlockCredits(userId, quantity, `checkout:${session.id}`, "credit_pack");
-    await trackProductEvent({
-      eventType: "checkout_completed",
-      userId,
-      amountCents: Number(session.amount_total || 0),
-      metadata: { kind: "credit_pack", pack: session.metadata.pack || null }
-    });
-    return { action: "credit_pack_granted", userId };
-  }
+  await trackProductEvent({
+    eventType: "checkout_completed",
+    userId,
+    plan: PLAN.id,
+    amountCents: Number(session.amount_total || 0),
+    metadata: { kind: "subscription" }
+  });
 
   const subscriptionId = stripeId(session.subscription);
-  if (kind === "subscription") {
-    const planId = normalizePlan(session.metadata?.plan);
-    if (planId === "free" || !subscriptionId) {
-      throw retryableWebhookError("Checkout subscription metadata is incomplete.");
-    }
-
-    await updateStripeSubscription({
-      userId,
-      customerId,
-      subscriptionId,
-      status: "active",
-      plan: planId,
-      priceId: appConfig.stripe.prices[planId],
-      periodStart: null,
-      periodEnd: null,
-      stripeMode: getStripeMode(),
-      cancelAtPeriodEnd: false
-    });
-    const referral = await activateAffiliateReferral(userId, planId);
-    await trackProductEvent({
-      eventType: "checkout_completed",
-      userId,
-      plan: planId,
-      amountCents: Number(session.amount_total || 0),
-      metadata: { kind: "subscription" }
-    });
-    await trackProductEvent({
-      eventType: "subscription",
-      userId,
-      plan: planId,
-      amountCents: Number(session.amount_total || 0),
-      metadata: { source: "checkout" }
-    });
-    if (referral) {
-      await trackProductEvent({
-        eventType: "affiliate_conversion",
-        userId,
-        plan: planId,
-        metadata: { source: "checkout" }
-      });
-    }
-
-    try {
-      const subscription = await stripeGet(`/subscriptions/${encodeURIComponent(subscriptionId)}`);
-      await processSubscriptionChanged(subscription, "customer.subscription.created");
-    } catch (error) {
-      console.warn(
-        `[stripe] Checkout upgraded user=${safeLogValue(userId)} plan=${safeLogValue(planId)} ` +
-        `but subscription enrichment will retry: ${sanitizeStripeError(error)}`
-      );
-      throw error;
-    }
-    return { action: "subscription_activated", userId, plan: planId };
-  }
-  return { action: "checkout_ignored", userId };
+  if (!subscriptionId) throw retryableWebhookError("Checkout subscription is missing.");
+  // Never assume "active": the subscription's own status (usually "trialing") is read from Stripe and stored.
+  const subscription = await stripeGet(`/subscriptions/${encodeURIComponent(subscriptionId)}`);
+  const synced = await processSubscriptionChanged(subscription, "checkout.session.completed", { userId, eventId: stripeEventId });
+  return { ...synced, action: `checkout_${synced.action}` };
 }
 
-async function processInvoicePaymentSucceeded(invoice, stripeEventId) {
-  const customerId = stripeId(invoice.customer);
-  const subscriptionId = getInvoiceSubscriptionId(invoice);
-  let subscription = null;
+async function resolveSubscriptionUser(subscription, eventType, { userId = null } = {}) {
+  const metadataUserId = userId || subscription.metadata?.user_id || null;
+  const customerId = stripeId(subscription.customer);
+  const user = metadataUserId
+    ? await findUserById(metadataUserId)
+    : await findUserByStripeCustomer(customerId, getStripeMode());
+  if (user) return { user };
+  // Account deletion clears the local customer id and deletes the Stripe customer, so a
+  // later subscription.deleted for it resolves to nobody. Acknowledge only that exact case:
+  // a deleted event, no user_id metadata, and a customer Stripe confirms is deleted. A
+  // customer that exists but isn't linked yet (subscription events can arrive before
+  // checkout.session.completed links it) still throws, so Stripe retries until it's linked.
+  if (
+    eventType === "customer.subscription.deleted" &&
+    !metadataUserId &&
+    customerId &&
+    await isStripeCustomerDeleted(customerId)
+  ) {
+    return { result: { action: "subscription_deleted_unknown_customer", userId: null } };
+  }
+  throw retryableWebhookError("Unable to resolve the subscription user.");
+}
 
-  if (subscriptionId) {
-    subscription = await stripeGet(`/subscriptions/${encodeURIComponent(subscriptionId)}`);
+// customer.subscription.created / updated / deleted, and the subscription read after checkout or an invoice.
+// Stores Stripe's own status; paid access follows from it (hasPaidAccess). A price that isn't ours grants nothing.
+async function processSubscriptionChanged(subscription, eventType, { userId = null, eventId = null } = {}) {
+  const resolved = await resolveSubscriptionUser(subscription, eventType, { userId });
+  if (resolved.result) return resolved.result;
+  const { user } = resolved;
+  if (isDeletedAccount(user)) return deletedAccountResult();
+
+  const deleted = eventType === "customer.subscription.deleted";
+  const priceId = subscription.items?.data?.[0]?.price?.id || null;
+  const interval = intervalForPrice(priceId);
+  if (!interval && !deleted) {
+    await flagUnknownPrice(priceId, { eventId, eventType, userId: user.id, subscriptionId: subscription.id });
+    return { action: "unknown_price_ignored", userId: user.id, priceId };
   }
 
+  const status = deleted ? "canceled" : String(subscription.status || "incomplete");
+  const paid = !deleted && PAID_ACCESS_STATUSES.includes(status);
+  const period = getSubscriptionPeriod(subscription);
+  const update = await updateStripeSubscription({
+    userId: user.id,
+    customerId: stripeId(subscription.customer),
+    subscriptionId: deleted ? null : subscription.id,
+    status,
+    plan: paid ? PLAN.id : "free",
+    priceId: deleted ? null : priceId,
+    periodStart: fromUnix(period.start),
+    periodEnd: fromUnix(period.end),
+    stripeMode: getStripeMode(),
+    cancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end),
+    trialEnd: fromUnix(subscription.trial_end),
+    billingInterval: interval
+  });
+  if (!update) return deletedAccountResult();
+  const previous = update.previous || {};
+  const result = { action: deleted ? "subscription_ended" : "subscription_synced", userId: user.id, status };
+
+  if (eventType === "customer.subscription.created" && status === "trialing") {
+    result.trial = await startTrial(user, subscription, interval);
+  }
+  // Cancellation requested (in the Customer Portal): access continues to the period end.
+  if (!deleted && subscription.cancel_at_period_end && !previous.cancelAtPeriodEnd) {
+    sendSubscriptionCanceledEmail(user, { accessUntil: fromUnix(period.end) || fromUnix(subscription.trial_end) });
+    result.cancellationEmail = true;
+  }
+  if (deleted) {
+    await deactivateAffiliateReferral(user.id);
+    // A trial that ended without ever being paid for counts as a cancelled trial.
+    if (subscription.trial_end && !(await hasPaidInvoice(subscription.id))) {
+      await trackProductEvent({ eventType: "trial_canceled", userId: user.id, plan: PLAN.id, metadata: { subscriptionId: subscription.id } });
+      result.trialCanceled = true;
+    }
+  }
+  return result;
+}
+
+// A new trial: one per card. The card's fingerprint is only known now, after checkout. If another account already
+// used this card for a trial, the trial ends now (the first charge happens immediately) and the user is told why.
+async function startTrial(user, subscription, interval) {
+  const amountCents = amountCentsForInterval(interval);
+  const fingerprint = await readSubscriptionCardFingerprint(subscription);
+  if (!fingerprint) {
+    await recordBillingAnomaly({
+      kind: "trial_card_fingerprint_missing",
+      reference: subscription.id,
+      detail: { userId: user.id }
+    });
+  } else {
+    const hash = cardFingerprintHash(fingerprint);
+    if (hash) {
+      const claim = await claimTrialCard(hash, user.id);
+      if (!claim.claimed) {
+        await stripeRequest(`/subscriptions/${encodeURIComponent(subscription.id)}`, { trial_end: "now" });
+        sendTrialCardAlreadyUsedEmail(user, { amountCents, interval });
+        await recordBillingAnomaly({
+          kind: "trial_card_reused",
+          reference: subscription.id,
+          detail: { userId: user.id }
+        });
+        return { ended: true, reason: "card_already_used" };
+      }
+    }
+  }
+  await claimTrialIdentities(trialIdentities({ email: user.email, googleSubjects: await listGoogleSubjects(user.id) }));
+  await trackProductEvent({ eventType: "trial_started", userId: user.id, plan: PLAN.id, metadata: { interval } });
+  sendTrialStartedEmail(user, { firstChargeDate: fromUnix(subscription.trial_end), amountCents, interval });
+  return { ended: false };
+}
+
+async function readSubscriptionCardFingerprint(subscription) {
+  let paymentMethod = subscription.default_payment_method;
+  if (!paymentMethod) {
+    const customerId = stripeId(subscription.customer);
+    if (customerId) {
+      const customer = await stripeGet(`/customers/${encodeURIComponent(customerId)}`);
+      paymentMethod = customer?.invoice_settings?.default_payment_method || null;
+    }
+  }
+  if (!paymentMethod) return null;
+  if (typeof paymentMethod === "string") {
+    paymentMethod = await stripeGet(`/payment_methods/${encodeURIComponent(paymentMethod)}`);
+  }
+  return paymentMethod?.card?.fingerprint || null;
+}
+
+// Same secret and HMAC as trial_identity_claims; Stripe's fingerprint itself is never stored.
+export function cardFingerprintHash(fingerprint) {
+  const secret = appConfig.trialIdentitySecret;
+  if (!secret) {
+    console.error("[trial] TRIAL_IDENTITY_SECRET is not set; skipping the one-trial-per-card check.");
+    return null;
+  }
+  if (!fingerprint) return null;
+  return createHmac("sha256", secret).update(`card:${fingerprint}`).digest("hex");
+}
+
+// 3 days before the trial ends: when the first charge happens, how much, and how to cancel.
+async function processTrialWillEnd(subscription, eventId) {
+  const resolved = await resolveSubscriptionUser(subscription, "customer.subscription.trial_will_end");
+  if (resolved.result) return resolved.result;
+  const { user } = resolved;
+  if (isDeletedAccount(user)) return deletedAccountResult();
+  const priceId = subscription.items?.data?.[0]?.price?.id || null;
+  const interval = intervalForPrice(priceId);
+  if (!interval) {
+    await flagUnknownPrice(priceId, { eventId, eventType: "customer.subscription.trial_will_end", userId: user.id });
+    return { action: "unknown_price_ignored", userId: user.id, priceId };
+  }
+  if (subscription.cancel_at_period_end || subscription.status !== "trialing") {
+    return { action: "trial_ending_not_charged", userId: user.id };
+  }
+  sendTrialEndingEmail(user, {
+    firstChargeDate: fromUnix(subscription.trial_end),
+    amountCents: amountCentsForInterval(interval),
+    interval
+  });
+  return { action: "trial_ending_notified", userId: user.id };
+}
+
+// invoice.paid (and the older invoice.payment_succeeded for the same invoice). Only an invoice that charged money
+// counts: the $0 trial invoice grants nothing, sends nothing and pays no commission.
+async function processInvoicePaid(invoice, stripeEventId) {
+  const amountPaid = Number(invoice.amount_paid || 0);
+  if (amountPaid <= 0) {
+    return { action: "zero_amount_invoice_ignored", userId: null };
+  }
+  const customerId = stripeId(invoice.customer);
+  const subscriptionId = getInvoiceSubscriptionId(invoice);
+  const subscription = subscriptionId
+    ? await stripeGet(`/subscriptions/${encodeURIComponent(subscriptionId)}`)
+    : null;
   const userId = subscription?.metadata?.user_id || invoice.metadata?.user_id;
   const user = userId
     ? await findUserById(userId)
@@ -394,138 +535,129 @@ async function processInvoicePaymentSucceeded(invoice, stripeEventId) {
   if (!user) throw retryableWebhookError("Unable to resolve the invoice user.");
   if (isDeletedAccount(user)) return deletedAccountResult();
 
-  const priceId = getInvoicePriceId(invoice) ||
-    subscription?.items?.data?.[0]?.price?.id;
-  const planId = planFromPrice(priceId);
-  const plan = BILLING_PLANS[planId];
-  if (!plan || plan.monthlyUnlockGrant <= 0) {
-    if (isCreditPackPrice(priceId)) {
-      return { action: "credit_pack_invoice_ignored", userId: user.id };
-    }
-    throw retryableWebhookError(`Unknown subscription price ${safeLogValue(priceId)}.`);
+  const priceId = getInvoicePriceId(invoice) || subscription?.items?.data?.[0]?.price?.id || null;
+  const interval = intervalForPrice(priceId);
+  if (!interval) {
+    await flagUnknownPrice(priceId, { eventId: stripeEventId, eventType: "invoice.paid", userId: user.id, invoiceId: invoice.id });
+    return { action: "unknown_price_ignored", userId: user.id, priceId };
   }
 
-  const period = getInvoicePeriod(invoice, priceId);
-  const subscriptionPeriod = getSubscriptionPeriod(subscription);
-  const applied = await updateStripeSubscription({
+  const recorded = await recordPaidInvoice({
+    invoiceId: invoice.id,
     userId: user.id,
-    customerId,
     subscriptionId,
-    status: subscription?.status || "active",
-    plan: planId,
-    priceId,
-    periodStart: fromUnix(period.start || subscriptionPeriod.start),
-    periodEnd: fromUnix(period.end || subscriptionPeriod.end),
-    stripeMode: getStripeMode(),
-    cancelAtPeriodEnd: Boolean(subscription?.cancel_at_period_end)
+    chargeId: stripeId(invoice.charge) || stripeId(invoice.payments?.data?.[0]?.payment?.charge),
+    amountPaidCents: amountPaid,
+    currency: invoice.currency,
+    interval,
+    livemode: invoice.livemode,
+    paidAt: fromUnix(invoice.status_transitions?.paid_at)
   });
-  if (!applied) return deletedAccountResult();
-
-  const periodStart = period.start || subscriptionPeriod.start;
-  const grantReference = subscriptionId && periodStart
-    ? `subscription:${subscriptionId}:${planId}:${periodStart}`
-    : `invoice:${invoice.id}`;
-  await grantSubscriptionEntitlements({
-    userId: user.id,
-    plan: planId,
-    scanCredits: plan.discoveryLimit,
-    unlockCredits: plan.monthlyUnlockGrant,
-    externalReference: grantReference
-  });
+  if (!recorded.inserted) {
+    return { action: "invoice_already_recorded", userId: user.id };
+  }
+  if (subscription) {
+    await processSubscriptionChanged(subscription, "invoice.paid", { userId: user.id, eventId: stripeEventId });
+  }
+  if (recorded.firstPaidInvoice && subscription?.trial_end) {
+    await trackProductEvent({ eventType: "trial_converted", userId: user.id, plan: PLAN.id, amountCents: amountPaid, metadata: { interval } });
+  }
+  const period = getInvoicePeriod(invoice, priceId);
   const commission = await recordRecurringAffiliateCommission({
     referredUserId: user.id,
-    plan: planId,
-    grossAmountCents: Number(invoice.amount_paid || 0),
+    plan: PLAN.id,
+    grossAmountCents: amountPaid,
     stripeInvoiceId: invoice.id,
     stripeEventId,
-    periodStart: fromUnix(periodStart)
+    periodStart: fromUnix(period.start)
   });
   await trackProductEvent({
     eventType: "subscription",
     userId: user.id,
-    plan: planId,
-    amountCents: Number(invoice.amount_paid || 0),
-    metadata: { source: "invoice" }
+    plan: PLAN.id,
+    amountCents: amountPaid,
+    metadata: { source: "invoice", interval }
   });
-  sendSubscriptionConfirmationEmail(user, planId);
+  // One confirmation per subscription, on its first real charge; Stripe's own receipts cover every charge.
+  if (recorded.firstPaidInvoice) {
+    sendSubscriptionConfirmationEmail(user, {
+      amountCents: amountPaid,
+      interval,
+      nextChargeDate: fromUnix(period.end) || fromUnix(getSubscriptionPeriod(subscription).end)
+    });
+  }
   if (commission?.affiliateUser?.email) {
     sendAffiliateCommissionEmail(commission.affiliateUser, {
-      plan: planId,
+      plan: PLAN.id,
       commissionCents: commission.commission_amount_cents
     });
   }
   return {
-    action: "subscription_payment_applied",
+    action: "subscription_payment_recorded",
     userId: user.id,
-    plan: planId,
+    amountCents: amountPaid,
     affiliateCommissionCreated: Boolean(commission)
   };
 }
 
-async function processInvoicePaymentFailed(invoice) {
+async function processInvoicePaymentFailed(invoice, stripeEventId) {
   const customerId = stripeId(invoice.customer);
-  const userId = invoice.metadata?.user_id;
+  const subscriptionId = getInvoiceSubscriptionId(invoice);
+  const subscription = subscriptionId
+    ? await stripeGet(`/subscriptions/${encodeURIComponent(subscriptionId)}`)
+    : null;
+  const userId = subscription?.metadata?.user_id || invoice.metadata?.user_id;
   const user = userId
     ? await findUserById(userId)
     : await findUserByStripeCustomer(customerId, getStripeMode());
   if (!user) throw retryableWebhookError("Unable to resolve the failed invoice user.");
   if (isDeletedAccount(user)) return deletedAccountResult();
 
+  // Usually past_due now: access continues and the app shows "Payment failed — update your card".
+  if (subscription) {
+    await processSubscriptionChanged(subscription, "invoice.payment_failed", { userId: user.id, eventId: stripeEventId });
+  }
   sendFailedPaymentEmail(user);
-  return { action: "failed_payment_notified", userId: user.id };
+  return { action: "failed_payment_notified", userId: user.id, status: subscription?.status || null };
 }
 
-async function processSubscriptionChanged(subscription, eventType) {
-  const metadataUserId = subscription.metadata?.user_id || null;
-  const customerId = stripeId(subscription.customer);
-  const user = metadataUserId
-    ? await findUserById(metadataUserId)
-    : await findUserByStripeCustomer(customerId, getStripeMode());
-  if (!user) {
-    // Account deletion clears the local customer id and deletes the Stripe customer, so a
-    // later subscription.deleted for it resolves to nobody. Acknowledge only that exact case:
-    // a deleted event, no user_id metadata, and a customer Stripe confirms is deleted. A
-    // customer that exists but isn't linked yet (subscription events can arrive before
-    // checkout.session.completed links it) still throws, so Stripe retries until it's linked.
-    if (
-      eventType === "customer.subscription.deleted" &&
-      !metadataUserId &&
-      customerId &&
-      await isStripeCustomerDeleted(customerId)
-    ) {
-      return { action: "subscription_deleted_unknown_customer", userId: null };
-    }
-    throw retryableWebhookError("Unable to resolve the subscription user.");
+// A refund: record it against the invoice (revenue drops by the refunded amount) and reverse the affiliate
+// commission in proportion.
+async function processChargeRefunded(charge) {
+  const invoiceId = stripeId(charge.invoice);
+  const refundedCents = Number(charge.amount_refunded || 0);
+  const invoice = await recordInvoiceRefund({ invoiceId, chargeId: charge.id || null, amountRefundedCents: refundedCents });
+  const reversal = await reconcileAffiliateRefund(invoice?.stripe_invoice_id || invoiceId, refundedCents);
+  if (invoice) {
+    await trackProductEvent({
+      eventType: "refund",
+      userId: invoice.user_id || null,
+      plan: PLAN.id,
+      amountCents: refundedCents,
+      metadata: { invoiceId: invoice.stripe_invoice_id }
+    });
   }
-  if (isDeletedAccount(user)) return deletedAccountResult();
-
-  const priceId = subscription.items?.data?.[0]?.price?.id || null;
-  const active = !eventType.endsWith(".deleted") &&
-    ["active", "trialing", "past_due"].includes(subscription.status);
-  const plan = active ? planFromPrice(priceId) : "free";
-  const period = getSubscriptionPeriod(subscription);
-
-  const applied = await updateStripeSubscription({
-    userId: user.id,
-    customerId: stripeId(subscription.customer),
-    subscriptionId: eventType.endsWith(".deleted") ? null : subscription.id,
-    status: eventType.endsWith(".deleted") ? "canceled" : subscription.status,
-    plan: normalizePlan(plan),
-    priceId: active ? priceId : null,
-    periodStart: fromUnix(period.start),
-    periodEnd: fromUnix(period.end),
-    stripeMode: getStripeMode(),
-    cancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end)
-  });
-  if (!applied) return deletedAccountResult();
-  if (!active) {
-    await deactivateAffiliateReferral(user.id);
-  }
+  if (!invoice && !reversal) return { action: "refund_ignored", userId: null };
   return {
-    action: active ? "subscription_synced" : "subscription_cancelled",
-    userId: user.id,
-    plan: normalizePlan(plan)
+    action: "refund_recorded",
+    userId: invoice?.user_id || null,
+    refundedCents,
+    affiliateCommissionReversed: Boolean(reversal)
   };
+}
+
+// Unknown price ids are logged once at warn level, grant nothing, and show on the admin billing-anomalies card.
+// The webhook still answers 200 so Stripe doesn't retry forever.
+async function flagUnknownPrice(priceId, detail = {}) {
+  const { firstTime } = await recordBillingAnomaly({
+    kind: "unknown_price",
+    reference: priceId || "none",
+    stripeEventId: detail.eventId || null,
+    detail
+  });
+  if (firstTime) {
+    console.warn(`[stripe] Unknown price ${safeLogValue(priceId)} on ${safeLogValue(detail.eventType)}; nothing granted.`);
+  }
 }
 
 // Events for an anonymized account are acknowledged (so Stripe stops retrying) but never
@@ -543,64 +675,6 @@ function deletedAccountResult() {
 async function isStripeCustomerDeleted(customerId) {
   const customer = await stripeGet(`/customers/${encodeURIComponent(customerId)}`);
   return customer?.deleted === true;
-}
-
-async function processChargeRefunded(charge) {
-  const invoiceId = stripeId(charge.invoice);
-  if (!invoiceId) return { action: "refund_ignored", userId: null };
-  const refund = await reconcileAffiliateRefund(invoiceId, Number(charge.amount_refunded || 0));
-  return { action: refund ? "affiliate_refund_reconciled" : "refund_ignored", userId: null };
-}
-
-function planFromPrice(priceId) {
-  if (priceId === appConfig.stripe.prices.elite) return "elite";
-  if (priceId === appConfig.stripe.prices.pro) return "pro";
-  return "free";
-}
-
-function planMonthlyAmountCents(planId) {
-  if (planId === "pro") return 2900;
-  if (planId === "elite") return 9900;
-  return 0;
-}
-
-function isCreditPackPrice(priceId) {
-  return ["pack10", "pack50", "pack100"]
-    .some((pack) => appConfig.stripe.prices[pack] === priceId);
-}
-
-export function getPlanEntitlementsForPrice(priceId) {
-  const planId = planFromPrice(priceId);
-  const plan = BILLING_PLANS[planId];
-  if (!plan || planId === "free") return null;
-  return {
-    plan: planId,
-    scanCredits: plan.discoveryLimit,
-    unlockCredits: plan.monthlyUnlockGrant
-  };
-}
-
-// Best-effort, informational only: Stripe already enforces the redemption cap for
-// stripe_discount codes, this just mirrors the result into our own table for admin
-// reporting. Any failure here must never break checkout processing.
-async function recordPromoRedemptionFromCheckout(session, userId) {
-  try {
-    const promotionCodeId = stripeId(session.discounts?.[0]?.promotion_code) ||
-      await resolveSessionPromotionCodeId(session.id);
-    if (!promotionCodeId) return;
-    await recordStripeDiscountRedemption({ stripePromotionCodeId: promotionCodeId, userId });
-  } catch (error) {
-    console.warn(`[stripe] promo_redemption_record_failed session=${safeLogValue(session.id)} reason=${sanitizeStripeError(error)}`);
-  }
-}
-
-async function resolveSessionPromotionCodeId(sessionId) {
-  const detailed = await stripeGet(
-    `/checkout/sessions/${encodeURIComponent(sessionId)}?expand[]=total_details.breakdown`
-  );
-  // discount.promotion_code exists before and after 2025-09-30.clover (clover only replaced
-  // discount.coupon with discount.source.coupon), so this works on any account/webhook version.
-  return stripeId(detailed.total_details?.breakdown?.discounts?.[0]?.discount?.promotion_code) || null;
 }
 
 const STRIPE_TERMINAL_SUBSCRIPTION_STATUSES = new Set(["canceled", "incomplete_expired"]);

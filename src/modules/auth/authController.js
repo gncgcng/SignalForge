@@ -350,7 +350,8 @@ export async function handleAuthRoutes(req, res, pathname) {
       const body = await readJson(req);
       return sendJson(res, 200, await completePasswordReset({
         token: body.token,
-        password: body.password
+        password: body.password,
+        keepSessionId: req.sessionId || null
       }), authResponseHeaders());
     } catch (error) {
       return sendError(res, error.statusCode || 400, error.message);

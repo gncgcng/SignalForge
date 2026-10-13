@@ -187,7 +187,7 @@ export async function recordRecurringAffiliateCommission({
   stripeEventId,
   periodStart
 }) {
-  if (!["pro", "elite"].includes(plan) || grossAmountCents <= 0) return null;
+  if (!["pro", "elite", "signalforge"].includes(plan) || grossAmountCents <= 0) return null;
   const commissionCents = calculateAffiliateCommissionCents(grossAmountCents);
 
   return transaction(async (client) => {
@@ -250,7 +250,7 @@ export async function recordRecurringAffiliateCommission({
 }
 
 export async function activateAffiliateReferral(referredUserId, plan) {
-  if (!["pro", "elite"].includes(plan)) return null;
+  if (!["pro", "elite", "signalforge"].includes(plan)) return null;
   const result = await query(`
     UPDATE affiliate_referrals r
     SET subscription_plan = $2, active = true, updated_at = now()

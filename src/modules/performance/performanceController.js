@@ -1,3 +1,4 @@
+import { hasPaidAccess } from "../subscriptions/subscriptionService.js";
 import { sendError, sendJson } from "../../shared/http.js";
 import { getPerformance } from "./performanceService.js";
 
@@ -8,6 +9,10 @@ export async function handlePerformanceRoutes(req, res, pathname, url) {
 
   if (!req.user) {
     return sendError(res, 401, "Authentication required.");
+  }
+  // Paid plan only (trial, active or past due), checked on the server.
+  if (!hasPaidAccess(req.user)) {
+    return sendError(res, 402, "The performance page is part of the SignalForge plan. Start your 7-day free trial to use it.", { code: "PAID_ACCESS_REQUIRED" });
   }
 
   if (pathname === "/api/performance" && req.method === "GET") {

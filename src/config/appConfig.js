@@ -50,11 +50,8 @@ const sessionCookieDomain = resolveCookieDomain(appUrl, process.env.NODE_ENV || 
 export const stripeEnvironmentKeys = [
   "STRIPE_SECRET_KEY",
   "STRIPE_WEBHOOK_SECRET",
-  "STRIPE_PRO_PRICE_ID",
-  "STRIPE_ELITE_PRICE_ID",
-  "STRIPE_CREDITS_10_PRICE_ID",
-  "STRIPE_CREDITS_50_PRICE_ID",
-  "STRIPE_CREDITS_100_PRICE_ID"
+  "STRIPE_PRICE_MONTHLY",
+  "STRIPE_PRICE_ANNUAL"
 ];
 
 export const appConfig = {
@@ -215,23 +212,19 @@ export const appConfig = {
     successUrl: appUrl ? `${appUrl}/#billing?checkout=success` : "",
     cancelUrl: appUrl ? `${appUrl}/#billing?checkout=cancelled` : "",
     portalReturnUrl: appUrl ? `${appUrl}/#billing` : "",
+    // Used only by the admin promo-code tools. Checkout never offers promotion codes.
     promotionCodesEnabled: process.env.STRIPE_ALLOW_PROMOTION_CODES !== "false",
-    // New Checkout Sessions (plans and credit packs) are paused unless this is exactly "true".
+    // New Checkout Sessions are paused unless this is exactly "true".
     // Webhooks, the Customer Portal and existing subscriptions are unaffected.
     checkoutEnabled: process.env.BILLING_CHECKOUT_ENABLED === "true",
+    // The one plan: two recurring prices on the "SignalForge" product, created in the Stripe dashboard.
     prices: {
-      pro: process.env.STRIPE_PRO_PRICE_ID || "",
-      elite: process.env.STRIPE_ELITE_PRICE_ID || "",
-      pack10: process.env.STRIPE_CREDITS_10_PRICE_ID || "",
-      pack50: process.env.STRIPE_CREDITS_50_PRICE_ID || "",
-      pack100: process.env.STRIPE_CREDITS_100_PRICE_ID || ""
+      monthly: process.env.STRIPE_PRICE_MONTHLY || "",
+      annual: process.env.STRIPE_PRICE_ANNUAL || ""
     },
     priceEnvironmentKeys: {
-      pro: "STRIPE_PRO_PRICE_ID",
-      elite: "STRIPE_ELITE_PRICE_ID",
-      pack10: "STRIPE_CREDITS_10_PRICE_ID",
-      pack50: "STRIPE_CREDITS_50_PRICE_ID",
-      pack100: "STRIPE_CREDITS_100_PRICE_ID"
+      monthly: "STRIPE_PRICE_MONTHLY",
+      annual: "STRIPE_PRICE_ANNUAL"
     }
   }
 };
