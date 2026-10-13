@@ -85,7 +85,9 @@ export async function handleAuthRoutes(req, res, pathname) {
         appConfig.googleOAuth.clientSecret &&
         appConfig.googleOAuth.redirectUri
       ),
-      emailFeaturesEnabled: appConfig.email.featuresEnabled
+      emailFeaturesEnabled: appConfig.email.featuresEnabled,
+      // Lets the public pricing card say "opens soon" while BILLING_CHECKOUT_ENABLED is off.
+      checkoutEnabled: Boolean(appConfig.stripe.checkoutEnabled)
     }, {
       "cache-control": "no-store"
     });

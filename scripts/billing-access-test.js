@@ -155,20 +155,23 @@ try {
 
   // Backtesting and performance.
   for (const [handler, method, path] of [
-    [handleBacktestRoutes, "GET", "/api/backtesting?symbol=BTC-USD&timeframe=1h"],
+    // An unsupported market fails validation right after the paywall, so the test needs no candle data.
+    [handleBacktestRoutes, "GET", "/api/backtesting?symbol=NOT-A-MARKET&timeframe=1h"],
     [handleBacktestRoutes, "POST", "/api/backtesting/run"],
     [handlePerformanceRoutes, "GET", "/api/performance"]
   ]) {
     const pathname = path.split("?")[0];
     const url = new URL(`http://localhost${path}`);
-    const freeResponse = await call((req, res) => handler(req, res, pathname, url), free, method, pathname, method === "POST" ? { symbol: "BTC-USD", timeframe: "1h" } : undefined);
-    const paidResponse = await call((req, res) => handler(req, res, pathname, url), trial, method, pathname, method === "POST" ? { symbol: "BTC-USD", timeframe: "1h" } : undefined);
+    const body = method === "POST" ? { symbol: "NOT-A-MARKET", timeframe: "1h" } : undefined;
+    const freeResponse = await call((req, res) => handler(req, res, pathname, url), free, method, pathname, body);
+    const paidResponse = await call((req, res) => handler(req, res, pathname, url), trial, method, pathname, body);
     assert.equal(freeResponse.status, 402, path);
     assert.equal(freeResponse.json.error.details.code, "PAID_ACCESS_REQUIRED");
     assert.notEqual(paidResponse.status, 402, `${path} with access`);
     record(`${method} ${pathname}`, freeResponse.status, paidResponse.status);
   }
   assert.equal(endpoints["GET /api/performance"].paid, 200);
+  assert.equal(endpoints["GET /api/backtesting"].paid, 400, "past the paywall: the market is validated");
 
   // My trades: writes need the plan; reading, exporting and deleting never do.
   const trade = { status: "open", market: "BTC-USD", direction: "long", entryPrice: 100, stopPrice: 99, sizeUnits: 1, openedAt: "2026-01-05T10:00:00Z" };
@@ -201,7 +204,8 @@ try {
 
   // Pages without an endpoint (the trade checker is computed in the browser) are gated in the client too.
   const app = readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
-  assert.match(app, /const PAID_VIEWS = new Set\(\["trade-check", "my-trades", "backtesting", "performance"\]\)/);
+  assert.match(app, /const PAID_VIEWS = new Set\(\["trade-check", "backtesting", "performance"\]\)/);
+  assert.match(app, /classList\.toggle\("my-trades-read-only", myTradesLocked\)/, "My trades turns read-only, not hidden");
   results.endpoints = endpoints;
   console.log(JSON.stringify(results, null, 2));
 } finally {

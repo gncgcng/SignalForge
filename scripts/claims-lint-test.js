@@ -49,6 +49,9 @@ export function userFacingSources() {
     "public/journalStats.js", // My trades: stats panel, labels, comparison line, empty state
     "public/trackRecordStats.js", // shared label text
     "src/modules/real-trades/realTradeService.js", // My trades validation messages
+    "public/billingView.js", // pricing card, Billing status lines, trial sentence
+    "src/modules/subscriptions/subscriptionService.js", // paywall messages
+    "src/modules/subscriptions/stripeService.js", // checkout and billing errors
     "public/research.js", // /research calculator wiring
     "src/modules/research/researchPage.js", // public /research page template
     "public/manifest.json",

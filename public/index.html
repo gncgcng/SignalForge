@@ -37,7 +37,9 @@
         "url": "https://signalforge-app.com/",
         "description": "Know the odds before you trade. SignalForge scans crypto markets for rule-based trading setups, with multi-timeframe analysis, risk management, Telegram alerts, paper trading, and outcome tracking.",
         "offers": [
-          { "@type": "Offer", "name": "Free", "price": "0", "priceCurrency": "USD" }
+          { "@type": "Offer", "name": "Free", "price": "0", "priceCurrency": "USD" },
+          { "@type": "Offer", "name": "SignalForge monthly", "price": "9.99", "priceCurrency": "USD", "description": "7-day free trial, card required. Cancel any time." },
+          { "@type": "Offer", "name": "SignalForge annual", "price": "89.99", "priceCurrency": "USD", "description": "7-day free trial, card required. Cancel any time." }
         ]
       }
     </script>
@@ -133,14 +135,14 @@
               <div class="hero-actions premium-actions">
                 <button id="start-free-button" type="button">
                   Start Free
-                  <span>3 Free Setup Unlocks</span>
+                  <span>BTC &amp; ETH setups with levels</span>
                 </button>
                 <button class="secondary-action" id="view-demo-button" type="button">Watch Demo</button>
               </div>
               <a class="secondary-anchor hero-research-link" href="/research">See our research</a>
               <div class="hero-trust-row" aria-label="Signup highlights">
                 <span>✓ Google Login</span>
-                <span>✓ No Credit Card Required</span>
+                <span>✓ Free account, no card needed</span>
                 <span>✓ Educational Tool Only</span>
               </div>
               <p class="risk-caption">Educational Tool Only. Not Financial Advice.</p>
@@ -172,9 +174,9 @@
                   </div>
                   <p class="mockup-levels-title">Setup levels</p>
                   <div class="mockup-levels" aria-label="Setup levels">
-                    <div><span>Entry</span><strong>Unlock to view</strong></div>
-                    <div><span>Take Profit</span><strong>Unlock to view</strong></div>
-                    <div><span>Stop Loss</span><strong>Unlock to view</strong></div>
+                    <div><span>Entry</span><strong>In the app</strong></div>
+                    <div><span>Take Profit</span><strong>In the app</strong></div>
+                    <div><span>Stop Loss</span><strong>In the app</strong></div>
                     <div><span>Reward/Risk</span><strong>2.4R</strong></div>
                   </div>
                 </div>
@@ -198,8 +200,8 @@
             </article>
             <article class="premium-card fade-up">
               <span class="feature-icon">◆</span>
-              <strong>Unlock a Setup</strong>
-              <p>Open the full entry, stop loss, take profit, reward/risk, rule match, and setup reasoning for the setups you choose.</p>
+              <strong>See the Levels</strong>
+              <p>Open the full entry, stop loss, take profit, reward/risk, rule match, track record and setup reasoning. Free on BTC-USD and ETH-USD; every market with the plan.</p>
             </article>
             <article class="premium-card fade-up">
               <span class="feature-icon">↗</span>
@@ -264,14 +266,14 @@
           <div class="section-title fade-up">
             <div>
               <span class="eyebrow">Live scan preview</span>
-              <h2>Try the scan flow without unlocking real data.</h2>
+              <h2>Try the scan flow on demo data.</h2>
             </div>
           </div>
           <div class="landing-demo-shell fade-up">
             <div class="landing-demo-controls">
               <div>
                 <strong>Landing-page demo</strong>
-                <span>No credits used. No real setup unlocked.</span>
+                <span>Demo data only. Nothing real is scanned.</span>
               </div>
               <button id="landing-run-scan" type="button">Run Scan</button>
             </div>
@@ -283,7 +285,7 @@
                   <div><span>BTCUSD</span><strong>Long setup</strong></div>
                   <strong>89%</strong>
                 </div>
-                <button class="launch-auth-button" type="button">Unlock Preview</button>
+                <button class="launch-auth-button" type="button">Open the app</button>
               </div>
             </div>
           </div>
@@ -309,28 +311,40 @@
           <div class="section-title fade-up">
             <div>
               <span class="eyebrow">Pricing</span>
-              <h2>Start free. A new plan is coming soon.</h2>
+              <h2>One plan. A 7-day free trial.</h2>
             </div>
             <div class="pricing-trust-links">
-              <a href="#how-it-works" data-public-how-it-works>Understand credits and unlocks</a>
+              <a href="#how-it-works" data-public-how-it-works>How SignalForge works</a>
               <button class="inline-trust-link" type="button" data-legal-doc="refund">Refund Policy</button>
             </div>
           </div>
-          <div class="pricing-grid premium-pricing-grid pricing-grid-paused">
+          <div class="pricing-grid premium-pricing-grid">
             <article class="pricing-plan">
-              <div class="pricing-heading"><span>Free</span><strong>Start exploring</strong></div>
-              <p>For learning the workflow and testing the scanner.</p>
+              <div class="pricing-heading"><span>Free</span><strong>$0</strong></div>
+              <p>A free account, no card needed.</p>
               <ul>
-                <li>3 free unlocks after email verification</li>
-                <li>10 setup discoveries per day</li>
-                <li>Basic scanner access</li>
-                <li>Signal history and educational risk context</li>
+                <li>The research page, the fee calculator and the track-records table</li>
+                <li>Setups with levels on BTC-USD and ETH-USD, with their track records</li>
+                <li>Paper trading</li>
               </ul>
-              <button class="secondary-action launch-auth-button" type="button">Start Free</button>
+              <button class="secondary-action launch-auth-button" type="button">Create a free account</button>
             </article>
-            <article class="pricing-plan featured-price pricing-coming-soon" id="pricing-coming-soon">
-              <div class="pricing-heading"><span>New plan</span><strong>Coming soon</strong></div>
-              <p>A new plan is coming soon. Everything in your account stays free until then.</p>
+            <article class="pricing-plan featured-price" id="pricing-plan-card" data-plan-interval="month">
+              <div class="pricing-heading"><span>SignalForge</span><strong data-plan-price>$9.99<small>/month</small></strong></div>
+              <div class="plan-interval-toggle" role="group" aria-label="Billing period">
+                <button type="button" data-plan-interval-choice="month" aria-pressed="true">Monthly</button>
+                <button type="button" data-plan-interval-choice="year" aria-pressed="false">Annual · save 25%</button>
+              </div>
+              <p data-plan-price-line>$9.99 a month, or $89.99 a year (save 25%).</p>
+              <ul>
+                <li>Setups and levels on every market and timeframe</li>
+                <li>Telegram alerts</li>
+                <li>The trade checker and My trades</li>
+                <li>Backtesting and the performance pages</li>
+              </ul>
+              <button class="launch-auth-button" type="button" data-plan-cta>Start 7-day free trial</button>
+              <p class="pricing-trial-note" data-pricing-note>7-day free trial. Card required. You won't be charged until <span data-trial-charge-date>7 days from today</span>. Cancel any time in Settings. One free trial per person and per card.</p>
+              <p class="pricing-trial-note hidden" data-checkout-paused-note>New subscriptions open soon. Free accounts work now.</p>
             </article>
           </div>
         </section>
@@ -395,7 +409,7 @@
         <section class="landing-final-cta">
           <span class="eyebrow">Start scanning</span>
           <h2>Know the odds before you trade.</h2>
-          <p>Create your free account and unlock your first three setups today.</p>
+          <p>Create a free account and see BTC-USD and ETH-USD setups with their levels and track records today.</p>
           <div class="hero-actions">
             <button class="launch-auth-button" type="button">Start Free</button>
             <a class="secondary-anchor" href="#pricing">Compare plans</a>
@@ -677,9 +691,9 @@
             </section>
           </nav>
           <div class="trial-card">
-            <span>Plan capacity</span>
-            <strong id="trial-count">3 signals left</strong>
-            <span class="verification-note hidden" id="verification-note">Verify your email before using setup or unlock credits.</span>
+            <span>Your plan</span>
+            <strong id="trial-count">Free plan</strong>
+            <span class="verification-note hidden" id="verification-note">Verify your email to scan and view setup levels.</span>
             <button class="secondary-action hidden" id="resend-verification" type="button">Resend verification</button>
             <button id="upgrade-button">View plan</button>
           </div>
@@ -698,6 +712,12 @@
               <button id="logout-button">Logout</button>
             </div>
           </header>
+
+          <div class="billing-banner hidden" id="billing-past-due-banner" role="alert">
+            <strong>Payment failed — update your card</strong>
+            <span>Your access continues while Stripe retries the card.</span>
+            <button type="button" data-billing-update-card>Update card</button>
+          </div>
 
           <section id="scanner-view" data-view="scanner">
             <section class="onboarding-panel hidden" id="onboarding-panel" aria-label="Get started checklist">
@@ -761,7 +781,7 @@
                 <div class="action-row">
                   <button class="primary-action" id="scan-all-button" type="button">Scan All</button>
                   <button class="secondary-action hidden" id="cancel-scan-button" type="button">Cancel scan</button>
-                  <button class="primary-action secondary-action" id="generate-button" type="button">Unlock Current</button>
+                  <button class="primary-action secondary-action" id="generate-button" type="button">View levels</button>
                 </div>
                 <div class="scan-progress hidden" id="scan-progress">
                   <div><span id="scan-progress-text">Scanning markets...</span><strong id="scan-progress-count">0/12</strong></div>
@@ -786,7 +806,7 @@
                     <div><span>Skipped</span><strong id="scan-summary-skipped">0</strong></div>
                     <div><span>Provider errors</span><strong id="scan-summary-provider-errors">0</strong></div>
                     <div><span>No data</span><strong id="scan-summary-no-data">0</strong></div>
-                    <div><span>Credits</span><strong id="scan-summary-credits">No credits used</strong></div>
+                    <div><span>Levels</span><strong id="scan-summary-credits">--</strong></div>
                     <div><span>Next scan</span><strong id="scan-summary-next">When ready</strong></div>
                   </div>
                   <p class="reasoning" id="scan-summary-reason">Run Scan All to find high-quality setups.</p>
@@ -915,7 +935,7 @@
                 <div><span class="eyebrow">Live setup watcher</span><h3>Watching Setups</h3></div>
                 <span id="candidate-count">0 watching</span>
               </div>
-              <p class="reasoning">Watching setups are not signals yet. SignalForge is waiting for better confirmation, entry quality, or risk/reward before alerting. They use no credits.</p>
+              <p class="reasoning">Watching setups are not signals yet. SignalForge is waiting for better confirmation, entry quality, or risk/reward before alerting.</p>
               <div class="candidate-status-legend" aria-label="Watching setup status definitions">
                 <span><strong>Watching</strong> Confirmations incomplete</span>
                 <span><strong>Almost Ready</strong> One or two key checks remain</span>
@@ -949,7 +969,7 @@
             </div>
             <div class="signal-disclaimer">
               <strong>Alerts are in-app only.</strong>
-              <span>Scanning and alert detection do not use signal credits.</span>
+              <span>Alerts here are in the app. Telegram alerts are part of the SignalForge plan.</span>
             </div>
             <div class="watchlist-grid" id="watchlist-grid"></div>
           </section>
@@ -964,7 +984,7 @@
             </div>
             <div class="signal-disclaimer">
               <strong>Educational tool only. Not financial advice.</strong>
-              <span>Unlocking a full signal is optional and is the only action that uses a credit.</span>
+              <span>Levels are free on BTC-USD and ETH-USD. Every other market is part of the SignalForge plan.</span>
             </div>
             <div class="alerts-grid" id="alerts-grid"></div>
           </section>
@@ -1105,6 +1125,11 @@
 
           <section class="page-view hidden my-trades-view" id="my-trades-view" data-view="my-trades">
             <div class="my-trades-stats" id="my-trades-stats" aria-live="polite"></div>
+            <article class="panel my-trades-read-only-note hidden" id="my-trades-read-only-note">
+              <strong>Your trades stay readable and exportable.</strong>
+              <p class="reasoning">Adding and editing trades is part of the SignalForge plan ($9.99 a month or $89.99 a year, 7-day free trial). Deleting and exporting always work.</p>
+              <button type="button" data-paid-gate-billing>See the plan</button>
+            </article>
             <article class="panel my-trades-form-panel">
               <h2 id="my-trades-form-title">Log a trade</h2>
               <p class="reasoning">Real trades you made. Fees are estimated at your fee rate per side when you leave "Fees paid" empty.</p>
@@ -1349,7 +1374,7 @@
               <div>
                 <span class="eyebrow">Historical strategy research</span>
                 <h3>Backtesting Lab</h3>
-                <p>Test SignalForge rule sets against historical OHLCV candles before trusting a setup workflow. Scanner, credits, alerts, and billing stay untouched.</p>
+                <p>Test SignalForge rule sets against historical OHLCV candles before trusting a setup workflow. Scanner, alerts and billing stay untouched.</p>
               </div>
               <span class="status-pill" id="lab-status">Ready</span>
             </div>
@@ -1513,7 +1538,7 @@
               <div>
                 <span class="eyebrow">Outcome analytics</span>
                 <h3>Performance Dashboard</h3>
-                <p>Track unlocked signals, outcomes, win rate, average R, and market performance.</p>
+                <p>Track the setups you opened, their outcomes, win rate, average R, and market performance.</p>
               </div>
               <span class="performance-filter-chip" id="performance-filter-label">All history</span>
             </div>
@@ -1561,10 +1586,10 @@
             </form>
             <div class="performance-empty-state hidden" id="performance-empty-state">
               <strong>No completed signals yet.</strong>
-              <p>Unlock and track signals to build your performance history.</p>
+              <p>Open setups to build your performance history.</p>
             </div>
             <div class="performance-summary-grid premium-stat-grid">
-              <div class="primary-stat"><span>Total unlocked signals</span><strong id="performance-total">0</strong></div>
+              <div class="primary-stat"><span>Setups tracked</span><strong id="performance-total">0</strong></div>
               <div class="primary-stat"><span>Win rate</span><strong id="performance-win-rate">0%</strong></div>
               <div class="primary-stat"><span>Net R</span><strong id="performance-net-r">0.00R</strong></div>
               <div><span>Average R</span><strong id="performance-average-r">0.00R</strong></div>
@@ -1837,7 +1862,7 @@
               <div>
                 <span class="eyebrow">Community rankings</span>
                 <h3>SignalForge Leaderboards</h3>
-                <p>Rankings use real tracked SignalForge outcomes and R-multiple performance from unlocked signals and linked paper trades.</p>
+                <p>Rankings use real tracked SignalForge outcomes and R-multiple performance from opened setups and linked paper trades.</p>
               </div>
               <span class="performance-filter-chip" id="leaderboard-updated">Live rankings</span>
             </div>
@@ -1891,7 +1916,7 @@
                 <p class="form-note" id="username-onboarding-message"></p>
               </article>
               <div class="profile-stat-grid">
-                <article><span>Signals unlocked</span><strong id="profile-signals-unlocked">0</strong></article>
+                <article><span>Setups opened</span><strong id="profile-signals-unlocked">0</strong></article>
                 <article><span>Closed signals</span><strong id="profile-closed-signals">0</strong></article>
                 <article><span>Win rate</span><strong id="profile-win-rate">0%</strong></article>
                 <article><span>Net R</span><strong id="profile-net-r">0.00R</strong></article>
@@ -2385,54 +2410,41 @@
           <section class="page-view hidden" id="billing-view" data-view="billing">
             <div class="section-title">
               <div>
-                <span class="eyebrow">Subscription and credits</span>
+                <span class="eyebrow">Settings</span>
                 <h3>Billing</h3>
               </div>
-              <button class="secondary-action" id="manage-subscription-button" type="button">Manage subscription</button>
             </div>
+            <article class="panel billing-status-panel" id="billing-status-panel">
+              <span class="eyebrow">Status</span>
+              <h3 id="billing-status-headline">Free plan</h3>
+              <p class="reasoning" id="billing-status-detail"></p>
+              <div class="billing-actions hidden" id="billing-manage-actions">
+                <button class="secondary-action" id="billing-cancel-button" type="button" data-billing-portal>Cancel subscription</button>
+                <button class="secondary-action" id="billing-update-card-button" type="button" data-billing-portal>Update card</button>
+              </div>
+            </article>
             <div class="billing-summary-grid">
-              <article class="panel"><span>Current plan</span><strong id="billing-current-plan">Free</strong></article>
+              <article class="panel"><span>Plan</span><strong id="billing-current-plan">Free</strong></article>
               <article class="panel"><span>Setup discoveries</span><strong id="billing-discovery-credits">10 / day</strong></article>
-              <article class="panel"><span>Unlock credits</span><strong id="billing-unlock-credits">3</strong></article>
+              <article class="panel"><span>Levels</span><strong id="billing-unlock-credits">BTC-USD, ETH-USD</strong></article>
             </div>
             <p class="status-line" id="billing-status"></p>
-            <article class="panel promo-redeem-panel">
-              <div>
-                <span class="eyebrow">Promo code</span>
-                <h3>Redeem a code</h3>
-                <p class="reasoning">Credit codes add unlock credits to your balance right away.</p>
+            <article class="panel billing-plan-panel" id="billing-plan-panel">
+              <div class="pricing-heading"><span>SignalForge</span><strong data-plan-price>$9.99<small>/month</small></strong></div>
+              <div class="plan-interval-toggle" role="group" aria-label="Billing period">
+                <button type="button" data-plan-interval-choice="month" aria-pressed="true">Monthly</button>
+                <button type="button" data-plan-interval-choice="year" aria-pressed="false">Annual · save 25%</button>
               </div>
-              <form id="promo-redeem-form" class="promo-redeem-form" autocomplete="off">
-                <label for="promo-redeem-code">Code</label>
-                <div class="promo-redeem-row">
-                  <input id="promo-redeem-code" name="code" maxlength="40" autocomplete="off" autocapitalize="characters" spellcheck="false" required />
-                  <button type="submit" id="promo-redeem-submit">Redeem</button>
-                </div>
-              </form>
-              <p class="status-line" id="promo-redeem-message" aria-live="polite"></p>
+              <p data-plan-price-line>$9.99 a month, or $89.99 a year (save 25%).</p>
+              <ul id="billing-plan-features"></ul>
+              <button type="button" id="billing-checkout-button" data-plan-cta>Start 7-day free trial</button>
+              <p class="pricing-trial-note" id="billing-pricing-note" data-pricing-note></p>
+              <p class="pricing-trial-note hidden" id="billing-checkout-paused" data-checkout-paused-note>New subscriptions open soon. Everything on the free plan works now.</p>
             </article>
             <div class="signal-disclaimer">
               <strong>Educational tool only. Not financial advice.</strong>
-              <span>Subscriptions and credit packs provide access to research tools only. Affiliates may earn commissions from paid subscriptions. <button class="inline-trust-link" type="button" data-how-it-works-link>See how credits and signals work</button> · <button class="inline-trust-link" type="button" data-legal-doc="refund">Refund Policy</button></span>
+              <span>The plan gives access to research tools only. Affiliates may earn commissions from paid subscriptions. <button class="inline-trust-link" type="button" data-legal-doc="terms">Terms</button> · <button class="inline-trust-link" type="button" data-legal-doc="refund">Refund Policy</button></span>
             </div>
-            <article class="panel billing-coming-soon" id="billing-coming-soon">
-              <span class="eyebrow">Plans</span>
-              <h3>A new plan is coming soon</h3>
-              <p>A new plan is coming soon. Everything in your account stays free until then.</p>
-            </article>
-            <section class="hidden" id="billing-plans-section">
-              <div class="section-title">
-                <div><span class="eyebrow">Plans</span><h3>Choose your capacity</h3></div>
-              </div>
-              <div class="billing-plan-grid" id="billing-plan-grid"></div>
-            </section>
-            <section class="hidden" id="billing-packs-section">
-              <div class="section-title">
-                <div><span class="eyebrow">One-time purchase</span><h3>Unlock credit packs</h3></div>
-                <span>Purchased unlocks do not expire</span>
-              </div>
-              <div class="billing-pack-grid" id="billing-pack-grid"></div>
-            </section>
           </section>
         </div>
       </section>
