@@ -40,6 +40,7 @@ import {
 import {
   claimTrialCard,
   hasPaidInvoice,
+  hasTrialStarted,
   listGoogleSubjects,
   recordBillingAnomaly,
   recordInvoiceRefund,
@@ -461,7 +462,7 @@ async function startTrial(user, subscription, interval) {
     }
   }
   await claimTrialIdentities(trialIdentities({ email: user.email, googleSubjects: await listGoogleSubjects(user.id) }));
-  await trackProductEvent({ eventType: "trial_started", userId: user.id, plan: PLAN.id, metadata: { interval } });
+  await trackProductEvent({ eventType: "trial_started", userId: user.id, plan: PLAN.id, metadata: { interval, subscriptionId: subscription.id } });
   sendTrialStartedEmail(user, { firstChargeDate: fromUnix(subscription.trial_end), amountCents, interval });
   return { ended: false };
 }
@@ -493,8 +494,11 @@ export function cardFingerprintHash(fingerprint) {
   return createHmac("sha256", secret).update(`card:${fingerprint}`).digest("hex");
 }
 
-// 3 days before the trial ends: when the first charge happens, how much, and how to cancel.
-async function processTrialWillEnd(subscription, eventId) {
+// 3 days before the trial ends: when the first charge happens, how much, and how to cancel. Stripe also sends this
+// event when a trial is ended early (trial_end=now, e.g. by the one-trial-per-card rule) with the old trial date in
+// the payload, so the subscription is read again and the email only goes out for a trial that is still running.
+async function processTrialWillEnd(eventSubscription, eventId) {
+  const subscription = await stripeGet(`/subscriptions/${encodeURIComponent(eventSubscription.id)}`);
   const resolved = await resolveSubscriptionUser(subscription, "customer.subscription.trial_will_end");
   if (resolved.result) return resolved.result;
   const { user } = resolved;
@@ -507,6 +511,9 @@ async function processTrialWillEnd(subscription, eventId) {
   }
   if (subscription.cancel_at_period_end || subscription.status !== "trialing") {
     return { action: "trial_ending_not_charged", userId: user.id };
+  }
+  if (!subscription.trial_end || subscription.trial_end * 1000 <= Date.now()) {
+    return { action: "trial_already_ended", userId: user.id };
   }
   sendTrialEndingEmail(user, {
     firstChargeDate: fromUnix(subscription.trial_end),
@@ -559,7 +566,8 @@ async function processInvoicePaid(invoice, stripeEventId) {
   if (subscription) {
     await processSubscriptionChanged(subscription, "invoice.paid", { userId: user.id, eventId: stripeEventId });
   }
-  if (recorded.firstPaidInvoice && subscription?.trial_end) {
+  // A conversion is the first charge of a subscription whose trial actually ran (not one ended at once by the card rule).
+  if (recorded.firstPaidInvoice && subscriptionId && await hasTrialStarted(subscriptionId)) {
     await trackProductEvent({ eventType: "trial_converted", userId: user.id, plan: PLAN.id, amountCents: amountPaid, metadata: { interval } });
   }
   const period = getInvoicePeriod(invoice, priceId);

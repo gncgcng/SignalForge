@@ -84,6 +84,18 @@ export async function hasPaidInvoice(subscriptionId) {
   return Boolean(result.rows[0]);
 }
 
+// Whether this subscription really started a free trial (recorded when the trial started; a trial ended at once by
+// the one-trial-per-card rule has no such row).
+export async function hasTrialStarted(subscriptionId) {
+  if (!subscriptionId) return false;
+  const result = await query(`
+    SELECT 1 FROM product_analytics_events
+    WHERE event_type = 'trial_started' AND metadata->>'subscriptionId' = $1
+    LIMIT 1
+  `, [subscriptionId]);
+  return Boolean(result.rows[0]);
+}
+
 export async function listGoogleSubjects(userId) {
   const result = await query(`
     SELECT provider_subject FROM oauth_accounts WHERE user_id = $1 AND provider = 'google'

@@ -7185,6 +7185,17 @@ function renderCheckoutReturnStatus() {
 }
 
 async function refreshBillingAfterCheckout() {
+  // The webhook usually lands before the browser returns from Stripe: if the plan is already on, say so now.
+  try {
+    await loadSubscription();
+  } catch {
+    // Fall through to the polling below.
+  }
+  if (state.subscription?.hasPaidAccess) {
+    billingStatus.textContent = "Confirmed. Your plan is active.";
+    removeHashParams(["checkout"]);
+    return;
+  }
   const baseline = billingSnapshot();
 
   for (let attempt = 1; attempt <= 20; attempt += 1) {
