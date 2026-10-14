@@ -162,7 +162,9 @@ try {
   assert.match(emailsTo(userA).at(-1).subject, /subscription is active/);
   const again = await process_("invoice.payment_succeeded", invoice({ id: `in_paid_${tag}`, subscription: subA.id, customer: cusA, amount: 999 }));
   assert.equal(again.action, "invoice_already_recorded", "invoice.payment_succeeded for the same invoice is not counted twice");
-  results["2a. trial -> trial_will_end -> paid -> active"] = { statuses: ["trialing", "active"], commission: 1, trialEndingEmail: ending.subject };
+  assert.equal(Number((await query(`SELECT COUNT(*)::integer AS n FROM product_analytics_events WHERE event_type = 'trial_converted' AND user_id = $1`, [userA])).rows[0].n), 1,
+    "a trial that ran and was then paid is a conversion");
+  results["2a. trial -> trial_will_end -> paid -> active"] ={ statuses: ["trialing", "active"], commission: 1, trialEndingEmail: ending.subject };
 
   // ---- 2b. trial cancel -> deleted: no charge, no commission ----
   const cusB = `cus_b_${tag}`;
@@ -235,6 +237,25 @@ try {
   assert.equal(trialEndCalls[0].params.trial_end, "now");
   assert.deepEqual(outcome.trial, { ended: true, reason: "card_already_used" });
   assert.match(emailsTo(userC).at(-1).text, /This card was already used for a free trial, so your subscription started today\./);
+  // Stripe then sends trial_will_end with the stale payload (still "trialing", the old trial date). The subscription is
+  // read again, so no "trial ends" email goes out.
+  const emailsBeforeStale = emailsTo(userC).length;
+  const stalePayload = { ...subC, status: "trialing", trial_end: Math.floor(Date.now() / 1000) + 7 * 86400 };
+  outcome = await process_("customer.subscription.trial_will_end", stalePayload);
+  await settle();
+  assert.equal(outcome.action, "trial_ending_not_charged");
+  assert.equal(emailsTo(userC).length, emailsBeforeStale, "no trial-ending email after the trial was ended");
+  // ...and its first charge is not a trial conversion.
+  const conversionsBefore = Number((await query(`SELECT COUNT(*)::integer AS n FROM product_analytics_events WHERE event_type = 'trial_converted'`)).rows[0].n);
+  outcome = await process_("invoice.paid", invoice({ id: `in_c_${tag}`, subscription: subC.id, customer: cusC, amount: 999 }));
+  assert.equal(outcome.action, "subscription_payment_recorded");
+  assert.equal(Number((await query(`SELECT COUNT(*)::integer AS n FROM product_analytics_events WHERE event_type = 'trial_converted'`)).rows[0].n), conversionsBefore,
+    "a trial ended by the card rule is not a conversion");
+  // A trial_will_end whose trial has already passed (Stripe re-read) sends nothing either.
+  const endedSub = fake.addSubscription({ id: `sub_ended_${tag}`, customer: cusC, userId: userC, priceId: "price_fake_monthly" });
+  endedSub.trial_end = Math.floor(Date.now() / 1000) - 60;
+  outcome = await process_("customer.subscription.trial_will_end", endedSub);
+  assert.equal(outcome.action, "trial_already_ended");
   // The same account subscribing again with the same card isn't penalised.
   const subA2 = fake.addSubscription({ id: `sub_a2_${tag}`, customer: cusA, userId: userA, priceId: "price_fake_monthly", paymentMethod: "pm_card_a" });
   const callsBefore = fake.callsTo("POST", /^\/subscriptions\//).length;

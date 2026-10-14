@@ -15,7 +15,8 @@ const check = (name, fn) => { fn(); results[name] = true; };
 
 check("pricing card: one plan, monthly/annual toggle, the trial sentence", () => {
   const now = new Date("2026-10-14T09:00:00Z");
-  assert.equal(view.pricingNote({ now }),
+  // The app shows dates in the viewer's time zone; tests pin UTC.
+  assert.equal(view.pricingNote({ now, timeZone: "UTC" }),
     "7-day free trial. Card required. You won't be charged until 21 Oct 2026. Cancel any time in Settings. One free trial per person and per card.");
   assert.match(view.pricingNote({ now, trialEligible: false }), /already had its free trial, so a subscription starts today/);
   assert.equal(view.checkoutButtonLabel({ trialEligible: true }), "Start 7-day free trial");
@@ -32,11 +33,14 @@ check("pricing card: one plan, monthly/annual toggle, the trial sentence", () =>
 
 check("billing status in plain words", () => {
   const base = { hasPaidAccess: true, billingInterval: "month", customerPortalAvailable: true };
-  assert.equal(view.describeBillingStatus({ ...base, status: "trialing", nextChargeAt: "2026-10-21T10:00:00Z", trialEnd: "2026-10-21T10:00:00Z" }).headline,
+  assert.equal(view.describeBillingStatus({ ...base, status: "trialing", nextChargeAt: "2026-10-21T10:00:00Z", trialEnd: "2026-10-21T10:00:00Z" }, { timeZone: "UTC" }).headline,
     "Free trial — first charge $9.99 on 21 Oct 2026");
-  assert.equal(view.describeBillingStatus({ ...base, status: "trialing", cancelAtPeriodEnd: true, trialEnd: "2026-10-21T10:00:00Z" }).headline,
+  assert.equal(view.describeBillingStatus({ ...base, status: "trialing", cancelAtPeriodEnd: true, trialEnd: "2026-10-21T10:00:00Z" }, { timeZone: "UTC" }).headline,
     "Free trial — cancelled. Access until 21 Oct 2026");
-  assert.equal(view.describeBillingStatus({ ...base, status: "active", billingInterval: "year", nextChargeAt: "2027-10-21T10:00:00Z" }).headline, "Active — $89.99/year");
+  assert.equal(view.describeBillingStatus({ ...base, status: "active", billingInterval: "year", nextChargeAt: "2027-10-21T10:00:00Z" }, { timeZone: "UTC" }).headline, "Active — $89.99/year");
+  // In a US time zone, a trial ending at 04:22 UTC on the 21st is shown as the 20th, as Stripe shows it.
+  assert.equal(view.describeBillingStatus({ ...base, status: "trialing", nextChargeAt: "2026-10-21T04:22:00Z", trialEnd: "2026-10-21T04:22:00Z" }, { timeZone: "America/Los_Angeles" }).headline,
+    "Free trial — first charge $9.99 on 20 Oct 2026");
   const pastDue = view.describeBillingStatus({ ...base, status: "past_due" });
   assert.equal(pastDue.headline, "Payment failed — update your card");
   assert.equal(pastDue.banner, "Payment failed — update your card");
@@ -62,14 +66,15 @@ check("levels copy: the trial line replaces the unlock line; Telegram drops it",
 check("billing emails", () => {
   const charge = "2026-10-21T10:00:00Z";
   const started = emails.buildTrialStartedEmail({ firstChargeDate: charge, amountCents: 999, interval: "month" }).text;
-  assert.match(started, /Your card will be charged \$9\.99 on 21 Oct 2026, and then \$9\.99 a month until you cancel\./);
+  // Emails give the exact UTC moment, since they can't know the reader's time zone.
+  assert.match(started, /Your card will be charged \$9\.99 on 21 Oct 2026, 10:00 UTC, and then \$9\.99 a month until you cancel\./);
   assert.match(started, /cancel any time in Settings → Billing/i);
   const ending = emails.buildTrialEndingEmail({ firstChargeDate: charge, amountCents: 8999, interval: "year" });
-  assert.equal(ending.subject, "Your SignalForge trial ends on 21 Oct 2026");
+  assert.equal(ending.subject, "Your SignalForge trial ends on 21 Oct 2026, 10:00 UTC");
   assert.match(ending.text, /charged \$89\.99/);
   assert.match(ending.text, /Open Settings → Billing: https?:\/\/[^\s]+\/#billing/);
   assert.match(emails.buildFailedPaymentEmail().text, /open Settings → Billing, choose Update card/);
-  assert.match(emails.buildSubscriptionCanceledEmail({ accessUntil: charge }).text, /You keep full access until 21 Oct 2026/);
+  assert.match(emails.buildSubscriptionCanceledEmail({ accessUntil: charge }).text, /You keep full access until 21 Oct 2026, 10:00 UTC/);
   assert.match(emails.buildTrialCardAlreadyUsedEmail({ amountCents: 999, interval: "month" }).text,
     /This card was already used for a free trial, so your subscription started today\./);
   assert.doesNotMatch(emails.buildWelcomeEmail({ username: "x" }).text, /unlock/i);

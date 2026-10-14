@@ -93,14 +93,23 @@ export function formatPlanCharge(amountCents, interval) {
   return `${formatCents(amountCents)} ${interval === "year" ? "a year" : "a month"}`;
 }
 
-// "21 Oct 2026", in UTC so the date matches Stripe's.
+// "21 Oct 2026", in UTC.
 export function formatBillingDate(value) {
   if (!value) return "";
   return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }).format(new Date(value));
 }
 
+// "21 Oct 2026, 04:22 UTC". Emails don't know the reader's time zone, so the trial and cancellation emails give the
+// exact moment: a trial ending at 04:22 UTC on the 21st is charged on the evening of the 20th in the Americas.
+export function formatBillingDateTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  const time = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: "UTC" }).format(date);
+  return `${formatBillingDate(date)}, ${time} UTC`;
+}
+
 export function buildTrialStartedEmail({ firstChargeDate, amountCents, interval }) {
-  const date = formatBillingDate(firstChargeDate);
+  const date = formatBillingDateTime(firstChargeDate);
   return renderEmail({
     subject: "Your SignalForge free trial has started",
     preheader: `Nothing is charged until ${date}.`,
@@ -115,7 +124,7 @@ export function buildTrialStartedEmail({ firstChargeDate, amountCents, interval 
 }
 
 export function buildTrialEndingEmail({ firstChargeDate, amountCents, interval }) {
-  const date = formatBillingDate(firstChargeDate);
+  const date = formatBillingDateTime(firstChargeDate);
   return renderEmail({
     subject: `Your SignalForge trial ends on ${date}`,
     preheader: `Your card will be charged ${formatCents(amountCents)} on ${date} unless you cancel.`,
@@ -170,7 +179,7 @@ export function buildFailedPaymentEmail() {
 }
 
 export function buildSubscriptionCanceledEmail({ accessUntil }) {
-  const date = formatBillingDate(accessUntil);
+  const date = formatBillingDateTime(accessUntil);
   return renderEmail({
     subject: "Your SignalForge subscription is cancelled",
     preheader: date ? `You keep access until ${date}.` : "Your subscription is cancelled.",

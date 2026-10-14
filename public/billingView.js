@@ -25,12 +25,13 @@ export const PAID_FEATURES = Object.freeze([
   "Backtesting and the performance pages"
 ]);
 
-// "21 Oct 2026", in UTC like Stripe's dates.
-export function formatBillingDate(value) {
+// "21 Oct 2026", in the viewer's own time zone, so it matches the date Stripe shows them (a trial ending at 04:22 UTC
+// on the 21st ends on the evening of the 20th in the Americas). Tests pass timeZone: "UTC".
+export function formatBillingDate(value, { timeZone } = {}) {
   if (!value) return "";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }).format(date);
+  return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric", ...(timeZone ? { timeZone } : {}) }).format(date);
 }
 
 export function formatAmount(cents) {
@@ -47,11 +48,11 @@ export function priceLine(interval) {
 }
 
 // The sentence under the pricing card. Without a trial (the account already had one) it says so before the click.
-export function pricingNote({ now = new Date(), trialEligible = true } = {}) {
+export function pricingNote({ now = new Date(), trialEligible = true, timeZone } = {}) {
   if (trialEligible === false) {
     return `This account has already had its free trial, so a subscription starts today and is charged at checkout. Cancel any time in Settings. ${ONE_TRIAL_RULE}`;
   }
-  return `7-day free trial. Card required. You won't be charged until ${formatBillingDate(trialChargeDate(now))}. Cancel any time in Settings. ${ONE_TRIAL_RULE}`;
+  return `7-day free trial. Card required. You won't be charged until ${formatBillingDate(trialChargeDate(now), { timeZone })}. Cancel any time in Settings. ${ONE_TRIAL_RULE}`;
 }
 
 export function checkoutButtonLabel({ trialEligible = true } = {}) {
@@ -59,12 +60,12 @@ export function checkoutButtonLabel({ trialEligible = true } = {}) {
 }
 
 // The Billing page's status, in plain words.
-export function describeBillingStatus(summary = {}) {
+export function describeBillingStatus(summary = {}, { timeZone } = {}) {
   const status = summary.status || "none";
   const interval = summary.billingInterval === "year" ? "year" : "month";
   const price = PLAN_PRICES[interval];
-  const nextCharge = formatBillingDate(summary.nextChargeAt);
-  const periodEnd = formatBillingDate(summary.trialEnd && status === "trialing" ? summary.trialEnd : summary.currentPeriodEnd);
+  const nextCharge = formatBillingDate(summary.nextChargeAt, { timeZone });
+  const periodEnd = formatBillingDate(summary.trialEnd && status === "trialing" ? summary.trialEnd : summary.currentPeriodEnd, { timeZone });
   if (summary.plan === "tester") {
     return { tone: "neutral", headline: "Tester — full access", detail: "Tester accounts have every paid feature.", banner: null, manage: false };
   }
