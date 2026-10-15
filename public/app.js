@@ -10837,7 +10837,10 @@ function renderAdminAnalytics() {
   ]);
   renderMarketMetricRows("#analytics-most-scanned", analytics.mostScannedMarkets);
   renderMarketMetricRows("#analytics-most-unlocked", analytics.mostUnlockedMarkets);
-  renderMetricRows("#analytics-signup-sources", (analytics.signupsBySource || []).map((row) => [row.source, row.count]));
+  renderMetricRows("#analytics-signup-sources", (analytics.signupsBySource || []).map((row) => [
+    row.source,
+    `${formatInteger(row.count)} ${row.count === 1 ? "signup" : "signups"} · ${formatInteger(row.trials || 0)} ${row.trials === 1 ? "trial" : "trials"}`
+  ]), { rawValues: true });
   renderAdminOperationsDashboard();
   renderValidationDashboard();
 }
