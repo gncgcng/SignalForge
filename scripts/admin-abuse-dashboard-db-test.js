@@ -57,6 +57,12 @@ try {
   const body = loader.slice(0, loader.indexOf("\n}\n"));
   assert.match(body, /Promise\.allSettled\(/, "loadAdminRequests uses Promise.allSettled");
   assert.doesNotMatch(body, /Promise\.all\(/, "loadAdminRequests does not use Promise.all");
+  // ...and the failure is shown once, naming the panel, instead of the panel silently looking empty.
+  const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
+  assert.match(html, /id="admin-load-error" role="alert"/);
+  assert.match(body, /#admin-load-error/);
+  assert.match(frontend, /Promise\.allSettled\(\[loadAdminRequests\(\), loadCandidateQuality\(\)\]\)/,
+    "the caller reports every admin loader failure, not only the first");
   results["admin view tolerates one failing endpoint"] = true;
 
   console.log(JSON.stringify(results, null, 2));

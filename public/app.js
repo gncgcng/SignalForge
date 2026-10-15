@@ -4086,11 +4086,8 @@ async function bootDashboard() {
   reportDashboardLoadFailures(dashboardLoads);
 
   if (state.user.isAdmin) {
-    try {
-      await Promise.all([loadAdminRequests(), loadCandidateQuality()]);
-    } catch (error) {
-      reportDashboardLoadFailures([{ status: "rejected", reason: error }]);
-    }
+    // allSettled so each loader's failure is reported, not just the first one to reject.
+    reportDashboardLoadFailures(await Promise.allSettled([loadAdminRequests(), loadCandidateQuality()]));
   }
   renderTimeframes();
   syncRouteFromLocation({ force: true, replaceInvalid: true });
@@ -6357,6 +6354,7 @@ async function loadAdminRequests() {
     "/api/admin/analytics",
     "/api/admin/support"
   ];
+  const panels = ["Tester access requests", "Fraud signals", "Affiliates", "Analytics and dashboard", "Support tickets"];
   const results = await Promise.allSettled(endpoints.map((endpoint) => api.request(endpoint)));
   const [tester, abuse, affiliates, analytics, support] = results.map((result) =>
     result.status === "fulfilled" ? result.value : null
@@ -6385,10 +6383,17 @@ async function loadAdminRequests() {
   renderAdminSupportFilters();
   renderAdminSupportSummary();
 
-  // Still reported to the caller (reportDashboardLoadFailures), naming each endpoint that failed.
+  // One visible error naming each panel that failed (its data may be stale or empty), also reported to the caller.
   const failures = results
-    .map((result, index) => result.status === "rejected" ? `${endpoints[index]}: ${result.reason?.message || "Unknown error"}` : null)
+    .map((result, index) => result.status === "rejected"
+      ? `${panels[index]} (${endpoints[index]}): ${result.reason?.message || "Unknown error"}`
+      : null)
     .filter(Boolean);
+  const loadError = document.querySelector("#admin-load-error");
+  if (loadError) {
+    loadError.textContent = failures.length ? `Some admin data could not load. ${failures.join(" · ")}` : "";
+    loadError.classList.toggle("hidden", !failures.length);
+  }
   if (failures.length) {
     throw new Error(`Admin data partly failed to load (${failures.join("; ")})`);
   }
