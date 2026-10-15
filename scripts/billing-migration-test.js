@@ -33,7 +33,8 @@ try {
     DROP TABLE trial_card_claims; DROP TABLE billing_invoices; DROP TABLE billing_anomalies;
     ALTER TABLE subscriptions DROP COLUMN trial_end, DROP COLUMN first_subscribed_at, DROP COLUMN billing_interval;
     ALTER TABLE subscriptions ALTER COLUMN status SET DEFAULT 'trialing';
-    DELETE FROM schema_migrations WHERE filename = '068_single_plan_billing.sql';
+    -- Later migrations are rewound too; they are additive and re-run idempotently.
+    DELETE FROM schema_migrations WHERE filename >= '068_single_plan_billing.sql';
   `);
   assert.equal((await client.query(`SELECT max(filename) AS f FROM schema_migrations`)).rows[0].f, "067_real_trades.sql");
   const users = [
@@ -50,7 +51,10 @@ try {
   }
   const at067 = migrate();
   assert.equal(at067.status, 0, at067.stderr);
-  assert.deepEqual(at067.stdout.trim().split("\n").filter((line) => line.includes("Applied migration")), ["[database] Applied migration 068_single_plan_billing.sql"]);
+  const appliedAt067 = at067.stdout.trim().split("\n").filter((line) => line.includes("Applied migration"));
+  // 068 first, then only migrations added after it: nothing up to 067 runs again.
+  assert.equal(appliedAt067[0], "[database] Applied migration 068_single_plan_billing.sql");
+  assert.ok(appliedAt067.slice(1).every((line) => (line.match(/migration (\d{3})_/)?.[1] || "") > "068"), appliedAt067.join("\n"));
   const rows = Object.fromEntries((await client.query(`SELECT user_id, status, first_subscribed_at IS NOT NULL AS had_subscription FROM subscriptions ORDER BY user_id`)).rows
     .map((row) => [row.user_id, { status: row.status, hadSubscription: row.had_subscription }]));
   assert.deepEqual(rows, {

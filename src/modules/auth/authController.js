@@ -134,7 +134,7 @@ export async function handleAuthRoutes(req, res, pathname) {
         req,
         req.headers["x-device-fingerprint"] || body.deviceFingerprint,
         body.affiliateCode,
-        { legalConsentAccepted: body.legalConsentAccepted, ageConfirmed: body.ageConfirmed }
+        { legalConsentAccepted: body.legalConsentAccepted, ageConfirmed: body.ageConfirmed, attribution: body.attribution }
       );
       return sendJson(res, 200, {
         authorizationUrl: result.authorizationUrl

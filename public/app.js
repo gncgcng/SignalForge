@@ -18,6 +18,7 @@ import {
   signalFiltersToParams
 } from "./signalFilters.js";
 import { calculateRiskPosition } from "./riskCalculator.js";
+import { captureFirstTouch, getFirstTouch } from "./attribution.js";
 import {
   buildTrackRecordView,
   formatR as formatRecordR,
@@ -601,7 +602,7 @@ const legalDocuments = {
   privacy: {
     title: "Privacy Policy",
     body: `
-      <p>SignalForge stores account information needed to operate the service, including your email, authentication records, credit balances, saved signals, alerts, journal entries, affiliate attribution, and subscription status.</p>
+      <p>SignalForge stores account information needed to operate the service, including your email, authentication records, credit balances, saved signals, alerts, journal entries, affiliate attribution, the site or campaign that first referred you (a source name and referring domain, never the full link), and subscription status.</p>
       <p>Trades you log in My trades are stored only to show your own statistics. They are never sold or shared. You can export them at any time, and deleting your account deletes them.</p>
       <p>Payment information is handled by Stripe. Telegram alerts require Telegram connection details. Google sign-in is validated on the backend before an account is created or linked.</p>
       <p>We use security and anti-abuse signals such as IP-derived hashes and device fingerprints to protect free trials and subscriptions. To allow one free trial per person, we keep keyed hashes of your email address and Google account, including after account deletion. We do not sell personal trading history.</p>
@@ -926,6 +927,7 @@ authForm.addEventListener("submit", async (event) => {
   const form = new FormData(authForm);
   const credentials = Object.fromEntries(form);
   credentials.affiliateCode = state.referralCode;
+  credentials.attribution = getFirstTouch();
   credentials.legalConsentAccepted = legalConsent.checked;
   credentials.ageConfirmed = ageConfirm.checked;
   credentials.intent = getAuthMode();
@@ -1183,6 +1185,7 @@ googleAuthButton.addEventListener("click", async () => {
       method: "POST",
       body: JSON.stringify({
         affiliateCode: state.referralCode,
+        attribution: getFirstTouch(),
         legalConsentAccepted: true,
         ageConfirmed: true
       }),
@@ -3416,6 +3419,8 @@ async function enterPaperTrade(button) {
 }
 
 async function init() {
+  // First, before any route returns early: a shared profile link is a landing page too.
+  captureFirstTouch();
   openLegalDocumentFromUrl();
   const restoreOperationId = ++authOperationVersion;
   console.info(`[app] build_version=${window.__SIGNALFORGE_BUILD_VERSION__ || "development"}`);
@@ -10810,6 +10815,7 @@ function renderAdminAnalytics() {
   ]);
   renderMarketMetricRows("#analytics-most-scanned", analytics.mostScannedMarkets);
   renderMarketMetricRows("#analytics-most-unlocked", analytics.mostUnlockedMarkets);
+  renderMetricRows("#analytics-signup-sources", (analytics.signupsBySource || []).map((row) => [row.source, row.count]));
   renderAdminOperationsDashboard();
   renderValidationDashboard();
 }

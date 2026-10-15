@@ -443,7 +443,8 @@ export async function getAdminProductAnalytics() {
     eventSummary,
     mostScanned,
     mostUnlocked,
-    affiliateSummary
+    affiliateSummary,
+    signupSources
   ] = await Promise.all([
     query(`
       SELECT
@@ -501,6 +502,15 @@ export async function getAdminProductAnalytics() {
         COALESCE((SELECT SUM(amount_cents)
           FROM affiliate_payout_requests
           WHERE status IN ('pending', 'approved')), 0)::integer AS reserved_payout_cents
+    `),
+    // First-touch source stored on the signup event; signups before tracking began are "unknown".
+    query(`
+      SELECT COALESCE(NULLIF(metadata->>'source', ''), 'unknown') AS source, COUNT(*)::integer AS count
+      FROM product_analytics_events
+      WHERE event_type = 'signup'
+      GROUP BY 1
+      ORDER BY count DESC, source ASC
+      LIMIT 12
     `)
   ]);
   const users = userSummary.rows[0] || {};
@@ -532,7 +542,8 @@ export async function getAdminProductAnalytics() {
     checkoutStarted: Number(events.checkout_started || 0),
     checkoutCompleted: Number(events.checkout_completed || 0),
     mostScannedMarkets: mostScanned.rows,
-    mostUnlockedMarkets: mostUnlocked.rows
+    mostUnlockedMarkets: mostUnlocked.rows,
+    signupsBySource: signupSources.rows
   };
 }
 
@@ -1406,6 +1417,7 @@ export async function createOAuthLoginState({
   affiliateCode,
   legalConsentAccepted = false,
   ageConfirmed = false,
+  signupAttribution = {},
   purpose = "login",
   userId = null,
   sessionId = null,
@@ -1415,9 +1427,9 @@ export async function createOAuthLoginState({
     INSERT INTO oauth_login_states (
       state_hash, provider, nonce, signup_ip_hash,
       device_fingerprint_hash, affiliate_code, legal_consent_accepted, age_confirmed,
-      purpose, user_id, session_id, expires_at
+      purpose, user_id, session_id, expires_at, signup_attribution
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
   `, [
     stateHash,
     provider,
@@ -1430,7 +1442,8 @@ export async function createOAuthLoginState({
     purpose,
     userId,
     sessionId,
-    expiresAt
+    expiresAt,
+    JSON.stringify(signupAttribution || {})
   ]);
 }
 
@@ -1464,6 +1477,7 @@ export async function consumeOAuthLoginState(stateHash, provider, purpose = "log
       affiliateCode: state.affiliate_code,
       legalConsentAccepted: state.legal_consent_accepted === true,
       ageConfirmed: state.age_confirmed === true,
+      signupAttribution: state.signup_attribution || {},
       userId: state.user_id,
       sessionId: state.session_id
     };

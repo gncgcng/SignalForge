@@ -1,4 +1,4 @@
-const CACHE_VERSION = "signalforge-static-v43-single-plan-001";
+const CACHE_VERSION = "signalforge-static-v44-attribution-001";
 const OFFLINE_URL = "/offline.html";
 const CRITICAL_ASSET_PATHS = new Set([
   "/index.html",
@@ -10,6 +10,7 @@ const CRITICAL_ASSET_PATHS = new Set([
   "/riskCalculator.js",
   "/trackRecords.js",
   "/feeCost.js",
+  "/attribution.js",
   "/tradeCheck.js",
   "/trackRecordStats.js",
   "/journalStats.js",
@@ -29,6 +30,7 @@ const STATIC_ASSETS = [
   "/riskCalculator.js",
   "/trackRecords.js",
   "/feeCost.js",
+  "/attribution.js",
   "/tradeCheck.js",
   "/trackRecordStats.js",
   "/journalStats.js",

@@ -1,4 +1,8 @@
 import { computeFeeCost, formatPercentValue } from "./feeCost.js";
+import { captureFirstTouch } from "./attribution.js";
+
+// Record where this visitor came from before they reach the app (first touch only).
+captureFirstTouch();
 
 // Wires the /research fee-cost calculator. Client-side only: nothing is sent anywhere.
 const form = document.querySelector("#fee-calculator-form");
