@@ -504,12 +504,24 @@ export async function getAdminProductAnalytics() {
           WHERE status IN ('pending', 'approved')), 0)::integer AS reserved_payout_cents
     `),
     // First-touch source stored on the signup event; signups before tracking began are "unknown".
+    // trials: how many of those signups later started a trial in the current Stripe mode.
     query(`
-      SELECT COALESCE(NULLIF(metadata->>'source', ''), 'unknown') AS source, COUNT(*)::integer AS count
-      FROM product_analytics_events
-      WHERE event_type = 'signup'
-      GROUP BY 1
-      ORDER BY count DESC, source ASC
+      SELECT su.source, COUNT(*)::integer AS count, COUNT(t.user_id)::integer AS trials
+      FROM (
+        SELECT user_id, COALESCE(NULLIF(metadata->>'source', ''), 'unknown') AS source
+        FROM product_analytics_events
+        WHERE event_type = 'signup'
+      ) su
+      LEFT JOIN LATERAL (
+        SELECT e.user_id
+        FROM product_analytics_events e
+        LEFT JOIN subscriptions s ON s.user_id = e.user_id
+        WHERE e.event_type = 'trial_started' AND e.user_id = su.user_id
+          AND ${countsInCurrentStripeModeSql("COALESCE(e.metadata->>'stripeMode', s.stripe_mode)")}
+        LIMIT 1
+      ) t ON true
+      GROUP BY su.source
+      ORDER BY count DESC, su.source ASC
       LIMIT 12
     `)
   ]);

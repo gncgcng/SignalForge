@@ -100,6 +100,7 @@ const wiring = {
     repositories.includes("signupAttribution: state.signup_attribution || {}"),
   adminCountsBySource:
     repositories.includes("COALESCE(NULLIF(metadata->>'source', ''), 'unknown') AS source") &&
+    repositories.includes("COUNT(t.user_id)::integer AS trials") &&
     repositories.includes("signupsBySource: signupSources.rows") &&
     html.includes('id="analytics-signup-sources"') &&
     app.includes('renderMetricRows("#analytics-signup-sources"'),
