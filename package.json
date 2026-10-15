@@ -62,6 +62,7 @@
     "test:my-trades-db": "node scripts/my-trades-db-test.js",
     "test:billing-webhooks": "node scripts/billing-webhooks-test.js",
     "test:billing-access": "node scripts/billing-access-test.js",
+    "test:billing-admin-metrics": "node scripts/billing-admin-metrics-test.js",
     "test:billing-migration": "node scripts/billing-migration-test.js",
     "test:billing-copy": "node scripts/billing-copy-test.js",
     "test:password-reset-revoke": "node scripts/password-reset-revoke-test.js",

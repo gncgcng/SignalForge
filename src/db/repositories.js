@@ -2,7 +2,8 @@ import { randomInt } from "node:crypto";
 import { appConfig } from "../config/appConfig.js";
 import { createId } from "../shared/ids.js";
 import { query, transaction } from "./client.js";
-import { MRR_SQL, getBillingAdminSummary, listBillingAnomalies } from "../modules/subscriptions/billingRepository.js";
+import { mrrSql, getBillingAdminSummary, listBillingAnomalies, trialEventsSql } from "../modules/subscriptions/billingRepository.js";
+import { countsInCurrentStripeModeSql } from "../modules/subscriptions/stripeModeFilter.js";
 
 export async function findUserByEmail(email) {
   const result = await query(`
@@ -447,12 +448,13 @@ export async function getAdminProductAnalytics() {
     query(`
       SELECT
         COUNT(*)::integer AS total_users,
-        -- Paying (active or past due) subscriptions; trials have paid nothing yet.
+        -- Paying (active or past due) subscriptions in the current Stripe mode; trials have paid nothing yet.
         COUNT(*) FILTER (
           WHERE COALESCE(s.status, '') IN ('active', 'past_due')
             AND s.provider_subscription_id IS NOT NULL
+            AND ${countsInCurrentStripeModeSql("s.stripe_mode")}
         )::integer AS paid_users,
-        (${MRR_SQL}) AS monthly_recurring_revenue_cents
+        (${mrrSql()}) AS monthly_recurring_revenue_cents
       FROM users u
       LEFT JOIN subscriptions s ON s.user_id = u.id
       WHERE u.role <> 'tester'
@@ -561,13 +563,12 @@ export async function getAdminOperationsDashboard() {
           WHERE created_at >= now() - interval '7 days' AND user_id IS NOT NULL) AS active_week,
         (SELECT COUNT(*)::integer FROM users
           WHERE created_at >= date_trunc('day', now()) AND COALESCE(role, 'user') <> 'tester') AS new_users_today,
-        (SELECT COUNT(*)::integer FROM product_analytics_events
-          WHERE event_type = 'trial_started' AND created_at >= date_trunc('day', now())) AS new_trials,
+        ${trialEventsSql("trial_started", undefined, "date_trunc('day', now())")} AS new_trials,
         (SELECT COUNT(DISTINCT stripe_subscription_id)::integer FROM billing_invoices i
           WHERE i.paid_at >= date_trunc('day', now())
             AND NOT EXISTS (SELECT 1 FROM billing_invoices e
               WHERE e.stripe_subscription_id = i.stripe_subscription_id AND e.paid_at < i.paid_at)) AS new_paid,
-        (${MRR_SQL}) AS mrr_cents,
+        (${mrrSql()}) AS mrr_cents,
         -- Real invoice amounts, refunds subtracted.
         COALESCE((SELECT SUM(amount_paid_cents - amount_refunded_cents) FROM billing_invoices
           WHERE paid_at >= date_trunc('day', now())), 0)::integer AS revenue_today_cents,

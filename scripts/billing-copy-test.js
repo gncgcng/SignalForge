@@ -35,8 +35,24 @@ check("billing status in plain words", () => {
   const base = { hasPaidAccess: true, billingInterval: "month", customerPortalAvailable: true };
   assert.equal(view.describeBillingStatus({ ...base, status: "trialing", nextChargeAt: "2026-10-21T10:00:00Z", trialEnd: "2026-10-21T10:00:00Z" }, { timeZone: "UTC" }).headline,
     "Free trial — first charge $9.99 on 21 Oct 2026");
-  assert.equal(view.describeBillingStatus({ ...base, status: "trialing", cancelAtPeriodEnd: true, trialEnd: "2026-10-21T10:00:00Z" }, { timeZone: "UTC" }).headline,
-    "Free trial — cancelled. Access until 21 Oct 2026");
+  // A scheduled cancellation: full access to the period end, then the free plan; "Resume subscription" replaces "Update card".
+  const cancelledTrial = view.describeBillingStatus({ ...base, status: "trialing", cancelAtPeriodEnd: true, trialEnd: "2026-10-21T10:00:00Z" }, { timeZone: "UTC" });
+  assert.equal(cancelledTrial.headline,
+    "Free trial — cancelled. Full access until 21 Oct 2026, then your account moves to the free plan. You won't be charged.");
+  assert.equal(cancelledTrial.resume, true);
+  assert.equal(cancelledTrial.manage, true);
+  const cancelledPaid = view.describeBillingStatus({ ...base, status: "active", cancelAtPeriodEnd: true, currentPeriodEnd: "2026-11-14T10:00:00Z" }, { timeZone: "UTC" });
+  assert.equal(cancelledPaid.headline,
+    "Subscription cancelled. Full access until 14 Nov 2026, then your account moves to the free plan.");
+  assert.equal(cancelledPaid.resume, true);
+  assert.equal(cancelledPaid.manage, true);
+  for (const summary of [{ ...base, status: "trialing", trialEnd: "2026-10-21T10:00:00Z" }, { ...base, status: "active" }, { ...base, status: "past_due" }, { status: "none" }]) {
+    assert.equal(view.describeBillingStatus(summary).resume, false, `no Resume button for ${summary.status}`);
+  }
+  assert.ok(html.includes(`<button class="hidden" id="billing-resume-button" type="button" data-billing-portal>Resume subscription</button>`));
+  assert.ok(html.indexOf('id="billing-resume-button"') < html.indexOf('id="billing-cancel-button"'), "Resume comes first: it is the primary button");
+  assert.ok(app.includes(`querySelector("#billing-resume-button")?.classList.toggle("hidden", !status.resume)`));
+  assert.ok(app.includes(`querySelector("#billing-update-card-button")?.classList.toggle("hidden", Boolean(status.resume))`));
   assert.equal(view.describeBillingStatus({ ...base, status: "active", billingInterval: "year", nextChargeAt: "2027-10-21T10:00:00Z" }, { timeZone: "UTC" }).headline, "Active — $89.99/year");
   // In a US time zone, a trial ending at 04:22 UTC on the 21st is shown as the 20th, as Stripe shows it.
   assert.equal(view.describeBillingStatus({ ...base, status: "trialing", nextChargeAt: "2026-10-21T04:22:00Z", trialEnd: "2026-10-21T04:22:00Z" }, { timeZone: "America/Los_Angeles" }).headline,

@@ -34,6 +34,7 @@ import {
   PLAN,
   amountCentsForInterval,
   hasPaidAccess,
+  hasPreviousSubscription,
   intervalForPrice,
   priceIdForInterval
 } from "./subscriptionService.js";
@@ -113,11 +114,11 @@ export function buildCheckoutSessionParams({ user, customerId, priceId, interval
   };
 }
 
-// No trial for an account that has had any subscription before, or whose email / Google account already had a
+// No trial for an account that has had any subscription before (in this Stripe mode), or whose email / Google account already had a
 // free trial (trial_identity_claims, kept after account deletion). The card rule is checked later, in the webhook,
 // because the card isn't known until it is entered.
 export async function getTrialEligibility(user) {
-  if (user?.subscription?.firstSubscribedAt || user?.subscription?.providerSubscriptionId) {
+  if (hasPreviousSubscription(user)) {
     return { eligible: false, reason: "previous_subscription" };
   }
   const identities = trialIdentities({ email: user?.email, googleSubjects: await listGoogleSubjects(user.id) });
@@ -427,7 +428,7 @@ async function processSubscriptionChanged(subscription, eventType, { userId = nu
     await deactivateAffiliateReferral(user.id);
     // A trial that ended without ever being paid for counts as a cancelled trial.
     if (subscription.trial_end && !(await hasPaidInvoice(subscription.id))) {
-      await trackProductEvent({ eventType: "trial_canceled", userId: user.id, plan: PLAN.id, metadata: { subscriptionId: subscription.id } });
+      await trackProductEvent({ eventType: "trial_canceled", userId: user.id, plan: PLAN.id, metadata: { subscriptionId: subscription.id, stripeMode: getStripeMode() } });
       result.trialCanceled = true;
     }
   }
@@ -462,7 +463,7 @@ async function startTrial(user, subscription, interval) {
     }
   }
   await claimTrialIdentities(trialIdentities({ email: user.email, googleSubjects: await listGoogleSubjects(user.id) }));
-  await trackProductEvent({ eventType: "trial_started", userId: user.id, plan: PLAN.id, metadata: { interval, subscriptionId: subscription.id } });
+  await trackProductEvent({ eventType: "trial_started", userId: user.id, plan: PLAN.id, metadata: { interval, subscriptionId: subscription.id, stripeMode: getStripeMode() } });
   sendTrialStartedEmail(user, { firstChargeDate: fromUnix(subscription.trial_end), amountCents, interval });
   return { ended: false };
 }
@@ -568,7 +569,7 @@ async function processInvoicePaid(invoice, stripeEventId) {
   }
   // A conversion is the first charge of a subscription whose trial actually ran (not one ended at once by the card rule).
   if (recorded.firstPaidInvoice && subscriptionId && await hasTrialStarted(subscriptionId)) {
-    await trackProductEvent({ eventType: "trial_converted", userId: user.id, plan: PLAN.id, amountCents: amountPaid, metadata: { interval } });
+    await trackProductEvent({ eventType: "trial_converted", userId: user.id, plan: PLAN.id, amountCents: amountPaid, metadata: { interval, subscriptionId, stripeMode: getStripeMode() } });
   }
   const period = getInvoicePeriod(invoice, priceId);
   const commission = await recordRecurringAffiliateCommission({

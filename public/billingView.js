@@ -59,7 +59,8 @@ export function checkoutButtonLabel({ trialEligible = true } = {}) {
   return trialEligible === false ? "Subscribe" : "Start 7-day free trial";
 }
 
-// The Billing page's status, in plain words.
+// The Billing page's status, in plain words. resume: a cancellation is scheduled for the period end, so the primary
+// button is "Resume subscription" (the Customer Portal) instead of "Update card".
 export function describeBillingStatus(summary = {}, { timeZone } = {}) {
   const status = summary.status || "none";
   const interval = summary.billingInterval === "year" ? "year" : "month";
@@ -67,25 +68,40 @@ export function describeBillingStatus(summary = {}, { timeZone } = {}) {
   const nextCharge = formatBillingDate(summary.nextChargeAt, { timeZone });
   const periodEnd = formatBillingDate(summary.trialEnd && status === "trialing" ? summary.trialEnd : summary.currentPeriodEnd, { timeZone });
   if (summary.plan === "tester") {
-    return { tone: "neutral", headline: "Tester — full access", detail: "Tester accounts have every paid feature.", banner: null, manage: false };
+    return { tone: "neutral", headline: "Tester — full access", detail: "Tester accounts have every paid feature.", banner: null, manage: false, resume: false };
   }
   if (status === "trialing") {
     if (summary.cancelAtPeriodEnd) {
-      return { tone: "neutral", headline: `Free trial — cancelled. Access until ${periodEnd}`, detail: "You won't be charged.", banner: null, manage: true };
+      return {
+        tone: "neutral",
+        headline: `Free trial — cancelled. Full access until ${periodEnd}, then your account moves to the free plan. You won't be charged.`,
+        detail: "",
+        banner: null,
+        manage: true,
+        resume: true
+      };
     }
     return {
       tone: "good",
       headline: `Free trial — first charge ${price.label} on ${nextCharge || periodEnd}`,
       detail: `Then ${priceLine(interval)} until you cancel. Cancel before ${nextCharge || periodEnd} and you won't be charged.`,
       banner: null,
-      manage: true
+      manage: true,
+      resume: false
     };
   }
   if (status === "active") {
     if (summary.cancelAtPeriodEnd) {
-      return { tone: "neutral", headline: `Active until ${periodEnd} — cancelled`, detail: "It won't renew and you won't be charged again.", banner: null, manage: true };
+      return {
+        tone: "neutral",
+        headline: `Subscription cancelled. Full access until ${periodEnd}, then your account moves to the free plan.`,
+        detail: "",
+        banner: null,
+        manage: true,
+        resume: true
+      };
     }
-    return { tone: "good", headline: `Active — ${price.short}`, detail: nextCharge ? `Next charge ${price.label} on ${nextCharge}.` : "", banner: null, manage: true };
+    return { tone: "good", headline: `Active — ${price.short}`, detail: nextCharge ? `Next charge ${price.label} on ${nextCharge}.` : "", banner: null, manage: true, resume: false };
   }
   if (status === "past_due") {
     return {
@@ -93,16 +109,17 @@ export function describeBillingStatus(summary = {}, { timeZone } = {}) {
       headline: PAST_DUE_BANNER,
       detail: "Your access continues while Stripe retries the card. Update your card to keep your plan.",
       banner: PAST_DUE_BANNER,
-      manage: true
+      manage: true,
+      resume: false
     };
   }
   if (status === "canceled") {
-    return { tone: "neutral", headline: "Cancelled — your subscription has ended", detail: "Your My trades history stays readable and exportable. You can subscribe again at any time.", banner: null, manage: false };
+    return { tone: "neutral", headline: "Cancelled — your subscription has ended", detail: "Your My trades history stays readable and exportable. You can subscribe again at any time.", banner: null, manage: false, resume: false };
   }
   if (["unpaid", "incomplete", "incomplete_expired", "paused"].includes(status)) {
-    return { tone: "warning", headline: "Not active — the last payment didn't go through", detail: "Update your card or subscribe again to get the plan back.", banner: null, manage: true };
+    return { tone: "warning", headline: "Not active — the last payment didn't go through", detail: "Update your card or subscribe again to get the plan back.", banner: null, manage: true, resume: false };
   }
-  return { tone: "neutral", headline: "Free plan", detail: FREE_FEATURES.join(" · "), banner: null, manage: false };
+  return { tone: "neutral", headline: "Free plan", detail: FREE_FEATURES.join(" · "), banner: null, manage: false, resume: false };
 }
 
 export function renderFeatureListHtml(features, escapeHtml) {

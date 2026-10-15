@@ -1680,7 +1680,7 @@ document.querySelector("#billing-checkout-button")?.addEventListener("click", as
   await startCheckout(event.currentTarget, { interval: state.planInterval });
 });
 
-// "Cancel subscription" and "Update card" both open the Stripe Customer Portal.
+// "Cancel subscription", "Resume subscription" and "Update card" all open the Stripe Customer Portal.
 async function openBillingPortal(button) {
   try {
     if (button) button.disabled = true;
@@ -7111,6 +7111,9 @@ function renderBilling() {
   document.querySelector("#billing-status-detail").textContent = status.detail;
   document.querySelector("#billing-manage-actions")?.classList.toggle("hidden", !(status.manage && subscription.customerPortalAvailable));
   document.querySelector("#billing-cancel-button")?.classList.toggle("hidden", subscription.cancelAtPeriodEnd || !["trialing", "active", "past_due"].includes(subscription.status));
+  // A scheduled cancellation: "Resume subscription" is the primary button and replaces "Update card".
+  document.querySelector("#billing-resume-button")?.classList.toggle("hidden", !status.resume);
+  document.querySelector("#billing-update-card-button")?.classList.toggle("hidden", Boolean(status.resume));
   billingCurrentPlan.textContent = subscription.planName;
   billingDiscoveryCredits.textContent = subscription.setupDiscoveries?.limit == null
     ? "Unlimited"

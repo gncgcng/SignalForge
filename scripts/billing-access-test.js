@@ -23,6 +23,8 @@ const { enqueueMatchingTelegramNotifications } = await import("../src/modules/no
 const { handleBacktestRoutes } = await import("../src/modules/backtesting/backtestController.js");
 const { handlePerformanceRoutes } = await import("../src/modules/performance/performanceController.js");
 const { handleRealTradeRoutes } = await import("../src/modules/real-trades/realTradeController.js");
+const { getTrialEligibility } = await import("../src/modules/subscriptions/stripeService.js");
+const { describeBillingStatus } = await import("../public/billingView.js");
 const fixtures = await import("./account-deletion-fixtures.js");
 
 const results = {};
@@ -50,6 +52,43 @@ assert.equal(access.canViewLevels(user("none"), "SOL-USD"), false);
 assert.equal(access.canViewLevels(user("trialing"), "SOL-USD"), true);
 results.hasPaidAccess = matrix;
 
+// ---- a row from the other Stripe mode: the status line, plan card and trial all follow hasPaidAccess ----
+// (Production had old test-mode 'active' rows under the live key: Billing said "Active — $9.99/month" over a Free
+// plan card that offered "Subscribe" because the account "already had its free trial".)
+const otherMode = user("active", { stripeMode: "live", priceId: "price_old_pro", firstSubscribedAt: "2026-06-22T05:49:09Z" });
+assert.equal(access.isOtherStripeModeSubscription(otherMode.subscription), true);
+const otherModeSummary = access.getSubscriptionSummary(otherMode);
+// One comparison, so a regression shows every wrong value at once.
+assert.deepEqual({
+  subscriptionStatus: access.subscriptionStatus(otherMode),
+  summaryStatus: otherModeSummary.status,
+  statusLine: describeBillingStatus(otherModeSummary).headline,
+  hasPaidAccess: otherModeSummary.hasPaidAccess,
+  planName: otherModeSummary.planName,
+  hasPreviousSubscription: access.hasPreviousSubscription(otherMode),
+  trialEligible: otherModeSummary.trialEligible
+}, {
+  subscriptionStatus: "none",
+  summaryStatus: "none",
+  statusLine: "Free plan", // matches the Free plan card
+  hasPaidAccess: false,
+  planName: "Free",
+  hasPreviousSubscription: false, // a test-mode subscription doesn't use up the live trial
+  trialEligible: null // not known to be ineligible
+});
+for (const status of ["trialing", "past_due"]) {
+  assert.equal(access.subscriptionStatus(user(status, { stripeMode: "live" })), "none", status);
+}
+// Same mode is unchanged: the real status shows and a previous subscription still means no trial.
+const sameMode = user("active", { firstSubscribedAt: "2026-06-22T05:49:09Z" });
+assert.equal(access.subscriptionStatus(sameMode), "active");
+assert.equal(access.hasPreviousSubscription(sameMode), true);
+assert.equal(access.getSubscriptionSummary(sameMode).trialEligible, false);
+assert.match(describeBillingStatus(access.getSubscriptionSummary(sameMode)).headline, /^Active — /);
+// A row with no recorded mode is treated as before.
+assert.equal(access.subscriptionStatus(user("active", { stripeMode: null })), "active");
+results.otherStripeModeRow = { status: otherModeSummary.status, plan: otherModeSummary.plan, trialEligible: otherModeSummary.trialEligible };
+
 // ---- endpoints ----
 async function call(handler, reqUser, method, path, body, url = null) {
   const raw = body === undefined ? [] : [Buffer.from(JSON.stringify(body))];
@@ -66,12 +105,13 @@ async function call(handler, reqUser, method, path, body, url = null) {
   return { status: res.statusCode, json, text: res.body };
 }
 
-async function makeUser(name, status, { subscriptionId = null } = {}) {
+async function makeUser(name, status, { subscriptionId = null, stripeMode = "test", firstSubscribed = false } = {}) {
   const id = await fixtures.createHelperUser(`acc_${name}`);
   helperIds.push(id);
   await query(`UPDATE users SET email_verified_at = now() WHERE id = $1`, [id]);
-  await query(`INSERT INTO subscriptions (id, user_id, status, provider_subscription_id, stripe_mode, provider_customer_id)
-    VALUES ($1, $2, $3, $4, 'test', $5)`, [`sub_row_${id}`, id, status, subscriptionId, subscriptionId ? `cus_${id}` : null]);
+  await query(`INSERT INTO subscriptions (id, user_id, status, provider_subscription_id, stripe_mode, provider_customer_id, first_subscribed_at)
+    VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $7 THEN now() ELSE NULL END)`,
+  [`sub_row_${id}`, id, status, subscriptionId, stripeMode, subscriptionId ? `cus_${id}` : null, firstSubscribed]);
   return id;
 }
 
@@ -107,6 +147,15 @@ try {
   let canceled = await findUserById(canceledId);
   assert.equal(access.hasPaidAccess(free), false);
   assert.equal(access.hasPaidAccess(trial), true);
+
+  // Trial eligibility from the database: a stale other-mode subscription doesn't block the trial; a same-mode one does.
+  const staleId = await makeUser("stale", "active", { subscriptionId: `sub_stale_${tag}`, stripeMode: "live", firstSubscribed: true });
+  const returningId = await makeUser("returning", "canceled", { subscriptionId: `sub_ret_${tag}`, firstSubscribed: true });
+  const stale = await findUserById(staleId);
+  assert.equal(access.hasPaidAccess(stale), false);
+  assert.equal(access.getSubscriptionSummary(stale).status, "none");
+  assert.deepEqual(await getTrialEligibility(stale), { eligible: true, reason: null });
+  assert.deepEqual(await getTrialEligibility(await findUserById(returningId)), { eligible: false, reason: "previous_subscription" });
 
   const endpoints = {};
   const record = (name, freeStatus, paidStatus) => { endpoints[name] = { free: freeStatus, paid: paidStatus }; };
