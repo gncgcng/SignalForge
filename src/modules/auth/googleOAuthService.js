@@ -31,6 +31,7 @@ import {
 import { createSession } from "./authService.js";
 import { buildSignupConsentRecord, isDemoOrTesterIdentity } from "./authPolicy.js";
 import { trackProductEvent } from "../analytics/productAnalyticsService.js";
+import { normalizeSignupAttribution } from "../analytics/signupAttribution.js";
 import { attributeAffiliateReferral } from "../affiliates/affiliateRepository.js";
 import { sendWelcomeEmail } from "../notifications/transactionalEmailService.js";
 
@@ -38,7 +39,7 @@ const provider = "google";
 const stateTtlMs = 10 * 60 * 1000;
 let jwksCache = { expiresAt: 0, keys: [] };
 
-export async function startGoogleOAuth(req, deviceFingerprint, affiliateCode, { legalConsentAccepted = false, ageConfirmed = false } = {}) {
+export async function startGoogleOAuth(req, deviceFingerprint, affiliateCode, { legalConsentAccepted = false, ageConfirmed = false, attribution = null } = {}) {
   assertGoogleConfigured();
   const state = randomBytes(32).toString("base64url");
   const nonce = randomBytes(32).toString("base64url");
@@ -53,6 +54,7 @@ export async function startGoogleOAuth(req, deviceFingerprint, affiliateCode, { 
     affiliateCode: sanitizeAffiliateCode(affiliateCode),
     legalConsentAccepted: legalConsentAccepted === true,
     ageConfirmed: ageConfirmed === true,
+    signupAttribution: normalizeSignupAttribution(attribution),
     expiresAt: new Date(Date.now() + stateTtlMs)
   });
 
@@ -293,7 +295,8 @@ async function createGoogleUser(claims, loginState) {
   await trackProductEvent({
     eventType: "signup",
     userId: user.id,
-    authProvider: "google"
+    authProvider: "google",
+    metadata: normalizeSignupAttribution(loginState.signupAttribution)
   });
   user = await linkOAuthIdentity({
     provider,

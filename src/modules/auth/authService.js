@@ -46,6 +46,7 @@ import {
   sendVerificationEmail
 } from "./emailVerificationService.js";
 import { trackProductEvent } from "../analytics/productAnalyticsService.js";
+import { normalizeSignupAttribution } from "../analytics/signupAttribution.js";
 import { attributeAffiliateReferral } from "../affiliates/affiliateRepository.js";
 import {
   sendPasswordResetEmail,
@@ -259,6 +260,7 @@ export async function registerOrLogin({
   password,
   deviceFingerprint,
   affiliateCode,
+  attribution,
   legalConsentAccepted,
   ageConfirmed,
   username,
@@ -406,7 +408,8 @@ export async function registerOrLogin({
   await trackProductEvent({
     eventType: "signup",
     userId: user.id,
-    authProvider: "email"
+    authProvider: "email",
+    metadata: normalizeSignupAttribution(attribution)
   });
   await recordSignupAttempt({
     ...signupContext,
