@@ -6349,32 +6349,49 @@ async function loadWebhookEvents() {
 
 async function loadAdminRequests() {
   if (!state.user.isAdmin) return;
-  const [{ requests }, { abuse }, { affiliateAdmin }, { analytics, validation, learning, dashboard }, support] = await Promise.all([
-    api.request("/api/admin/tester-access"),
-    api.request("/api/admin/abuse"),
-    api.request("/api/admin/affiliates"),
-    api.request("/api/admin/analytics"),
-    api.request("/api/admin/support")
-  ]);
-  state.adminRequests = requests;
-  state.abuseDashboard = abuse;
-  state.affiliateAdmin = affiliateAdmin;
-  state.adminAnalytics = analytics;
-  state.adminDashboard = dashboard;
-  state.learningDashboard = learning;
-  state.validationDashboard = validation;
-  state.adminSupport = {
-    ...state.adminSupport,
-    tickets: support.tickets || [],
-    summary: support.summary || {},
-    topics: support.topics || defaultSupportIssues
-  };
+  // allSettled: one failing admin endpoint must not keep the other Admin panels from rendering.
+  const endpoints = [
+    "/api/admin/tester-access",
+    "/api/admin/abuse",
+    "/api/admin/affiliates",
+    "/api/admin/analytics",
+    "/api/admin/support"
+  ];
+  const results = await Promise.allSettled(endpoints.map((endpoint) => api.request(endpoint)));
+  const [tester, abuse, affiliates, analytics, support] = results.map((result) =>
+    result.status === "fulfilled" ? result.value : null
+  );
+  if (tester) state.adminRequests = tester.requests;
+  if (abuse) state.abuseDashboard = abuse.abuse;
+  if (affiliates) state.affiliateAdmin = affiliates.affiliateAdmin;
+  if (analytics) {
+    state.adminAnalytics = analytics.analytics;
+    state.adminDashboard = analytics.dashboard;
+    state.learningDashboard = analytics.learning;
+    state.validationDashboard = analytics.validation;
+  }
+  if (support) {
+    state.adminSupport = {
+      ...state.adminSupport,
+      tickets: support.tickets || [],
+      summary: support.summary || {},
+      topics: support.topics || defaultSupportIssues
+    };
+  }
   renderAdminAnalytics();
   renderAdminRequests();
   renderAbuseDashboard();
   renderAffiliateAdmin();
   renderAdminSupportFilters();
   renderAdminSupportSummary();
+
+  // Still reported to the caller (reportDashboardLoadFailures), naming each endpoint that failed.
+  const failures = results
+    .map((result, index) => result.status === "rejected" ? `${endpoints[index]}: ${result.reason?.message || "Unknown error"}` : null)
+    .filter(Boolean);
+  if (failures.length) {
+    throw new Error(`Admin data partly failed to load (${failures.join("; ")})`);
+  }
 }
 
 function applyAlerts({ alerts, unreadCount }) {

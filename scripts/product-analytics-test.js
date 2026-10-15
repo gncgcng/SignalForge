@@ -79,7 +79,7 @@ const result = {
     html.includes("SignalForge Admin Dashboard") &&
     html.includes('id="admin-overview-users"') &&
     html.includes('id="analytics-most-scanned"') &&
-    app.includes('api.request("/api/admin/analytics")') &&
+    app.includes('"/api/admin/analytics"') &&
     app.includes("function renderAdminAnalytics()") &&
     css.includes(".admin-analytics-grid"),
   sensitiveDataMinimized:
