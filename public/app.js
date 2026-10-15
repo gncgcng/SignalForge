@@ -4086,11 +4086,8 @@ async function bootDashboard() {
   reportDashboardLoadFailures(dashboardLoads);
 
   if (state.user.isAdmin) {
-    try {
-      await Promise.all([loadAdminRequests(), loadCandidateQuality()]);
-    } catch (error) {
-      reportDashboardLoadFailures([{ status: "rejected", reason: error }]);
-    }
+    // allSettled so each loader's failure is reported, not just the first one to reject.
+    reportDashboardLoadFailures(await Promise.allSettled([loadAdminRequests(), loadCandidateQuality()]));
   }
   renderTimeframes();
   syncRouteFromLocation({ force: true, replaceInvalid: true });
@@ -6349,32 +6346,57 @@ async function loadWebhookEvents() {
 
 async function loadAdminRequests() {
   if (!state.user.isAdmin) return;
-  const [{ requests }, { abuse }, { affiliateAdmin }, { analytics, validation, learning, dashboard }, support] = await Promise.all([
-    api.request("/api/admin/tester-access"),
-    api.request("/api/admin/abuse"),
-    api.request("/api/admin/affiliates"),
-    api.request("/api/admin/analytics"),
-    api.request("/api/admin/support")
-  ]);
-  state.adminRequests = requests;
-  state.abuseDashboard = abuse;
-  state.affiliateAdmin = affiliateAdmin;
-  state.adminAnalytics = analytics;
-  state.adminDashboard = dashboard;
-  state.learningDashboard = learning;
-  state.validationDashboard = validation;
-  state.adminSupport = {
-    ...state.adminSupport,
-    tickets: support.tickets || [],
-    summary: support.summary || {},
-    topics: support.topics || defaultSupportIssues
-  };
+  // allSettled: one failing admin endpoint must not keep the other Admin panels from rendering.
+  const endpoints = [
+    "/api/admin/tester-access",
+    "/api/admin/abuse",
+    "/api/admin/affiliates",
+    "/api/admin/analytics",
+    "/api/admin/support"
+  ];
+  const panels = ["Tester access requests", "Fraud signals", "Affiliates", "Analytics and dashboard", "Support tickets"];
+  const results = await Promise.allSettled(endpoints.map((endpoint) => api.request(endpoint)));
+  const [tester, abuse, affiliates, analytics, support] = results.map((result) =>
+    result.status === "fulfilled" ? result.value : null
+  );
+  if (tester) state.adminRequests = tester.requests;
+  if (abuse) state.abuseDashboard = abuse.abuse;
+  if (affiliates) state.affiliateAdmin = affiliates.affiliateAdmin;
+  if (analytics) {
+    state.adminAnalytics = analytics.analytics;
+    state.adminDashboard = analytics.dashboard;
+    state.learningDashboard = analytics.learning;
+    state.validationDashboard = analytics.validation;
+  }
+  if (support) {
+    state.adminSupport = {
+      ...state.adminSupport,
+      tickets: support.tickets || [],
+      summary: support.summary || {},
+      topics: support.topics || defaultSupportIssues
+    };
+  }
   renderAdminAnalytics();
   renderAdminRequests();
   renderAbuseDashboard();
   renderAffiliateAdmin();
   renderAdminSupportFilters();
   renderAdminSupportSummary();
+
+  // One visible error naming each panel that failed (its data may be stale or empty), also reported to the caller.
+  const failures = results
+    .map((result, index) => result.status === "rejected"
+      ? `${panels[index]} (${endpoints[index]}): ${result.reason?.message || "Unknown error"}`
+      : null)
+    .filter(Boolean);
+  const loadError = document.querySelector("#admin-load-error");
+  if (loadError) {
+    loadError.textContent = failures.length ? `Some admin data could not load. ${failures.join(" · ")}` : "";
+    loadError.classList.toggle("hidden", !failures.length);
+  }
+  if (failures.length) {
+    throw new Error(`Admin data partly failed to load (${failures.join("; ")})`);
+  }
 }
 
 function applyAlerts({ alerts, unreadCount }) {

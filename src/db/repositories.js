@@ -1910,12 +1910,12 @@ export async function listAbuseReviewDashboard() {
       LIMIT 50
     `),
     query(`
-      SELECT device_fingerprint_hash, COUNT(DISTINCT user_id) AS accounts,
+      SELECT device_fingerprint_hash, COUNT(DISTINCT id) AS accounts,
         BOOL_OR(trial_used) AS trial_used, MAX(created_at) AS last_seen
       FROM users
       WHERE device_fingerprint_hash IS NOT NULL
       GROUP BY device_fingerprint_hash
-      HAVING COUNT(DISTINCT user_id) > 1
+      HAVING COUNT(DISTINCT id) > 1
       ORDER BY accounts DESC
       LIMIT 50
     `),
