@@ -1,4 +1,5 @@
 import { readJson, sendError, sendJson } from "../../shared/http.js";
+import { isAdminUser } from "../auth/authService.js";
 import { detectMatchingAlerts } from "../alerts/alertService.js";
 import { enqueueMatchingTelegramNotifications } from "../notifications/notificationService.js";
 import {
@@ -40,7 +41,7 @@ export async function handleSignalRoutes(req, res, pathname) {
   }
 
   if (pathname === "/api/signals/candidates/quality" && req.method === "GET") {
-    if (!req.user.isAdmin) return sendError(res, 403, "Admin access required.");
+    if (!isAdminUser(req.user)) return sendError(res, 403, "Admin access required.");
     const [quality, marketBrief] = await Promise.all([
       getCandidateQualitySummary(),
       getLatestDailyMarketBrief()
