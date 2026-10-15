@@ -57,14 +57,25 @@ results.hasPaidAccess = matrix;
 // plan card that offered "Subscribe" because the account "already had its free trial".)
 const otherMode = user("active", { stripeMode: "live", priceId: "price_old_pro", firstSubscribedAt: "2026-06-22T05:49:09Z" });
 assert.equal(access.isOtherStripeModeSubscription(otherMode.subscription), true);
-assert.equal(access.subscriptionStatus(otherMode), "none");
-assert.equal(access.hasPreviousSubscription(otherMode), false, "a test-mode subscription doesn't use up the live trial");
 const otherModeSummary = access.getSubscriptionSummary(otherMode);
-assert.equal(otherModeSummary.hasPaidAccess, false);
-assert.equal(otherModeSummary.status, "none");
-assert.equal(otherModeSummary.plan, "free");
-assert.equal(otherModeSummary.trialEligible, null, "not known to be ineligible");
-assert.equal(describeBillingStatus(otherModeSummary).headline, "Free plan", "the status line matches the Free plan card");
+// One comparison, so a regression shows every wrong value at once.
+assert.deepEqual({
+  subscriptionStatus: access.subscriptionStatus(otherMode),
+  summaryStatus: otherModeSummary.status,
+  statusLine: describeBillingStatus(otherModeSummary).headline,
+  hasPaidAccess: otherModeSummary.hasPaidAccess,
+  planName: otherModeSummary.planName,
+  hasPreviousSubscription: access.hasPreviousSubscription(otherMode),
+  trialEligible: otherModeSummary.trialEligible
+}, {
+  subscriptionStatus: "none",
+  summaryStatus: "none",
+  statusLine: "Free plan", // matches the Free plan card
+  hasPaidAccess: false,
+  planName: "Free",
+  hasPreviousSubscription: false, // a test-mode subscription doesn't use up the live trial
+  trialEligible: null // not known to be ineligible
+});
 for (const status of ["trialing", "past_due"]) {
   assert.equal(access.subscriptionStatus(user(status, { stripeMode: "live" })), "none", status);
 }

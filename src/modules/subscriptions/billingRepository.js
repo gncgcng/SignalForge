@@ -1,5 +1,7 @@
 import { query } from "../../db/client.js";
 import { createId } from "../../shared/ids.js";
+import { getStripeMode } from "../../config/appConfig.js";
+import { countsInCurrentStripeModeSql } from "./stripeModeFilter.js";
 
 // Things the webhook refused to act on. One row per kind + reference; a repeat only bumps the counter.
 // Returns { firstTime } so the caller logs each anomaly once.
@@ -103,19 +105,34 @@ export async function listGoogleSubjects(userId) {
   return result.rows.map((row) => row.provider_subject);
 }
 
+// A trial event counts in the current Stripe mode by the mode it recorded, or (older events, which didn't record one)
+// by the mode of the account's subscription row.
+// sinceSql is an optional fixed SQL time bound (e.g. "date_trunc('day', now())"), never user input.
+export function trialEventsSql(eventType, mode = getStripeMode(), sinceSql = null) {
+  return `(SELECT COUNT(*)::integer FROM product_analytics_events e
+        LEFT JOIN subscriptions s ON s.user_id = e.user_id
+        WHERE e.event_type = '${eventType}' AND ${countsInCurrentStripeModeSql("COALESCE(e.metadata->>'stripeMode', s.stripe_mode)", mode)}${
+          sinceSql ? ` AND e.created_at >= ${sinceSql}` : ""})`;
+}
+
+// Subscription rows in this status, in the current Stripe mode, testers excluded.
+function subscriptionCountSql(status, mode) {
+  return `(SELECT COUNT(*)::integer FROM subscriptions s JOIN users u ON u.id = s.user_id
+        WHERE s.status = '${status}' AND s.provider_subscription_id IS NOT NULL AND COALESCE(u.role, 'user') <> 'tester'
+          AND ${countsInCurrentStripeModeSql("s.stripe_mode", mode)})`;
+}
+
 // Admin cards: trials, subscriptions, anomalies, and revenue from real invoice amounts (refunds subtracted).
-export async function getBillingAdminSummary() {
+// Subscriptions, trials and MRR count only the current Stripe mode: old test-mode rows under the live key are stale.
+export async function getBillingAdminSummary({ mode = getStripeMode() } = {}) {
   const result = await query(`
     SELECT
-      (SELECT COUNT(*)::integer FROM product_analytics_events WHERE event_type = 'trial_started') AS trials_started,
-      (SELECT COUNT(*)::integer FROM product_analytics_events WHERE event_type = 'trial_converted') AS trials_converted,
-      (SELECT COUNT(*)::integer FROM product_analytics_events WHERE event_type = 'trial_canceled') AS trials_canceled,
-      (SELECT COUNT(*)::integer FROM subscriptions s JOIN users u ON u.id = s.user_id
-        WHERE s.status = 'trialing' AND s.provider_subscription_id IS NOT NULL AND COALESCE(u.role, 'user') <> 'tester') AS trialing,
-      (SELECT COUNT(*)::integer FROM subscriptions s JOIN users u ON u.id = s.user_id
-        WHERE s.status = 'active' AND s.provider_subscription_id IS NOT NULL AND COALESCE(u.role, 'user') <> 'tester') AS active_subscriptions,
-      (SELECT COUNT(*)::integer FROM subscriptions s JOIN users u ON u.id = s.user_id
-        WHERE s.status = 'past_due' AND s.provider_subscription_id IS NOT NULL AND COALESCE(u.role, 'user') <> 'tester') AS past_due,
+      ${trialEventsSql("trial_started", mode)} AS trials_started,
+      ${trialEventsSql("trial_converted", mode)} AS trials_converted,
+      ${trialEventsSql("trial_canceled", mode)} AS trials_canceled,
+      ${subscriptionCountSql("trialing", mode)} AS trialing,
+      ${subscriptionCountSql("active", mode)} AS active_subscriptions,
+      ${subscriptionCountSql("past_due", mode)} AS past_due,
       (SELECT COUNT(*)::integer FROM billing_anomalies) AS billing_anomalies,
       COALESCE((SELECT SUM(amount_paid_cents - amount_refunded_cents) FROM billing_invoices
         WHERE paid_at >= date_trunc('day', now())), 0)::integer AS revenue_today_cents,
@@ -123,7 +140,7 @@ export async function getBillingAdminSummary() {
         WHERE paid_at >= date_trunc('month', now())), 0)::integer AS revenue_month_cents,
       COALESCE((SELECT SUM(amount_paid_cents - amount_refunded_cents) FROM billing_invoices), 0)::integer AS revenue_lifetime_cents,
       COALESCE((SELECT SUM(amount_refunded_cents) FROM billing_invoices), 0)::integer AS refunded_cents,
-      (${MRR_SQL}) AS mrr_cents
+      (${mrrSql(mode)}) AS mrr_cents
   `);
   const row = result.rows[0] || {};
   const number = (value) => Number(value || 0);
@@ -143,9 +160,9 @@ export async function getBillingAdminSummary() {
   };
 }
 
-// MRR from real invoices: for every subscription that is active or past due, its latest paid invoice (minus any
-// refund), divided by 12 for an annual plan. Trials have paid nothing yet and add nothing.
-export const MRR_SQL = `
+// MRR from real invoices: for every subscription that is active or past due in the current Stripe mode, its latest
+// paid invoice (minus any refund), divided by 12 for an annual plan. Trials have paid nothing yet and add nothing.
+export const mrrSql = (mode = getStripeMode()) => `
   COALESCE((
     SELECT SUM(CASE WHEN latest.billing_interval = 'year'
       THEN ROUND((latest.amount_paid_cents - latest.amount_refunded_cents) / 12.0)
@@ -162,4 +179,5 @@ export const MRR_SQL = `
     WHERE s.status IN ('active', 'past_due')
       AND s.provider_subscription_id IS NOT NULL
       AND COALESCE(u.role, 'user') <> 'tester'
+      AND ${countsInCurrentStripeModeSql("s.stripe_mode", mode)}
   ), 0)::integer`;

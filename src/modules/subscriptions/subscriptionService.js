@@ -4,6 +4,9 @@ import {
   getStripeMode
 } from "../../config/appConfig.js";
 import { consumeDiscoveryCredits } from "../../db/repositories.js";
+import { isOtherStripeModeSubscription } from "./stripeModeFilter.js";
+
+export { isOtherStripeModeSubscription };
 
 // One plan: $9.99 a month or $89.99 a year, with a 7-day free trial (card required).
 export const PLAN = Object.freeze({
@@ -27,13 +30,6 @@ export const PAID_ACCESS_STATUSES = Object.freeze(["trialing", "active", "past_d
 
 export const LEVELS_TRIAL_MESSAGE = "Start your 7-day free trial to see levels on every market.";
 export const PAID_FEATURE_MESSAGE = "This is part of the SignalForge plan. Start your 7-day free trial to use it.";
-
-// A subscription row stored under the other Stripe mode (e.g. an old test-mode subscription under a live key).
-// It is stale here: it never pays, never shows as the account's status and never counts as a previous trial.
-export function isOtherStripeModeSubscription(subscription, currentMode = getStripeMode()) {
-  const knownModes = ["test", "live"];
-  return knownModes.includes(currentMode) && knownModes.includes(subscription?.stripeMode) && subscription.stripeMode !== currentMode;
-}
 
 // The one function that decides paid access, on the server. Testers and admins always have it.
 export function hasPaidAccess(user) {
