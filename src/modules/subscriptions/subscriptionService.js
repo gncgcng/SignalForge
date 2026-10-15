@@ -28,6 +28,13 @@ export const PAID_ACCESS_STATUSES = Object.freeze(["trialing", "active", "past_d
 export const LEVELS_TRIAL_MESSAGE = "Start your 7-day free trial to see levels on every market.";
 export const PAID_FEATURE_MESSAGE = "This is part of the SignalForge plan. Start your 7-day free trial to use it.";
 
+// A subscription row stored under the other Stripe mode (e.g. an old test-mode subscription under a live key).
+// It is stale here: it never pays, never shows as the account's status and never counts as a previous trial.
+export function isOtherStripeModeSubscription(subscription, currentMode = getStripeMode()) {
+  const knownModes = ["test", "live"];
+  return knownModes.includes(currentMode) && knownModes.includes(subscription?.stripeMode) && subscription.stripeMode !== currentMode;
+}
+
 // The one function that decides paid access, on the server. Testers and admins always have it.
 export function hasPaidAccess(user) {
   if (!user) return false;
@@ -36,12 +43,7 @@ export function hasPaidAccess(user) {
   const subscription = user.subscription || {};
   if (!PAID_ACCESS_STATUSES.includes(subscription.status)) return false;
   if (!subscription.providerSubscriptionId) return false;
-  // A subscription from the other Stripe mode (e.g. old test-mode subscriptions under a live key) never pays here.
-  const currentMode = getStripeMode();
-  const knownModes = ["test", "live"];
-  if (knownModes.includes(currentMode) && knownModes.includes(subscription.stripeMode) && subscription.stripeMode !== currentMode) {
-    return false;
-  }
+  if (isOtherStripeModeSubscription(subscription)) return false;
   return true;
 }
 
@@ -84,10 +86,12 @@ export function amountCentsForInterval(interval) {
   return PLAN.intervals[interval]?.amountCents ?? null;
 }
 
-// Legacy rows (old default 'trialing' with no Stripe subscription) read as 'none'.
+// Legacy rows (old default 'trialing' with no Stripe subscription) and rows from the other Stripe mode read as
+// 'none', so the Billing status line agrees with hasPaidAccess and the plan card.
 export function subscriptionStatus(user) {
   const subscription = user?.subscription || {};
   if (!subscription.status) return "none";
+  if (isOtherStripeModeSubscription(subscription)) return "none";
   if (!subscription.providerSubscriptionId && ["trialing", "active"].includes(subscription.status)) return "none";
   return subscription.status;
 }
@@ -161,7 +165,7 @@ export function getSubscriptionSummary(user, { trialEligible = null } = {}) {
     cancelAtPeriodEnd: Boolean(user.subscription.cancelAtPeriodEnd),
     // Only /api/subscriptions/me checks the identity claims (it needs the database). Everywhere else an account that
     // has subscribed before is still known to have no trial; otherwise it's unknown (null).
-    trialEligible: trialEligible ?? (user.subscription.firstSubscribedAt || user.subscription.providerSubscriptionId ? false : null),
+    trialEligible: trialEligible ?? (hasPreviousSubscription(user) ? false : null),
     freeLevelMarkets: FREE_LEVEL_MARKETS,
     setupDiscoveries: {
       limit: unlimited ? null : FREE_DISCOVERY_LIMIT,
@@ -186,6 +190,14 @@ export function getSubscriptionSummary(user, { trialEligible = null } = {}) {
       annual: { interval: "year", amountCents: PLAN.intervals.year.amountCents, label: PLAN.intervals.year.label }
     }
   };
+}
+
+// Whether the account has subscribed before in the current Stripe mode. A row from the other mode is ignored: a
+// test-mode subscription doesn't use up the live trial (the identity and card claims still apply).
+export function hasPreviousSubscription(user) {
+  const subscription = user?.subscription || {};
+  if (isOtherStripeModeSubscription(subscription)) return false;
+  return Boolean(subscription.firstSubscribedAt || subscription.providerSubscriptionId);
 }
 
 export function canDiscoverSetups(user) {

@@ -34,6 +34,7 @@ import {
   PLAN,
   amountCentsForInterval,
   hasPaidAccess,
+  hasPreviousSubscription,
   intervalForPrice,
   priceIdForInterval
 } from "./subscriptionService.js";
@@ -113,11 +114,11 @@ export function buildCheckoutSessionParams({ user, customerId, priceId, interval
   };
 }
 
-// No trial for an account that has had any subscription before, or whose email / Google account already had a
+// No trial for an account that has had any subscription before (in this Stripe mode), or whose email / Google account already had a
 // free trial (trial_identity_claims, kept after account deletion). The card rule is checked later, in the webhook,
 // because the card isn't known until it is entered.
 export async function getTrialEligibility(user) {
-  if (user?.subscription?.firstSubscribedAt || user?.subscription?.providerSubscriptionId) {
+  if (hasPreviousSubscription(user)) {
     return { eligible: false, reason: "previous_subscription" };
   }
   const identities = trialIdentities({ email: user?.email, googleSubjects: await listGoogleSubjects(user.id) });
