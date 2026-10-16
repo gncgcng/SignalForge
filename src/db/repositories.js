@@ -444,7 +444,8 @@ export async function getAdminProductAnalytics() {
     mostScanned,
     mostUnlocked,
     affiliateSummary,
-    signupSources
+    signupSources,
+    featureRequests
   ] = await Promise.all([
     query(`
       SELECT
@@ -523,7 +524,9 @@ export async function getAdminProductAnalytics() {
       GROUP BY su.source
       ORDER BY count DESC, su.source ASC
       LIMIT 12
-    `)
+    `),
+    // "Want stocks & ETFs? Tell us" on the backtesting page: one row per user.
+    query(`SELECT COUNT(*)::integer AS stocks_etfs FROM feature_requests WHERE feature = 'stocks_etfs'`)
   ]);
   const users = userSummary.rows[0] || {};
   const events = eventSummary.rows[0] || {};
@@ -555,7 +558,8 @@ export async function getAdminProductAnalytics() {
     checkoutCompleted: Number(events.checkout_completed || 0),
     mostScannedMarkets: mostScanned.rows,
     mostUnlockedMarkets: mostUnlocked.rows,
-    signupsBySource: signupSources.rows
+    signupsBySource: signupSources.rows,
+    stocksEtfsRequests: Number(featureRequests.rows[0]?.stocks_etfs || 0)
   };
 }
 

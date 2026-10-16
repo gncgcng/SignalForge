@@ -281,7 +281,8 @@ const state = {
       bestPerformingTimeframe: null
     }
   },
-  backtesting: null
+  backtesting: null,
+  backtestMarkets: null
 };
 
 const authScreen = document.querySelector("#auth-screen");
@@ -414,6 +415,11 @@ const journalClear = document.querySelector("#journal-clear");
 const journalList = document.querySelector("#journal-list");
 const journalEntryCount = document.querySelector("#journal-entry-count");
 const backtestingLabForm = document.querySelector("#backtesting-lab-form");
+const labMarketOptions = document.querySelector("#lab-market-options");
+const labMarketSearch = document.querySelector("#lab-market-search");
+const labMarketCount = document.querySelector("#lab-market-count");
+const labMarketWarning = document.querySelector("#lab-market-warning");
+const labStocksRequest = document.querySelector("#lab-stocks-request");
 const labStatus = document.querySelector("#lab-status");
 const labEvaluation = document.querySelector("#lab-evaluation");
 const labEmptyState = document.querySelector("#lab-empty-state");
@@ -3054,6 +3060,20 @@ backtestingLabForm.addEventListener("submit", async (event) => {
   }
 });
 
+labMarketSearch?.addEventListener("input", filterBacktestLabMarkets);
+labMarketOptions?.addEventListener("change", updateBacktestLiquidityWarning);
+
+labStocksRequest?.addEventListener("click", async () => {
+  labStocksRequest.disabled = true;
+  try {
+    await api.request("/api/backtesting/stocks-request", { method: "POST", body: "{}" });
+    renderStocksRequest(true);
+  } catch (error) {
+    labStocksRequest.disabled = false;
+    labStocksRequest.textContent = "Try again";
+  }
+});
+
 document.querySelectorAll('input[name="lab-preset"]').forEach((input) => {
   input.addEventListener("change", () => {
     if (input.checked) {
@@ -4020,6 +4040,7 @@ function clearClientAuthState() {
     }
   };
   state.backtesting = null;
+  state.backtestMarkets = null;
   state.signalStats = {
     totalSignals: 0,
     winRate: 0,
@@ -4502,9 +4523,11 @@ async function loadPairs(query = "") {
 function renderBacktestMarketOptions() {
   if (!backtestSymbol) return;
   const current = backtestSymbol.value;
-  const markets = state.marketCatalog.filter((pair) =>
-    pair.category === "Crypto" && pair.selectable && pair.providerStatus === "available"
-  );
+  const markets = state.backtestMarkets
+    ? state.backtestMarkets.filter((pair) => pair.category === "Crypto")
+    : state.marketCatalog.filter((pair) =>
+      pair.category === "Crypto" && pair.selectable && pair.providerStatus === "available"
+    );
   backtestSymbol.innerHTML = markets.map((pair) => `<option value="${escapeHtml(pair.symbol)}">${escapeHtml(pair.displaySymbol)} · ${escapeHtml(pair.name)}</option>`).join("");
   backtestSymbol.value = markets.some((pair) => pair.symbol === current) ? current : markets[0]?.symbol || "BTC-USD";
 }
@@ -6677,6 +6700,13 @@ function applyViewState(view, options = {}) {
 
   if (normalizedView === "my-trades") {
     openMyTrades();
+  }
+
+  if (normalizedView === "backtesting" && (!state.subscription || hasPaidAccessClient())) {
+    loadBacktestMarkets().catch((error) => {
+      labMarketWarning.textContent = `Market list unavailable: ${error.message}`;
+      labMarketWarning.classList.remove("hidden");
+    });
   }
 
   if (normalizedView === "admin") {
@@ -10833,7 +10863,8 @@ function renderAdminAnalytics() {
     ["Scans", analytics.scans],
     ["Unlocks", analytics.unlocks],
     ["Subscriptions", analytics.subscriptions],
-    ["Affiliate conversions", analytics.affiliateConversions]
+    ["Affiliate conversions", analytics.affiliateConversions],
+    ["Stocks & ETFs requests", analytics.stocksEtfsRequests]
   ]);
   renderMarketMetricRows("#analytics-most-scanned", analytics.mostScannedMarkets);
   renderMarketMetricRows("#analytics-most-unlocked", analytics.mostUnlockedMarkets);
@@ -11491,6 +11522,7 @@ function renderBacktest(backtest) {
       <strong>${escapeHtml(backtest.symbol)} · ${escapeHtml(backtest.timeframe)} · ${escapeHtml(backtest.provider)}</strong>
       <p class="reasoning">${escapeHtml(ruleSetEvaluation.message)}</p>
       <span>${backtest.candleCount} real candles · ${metrics.wins} TP · ${metrics.losses} SL · ${metrics.expired} expired</span>
+      ${(backtest.warnings || []).length ? `<span class="lab-liquidity-warning">${escapeHtml(backtest.warnings[0].message)}</span>` : ""}
     </div>
     ${backtest.trades.length ? `
       <div class="backtest-trades">
@@ -11531,6 +11563,7 @@ function renderBacktestingLab() {
   labEvaluation.innerHTML = `
     <strong>${escapeHtml(evaluation.message)}</strong>
     <span>${errors.length ? `${errors.length} market/timeframe combinations were unavailable.` : "All selected combinations completed."}</span>
+    ${(report.warnings || []).length ? `<span class="lab-liquidity-warning">${escapeHtml(report.warnings[0].message)} (${escapeHtml(report.warnings.map((warning) => warning.symbol).join(", "))})</span>` : ""}
   `;
   document.querySelector("#lab-total-trades").textContent = `${metrics.totalTrades}`;
   document.querySelector("#lab-win-rate").textContent = `${metrics.winRate}%`;
@@ -11563,6 +11596,54 @@ function renderBacktestingLab() {
     report.advancedStructureComparison?.correlation
   );
   renderLabTrades(trades);
+}
+
+// Backtesting accepts any Coinbase USD pair, not only the scanner list. Scanner pairs come first and are ticked by
+// default only for BTC-USD; a pair below the liquidity floor is marked and shows the warning when selected.
+async function loadBacktestMarkets() {
+  const { markets, stocksRequested } = await api.request("/api/backtesting/markets");
+  state.backtestMarkets = markets;
+  renderStocksRequest(stocksRequested);
+  renderBacktestLabMarkets();
+  renderBacktestMarketOptions();
+}
+
+function renderBacktestLabMarkets() {
+  if (!labMarketOptions || !state.backtestMarkets) return;
+  const selected = new Set([...labMarketOptions.querySelectorAll('input[name="lab-market"]:checked')].map((input) => input.value));
+  if (!selected.size) selected.add("BTC-USD");
+  labMarketOptions.innerHTML = state.backtestMarkets.map((market) => `
+    <label class="${market.lowLiquidity ? "lab-market-low-liquidity" : ""}" data-market-search="${escapeHtml(`${market.symbol} ${market.displaySymbol} ${market.name}`.toLowerCase())}"${market.lowLiquidity ? ` title="${escapeHtml(market.warning)}"` : ""}>
+      <input type="checkbox" name="lab-market" value="${escapeHtml(market.symbol)}"${selected.has(market.symbol) ? " checked" : ""} />
+      ${escapeHtml(market.symbol)}${market.lowLiquidity ? ` <small class="lab-market-badge">Low liquidity</small>` : market.category === "Crypto" && !market.scannerReady ? ` <small class="lab-market-badge muted">Not scanned</small>` : ""}
+    </label>`).join("");
+  const crypto = state.backtestMarkets.filter((market) => market.category === "Crypto");
+  labMarketCount.textContent = `${crypto.length} Coinbase USD pairs · ${crypto.filter((market) => market.scannerReady).length} in the scanner`;
+  filterBacktestLabMarkets();
+  updateBacktestLiquidityWarning();
+}
+
+function filterBacktestLabMarkets() {
+  const term = labMarketSearch.value.trim().toLowerCase();
+  labMarketOptions.querySelectorAll("label").forEach((label) => {
+    const checked = label.querySelector("input")?.checked;
+    label.classList.toggle("hidden", Boolean(term) && !checked && !(label.dataset.marketSearch || label.textContent.toLowerCase()).includes(term));
+  });
+}
+
+function updateBacktestLiquidityWarning() {
+  const lowLiquidity = new Set((state.backtestMarkets || []).filter((market) => market.lowLiquidity).map((market) => market.symbol));
+  const selected = [...labMarketOptions.querySelectorAll('input[name="lab-market"]:checked')]
+    .map((input) => input.value)
+    .filter((symbol) => lowLiquidity.has(symbol));
+  labMarketWarning.textContent = selected.length ? `Low liquidity: backtest results may be unreliable. (${selected.join(", ")})` : "";
+  labMarketWarning.classList.toggle("hidden", !selected.length);
+}
+
+function renderStocksRequest(requested) {
+  if (!labStocksRequest) return;
+  labStocksRequest.disabled = Boolean(requested);
+  labStocksRequest.textContent = requested ? "Thanks, noted" : "Tell us";
 }
 
 function applyBacktestPreset(preset) {

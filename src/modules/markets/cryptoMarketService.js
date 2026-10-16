@@ -79,6 +79,18 @@ export function listEnabledUsdCryptoSymbols() {
     .map((market) => market.providerSymbol || market.symbol);
 }
 
+// Markets the backtesting lab may use: every enabled Coinbase USD pair the product sync imported, verified or not,
+// whatever its scanner flag or liquidity. Legacy symbols and products Coinbase no longer lists are left out.
+export function listBacktestCryptoMarkets() {
+  return listCryptoMarketSettings().filter((market) =>
+    market.enabled &&
+    market.tradingEnabled !== false &&
+    /^[A-Z0-9]{1,20}-USD$/.test(market.providerSymbol || market.symbol) &&
+    !["legacy", "disabled"].includes(normalizeStatus(market.marketStatus)) &&
+    market.failureCode !== "PRODUCT_NOT_RETURNED"
+  );
+}
+
 // The auto scanner's markets: within each tier by Coinbase 24h USD volume (highest first, no data last), then
 // symbol; markets below the liquidity floor never take a slot. Before any liquidity refresh has succeeded both are
 // inactive, so this is the plain tier + symbol order.

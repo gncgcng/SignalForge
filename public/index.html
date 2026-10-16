@@ -1375,6 +1375,7 @@
                 <span class="eyebrow">Historical strategy research</span>
                 <h3>Backtesting Lab</h3>
                 <p>Test SignalForge rule sets against historical OHLCV candles before trusting a setup workflow. Scanner, alerts and billing stay untouched.</p>
+                <p class="lab-stocks-ask">Want stocks &amp; ETFs? <button class="secondary-action" id="lab-stocks-request" type="button">Tell us</button></p>
               </div>
               <span class="status-pill" id="lab-status">Ready</span>
             </div>
@@ -1399,9 +1400,10 @@
                     <span class="eyebrow">Markets</span>
                     <strong>Market selection</strong>
                   </div>
-                  <small>Historical OHLCV</small>
+                  <small id="lab-market-count">Any Coinbase USD pair</small>
                 </div>
-                <div class="lab-option-grid market-options">
+                <input class="lab-market-search" id="lab-market-search" type="search" placeholder="Search pairs, e.g. PEPE" aria-label="Search backtest markets" autocomplete="off" />
+                <div class="lab-option-grid market-options" id="lab-market-options">
                   <label><input type="checkbox" name="lab-market" value="BTC-USD" checked /> BTC-USD</label>
                   <label><input type="checkbox" name="lab-market" value="ETH-USD" /> ETH-USD</label>
                   <label><input type="checkbox" name="lab-market" value="SOL-USD" /> SOL-USD</label>
@@ -1416,6 +1418,7 @@
                   <label><input type="checkbox" name="lab-market" value="WTI" /> WTI</label>
                   <label><input type="checkbox" name="lab-market" value="BRENT" /> BRENT</label>
                 </div>
+                <p class="lab-liquidity-warning hidden" id="lab-market-warning" role="status"></p>
               </section>
 
               <section class="lab-card lab-timeframe-card">
