@@ -1,5 +1,5 @@
 import { analyzeMarketRegime } from "../market-data/marketRegimeService.js";
-import { getStrategyOhlcv } from "../market-data/marketDataService.js";
+import { getBacktestOhlcv } from "../market-data/marketDataService.js";
 import { scoreMultiTimeframeConfluence } from "../market-data/multiTimeframeService.js";
 import {
   analyzeSmartMoneyConcepts,
@@ -19,11 +19,18 @@ import { getTradingSession, tradingSessions } from "../intelligence/sessionIntel
 import { currentStrategyVersion } from "../analyst/signalAnalystService.js";
 import { saveGeneratedSignal } from "../admin-signals/generatedSignalService.js";
 import { cryptoMarketUniverse } from "../markets/cryptoMarkets.js";
+import { listBacktestCryptoMarkets, listScannerCryptoMarkets } from "../markets/cryptoMarketService.js";
+import { evaluateLiquidityFloor } from "../markets/marketLiquidityService.js";
 
+const backtestCommodities = [
+  ["XAU/USD", "Gold"], ["XAG/USD", "Silver"], ["WTI", "WTI Crude Oil"], ["BRENT", "Brent Crude Oil"]
+];
+// The built-in markets; listBacktestMarkets() adds every other Coinbase USD pair the product sync imported.
 export const backtestSymbols = [
   ...cryptoMarketUniverse.map((market) => market.symbol),
-  "XAU/USD", "XAG/USD", "WTI", "BRENT"
+  ...backtestCommodities.map(([symbol]) => symbol)
 ];
+export const lowLiquidityBacktestWarning = "Low liquidity: backtest results may be unreliable.";
 export const backtestTimeframes = ["15m", "1h", "4h"];
 export const strategyComponentNames = [
   "marketRegime",
@@ -46,8 +53,37 @@ const warmupCandles = 60;
 const maximumHoldingBars = 20;
 const timeframeOrder = ["15m", "1h", "4h"];
 
+// Backtesting is not limited to the scanner: any enabled Coinbase USD pair can be tested. scannerReady says whether
+// the pair is also in the scanner (scanner-ready and above the liquidity floor); a pair below the floor carries the
+// low-liquidity warning. The scanner and alerts keep using listScannerCryptoMarkets and are not affected.
+export function listBacktestMarkets() {
+  const scannerSymbols = new Set(listScannerCryptoMarkets().map((market) => market.symbol));
+  const crypto = listBacktestCryptoMarkets().map((market) => {
+    const liquidity = evaluateLiquidityFloor(market.symbol);
+    return {
+      symbol: market.symbol,
+      displaySymbol: market.displaySymbol || market.symbol.replace("-", ""),
+      name: market.name,
+      category: "Crypto",
+      scannerReady: scannerSymbols.has(market.symbol),
+      lowLiquidity: liquidity.belowFloor,
+      volume24hUsd: liquidity.volume24hUsd,
+      warning: liquidity.belowFloor ? lowLiquidityBacktestWarning : null
+    };
+  }).sort((a, b) => Number(b.scannerReady) - Number(a.scannerReady) || a.symbol.localeCompare(b.symbol));
+  const commodities = backtestCommodities.map(([symbol, name]) => ({
+    symbol, displaySymbol: symbol, name, category: "Commodities",
+    scannerReady: false, lowLiquidity: false, volume24hUsd: null, warning: null
+  }));
+  return [...crypto, ...commodities];
+}
+
 export async function runHistoricalBacktest(user, input) {
-  const symbols = normalizeSelections(input.symbols || input.symbol, backtestSymbols, "market");
+  const markets = listBacktestMarkets();
+  const symbols = normalizeSelections(input.symbols || input.symbol, markets.map((market) => market.symbol), "market");
+  const warnings = markets
+    .filter((market) => symbols.includes(market.symbol) && market.lowLiquidity)
+    .map((market) => ({ symbol: market.symbol, code: "LOW_LIQUIDITY", message: lowLiquidityBacktestWarning }));
   const timeframes = normalizeSelections(input.timeframes || input.timeframe, backtestTimeframes, "timeframe");
   const components = normalizeComponents(input.components);
   const sessionFilters = normalizeSessionFilters(input.sessions);
@@ -121,7 +157,7 @@ export async function runHistoricalBacktest(user, input) {
 
   await persistBacktestShadowSignals(reports, user);
 
-  return aggregateBacktestReports(
+  const report = aggregateBacktestReports(
     reports,
     errors,
     components,
@@ -134,6 +170,7 @@ export async function runHistoricalBacktest(user, input) {
     previousV3Reports,
     previousV2Reports
   );
+  return { ...report, warnings };
 }
 
 async function persistBacktestShadowSignals(reports, user) {
@@ -560,10 +597,10 @@ function hasRoomToTarget(metrics, price, direction, atrValue) {
 }
 
 async function loadHistoricalBundle(symbol, timeframe) {
-  const marketData = await getStrategyOhlcv(symbol, timeframe);
+  const marketData = await getBacktestOhlcv(symbol, timeframe);
   const higherTimeframes = timeframeOrder.slice(timeframeOrder.indexOf(timeframe) + 1);
   const settled = await Promise.allSettled(
-    higherTimeframes.map((higherTimeframe) => getStrategyOhlcv(symbol, higherTimeframe))
+    higherTimeframes.map((higherTimeframe) => getBacktestOhlcv(symbol, higherTimeframe))
   );
   const higherTimeframeData = {};
   settled.forEach((result, index) => {
@@ -574,7 +611,7 @@ async function loadHistoricalBundle(symbol, timeframe) {
   const correlationSettled = await Promise.allSettled(
     correlationSymbols
       .filter((peer) => peer !== symbol)
-      .map((peer) => getStrategyOhlcv(peer, timeframe))
+      .map((peer) => getBacktestOhlcv(peer, timeframe))
   );
   const correlationData = {};
   correlationSettled.forEach((result, index) => {

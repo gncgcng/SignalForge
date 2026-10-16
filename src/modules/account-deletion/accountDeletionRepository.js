@@ -54,7 +54,9 @@ export const RETAINED_TABLES = [
   ["affiliate_referrals", "referred_user_id"],
   ["affiliate_referrals", "affiliate_user_id"],
   ["affiliate_payout_requests", "affiliate_user_id"],
-  ["stripe_webhook_events", "user_id"]
+  ["stripe_webhook_events", "user_id"],
+  // Only the feature name and a timestamp; kept so the Admin demand count does not drop when an account is deleted.
+  ["feature_requests", "user_id"]
 ];
 
 // Retained with no link to the user at all, so they can't be listed above by user column.

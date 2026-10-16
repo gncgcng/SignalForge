@@ -364,6 +364,47 @@ export function getStrategyOhlcv(symbol, timeframe, input = {}) {
   return getOhlcv(symbol, timeframe, { ...input, completedOnly: true });
 }
 
+// Backtesting candles. A ready market goes through getStrategyOhlcv as before. Any other Coinbase USD pair (imported
+// but not verified for the scanner) is read straight from Coinbase without recording success or failure, so a
+// backtest never verifies a pair, starts a cooldown or otherwise changes what the scanner, alerts or paper trading use.
+export async function getBacktestOhlcv(symbol, timeframe) {
+  const pair = getPair(symbol);
+  if (!pair || !isCryptoMarket(pair) || isReadyStatus(pair.status)) {
+    return getStrategyOhlcv(symbol, timeframe);
+  }
+  const provider = getMarketDataProvider(pair);
+  if (provider.id !== "coinbase-exchange" || !provider.supports(pair.symbol, timeframe)) {
+    throw new MarketDataProviderError(`${provider.id} does not support ${pair.symbol} on ${timeframe}.`, {
+      statusCode: 400,
+      code: "PROVIDER_UNSUPPORTED_MARKET"
+    });
+  }
+  const marketData = await provider.getCandles(pair.symbol, timeframe, { completedOnly: true });
+  const candles = selectCompletedCandles(marketData.candles, timeframe);
+  if (candles.length < 60) {
+    throw new MarketDataProviderError(`${pair.symbol} returned insufficient OHLCV candles.`, { statusCode: 502, code: "INSUFFICIENT_CANDLES" });
+  }
+  return {
+    pair: {
+      ...pair,
+      lastPrice: candles.at(-1).close,
+      change24h: marketData.change24h
+    },
+    candles,
+    regime: analyzeMarketRegime(candles),
+    advancedStructure: analyzeAdvancedMarketStructure(candles, {
+      volumeAvailable: marketData.volumeAvailable !== false
+    }),
+    source: marketData.source,
+    volumeAvailable: marketData.volumeAvailable !== false,
+    lastCandleAt: new Date(candles.at(-1).time * 1000).toISOString(),
+    cache: marketData.cache,
+    receivedAt: marketData.receivedAt,
+    integrity: inspectCandleIntervals(candles, timeframe),
+    candleContract: "completed_only"
+  };
+}
+
 export async function getReadOnlySignalReviewMarketData(symbol, timeframe, window = {}) {
   const pair = getPair(symbol);
   if (!pair) {

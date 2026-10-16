@@ -120,6 +120,7 @@ export async function seedAccountData(userId, { affiliateId, adminId }) {
     customer_details: { email, name: "Private Person", address: { line1: "1 Main St" } },
     metadata: { user_id: userId }
   } } })]);
+  await query(`INSERT INTO feature_requests (user_id, feature) VALUES ($1, 'stocks_etfs')`, [userId]);
   await query(`INSERT INTO product_analytics_events (id, event_type, user_id, amount_cents) VALUES ($1, 'checkout_completed', $2, 2900)`, [s("pae"), userId]);
   const promo = s("promo");
   await query(`INSERT INTO promo_codes (id, code, type, max_redemptions, created_by_admin_id, credit_quantity) VALUES ($1, $2, 'credit_grant', 10, $3, 5)`,
@@ -270,5 +271,6 @@ export async function cleanupTestUsers(userIds) {
   await query(`DELETE FROM device_trial_history WHERE first_user_id = ANY($1)`, [userIds]);
   await query(`DELETE FROM trial_card_claims WHERE first_user_id = ANY($1)`, [userIds]);
   await query(`DELETE FROM billing_invoices WHERE user_id = ANY($1)`, [userIds]);
+  await query(`DELETE FROM feature_requests WHERE user_id = ANY($1)`, [userIds]);
   await query(`DELETE FROM users WHERE id = ANY($1)`, [userIds]);
 }

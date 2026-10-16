@@ -6909,6 +6909,57 @@ polyline {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.lab-option-grid.market-options#lab-market-options {
+  max-height: 260px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.lab-market-search {
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+.lab-market-badge {
+  margin-left: auto;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.16);
+  color: #fbbf24;
+  font-size: 0.66rem;
+  white-space: nowrap;
+}
+
+.lab-market-badge.muted {
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--muted, #94a3b8);
+}
+
+.lab-option-grid label.lab-market-low-liquidity {
+  border-color: rgba(245, 158, 11, 0.45);
+}
+
+.lab-liquidity-warning {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border: 1px solid rgba(245, 158, 11, 0.5);
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.1);
+  color: #fbbf24;
+  font-size: 0.8rem;
+}
+
+span.lab-liquidity-warning {
+  display: block;
+}
+
+.lab-stocks-ask {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .lab-option-grid.component-options {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
