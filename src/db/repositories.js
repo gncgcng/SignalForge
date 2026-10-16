@@ -525,8 +525,11 @@ export async function getAdminProductAnalytics() {
       ORDER BY count DESC, su.source ASC
       LIMIT 12
     `),
-    // "Want stocks & ETFs? Tell us" on the backtesting page: one row per user.
-    query(`SELECT COUNT(*)::integer AS stocks_etfs FROM feature_requests WHERE feature = 'stocks_etfs'`)
+    // "Want stocks & ETFs? Tell us" on the backtesting page: one row per user, plus the anonymous count
+    // left behind by deleted accounts.
+    query(`SELECT
+      (SELECT COUNT(*) FROM feature_requests WHERE feature = 'stocks_etfs')::integer +
+      COALESCE((SELECT count FROM feature_request_anonymous_counts WHERE feature = 'stocks_etfs'), 0) AS stocks_etfs`)
   ]);
   const users = userSummary.rows[0] || {};
   const events = eventSummary.rows[0] || {};

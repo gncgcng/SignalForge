@@ -21,6 +21,7 @@ import { saveGeneratedSignal } from "../admin-signals/generatedSignalService.js"
 import { cryptoMarketUniverse } from "../markets/cryptoMarkets.js";
 import { listBacktestCryptoMarkets, listScannerCryptoMarkets } from "../markets/cryptoMarketService.js";
 import { evaluateLiquidityFloor } from "../markets/marketLiquidityService.js";
+import { assertBacktestRunSize, loadBacktestCandles, withBacktestRun } from "./backtestThrottle.js";
 
 const backtestCommodities = [
   ["XAU/USD", "Gold"], ["XAG/USD", "Silver"], ["WTI", "WTI Crude Oil"], ["BRENT", "Brent Crude Oil"]
@@ -81,6 +82,11 @@ export function listBacktestMarkets() {
 export async function runHistoricalBacktest(user, input) {
   const markets = listBacktestMarkets();
   const symbols = normalizeSelections(input.symbols || input.symbol, markets.map((market) => market.symbol), "market");
+  assertBacktestRunSize(symbols);
+  return withBacktestRun(user?.id, () => runBacktest(user, input, markets, symbols));
+}
+
+async function runBacktest(user, input, markets, symbols) {
   const warnings = markets
     .filter((market) => symbols.includes(market.symbol) && market.lowLiquidity)
     .map((market) => ({ symbol: market.symbol, code: "LOW_LIQUIDITY", message: lowLiquidityBacktestWarning }));
@@ -597,10 +603,10 @@ function hasRoomToTarget(metrics, price, direction, atrValue) {
 }
 
 async function loadHistoricalBundle(symbol, timeframe) {
-  const marketData = await getBacktestOhlcv(symbol, timeframe);
+  const marketData = await loadBacktestCandles(symbol, timeframe, getBacktestOhlcv);
   const higherTimeframes = timeframeOrder.slice(timeframeOrder.indexOf(timeframe) + 1);
   const settled = await Promise.allSettled(
-    higherTimeframes.map((higherTimeframe) => getBacktestOhlcv(symbol, higherTimeframe))
+    higherTimeframes.map((higherTimeframe) => loadBacktestCandles(symbol, higherTimeframe, getBacktestOhlcv))
   );
   const higherTimeframeData = {};
   settled.forEach((result, index) => {
@@ -611,7 +617,7 @@ async function loadHistoricalBundle(symbol, timeframe) {
   const correlationSettled = await Promise.allSettled(
     correlationSymbols
       .filter((peer) => peer !== symbol)
-      .map((peer) => getBacktestOhlcv(peer, timeframe))
+      .map((peer) => loadBacktestCandles(peer, timeframe, getBacktestOhlcv))
   );
   const correlationData = {};
   correlationSettled.forEach((result, index) => {

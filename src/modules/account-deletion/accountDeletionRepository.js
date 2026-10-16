@@ -28,7 +28,9 @@ export const HARD_DELETE_TABLES = [
   ["signal_learning_events", "user_id"],
   ["signal_snapshots", "user_id"],
   ["signal_validation_rejections", "user_id"],
-  ["affiliate_clicks", "affiliate_user_id"]
+  ["affiliate_clicks", "affiliate_user_id"],
+  // Counted into feature_request_anonymous_counts first (see deleteAccountData), so Admin totals do not drop.
+  ["feature_requests", "user_id"]
 ];
 
 // Retained rows. Listed here so the verification test checks the same set the code acts on.
@@ -54,15 +56,14 @@ export const RETAINED_TABLES = [
   ["affiliate_referrals", "referred_user_id"],
   ["affiliate_referrals", "affiliate_user_id"],
   ["affiliate_payout_requests", "affiliate_user_id"],
-  ["stripe_webhook_events", "user_id"],
-  // Only the feature name and a timestamp; kept so the Admin demand count does not drop when an account is deleted.
-  ["feature_requests", "user_id"]
+  ["stripe_webhook_events", "user_id"]
 ];
 
 // Retained with no link to the user at all, so they can't be listed above by user column.
 // trial_identity_claims holds only keyed hashes of an email / Google subject (no email, no
 // user_id); it is kept so the same identity can't earn a second free trial after deletion.
-export const RETAINED_UNLINKED_TABLES = ["trial_identity_claims"];
+// feature_request_anonymous_counts holds only a number per feature.
+export const RETAINED_UNLINKED_TABLES = ["trial_identity_claims", "feature_request_anonymous_counts"];
 
 const STRIPE_PII_KEYS = new Set([
   "email", "customer_email", "receipt_email",
@@ -109,6 +110,13 @@ export async function deleteAccountData({ userId, email, loginEmailHash }) {
         `, [identities.map((identity) => identity.hash), identities.map((identity) => identity.kind)]);
       }
     }
+
+    // "Want stocks & ETFs?" and similar requests: keep only an anonymous count, then the rows go below.
+    await client.query(`
+      INSERT INTO feature_request_anonymous_counts (feature, count)
+      SELECT feature, COUNT(*)::integer FROM feature_requests WHERE user_id = $1 GROUP BY feature
+      ON CONFLICT (feature) DO UPDATE SET count = feature_request_anonymous_counts.count + EXCLUDED.count
+    `, [userId]);
 
     for (const [table, column] of HARD_DELETE_TABLES) {
       const result = await client.query(`DELETE FROM ${table} WHERE ${column} = $1`, [userId]);

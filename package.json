@@ -184,6 +184,7 @@
     "test:backtesting-lab": "node scripts/backtesting-lab-test.js",
     "test:backtest-any-pair": "node scripts/backtest-any-pair-db-test.js",
     "test:backtest-market-picker": "node scripts/backtest-market-picker-test.js",
+    "test:backtest-throttle": "node scripts/backtest-throttle-test.js",
     "test:stocks-request": "node scripts/stocks-request-db-test.js",
     "test:smart-money": "node scripts/smart-money-concepts-test.js",
     "test:dynamic-risk": "node scripts/dynamic-risk-engine-test.js",
