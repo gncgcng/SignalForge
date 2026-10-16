@@ -117,6 +117,25 @@ try {
   assert.deepEqual(btcReport.warnings, [], "no warning above the floor");
   await assert.rejects(() => runHistoricalBacktest({ id: user }, { symbol: "NOTAPAIR-USD", timeframe: "1h" }), /supported backtesting market/);
 
+  // 2b. Re-running is served from the backtest cache: no new Coinbase requests.
+  const requestsBefore = coinbaseRequests.length;
+  const rerun = await runHistoricalBacktest({ id: user }, { symbol: pair, timeframe: "1h" });
+  assert.equal(rerun.candleCount, report.candleCount);
+  assert.equal(coinbaseRequests.length, requestsBefore, "cached candles, no refetch");
+
+  // 2c. A second backtest from the same user while one runs gets the friendly busy answer through the route.
+  const paidUser = { id: user, role: "tester" };
+  const running = runHistoricalBacktest(paidUser, { symbol: pair, timeframe: "4h" });
+  const busy = fakeResponse();
+  await handleBacktestRoutes({ method: "GET", user: paidUser }, busy, "/api/backtesting",
+    new URL(`http://localhost/api/backtesting?symbol=${pair}&timeframe=1h`));
+  assert.equal(busy.statusCode, 429);
+  assert.equal(JSON.parse(busy.body).error.message, "Backtesting is busy right now. Please try again in a minute.");
+  await running;
+  await assert.rejects(() => runHistoricalBacktest({ id: user }, {
+    symbols: listBacktestMarkets().slice(0, 11).map((market) => market.symbol), timeframe: "1h"
+  }), /up to 10 markets/);
+
   // 3. The backtest did not verify, cool down or otherwise change the pair.
   const stateAfter = getCryptoMarketState(pair);
   for (const key of ["status", "marketStatus", "verificationStatus", "scannerEnabled", "effectiveScannerEnabled", "consecutiveFailures", "cooldownUntil", "lastSuccessfulCandleAt"]) {

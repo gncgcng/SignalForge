@@ -15,7 +15,10 @@ export async function hasFeatureRequest(userId, feature = STOCKS_ETFS_FEATURE) {
   return result.rows.length > 0;
 }
 
+// Live requests plus the anonymous count kept for deleted accounts.
 export async function countFeatureRequests(feature = STOCKS_ETFS_FEATURE) {
-  const result = await query("SELECT COUNT(*)::integer AS count FROM feature_requests WHERE feature = $1", [feature]);
+  const result = await query(`SELECT
+    (SELECT COUNT(*) FROM feature_requests WHERE feature = $1)::integer +
+    COALESCE((SELECT count FROM feature_request_anonymous_counts WHERE feature = $1), 0) AS count`, [feature]);
   return result.rows[0]?.count || 0;
 }

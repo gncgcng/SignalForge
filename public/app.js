@@ -11618,7 +11618,7 @@ function renderBacktestLabMarkets() {
       ${escapeHtml(market.symbol)}${market.lowLiquidity ? ` <small class="lab-market-badge">Low liquidity</small>` : market.category === "Crypto" && !market.scannerReady ? ` <small class="lab-market-badge muted">Not scanned</small>` : ""}
     </label>`).join("");
   const crypto = state.backtestMarkets.filter((market) => market.category === "Crypto");
-  labMarketCount.textContent = `${crypto.length} Coinbase USD pairs · ${crypto.filter((market) => market.scannerReady).length} in the scanner`;
+  labMarketCount.textContent = `${crypto.length} Coinbase USD pairs · ${crypto.filter((market) => market.scannerReady).length} in the scanner · up to 10 per run`;
   filterBacktestLabMarkets();
   updateBacktestLiquidityWarning();
 }
