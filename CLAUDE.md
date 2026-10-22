@@ -35,3 +35,5 @@
   non-local `DATABASE_URL`, but it cannot tell the dev volume from a throwaway one, so pick the port yourself.
 - The preview tool must serve the worktree you are working in and point at the throwaway database. If you
   change `.claude/launch.json` to do that, revert the change before you commit or finish.
+- Never start the signalforge-local launch config (or any preview/launch entry that points at the dev DB).
+  Browser checks must use a temporary launch entry pointing at the throwaway DB, and remove it afterwards.
