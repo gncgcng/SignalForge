@@ -424,6 +424,7 @@ const labStatus = document.querySelector("#lab-status");
 const labEvaluation = document.querySelector("#lab-evaluation");
 const labEmptyState = document.querySelector("#lab-empty-state");
 const labLoadingState = document.querySelector("#lab-loading-state");
+const labLoadingProgress = document.querySelector("#lab-loading-progress");
 const labResults = document.querySelector("#lab-results");
 const historyCount = document.querySelector("#history-count");
 const signalsHistory = document.querySelector("#signals-history");
@@ -652,7 +653,7 @@ const defaultSupportIssues = {
 
 const api = {
   async request(path, options = {}) {
-    const { timeoutMs = 0, signal: externalSignal, onResponse, onPayload, ...fetchOptions } = options;
+    const { timeoutMs = 0, signal: externalSignal, onResponse, onPayload, onStreamLine, ...fetchOptions } = options;
     const optionHeaders = fetchOptions.headers || {};
     const controller = new AbortController();
     let timedOut = false;
@@ -684,6 +685,9 @@ const api = {
       onResponse?.({ status: response.status, ok: response.ok });
       if (path === "/api/auth/session" || path === "/api/auth/restore") {
         updateAuthDebug({ endpoint: path, statusCode: response.status, restoreHttpStatus: response.status });
+      }
+      if (onStreamLine && response.ok && response.headers.get("content-type")?.includes("application/x-ndjson")) {
+        return await readNdjsonResponse(response, onStreamLine);
       }
       const responseText = await response.text();
       let payload = {};
@@ -728,6 +732,36 @@ const api = {
     }
   }
 };
+
+// A streamed response: {"type":"progress",...} lines go to onLine, then one {"type":"result",...} line is the payload
+// or one {"type":"error",...} line is thrown.
+async function readNdjsonResponse(response, onLine) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffered = "";
+  let result = null;
+  const handle = (text) => {
+    if (!text.trim()) return;
+    const line = JSON.parse(text);
+    if (line.type === "result") result = line;
+    else if (line.type === "error") {
+      const error = new Error(line.message || "Request failed.");
+      error.statusCode = line.statusCode;
+      throw error;
+    } else onLine(line);
+  };
+  for (;;) {
+    const { value, done } = await reader.read();
+    buffered += decoder.decode(value || new Uint8Array(), { stream: !done });
+    const lines = buffered.split("\n");
+    buffered = lines.pop();
+    lines.forEach(handle);
+    if (done) break;
+  }
+  handle(buffered);
+  if (!result) throw new Error("The connection closed before the result arrived. Please try again.");
+  return result;
+}
 
 window.addEventListener("beforeinstallprompt", (event) => {
   event.preventDefault();
@@ -3034,8 +3068,15 @@ backtestingLabForm.addEventListener("submit", async (event) => {
     labEmptyState.classList.add("hidden");
     labResults.classList.add("hidden");
     labLoadingState.classList.remove("hidden");
+    labLoadingProgress.textContent = "";
     const { backtest } = await api.request("/api/backtesting/run", {
       method: "POST",
+      headers: { accept: "application/x-ndjson" },
+      onStreamLine: ({ loaded, total }) => {
+        const text = `Loading candles ${loaded} of ${total}`;
+        labStatus.textContent = text;
+        labLoadingProgress.textContent = text;
+      },
       body: JSON.stringify({
         symbols: markets,
         timeframes,
@@ -11618,7 +11659,7 @@ function renderBacktestLabMarkets() {
       ${escapeHtml(market.symbol)}${market.lowLiquidity ? ` <small class="lab-market-badge">Low liquidity</small>` : market.category === "Crypto" && !market.scannerReady ? ` <small class="lab-market-badge muted">Not scanned</small>` : ""}
     </label>`).join("");
   const crypto = state.backtestMarkets.filter((market) => market.category === "Crypto");
-  labMarketCount.textContent = `${crypto.length} Coinbase USD pairs · ${crypto.filter((market) => market.scannerReady).length} in the scanner · up to 10 per run`;
+  labMarketCount.textContent = `${crypto.length} Coinbase USD pairs · ${crypto.filter((market) => market.scannerReady).length} in the scanner · up to 10 "Not scanned" pairs per run`;
   filterBacktestLabMarkets();
   updateBacktestLiquidityWarning();
 }

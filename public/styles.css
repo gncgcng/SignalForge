@@ -7015,6 +7015,12 @@ span.lab-liquidity-warning {
   border-color: rgba(248, 193, 74, 0.34);
 }
 
+.lab-loading-progress {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
 .lab-metrics-grid > div {
   display: grid;
   gap: 6px;
