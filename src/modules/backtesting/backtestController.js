@@ -48,14 +48,36 @@ export async function handleBacktestRoutes(req, res, pathname, url) {
     }
   }
 
+  // With "accept: application/x-ndjson" the run streams one line per candle load ({"type":"progress","loaded","total"})
+  // and ends with {"type":"result","backtest"} or {"type":"error"}. Errors raised before the first load (bad input,
+  // too many pairs, busy) keep their HTTP status. The steady output also keeps the proxy's idle timeout away.
   if (pathname === "/api/backtesting/run" && req.method === "POST") {
+    const stream = String(req.headers?.accept || "").includes("application/x-ndjson");
+    let streaming = false;
+    const writeLine = (line) => res.write(`${JSON.stringify(line)}\n`);
     try {
       const body = await readJson(req);
-      return sendJson(res, 200, {
-        backtest: await runHistoricalBacktest(req.user, body)
-      });
+      const onProgress = stream ? (progress) => {
+        if (!streaming) {
+          streaming = true;
+          res.writeHead(200, {
+            "content-type": "application/x-ndjson; charset=utf-8",
+            "cache-control": "no-cache, no-transform",
+            "x-accel-buffering": "no"
+          });
+        }
+        writeLine({ type: "progress", ...progress });
+      } : undefined;
+      const backtest = await runHistoricalBacktest(req.user, body, { onProgress });
+      if (!streaming) return sendJson(res, 200, { backtest });
+      writeLine({ type: "result", backtest });
+      res.end();
+      return true;
     } catch (error) {
-      return sendError(res, error.statusCode || 400, error.message);
+      if (!streaming) return sendError(res, error.statusCode || 400, error.message);
+      writeLine({ type: "error", statusCode: error.statusCode || 400, message: error.message });
+      res.end();
+      return true;
     }
   }
 

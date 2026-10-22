@@ -41,6 +41,7 @@ const { runAutoCryptoAlertScan } = await import("../src/modules/alerts/autoScanS
 const run = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`.toUpperCase();
 const pair = `SFBT${run}-USD`;
 const extraPairs = Array.from({ length: 10 }, (_, index) => `SFBT${run}X${index}-USD`);
+const failingPair = extraPairs[0]; // Coinbase answers 500 for its candles
 const userIds = [];
 const insertedLiquidity = [];
 
@@ -52,6 +53,7 @@ globalThis.fetch = async (input) => {
   const match = url.pathname.match(/^\/products\/([^/]+)\/candles$/);
   if (!match) throw new Error(`unexpected request ${url}`);
   coinbaseRequests.push(decodeURIComponent(match[1]));
+  if (decodeURIComponent(match[1]) === failingPair) return new Response("{}", { status: 500 });
   const granularity = Number(url.searchParams.get("granularity"));
   const start = Math.floor(Date.parse(url.searchParams.get("start")) / 1000);
   const end = Math.floor(Date.parse(url.searchParams.get("end")) / 1000);
@@ -70,10 +72,25 @@ function fakeResponse() {
   return {
     statusCode: 0,
     body: "",
-    writeHead(status) { this.statusCode = status; return this; },
+    headers: {},
+    writeHead(status, headers = {}) { this.statusCode = status; this.headers = headers; return this; },
     setHeader() {},
-    end(body = "") { this.body = String(body); }
+    write(chunk) { this.body += String(chunk); return true; },
+    end(body = "") { this.body += String(body); }
   };
+}
+
+// A POST to the run route with a JSON body and the given accept header.
+async function postRun(user, body, accept = "application/x-ndjson") {
+  const res = fakeResponse();
+  const req = {
+    method: "POST",
+    user,
+    headers: { accept },
+    async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify(body)); }
+  };
+  await handleBacktestRoutes(req, res, "/api/backtesting/run", new URL("http://localhost/api/backtesting/run"));
+  return res;
 }
 
 try {
@@ -164,6 +181,39 @@ try {
   assert.deepEqual(throttleSleeps, [], "no throttle spacing on scanner loads");
   await runHistoricalBacktest({ id: user }, { symbols: [pair, "BTC-USD"], timeframes: ["15m", "1h"] });
   assert.ok(throttleSleeps.length > 0, "the Not scanned pair's loads are still spaced");
+
+  // 2e. Streamed run: "Loading candles X of Y" progress lines, then the result. A pair whose candles fail still
+  // counts its skipped loads, so the progress reaches its total.
+  resetBacktestThrottle();
+  const streamed = await postRun(paidUser, { symbols: [pair, failingPair, "BTC-USD"], timeframes: ["15m", "1h"] });
+  assert.equal(streamed.statusCode, 200);
+  assert.match(streamed.headers["content-type"], /application\/x-ndjson/);
+  const lines = streamed.body.trim().split("\n").map((line) => JSON.parse(line));
+  const progressLines = lines.filter((line) => line.type === "progress");
+  const total = progressLines[0].total;
+  // Per bundle: the timeframe, the higher timeframes (15m: 2, 1h: 1) and 6 peers (7 for a pair outside the peers).
+  assert.equal(total, 2 * ((1 + 2 + 7) + (1 + 1 + 7)) + ((1 + 2 + 6) + (1 + 1 + 6)));
+  assert.equal(progressLines[0].loaded, 0, "first line before any load");
+  assert.ok(progressLines.every((line, index) => index === 0 || line.loaded > progressLines[index - 1].loaded), "progress only grows");
+  assert.equal(progressLines.at(-1).loaded, total, "progress reaches its total");
+  assert.equal(lines.at(-1).type, "result");
+  assert.ok(lines.at(-1).backtest.errors.some((error) => error.symbol === failingPair), "the failing pair is reported");
+  // Errors before the first load keep their status and plain JSON: busy (429) and too many pairs (400).
+  backtestLimits.maxRunsGlobal = 0;
+  try {
+    const busyStream = await postRun(paidUser, { symbol: pair, timeframe: "1h" });
+    assert.equal(busyStream.statusCode, 429);
+    assert.equal(JSON.parse(busyStream.body).error.message, "Backtesting is busy right now. Please try again in a minute.");
+  } finally {
+    backtestLimits.maxRunsGlobal = 2;
+  }
+  const tooMany = await postRun(paidUser, { symbols: [pair, ...extraPairs], timeframe: "1h" });
+  assert.equal(tooMany.statusCode, 400);
+  assert.match(JSON.parse(tooMany.body).error.message, /up to 10 "Not scanned" pairs/);
+  // Without the accept header the route answers plain JSON as before.
+  const plain = await postRun(paidUser, { symbol: "BTC-USD", timeframe: "1h" }, "application/json");
+  assert.equal(plain.statusCode, 200);
+  assert.equal(JSON.parse(plain.body).backtest.symbol, "BTC-USD");
 
   // 3. The backtest did not verify, cool down or otherwise change the pair.
   const stateAfter = getCryptoMarketState(pair);
