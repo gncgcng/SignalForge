@@ -17,6 +17,7 @@ const { createHelperUser } = await import("./account-deletion-fixtures.js");
 const {
   getCryptoMarketState,
   initializeCryptoMarketSettings,
+  listEligibleScannerCryptoMarkets,
   listScannerCryptoMarkets,
   reloadCryptoMarketSettings
 } = await import("../src/modules/markets/cryptoMarketService.js");
@@ -33,11 +34,13 @@ const {
   runHistoricalBacktest
 } = await import("../src/modules/backtesting/backtestService.js");
 const { handleBacktestRoutes } = await import("../src/modules/backtesting/backtestController.js");
+const { backtestLimits, resetBacktestThrottle } = await import("../src/modules/backtesting/backtestThrottle.js");
 const { scanMarketSetupDetailed } = await import("../src/modules/signals/signalService.js");
 const { runAutoCryptoAlertScan } = await import("../src/modules/alerts/autoScanService.js");
 
 const run = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`.toUpperCase();
 const pair = `SFBT${run}-USD`;
+const extraPairs = Array.from({ length: 10 }, (_, index) => `SFBT${run}X${index}-USD`);
 const userIds = [];
 const insertedLiquidity = [];
 
@@ -76,15 +79,21 @@ function fakeResponse() {
 try {
   await initializeCryptoMarketSettings();
   // As importCoinbaseCryptoProducts stores a newly discovered product: enabled, scanner off, not verified.
-  await query(`INSERT INTO crypto_markets (
-      symbol, display_symbol, provider_symbol, name, provider, liquidity_tier,
-      enabled, scanner_enabled, paper_trading_enabled, watchlist_enabled,
-      provider_status, base_asset, quote_asset, product_status, trading_enabled,
-      market_status, verification_status, status
-    ) VALUES ($1,$2,$1,'Backtest Test Coin','coinbase-exchange','standard',true,false,true,true,'unchecked',$3,'USD','online',true,'unavailable','failed','unavailable')`,
-  [pair, pair.replace("-", ""), pair.split("-")[0]]);
-  // Liquidity: the test pair is far below the $1M floor; BTC-USD and ETH-USD are well above it.
-  for (const [symbol, volume] of [[pair, 5000], ["BTC-USD", 5e9], ["ETH-USD", 2e9]]) {
+  // The extra pairs only make an 11-pair run for the per-run cap.
+  for (const symbol of [pair, ...extraPairs]) {
+    await query(`INSERT INTO crypto_markets (
+        symbol, display_symbol, provider_symbol, name, provider, liquidity_tier,
+        enabled, scanner_enabled, paper_trading_enabled, watchlist_enabled,
+        provider_status, base_asset, quote_asset, product_status, trading_enabled,
+        market_status, verification_status, status
+      ) VALUES ($1,$2,$1,'Backtest Test Coin','coinbase-exchange','standard',true,false,true,true,'unchecked',$3,'USD','online',true,'unavailable','failed','unavailable')`,
+    [symbol, symbol.replace("-", ""), symbol.split("-")[0]]);
+  }
+  // Liquidity: the test pair is far below the $1M floor; BTC-USD, ETH-USD and the other scanner-eligible seeds are
+  // well above it.
+  const scannerSeeds = listEligibleScannerCryptoMarkets().map((market) => market.symbol)
+    .filter((symbol) => !["BTC-USD", "ETH-USD"].includes(symbol));
+  for (const [symbol, volume] of [[pair, 5000], ["BTC-USD", 5e9], ["ETH-USD", 2e9], ...scannerSeeds.map((symbol) => [symbol, 1e8])]) {
     const result = await query(`INSERT INTO market_liquidity (symbol, volume_24h_usd, last_price, updated_at)
       VALUES ($1, $2, 1, now()) ON CONFLICT (symbol) DO NOTHING RETURNING symbol`, [symbol, volume]);
     if (result.rows.length) insertedLiquidity.push(symbol);
@@ -132,9 +141,29 @@ try {
   assert.equal(busy.statusCode, 429);
   assert.equal(JSON.parse(busy.body).error.message, "Backtesting is busy right now. Please try again in a minute.");
   await running;
-  await assert.rejects(() => runHistoricalBacktest({ id: user }, {
-    symbols: listBacktestMarkets().slice(0, 11).map((market) => market.symbol), timeframe: "1h"
-  }), /up to 10 markets/);
+  // ...but a scanner-only run is never gated: with no run slots at all it still goes through.
+  backtestLimits.maxRunsGlobal = 0;
+  try {
+    await assert.rejects(() => runHistoricalBacktest(paidUser, { symbol: pair, timeframe: "1h" }), { code: "BACKTEST_BUSY" });
+    const scannerWhileBusy = await runHistoricalBacktest(paidUser, { symbol: "BTC-USD", timeframe: "1h" });
+    assert.equal(scannerWhileBusy.symbol, "BTC-USD");
+  } finally {
+    backtestLimits.maxRunsGlobal = 2;
+  }
+  await assert.rejects(() => runHistoricalBacktest({ id: user }, { symbols: [pair, ...extraPairs], timeframe: "1h" }),
+    (error) => error.statusCode === 400 && /up to 10 "Not scanned" pairs/.test(error.message));
+
+  // 2d. Scanner pairs and commodities have no per-run cap and never go through the throttled loader.
+  const scannerOnly = listBacktestMarkets().filter((market) => market.scannerReady || market.category !== "Crypto")
+    .map((market) => market.symbol);
+  assert.ok(scannerOnly.length > 10, `more than 10 scanner pairs and commodities (${scannerOnly.length})`);
+  const throttleSleeps = [];
+  resetBacktestThrottle({ sleep: async (ms) => { throttleSleeps.push(ms); } });
+  const uncapped = await runHistoricalBacktest({ id: user }, { symbols: scannerOnly, timeframe: "1h" });
+  assert.ok(uncapped, "an 11+ market scanner run is accepted");
+  assert.deepEqual(throttleSleeps, [], "no throttle spacing on scanner loads");
+  await runHistoricalBacktest({ id: user }, { symbols: [pair, "BTC-USD"], timeframes: ["15m", "1h"] });
+  assert.ok(throttleSleeps.length > 0, "the Not scanned pair's loads are still spaced");
 
   // 3. The backtest did not verify, cool down or otherwise change the pair.
   const stateAfter = getCryptoMarketState(pair);
@@ -176,7 +205,7 @@ try {
 } finally {
   globalThis.fetch = realFetch;
   await query("DELETE FROM generated_signals WHERE pair = $1 OR generated_by = ANY($2)", [pair, userIds]);
-  await query("DELETE FROM crypto_markets WHERE symbol = $1", [pair]);
+  await query("DELETE FROM crypto_markets WHERE symbol = ANY($1)", [[pair, ...extraPairs]]);
   await query("DELETE FROM market_liquidity WHERE symbol = ANY($1)", [[pair, ...insertedLiquidity]]);
   if (userIds.length) await query("DELETE FROM users WHERE id = ANY($1)", [userIds]);
   await getPool().end();

@@ -82,11 +82,17 @@ export function listBacktestMarkets() {
 export async function runHistoricalBacktest(user, input) {
   const markets = listBacktestMarkets();
   const symbols = normalizeSelections(input.symbols || input.symbol, markets.map((market) => market.symbol), "market");
-  assertBacktestRunSize(symbols);
-  return withBacktestRun(user?.id, () => runBacktest(user, input, markets, symbols));
+  // The cap, the busy limits and the throttled, cached loader cover only pairs that are not in the scanner. Scanner
+  // pairs, commodities and the correlation peers load as they always did.
+  const throttled = new Set(markets
+    .filter((market) => market.category === "Crypto" && !market.scannerReady && symbols.includes(market.symbol))
+    .map((market) => market.symbol));
+  if (!throttled.size) return runBacktest(user, input, markets, symbols, throttled);
+  assertBacktestRunSize([...throttled]);
+  return withBacktestRun(user?.id, () => runBacktest(user, input, markets, symbols, throttled));
 }
 
-async function runBacktest(user, input, markets, symbols) {
+async function runBacktest(user, input, markets, symbols, throttled) {
   const warnings = markets
     .filter((market) => symbols.includes(market.symbol) && market.lowLiquidity)
     .map((market) => ({ symbol: market.symbol, code: "LOW_LIQUIDITY", message: lowLiquidityBacktestWarning }));
@@ -107,7 +113,7 @@ async function runBacktest(user, input, markets, symbols) {
   for (const symbol of symbols) {
     for (const timeframe of timeframes) {
       try {
-        const bundle = await loadHistoricalBundle(symbol, timeframe);
+        const bundle = await loadHistoricalBundle(symbol, timeframe, throttled);
         const options = {
           components,
           sessionFilters,
@@ -602,11 +608,14 @@ function hasRoomToTarget(metrics, price, direction, atrValue) {
     : Number(metrics.support) >= price || price - Number(metrics.support) >= minimumRoom;
 }
 
-async function loadHistoricalBundle(symbol, timeframe) {
-  const marketData = await loadBacktestCandles(symbol, timeframe, getBacktestOhlcv);
+async function loadHistoricalBundle(symbol, timeframe, throttled = new Set()) {
+  const load = (loadSymbol, loadTimeframe) => throttled.has(loadSymbol)
+    ? loadBacktestCandles(loadSymbol, loadTimeframe, getBacktestOhlcv)
+    : getBacktestOhlcv(loadSymbol, loadTimeframe);
+  const marketData = await load(symbol, timeframe);
   const higherTimeframes = timeframeOrder.slice(timeframeOrder.indexOf(timeframe) + 1);
   const settled = await Promise.allSettled(
-    higherTimeframes.map((higherTimeframe) => loadBacktestCandles(symbol, higherTimeframe, getBacktestOhlcv))
+    higherTimeframes.map((higherTimeframe) => load(symbol, higherTimeframe))
   );
   const higherTimeframeData = {};
   settled.forEach((result, index) => {
@@ -617,7 +626,7 @@ async function loadHistoricalBundle(symbol, timeframe) {
   const correlationSettled = await Promise.allSettled(
     correlationSymbols
       .filter((peer) => peer !== symbol)
-      .map((peer) => loadBacktestCandles(peer, timeframe, getBacktestOhlcv))
+      .map((peer) => load(peer, timeframe))
   );
   const correlationData = {};
   correlationSettled.forEach((result, index) => {

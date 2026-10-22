@@ -70,6 +70,6 @@ assert.equal(await withBacktestRun("user-a", async () => "after error"), "after 
 assert.equal(backtestLimits.maxMarketsPerRun, 10);
 assertBacktestRunSize(Array.from({ length: 10 }, (_, index) => `M${index}-USD`));
 assert.throws(() => assertBacktestRunSize(Array.from({ length: 11 }, (_, index) => `M${index}-USD`)),
-  (error) => error.statusCode === 400 && /up to 10 markets/.test(error.message));
+  (error) => error.statusCode === 400 && /up to 10 "Not scanned" pairs/.test(error.message));
 
 console.log(JSON.stringify({ cached: true, serialized: maxInFlight, spacing: sleeps, busy: BACKTEST_BUSY_MESSAGE }, null, 2));
