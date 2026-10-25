@@ -146,6 +146,9 @@ export const appConfig = {
     maxConcurrentRequests: Math.min(5, Math.max(1, Number(process.env.CRYPTO_MAX_CONCURRENT_REQUESTS || 4))),
     maxCandlesPerRequest: Math.min(300, Math.max(60, Number(process.env.CRYPTO_MAX_CANDLES_PER_REQUEST || 120))),
     unavailableCooldownMs: Math.max(300000, Number(process.env.CRYPTO_UNAVAILABLE_COOLDOWN_MS || 21600000)),
+    // A Coinbase 429 pauses every Coinbase request for Retry-After, or this long without the header, and this is the
+    // whole cooldown a rate-limited pair gets. unavailableCooldownMs is for pairs that actually failed.
+    rateLimitBackoffMs: Math.min(60000, Math.max(1000, Number(process.env.CRYPTO_RATE_LIMIT_BACKOFF_MS || 5000))),
     verificationPairsPerCycle: Math.min(20, Math.max(1, Number(process.env.CRYPTO_VERIFY_PAIRS_PER_CYCLE || 12)))
   },
   twelveData: {

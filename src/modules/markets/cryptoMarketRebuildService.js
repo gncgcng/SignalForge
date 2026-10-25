@@ -2,7 +2,7 @@ import { appConfig } from "../../config/appConfig.js";
 import { query } from "../../db/client.js";
 import { getCandlesFromCoinbase, getProductsFromCoinbase } from "../market-data/coinbaseMarketDataProvider.js";
 import { cryptoTimeframes } from "./cryptoMarkets.js";
-import { legacyCryptoReplacements, reloadCryptoMarketSettings } from "./cryptoMarketService.js";
+import { isRateLimitOnlyFailure, legacyCryptoReplacements, reloadCryptoMarketSettings } from "./cryptoMarketService.js";
 import { runWithConcurrency } from "./cryptoMarketMonitor.js";
 
 const stableOrFiatBases = new Set(["USD", "USDC", "USDT", "DAI", "EURC", "EUR", "GBP"]);
@@ -202,7 +202,10 @@ async function rebuildProduct(product, existing = {}) {
   const keepActive = previouslyUsable;
   const status = keepActive ? "active" : providerError ? "provider_error" : "unavailable";
   const reason = checks.at(-1)?.error || "No candle data returned from provider.";
-  const cooldownUntil = new Date(Date.now() + appConfig.cryptoMarkets.unavailableCooldownMs);
+  // A rate limit only waits out the backoff; the 6h cooldown is for pairs that actually failed.
+  const cooldownUntil = new Date(Date.now() + (isRateLimitOnlyFailure(checks)
+    ? appConfig.cryptoMarkets.rateLimitBackoffMs
+    : appConfig.cryptoMarkets.unavailableCooldownMs));
   await updateMarket(product, {
     status,
     marketStatus: status,

@@ -44,6 +44,10 @@ export async function handleBacktestRoutes(req, res, pathname, url) {
         })
       });
     } catch (error) {
+      logBacktestFailure(req.user, error.statusCode || 400, error, {
+        symbol: url.searchParams.get("symbol"),
+        timeframe: url.searchParams.get("timeframe")
+      });
       return sendError(res, error.statusCode || 400, error.message);
     }
   }
@@ -55,8 +59,9 @@ export async function handleBacktestRoutes(req, res, pathname, url) {
     const stream = String(req.headers?.accept || "").includes("application/x-ndjson");
     let streaming = false;
     const writeLine = (line) => res.write(`${JSON.stringify(line)}\n`);
+    let body;
     try {
-      const body = await readJson(req);
+      body = await readJson(req);
       const onProgress = stream ? (progress) => {
         if (!streaming) {
           streaming = true;
@@ -74,6 +79,7 @@ export async function handleBacktestRoutes(req, res, pathname, url) {
       res.end();
       return true;
     } catch (error) {
+      logBacktestFailure(req.user, error.statusCode || 400, error, body);
       if (!streaming) return sendError(res, error.statusCode || 400, error.message);
       writeLine({ type: "error", statusCode: error.statusCode || 400, message: error.message });
       res.end();
@@ -82,4 +88,14 @@ export async function handleBacktestRoutes(req, res, pathname, url) {
   }
 
   return false;
+}
+
+// One line per rejected or failed run (bad input, too many pairs, busy, no data), so a run the Backtesting Lab shows
+// as "Failed" can be found in the logs. Market and timeframe counts, not the request body; the reason is the message
+// the page shows, which can name a pair.
+function logBacktestFailure(user, statusCode, error, input = {}) {
+  const count = (value) => (Array.isArray(value) ? value.length : value ? 1 : 0);
+  const reason = String(error?.message || "unknown").replace(/[\r\n]+/g, " ").slice(0, 160);
+  console.warn(`[backtest] failed user=${user?.id || "unknown"} status=${statusCode} code=${error?.code || "none"} ` +
+    `markets=${count(input?.symbols ?? input?.symbol)} timeframes=${count(input?.timeframes ?? input?.timeframe)} reason=${reason}`);
 }
