@@ -265,7 +265,7 @@ export async function saveCryptoMarketVerification(symbol, checks, details = {})
       ? `Temporary provider warning: ${lastFailure?.error || details.error || "Verification failed; keeping previous active status."}`
     : null;
   const lastError = enough || keepActiveAfterFailure ? null : lastFailure?.error || details.error || "No candle data returned from provider.";
-  const cooldownUntil = enough ? null : new Date(Date.now() + failureCooldownMs(rateLimited));
+  const cooldownUntil = enough ? null : new Date(Date.now() + failureCooldownMs(isRateLimitOnlyFailure(checks)));
   const checkedAt = new Date();
   const verificationDetails = buildVerificationDetails(current, checks, {
     ...details,
@@ -668,7 +668,12 @@ function isConfirmedUnavailable(details = {}, failure = {}) {
 }
 function isRateLimitCode(code) { return String(code || "").toUpperCase() === "RATE_LIMITED"; }
 // A rate limit is Coinbase saying "slow down", not the pair failing: it waits out the backoff, not the 6h cooldown.
+// A check that failed for any other reason keeps the 6h cooldown.
 function failureCooldownMs(rateLimited) { return rateLimited ? appConfig.cryptoMarkets.rateLimitBackoffMs : appConfig.cryptoMarkets.unavailableCooldownMs; }
+export function isRateLimitOnlyFailure(checks = []) {
+  const failed = checks.filter((check) => !check.available);
+  return failed.length > 0 && failed.every((check) => isRateLimitCode(check.code));
+}
 function safeLogReason(value) { return String(value || "unknown").replace(/[\r\n]+/g, " ").slice(0, 160); }
 function legacyProviderStatus(row) { return row.provider_status === "available" ? "active" : row.provider_status === "provider_issue" ? "provider_error" : "unavailable"; }
 function legacyVerificationStatus(row) { return row.provider_status === "available" ? "verified" : row.provider_status === "provider_issue" ? "error" : "failed"; }

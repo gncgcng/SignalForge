@@ -27,6 +27,7 @@ const requestQueue = [];
 // A 429 pauses every Coinbase candle request in this process until rateLimitedUntil, and the request that hit it is
 // retried once after the pause, so one 429 costs a few seconds instead of the pair's scan.
 let rateLimitedUntil = 0;
+let lastRateLimitedAt = 0;
 
 export async function getCandlesFromCoinbase(symbol, timeframe, input = {}) {
   const granularity = providerGranularityByTimeframe[timeframe];
@@ -486,20 +487,26 @@ export function getCoinbaseRequestState() {
     active: activeRequests,
     queued: requestQueue.length,
     limit: appConfig.cryptoMarkets.maxConcurrentRequests,
-    rateLimitedUntil: rateLimitedUntil > Date.now() ? new Date(rateLimitedUntil).toISOString() : null
+    rateLimitedUntil: rateLimitedUntil > Date.now() ? new Date(rateLimitedUntil).toISOString() : null,
+    lastRateLimitedAt
   };
 }
 
-// The slot is held through the pause, so no request starts until it ends; the request timeout starts after it.
+// No request starts during a pause, and a waiting request holds no slot, so a caller that gives up on it (verification's
+// own timeout) does not keep a slot from the scanner. The request timeout starts once a slot is taken.
 async function acquireRequestSlot() {
-  if (activeRequests < appConfig.cryptoMarkets.maxConcurrentRequests) {
-    activeRequests += 1;
-  } else {
-    await new Promise((resolve) => requestQueue.push(resolve));
-    activeRequests += 1;
-  }
-  while (rateLimitedUntil > Date.now()) {
-    await new Promise((resolve) => setTimeout(resolve, rateLimitedUntil - Date.now()));
+  for (;;) {
+    while (rateLimitedUntil > Date.now()) {
+      await new Promise((resolve) => setTimeout(resolve, rateLimitedUntil - Date.now()));
+    }
+    if (activeRequests < appConfig.cryptoMarkets.maxConcurrentRequests) {
+      activeRequests += 1;
+    } else {
+      await new Promise((resolve) => requestQueue.push(resolve));
+      activeRequests += 1;
+    }
+    if (rateLimitedUntil <= Date.now()) return;
+    releaseRequestSlot();
   }
 }
 
@@ -508,7 +515,8 @@ function noteRateLimited(response) {
   const pauseMs = Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
     ? Math.min(60000, retryAfterSeconds * 1000)
     : appConfig.cryptoMarkets.rateLimitBackoffMs;
-  const until = Date.now() + pauseMs;
+  lastRateLimitedAt = Date.now();
+  const until = lastRateLimitedAt + pauseMs;
   if (until <= rateLimitedUntil) return;
   if (rateLimitedUntil <= Date.now()) console.warn(`[coinbase] rate_limited pause_ms=${pauseMs}`);
   rateLimitedUntil = until;

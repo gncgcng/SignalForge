@@ -91,7 +91,8 @@ export async function handleBacktestRoutes(req, res, pathname, url) {
 }
 
 // One line per rejected or failed run (bad input, too many pairs, busy, no data), so a run the Backtesting Lab shows
-// as "Failed" can be found in the logs. Counts only: no symbols, no request body.
+// as "Failed" can be found in the logs. Market and timeframe counts, not the request body; the reason is the message
+// the page shows, which can name a pair.
 function logBacktestFailure(user, statusCode, error, input = {}) {
   const count = (value) => (Array.isArray(value) ? value.length : value ? 1 : 0);
   const reason = String(error?.message || "unknown").replace(/[\r\n]+/g, " ").slice(0, 160);

@@ -7,7 +7,12 @@ import {
   getCoinbaseRequestState,
   getHistoricalCandlesFromCoinbase
 } from "../src/modules/market-data/coinbaseMarketDataProvider.js";
-import { getCryptoMarketState, recordCryptoMarketFailure } from "../src/modules/markets/cryptoMarketService.js";
+import { withRetries, withTimeout } from "../src/modules/markets/cryptoMarketMonitor.js";
+import {
+  getCryptoMarketState,
+  isRateLimitOnlyFailure,
+  recordCryptoMarketFailure
+} from "../src/modules/markets/cryptoMarketService.js";
 
 appConfig.cryptoMarkets.rateLimitBackoffMs = 300;
 const realFetch = globalThis.fetch;
@@ -28,8 +33,9 @@ const tooMany = (headers = {}) => new Response("[]", { status: 429, headers });
 // Sequence of responses; records when each fetch actually went out.
 function scriptFetch(responses) {
   const calls = [];
-  globalThis.fetch = async () => {
+  globalThis.fetch = async (_url, options = {}) => {
     calls.push(Date.now());
+    if (options.signal?.aborted) throw Object.assign(new Error("aborted"), { name: "AbortError" });
     const next = responses.shift();
     if (!next) throw new Error("unexpected extra Coinbase request");
     return next();
@@ -69,7 +75,49 @@ try {
   assert.equal(calls.length, 2);
   await waitForPauseToEnd();
 
-  // 4. A rate-limited pair cools down for the backoff only; a real failure still gets the 6h cooldown.
+  // 4. A request waiting out the pause holds no slot, and its timeout starts only once it has one: with a 400ms
+  // request timeout and a 1s pause, it still succeeds.
+  const requestTimeoutMs = appConfig.marketData.requestTimeoutMs;
+  appConfig.marketData.requestTimeoutMs = 400;
+  try {
+    calls = scriptFetch([() => tooMany({ "retry-after": "1" }), ok, ok]);
+    const hit = getHistoricalCandlesFromCoinbase("BTC-USD", "1h", window);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const waiting = getHistoricalCandlesFromCoinbase("ETH-USD", "1h", window);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(getCoinbaseRequestState().active, 0, "no slot is held during the pause");
+    const [hitResult, waitingResult] = await Promise.all([hit, waiting]);
+    assert.ok(hitResult.candles.length > 0 && waitingResult.candles.length > 0, "the timeout did not run during the pause");
+  } finally {
+    appConfig.marketData.requestTimeoutMs = requestTimeoutMs;
+  }
+  await waitForPauseToEnd();
+
+  // 5. Verification: a timeout that ran into the pause is RATE_LIMITED (short cooldown), other timeouts keep their
+  // code, and a rate limit is not retried.
+  const never = new Promise(() => {});
+  await assert.rejects(() => withTimeout(never, 50, "MARKET_DATA_TIMEOUT"), { code: "MARKET_DATA_TIMEOUT" });
+  scriptFetch([() => tooMany({ "retry-after": "1" })]);
+  const paused = getHistoricalCandlesFromCoinbase("BTC-USD", "1h", window).catch(() => {});
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  await assert.rejects(() => withTimeout(never, 100, "MARKET_DATA_TIMEOUT"), { code: "RATE_LIMITED" });
+  scriptFetch([ok]);
+  await paused;
+  await waitForPauseToEnd();
+  let attempts = 0;
+  await assert.rejects(() => withRetries(async () => { attempts += 1; throw Object.assign(new Error("429"), { code: "RATE_LIMITED" }); }, 2),
+    { code: "RATE_LIMITED" });
+  assert.equal(attempts, 1, "a rate limit is not retried");
+  attempts = 0;
+  await assert.rejects(() => withRetries(async () => { attempts += 1; throw Object.assign(new Error("502"), { code: "PROVIDER_RESPONSE_ERROR" }); }, 1));
+  assert.equal(attempts, 2, "other failures still retry");
+
+  // 6. Verification and rebuild cool a pair down for the backoff only when every failed check was a rate limit.
+  assert.equal(isRateLimitOnlyFailure([{ available: true }, { available: false, code: "RATE_LIMITED" }]), true);
+  assert.equal(isRateLimitOnlyFailure([{ available: false, code: "EMPTY_CANDLES" }, { available: false, code: "RATE_LIMITED" }]), false);
+  assert.equal(isRateLimitOnlyFailure([{ available: true }]), false);
+
+  // 7. A rate-limited pair cools down for the backoff only; a real failure still gets the 6h cooldown.
   const before = Date.now();
   await recordCryptoMarketFailure("ETH-USD", "4h", { code: "RATE_LIMITED", message: "Rate limited" });
   const rateLimitedCooldown = new Date(getCryptoMarketState("ETH-USD").cooldownUntil).getTime() - before;

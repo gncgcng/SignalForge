@@ -1,5 +1,5 @@
 import { appConfig } from "../../config/appConfig.js";
-import { getCandlesFromCoinbase, getProductFromCoinbase } from "../market-data/coinbaseMarketDataProvider.js";
+import { getCandlesFromCoinbase, getCoinbaseRequestState, getProductFromCoinbase } from "../market-data/coinbaseMarketDataProvider.js";
 import { cryptoTimeframes } from "./cryptoMarkets.js";
 import {
   getCryptoMarketState,
@@ -350,24 +350,32 @@ function matchesSymbol(market, symbol) {
     String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "") === normalized
   );
 }
-async function withRetries(operation, retries) {
+// A rate limit is not retried here: the provider already waited out the pause and retried once, and another attempt
+// would only queue more requests behind the pause.
+export async function withRetries(operation, retries) {
   let lastError;
   for (let attempt = 0; attempt <= retries; attempt += 1) {
     try {
       return await operation();
     } catch (error) {
       lastError = error;
+      if (error?.code === "RATE_LIMITED") break;
       if (attempt < retries) await sleep(250 * (attempt + 1));
     }
   }
   throw lastError;
 }
-function withTimeout(promise, timeoutMs, code) {
+// A timeout that ran into a Coinbase rate-limit pause is reported as RATE_LIMITED, so the pair gets the short backoff
+// cooldown and not the 6h one.
+export function withTimeout(promise, timeoutMs, code) {
   let timeoutId;
+  const startedAt = Date.now();
   const timeout = new Promise((_, reject) => {
     timeoutId = setTimeout(() => {
-      const error = new Error("Verification timed out.");
-      error.code = code;
+      const coinbase = getCoinbaseRequestState();
+      const rateLimited = Boolean(coinbase.rateLimitedUntil) || coinbase.lastRateLimitedAt >= startedAt;
+      const error = new Error(rateLimited ? "Verification paused by a Coinbase rate limit." : "Verification timed out.");
+      error.code = rateLimited ? "RATE_LIMITED" : code;
       reject(error);
     }, timeoutMs);
   });
