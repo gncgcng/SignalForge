@@ -202,7 +202,10 @@ async function rebuildProduct(product, existing = {}) {
   const keepActive = previouslyUsable;
   const status = keepActive ? "active" : providerError ? "provider_error" : "unavailable";
   const reason = checks.at(-1)?.error || "No candle data returned from provider.";
-  const cooldownUntil = new Date(Date.now() + appConfig.cryptoMarkets.unavailableCooldownMs);
+  // A rate limit only waits out the backoff; the 6h cooldown is for pairs that actually failed.
+  const cooldownUntil = new Date(Date.now() + (checks.some((check) => isRateLimitCode(check.code))
+    ? appConfig.cryptoMarkets.rateLimitBackoffMs
+    : appConfig.cryptoMarkets.unavailableCooldownMs));
   await updateMarket(product, {
     status,
     marketStatus: status,

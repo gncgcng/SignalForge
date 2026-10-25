@@ -24,6 +24,9 @@ export const coinbaseSymbols = cryptoProviderSymbols;
 const cache = new Map();
 let activeRequests = 0;
 const requestQueue = [];
+// A 429 pauses every Coinbase candle request in this process until rateLimitedUntil, and the request that hit it is
+// retried once after the pause, so one 429 costs a few seconds instead of the pair's scan.
+let rateLimitedUntil = 0;
 
 export async function getCandlesFromCoinbase(symbol, timeframe, input = {}) {
   const granularity = providerGranularityByTimeframe[timeframe];
@@ -207,7 +210,11 @@ function buildCandlesUrl(symbol, granularity, startMs, endMs) {
   return url;
 }
 
-async function fetchCandlePage(url, symbol, timeframe) {
+function fetchCandlePage(url, symbol, timeframe) {
+  return withRateLimitRetry(() => fetchCandlePageOnce(url, symbol, timeframe));
+}
+
+async function fetchCandlePageOnce(url, symbol, timeframe) {
   const controller = new AbortController();
   await acquireRequestSlot();
   const timeout = setTimeout(() => controller.abort(), appConfig.marketData.requestTimeoutMs);
@@ -220,6 +227,7 @@ async function fetchCandlePage(url, symbol, timeframe) {
       }
     });
     if (response.status === 429) {
+      noteRateLimited(response);
       throw new MarketDataProviderError("Market data rate limit reached. Please wait a moment and try again.", {
         statusCode: 429,
         code: "RATE_LIMITED"
@@ -308,7 +316,11 @@ function finiteTime(value, fallback) {
   return Number.isFinite(number) ? number : fallback;
 }
 
-async function fetchHistoricalCandlePage(url) {
+function fetchHistoricalCandlePage(url) {
+  return withRateLimitRetry(() => fetchHistoricalCandlePageOnce(url));
+}
+
+async function fetchHistoricalCandlePageOnce(url) {
   const controller = new AbortController();
   await acquireRequestSlot();
   const timeout = setTimeout(() => controller.abort(), appConfig.marketData.requestTimeoutMs);
@@ -318,6 +330,7 @@ async function fetchHistoricalCandlePage(url) {
       headers: { accept: "application/json", "user-agent": "SignalForge/0.1" }
     });
     if (response.status === 429) {
+      noteRateLimited(response);
       throw new MarketDataProviderError("Market data rate limit reached. Please retry later.", {
         statusCode: 429,
         code: "RATE_LIMITED"
@@ -424,6 +437,7 @@ export async function getProductFromCoinbase(symbol) {
     }
 
     if (response.status === 429) {
+      noteRateLimited(response);
       throw new MarketDataProviderError("Coinbase product check rate limited.", {
         statusCode: 429,
         code: "RATE_LIMITED"
@@ -468,16 +482,45 @@ export function isCoinbaseUsdCryptoSymbol(symbol) {
 }
 
 export function getCoinbaseRequestState() {
-  return { active: activeRequests, queued: requestQueue.length, limit: appConfig.cryptoMarkets.maxConcurrentRequests };
+  return {
+    active: activeRequests,
+    queued: requestQueue.length,
+    limit: appConfig.cryptoMarkets.maxConcurrentRequests,
+    rateLimitedUntil: rateLimitedUntil > Date.now() ? new Date(rateLimitedUntil).toISOString() : null
+  };
 }
 
+// The slot is held through the pause, so no request starts until it ends; the request timeout starts after it.
 async function acquireRequestSlot() {
   if (activeRequests < appConfig.cryptoMarkets.maxConcurrentRequests) {
     activeRequests += 1;
-    return;
+  } else {
+    await new Promise((resolve) => requestQueue.push(resolve));
+    activeRequests += 1;
   }
-  await new Promise((resolve) => requestQueue.push(resolve));
-  activeRequests += 1;
+  while (rateLimitedUntil > Date.now()) {
+    await new Promise((resolve) => setTimeout(resolve, rateLimitedUntil - Date.now()));
+  }
+}
+
+function noteRateLimited(response) {
+  const retryAfterSeconds = Number(response.headers?.get?.("retry-after"));
+  const pauseMs = Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+    ? Math.min(60000, retryAfterSeconds * 1000)
+    : appConfig.cryptoMarkets.rateLimitBackoffMs;
+  const until = Date.now() + pauseMs;
+  if (until <= rateLimitedUntil) return;
+  if (rateLimitedUntil <= Date.now()) console.warn(`[coinbase] rate_limited pause_ms=${pauseMs}`);
+  rateLimitedUntil = until;
+}
+
+async function withRateLimitRetry(request) {
+  try {
+    return await request();
+  } catch (error) {
+    if (error?.code !== "RATE_LIMITED") throw error;
+    return request();
+  }
 }
 
 function releaseRequestSlot() {

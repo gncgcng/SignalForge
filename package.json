@@ -185,6 +185,8 @@
     "test:backtest-any-pair": "node scripts/backtest-any-pair-db-test.js",
     "test:backtest-market-picker": "node scripts/backtest-market-picker-test.js",
     "test:backtest-throttle": "node scripts/backtest-throttle-test.js",
+    "test:backtest-failure-log": "node scripts/backtest-failure-log-test.js",
+    "test:coinbase-rate-limit-backoff": "node scripts/coinbase-rate-limit-backoff-test.js",
     "test:stocks-request": "node scripts/stocks-request-db-test.js",
     "test:smart-money": "node scripts/smart-money-concepts-test.js",
     "test:dynamic-risk": "node scripts/dynamic-risk-engine-test.js",
